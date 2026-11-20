@@ -41,6 +41,7 @@ the test's isolated git configuration.
   failures.
 - Working-tree cleanliness, pull outcome, committed-agent-files detection, and current-branch
   resolution all reflect the exact behavior configured on the git stub.
+- A folder is reported as the top folder of a Git repository only when it has its own `.git` folder or file.
 - The committed-agent-files cache never serves a stale result for a changed HEAD hash.
 - A package feed's sign-in is found, kept and removed through the credential helper without any prompt, within a time
   limit, without a secret in the log, and a missing git or helper is "nothing saved" rather than an error.
@@ -94,6 +95,13 @@ is verified by the `GitClient` unit tests (see the `GitClient` unit verification
 `GitClient_GetCurrentBranch_FastPathNormalBranch_ReturnsBranchNameWithoutInvokingGit` cited
 directly at the subsystem level, covering `AgentControl-GitIntegration-CurrentBranch` (child:
 `AgentControl-GitClient-CurrentBranch`).
+
+**GitIntegration_RepositoryRoot_SubsystemTestUsesARealRepositoryAndWorktree**: With the real git, the working folder of
+a repository with one commit is a repository root, and so is a linked worktree created by `git worktree add` (whose
+`.git` is a file, as asserted); the repository's `src` subfolder and a plain folder next to it are not. This scenario is
+tested by `GitIntegrationSubsystem_RepositoryRoot_RepositoryWorktreeAndSubfolder`, covering
+`AgentControl-GitIntegration-RepositoryRoot`; the missing-folder and blank-path cases are verified by the `GitClient`
+unit tests (see the `GitClient` unit verification design), covering the child `AgentControl-GitClient-RepositoryRoot`.
 
 **GitIntegration_SavedSignIns_SubsystemTestsUseTheRealCredentialHelperProtocol**: Through the credential-store
 contract the rest of the application uses, a sign-in kept by one instance (one session) is found by another, a lookup

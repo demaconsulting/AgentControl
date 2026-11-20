@@ -124,10 +124,52 @@ sections:
         tests:
           - windows@RemoveMenuItem_ClickThenConfirm_RemovesCard_DecliningLeavesItInPlace
 
+      - id: AgentControl-System-AddSeveralRepos
+        title: >-
+          The tool shall let the user add several repos at once, by choosing several folders in the
+          folder picker or by dropping folders from the file manager onto the repo list (into the
+          group they are dropped on), and shall tell the user in one message which folders were not
+          added and why.
+        tags: [system]
+        justification: |
+          Setting up the list for many repos one folder at a time is slow, and a message per folder
+          would bury the user in dialogs.
+        children:
+          - AgentControl-LauncherUI-AddSeveralRepos
+          - AgentControl-LauncherUI-AddRepoDropFolders
+          - AgentControl-LauncherUI-AddRepoSummary
+        tests:
+          # The operating system's folder picker and a drag from the file manager cannot be driven
+          # dependably by the UI Automation tests (native dialogs, and a drag source in another
+          # process), so the evidence is the headless window tests, which answer the picker through
+          # its seam and raise the platform's drag events with the dropped folders.
+          - MainWindow_AddRepoButton_SeveralFoldersPicked_AddsEachAndSummarizesTheRest
+          - MainWindow_DropFolders_OnGroupHeader_AddsThemToTheGroup
+
+      - id: AgentControl-System-AddGitReposOnly
+        title: >-
+          The tool shall add as a repo only a folder that is the top folder of a Git repository
+          (with a .git folder or file directly in it), whichever way it is added, and shall leave
+          the repos already in the list as they are.
+        tags: [system]
+        justification: |
+          A repo is synced, pulled and launched as a Git working folder; adding a plain folder or a
+          subfolder of a repository would put the agent folders where they do not belong. Repos a
+          user already tracks must not disappear because of the check.
+        children:
+          - AgentControl-LauncherUI-AddRepoGitRootOnly
+          - AgentControl-GitIntegration-RepositoryRoot
+        tests:
+          # As for AgentControl-System-AddSeveralRepos the adding paths cannot be driven end to end
+          # dependably; the headless window test and the GitIntegration subsystem test with the
+          # real git (a repository, a worktree and a subfolder) are the evidence.
+          - MainWindow_AddRepoButton_FolderThatIsNotAGitRepository_IsRefusedWithAMessage
+          - GitIntegrationSubsystem_RepositoryRoot_RepositoryWorktreeAndSubfolder
+
       - id: AgentControl-System-ListChangesKept
         title: >-
           The tool shall keep the changes the user makes to the recent-repos list (favorite, group,
-          card color, collapsed sections) in the user's settings, so they are still there when the
+          group color, group order, card color, collapsed sections) in the user's settings, so they are still there when the
           tool is started again, and shall never show a change that it could not save.
         tags: [system]
         justification: |
@@ -300,8 +342,9 @@ sections:
       - id: AgentControl-System-RepoGroupSections
         title: >-
           The tool shall show the recent-repos list as collapsible sections once a repo is in a
-          group - the favorites first, then the groups alphabetically, then the repos in no group
-          - and as a list without sections while no repo is in a group.
+          group - the favorites first, then the groups in the user's own order (alphabetically until
+          the user orders them), then the repos in no group - and as a list without sections while
+          no repo is in a group.
         tags: [system]
         justification: |
           Sections keep a long list readable; the list must stay exactly as it was for a user who
@@ -368,6 +411,50 @@ sections:
         tests:
           - windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly
           - windows@CardMenu_CardColor_PaletteOffersEveryColorAndAutomaticClearsTheChoice
+
+      - id: AgentControl-System-GroupColor
+        title: >-
+          The tool shall let the user choose a color for each of their own groups from the card
+          color palette, or none, show it on the group's header, use it for the tiles of the group's
+          repos that have no card color of their own, and keep it only in the user's own settings.
+        tags: [system]
+        justification: |
+          A color per group lets a developer with many groups find the right one at a glance and
+          see which group a repo belongs to; like the other organizing choices it is personal and
+          must not reach a repository.
+        children:
+          - AgentControl-LauncherUI-GroupColor
+          - AgentControl-LauncherUI-GroupColorOnCards
+          - AgentControl-LauncherUI-GroupColorLegible
+          - AgentControl-LauncherUI-GroupSettingsKeptInStep
+          - AgentControl-Settings-GroupOrganization
+        tests:
+          # End to end the header accent and the stored color are shown; the tiles that follow the
+          # group's color are verified at the LauncherUI subsystem level (headless window tests),
+          # because a tile's automatic color may equal the chosen one.
+          - windows@GroupHeaderMenu_GroupColor_ColorsHeaderAndStoresInSettingsOnly
+
+      - id: AgentControl-System-GroupReorder
+        title: >-
+          The tool shall let the user change the order of their groups by moving a group up or down
+          from its header's menu and by dragging its header, keep Favorites first and Ungrouped
+          last, not allow it while the filter has text, and keep the order in the user's own
+          settings so it is still there when the tool is started again.
+        tags: [system]
+        justification: |
+          The groups a developer uses most should come first; alphabetical order is only a
+          starting point. The built-in sections keep fixed places, and a filtered list shows only
+          some of the groups, so places in it are not places in the whole list.
+        children:
+          - AgentControl-LauncherUI-GroupOrder
+          - AgentControl-LauncherUI-GroupMoveMenu
+          - AgentControl-LauncherUI-GroupDragReorder
+          - AgentControl-LauncherUI-GroupOrderRemembered
+          - AgentControl-LauncherUI-GroupSettingsKeptInStep
+          - AgentControl-Settings-GroupOrganization
+        tests:
+          - windows@GroupHeaderMenu_MoveDown_ReordersGroupsAndKeepsOrderAfterRestart
+          - windows@RepoList_DragGroupHeaderBelowAnother_ReordersGroups
 
       - id: AgentControl-System-CardColorKeepsStatus
         title: >-
@@ -1434,13 +1521,17 @@ sections:
           - GitClient_IsWorkingTreeClean_CleanRepo_ReturnsTrue
 
       - id: AgentControl-System-About
-        title: The tool shall provide an About dialog showing the application version, copyright, and license.
+        title: >-
+          The tool shall provide an About dialog that shows the application's logo, name and tagline
+          in a banner, and the application version, copyright and license.
         tags: [system]
         justification: |
           Lets a developer identify exactly which build they are running (e.g. when
           reporting an issue) without inspecting file properties.
         children:
           - AgentControl-LauncherUI-About
+          - AgentControl-LauncherUI-AboutBanner
+          - AgentControl-LauncherUI-AboutScrollableDetails
           - AgentControl-Program-Version
         tests:
           - windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright

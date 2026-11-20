@@ -37,6 +37,9 @@ temporary configuration directory.
   with group names repaired and unified and an unknown card color never written back.
 - The user's repo order survives sessions in the settings file only; a file written before the order was stored is
   arranged once as favorites first and then by most recent launch, and a damaged marker reads as not arranged yet.
+- The color and the position of each of the user's groups survive sessions in the settings file only, are found by
+  group name ignoring letter case, and damaged entries, unknown colors and entries of groups no repo is in are dropped
+  without failing the load and are not written back.
 
 ### Test Scenarios
 
@@ -127,3 +130,18 @@ tested by `SettingsSubsystem_RepoOrder_SurvivesSessionsAndSeedsALegacyFileOnce`,
 `AgentControl-Settings-RepoOrder` (children: `AgentControl-SettingsStore-RepoOrder`,
 `AgentControl-SettingsStore-RepoOrderLegacySeed` and `AgentControl-SettingsStore-RepoOrderMarkerRepaired`, whose unit
 tests are in `SettingsStoreRepoOrderTests.cs`).
+
+**Settings_GroupOrganization_ColorAndOrderSurviveSessionsAndDamagedOrStaleEntriesAreDropped**: A first session saves
+three repos (one in *Client Work*, one in *Home* that is also a favorite, one without a group) with a color for each
+group and the order *Home* then *Client Work*; a later session loads them and finds each color by the group's name in
+another letter case and the order unchanged, and the configuration directory holds the settings file and nothing
+else. Then a damaged file - a color under a group name in another letter case and spelled in lower case, a color of a
+group no repo is in, a color for the built-in *Ungrouped* section, a color that is a number, and an order holding a
+stale group, a number and the group in another letter case - is loaded without failing: only the usable color and
+position are kept, spelled the way the group is spelled on its repo, the setting after the damage is kept, and saving
+what was loaded does not write the stale group back. This scenario is tested by
+`SettingsSubsystem_GroupOrganization_ColorAndOrderSurviveSessionsAndDamagedOrStaleEntriesAreDropped`, covering
+`AgentControl-Settings-GroupOrganization` (children: `AgentControl-SettingsStore-GroupColorsAndOrder`,
+`AgentControl-SettingsStore-GroupColorsAndOrderDefaults`,
+`AgentControl-SettingsStore-InvalidGroupColorsAndOrderRepaired`
+and `AgentControl-SettingsStore-StaleGroupSettingsDropped`, whose unit tests are in `SettingsStoreOrganizingTests.cs`).

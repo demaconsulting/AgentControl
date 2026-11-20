@@ -177,7 +177,8 @@ group when it has nothing to offer: "Select Package...", "Change package..." or 
 of the first two words of `RepoName` (words are runs of letters and digits, so `alpha-service` gives `AS`), or
 one letter for a one-word name, and **HasAvatarInitials** is `false` when the name has none (the view then shows
 a folder glyph). **AvatarColorIndex** (and **AvatarStyleClass**, `avatar0` ... `avatar9`) picks one of
-`AvatarPaletteSize` palette entries: the color the user chose (**CardColorName**) when there is one, otherwise a
+`AvatarPaletteSize` palette entries: the color the user chose for this card (**CardColorName**) when there is one,
+otherwise the color of its group (**GroupColorName**) when the group has one, otherwise a
 32-bit FNV-1a hash of the repo path compared without regard to case or
 a trailing separator; `string.GetHashCode` is deliberately not used because it is randomized per process, which
 would change a repo's color on every launch. The view model carries no color: the style class selects theme-aware
@@ -207,6 +208,22 @@ the index of the theme-aware `AvatarBackgroundN`/`AvatarForegroundN` resources, 
 the automatic colors come from. Where the repo shows its own picture the tile keeps its light backing (so a logo drawn
 for a white page stays legible) and a chosen color is drawn as a 3 px ring around the picture (the `customColor` class);
 with no picture the color fills the tile and the letters use the entry's foreground resource.
+
+**Group color on the tile** (`AgentControl-RepoCardViewModel-GroupColorFallback`). **GroupColorName** is the color the
+user chose for the repo's group, read from the live settings on every access through `AppSettings.FindGroupColor`
+(letter case ignored, an unknown color is none), or `null` when the repo is in no group or the group has no color. The
+precedence of the tile's color is therefore: the card's own color, then the group's color, then the automatic color
+from the path. A favorite keeps its group's color: starring a repo lists it under Favorites but does not repaint its
+tile, and its group chip tells where the color comes from. `IsCardColorAutomatic` keeps meaning "no color of its own"
+(the palette's Automatic entry), and `HasCustomCardColor` keeps meaning "a color of its own"; the new
+**IsTileColorChosen** (`HasCustomCardColor || GroupColorName is not null`) is what the view binds the `customColor`
+ring of a repo picture to, so a color chosen for the group is visible on a picture tile too. **CardColorHeading** names
+the color in effect in words: `Card color: Teal` for a color of its own, `Card color: Automatic (group color Teal)` when
+the tile follows the group's color, or `Card color: Automatic`. The card does not hear of a group color being chosen:
+the owner calls **RaiseGroupPropertiesChanged** on the cards after a group change (a move into or out of a group, a
+rename, a removal or a group color), which raises the change notifications of the group members and of
+`GroupColorName`, `IsTileColorChosen`, `CardColorHeading`, `AvatarColorIndex` and `AvatarStyleClass`; `SetCardColor`
+additionally raises `IsTileColorChosen`.
 
 **Repo picture** (`AgentControl-RepoCardViewModel-RepoPicture`): **RepoImage** (`Bitmap?`), **HasRepoImage**,
 **ShowAvatarInitials** and **ShowAvatarFolderGlyph** tell the tile what to show. `RefreshCheap` starts
@@ -912,6 +929,8 @@ background task, and a retired card raises nothing.
 
 - **RepoGroupName** (`Settings` subsystem) — cleans up, validates and repairs group names, and unifies the
   spelling of groups that differ only in letter case.
+- **AppSettings** (`Settings` subsystem data type) — the live settings read through the `getSettings` callback,
+  including `FindGroupColor`, the color of the repo's group that the tile falls back to.
 - **RepoImageLocator** (`LauncherUI`) — finds and decodes the repo's picture, enforcing every rule about what
   may be shown.
 - **RepoPinStore** (`RepoConfig` subsystem) — reads/writes the repo's pin, including the recorded content
@@ -966,7 +985,8 @@ background task, and a retired card raises nothing.
   `FavoriteChanged`/`GroupChanged` to re-section the displayed list (it deliberately does not subscribe to
   `LaunchRecorded`: a launch never reorders the list; settings are already
   saved by then; `CardColorChanged` needs no re-ordering), and retires a card when its repo is removed. It also
-  drives a drop in another section through `IsFavorite` and `MoveToGroup`, the same paths as the star and the menu.
+  drives a drop in another section through `IsFavorite` and `MoveToGroup`, the same paths as the star and the menu,
+  and calls `RaiseGroupPropertiesChanged` on the cards after a group is renamed, removed or given a color.
 - **MainWindow** (code-behind) — subscribes to `RemoveRequested`
   (`AgentControl-RepoCardViewModel-RemoveRequest`), `SelectPackageRequested`, `NewGroupRequested`,
   `ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`,

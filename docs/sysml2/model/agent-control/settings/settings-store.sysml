@@ -2,7 +2,7 @@ package AgentControl {
     private import SoftwareItemMetadata::*;
 
     part def SettingsStore {
-        doc /* Loads/saves application-wide settings, including the user's own repo order (with its one-time arrangement of an older file), repo groups, card colors and collapsed sections; resolves the default configuration directory. */
+        doc /* Loads/saves application-wide settings, including the user's own repo order (with its one-time arrangement of an older file), repo groups, card colors, collapsed sections, group colors and group order (repaired on load: unknown colors and entries of groups no repo is in are dropped); resolves the default configuration directory. */
 
         metadata info : SoftwareInfo {
             sourceFiles = ("src/DemaConsulting.AgentControl/Settings/SettingsStore.cs");

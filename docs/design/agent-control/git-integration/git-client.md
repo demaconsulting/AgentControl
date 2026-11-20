@@ -12,7 +12,8 @@ the four folders are tracked and can stop git tracking them (index only), which 
 `LauncherUI` subsystem convert a repo that committed its agent files. Each public method
 invokes a single git subcommand via `RunGit` and translates its
 exit code/output into a typed result or exception, isolating every other unit in the codebase
-from git's process-based interface.
+from git's process-based interface. It also answers, without running git, whether a folder is the
+top folder of a Git repository, so the launcher can refuse to track a folder that is not one.
 
 #### Data Model
 
@@ -111,12 +112,27 @@ accepts only `KnownAgentFolders` (same argument checks as `UntrackAgentFolders`)
   being right, keeping the common case free of a subprocess spawn
   (`AgentControl-GitClient-CurrentBranch`).
 
+**IsRepositoryRoot** (static): Determines whether a folder is the top folder of a Git repository.
+
+- *Parameters*: `string folderPath` — absolute path of the folder to check.
+- *Returns*: `bool` — `true` when `<folderPath>/.git` exists as a folder or as a file; otherwise `false`.
+- *Algorithm*: `Path.Combine(folderPath, ".git")`, then `Directory.Exists || File.Exists`. A `.git` file counts
+  because a linked worktree and a submodule have one (it names the real git directory); its content is not read.
+- *Preconditions*: `folderPath` is not null, empty or whitespace.
+- *Postconditions*: Only the folder itself is examined: the parent folders are deliberately not walked as `git`
+  itself would, so a subfolder of a repository is not a root (tracking it would put the agent folders in the wrong
+  place). A folder that does not exist or cannot be read is not a root. No git process is started, so the check is
+  cheap enough for every folder of a multi-folder add; the method is stateless and thread-safe
+  (`AgentControl-GitClient-RepositoryRoot`).
+
 #### Error Handling
 
 Every public method throws `ArgumentException` for a null/empty/whitespace `repositoryPath`
 and `InvalidOperationException` when the git executable cannot be started or the underlying
 git subcommand exits non-zero (except `Pull`, whose non-zero exit is reported via
 `GitCommandResult.Succeeded` rather than thrown, since a failed pull is an expected outcome).
+`IsRepositoryRoot` throws `ArgumentException` for a null/empty/whitespace `folderPath` and otherwise never throws: a
+missing or unreadable folder is reported as `false`.
 `RunGit` logs a warning when the process takes longer than 10 seconds to exit (distinguishing
 a hung process from a fast failure) and logs a caught `Win32Exception`'s `NativeErrorCode` at
 `Error` level before wrapping it in an `InvalidOperationException` — both added specifically to
@@ -136,3 +152,6 @@ flakiness.
   `HasCommittedAgentFiles`, and `GetCurrentBranch` across its refresh/pull methods, and
   `GetTrackedAgentFolders` and `UntrackAgentFolders` when it applies a package to a repo whose
   agent folders are tracked by git.
+- **MainWindowViewModel** (`LauncherUI` subsystem) — calls the static `IsRepositoryRoot` when a folder is added as a
+  new repo (single add, add to a group, several folders from the picker or dropped from the file manager), and refuses
+  the folder as not a Git repository when it returns `false`.

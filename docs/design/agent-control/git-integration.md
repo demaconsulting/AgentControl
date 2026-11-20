@@ -17,7 +17,9 @@ It also provides the safe use of a remote repository as a package source (`Agent
 `-RemoteGitNoCodeExecution`, `-RemoteGitBounded`, `-RemoteGitFailureReporting` and `-RemoteGitMinimumVersion`, which
 support `AgentControl-System-GitSourceSafety`, `AgentControl-System-GitSourceTransport` and
 `AgentControl-System-GitSources`; and `-RemoteGitNoBackgroundPrompt` and `-RemoteGitSignIn`, which support
-`AgentControl-System-GitSignInBackgroundNeverPrompts` and `AgentControl-System-GitSignIn`). The subsystem contains four
+`AgentControl-System-GitSignInBackgroundNeverPrompts` and `AgentControl-System-GitSignIn`). It also tells whether a
+folder is the top folder of a Git repository (`AgentControl-GitIntegration-RepositoryRoot`, which supports
+`AgentControl-System-AddGitReposOnly`). The subsystem contains four
 units: `GitClient`, `CommittedAgentFilesCache`, `GitCredentialClient` and `GitRemoteClient`.
 
 ### Interfaces
@@ -122,6 +124,16 @@ folders git tracks and stops git tracking chosen ones.
 - *Constraints*: Throws `InvalidOperationException` if both the fast path and the subprocess
   fallback fail.
 
+**GitClient.IsRepositoryRoot**: Reports whether a folder is the top folder of a Git repository.
+
+- *Type*: In-process .NET static method (file-system check only; no git process).
+- *Role*: Provider. Its consumer is `MainWindowViewModel` (`LauncherUI`), which refuses to add a folder for which it
+  returns `false`.
+- *Contract*: `true` when the folder has a `.git` folder or a `.git` file (a linked worktree or a submodule) directly
+  in it; `false` for a subfolder of a repository (the parents are not walked) and for a folder that does not exist
+  (`AgentControl-GitIntegration-RepositoryRoot`, `AgentControl-GitClient-RepositoryRoot`).
+- *Constraints*: Throws `ArgumentException` for a blank path; stateless and thread-safe.
+
 **CommittedAgentFilesCache**'s get/set/invalidate methods.
 
 - *Type*: In-process .NET instance methods.
@@ -143,6 +155,11 @@ separately: because the recent-repos list may show many repo cards, it reads `.g
 directly first (recognizing a normal branch ref, a detached HEAD, and a worktree
 indirection file) and only falls back to invoking `git` when that fast path cannot determine
 an answer, keeping the common case free of subprocess overhead.
+
+`GitClient.IsRepositoryRoot` is the one question answered without git at all: it only looks for `.git` (a folder or a
+file) directly in the folder, so the launcher can check every folder of a multi-folder add or a file-manager drop
+cheaply. It deliberately does not walk up to the parent folders as `git` would, because a subfolder of a repository is
+not a place to put the agent folders.
 
 `CommittedAgentFilesCache` implements architecture.md's "Repo-fact caching strategy" for the
 committed-agent-files badge specifically: since that fact is a property of the git tree, it is

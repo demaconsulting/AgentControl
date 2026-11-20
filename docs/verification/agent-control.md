@@ -20,6 +20,14 @@ level down instead, with the limitation disclosed rather than a fabricated end-t
   file's contents; the only test-suite touch point is indirect, via `TestLoggingFixture.cs`
   (see the `Logging` subsystem verification design for the full disclosure).
 
+Two system requirements about adding repos (`AgentControl-System-AddSeveralRepos` and
+`AgentControl-System-AddGitReposOnly`) are likewise not verified by FlaUI: the operating system's multi-select folder
+picker is a native dialog, and a drag from the file manager has its drag source in another process, so neither can be
+driven dependably through UI Automation. Their evidence is the headless window tests of the `LauncherUI` subsystem,
+which answer the picker through the window's `RepoFolderPicker` seam and raise the platform's drag-and-drop events
+with the dropped folders as storage items, and - for the Git-repository rule - the `GitIntegration` subsystem test,
+which runs the real git to make a repository, a linked worktree (whose `.git` is a file) and a subfolder.
+
 `AgentControl-System-ResponsiveOperations` states only what UI automation can observe: a background upgrade
 check never opens a sign-in dialog. That the window stays responsive, shows progress and can cancel is verified one
 level down, with deliberately slow and failing package sources, because a frozen UI thread is not observable through
@@ -42,9 +50,12 @@ corresponding `LauncherUI` and `Settings` requirements say is verified one level
   state of every control is not measured, and the focus ring is not asserted; the contrast of the theme's text and
   graphic colors is verified in the `LauncherUI` subsystem tests.
 - Groups, card colors and favorites (`AgentControl-System-RepoGroups` and the requirements next to it,
-  `AgentControl-System-CardColor` and its two companions): the scenarios below name what is exercised. Renaming and
+  `AgentControl-System-CardColor` and its two companions, `AgentControl-System-GroupColor` and
+  `AgentControl-System-GroupReorder`): the scenarios below name what is exercised. Renaming and
   removing a group from its header and the keeping of the keyboard focus on the star are not exercised end to end;
-  they are verified in the headless window tests of the `LauncherUI` subsystem.
+  they are verified in the headless window tests of the `LauncherUI` subsystem. For a group color only the header
+  accent and the stored color are shown end to end; that the tiles of the group's repos follow it is verified in the
+  headless window tests, because a tile's automatic color may happen to equal the chosen one.
 - A change that cannot be saved (`AgentControl-System-ListChangesKept`): a failing save cannot be provoked through
   the published application, so only the keeping of the changes is shown end to end; the refusal and the message are
   verified in the `LauncherUI` subsystem and unit tests.
@@ -170,10 +181,18 @@ port, and the real `git upload-pack`).
   least 4.5:1), a theme saved by an earlier session is in effect when the application starts, and choosing a theme
   in Settings re-themes the running application without a restart.
 - A repo can be moved into a new group, into an existing group and out of its group through the real UI; the
-  groups show as sections - favorites first, then the groups alphabetically, then the repos in no group, and no
+  groups show as sections - favorites first, then the groups in the user's order (alphabetically until the user orders
+  them), then the repos in no group, and no
   sections while no repo is in a group; a collapsed section is still collapsed after a restart; the filter finds a
   repo inside a collapsed group; groups and card colors are stored only in the user's settings (the repository stays
   untouched), and a chosen card color leaves the card's status unchanged.
+- A group's color chosen from its header menu shows as an accent on its header, named for assistive technology, is
+  stored by group name only in the user's settings, and None takes it away; a group moved down from its header menu or
+  dragged with the real mouse below another group's header is listed after it, without being collapsed, and the order
+  is stored in the user's settings and is still there after a restart.
+- Several folders can be added at once and folders dropped from the file manager are added, with one message for what
+  was not added; only the top folder of a Git repository (a `.git` folder or file directly in it) is added - verified
+  one level down, as disclosed in the Verification Approach.
 - Launching a repo leaves its card where it is; the card menu's Reorder items and a real mouse drag reorder the cards
   and a drag onto a group's header moves a card into the group; the order is stored only in the user's settings and is
   still there after a restart.
@@ -200,6 +219,24 @@ separate runs; declining leaves the card in place, and confirming removes it, pr
 is gated on user confirmation. This scenario is tested by
 `windows@RemoveMenuItem_ClickThenConfirm_RemovesCard_DecliningLeavesItInPlace`, covering
 `AgentControl-System-AddRemoveRepo`.
+
+**AgentControl_AddSeveralRepos_PickerAndFileManagerDropAddSeveralWithOneMessage**: Verified one level down (see the
+Verification Approach). In the headless main window the app bar's Add, with the folder picker seam answering with
+several folders, adds each repository and shows one message naming the folders that were not added and why; and
+folders dropped from the file manager on a group's header, raised as the platform's drag-and-drop events, are added to
+that group. This scenario is tested by `MainWindow_AddRepoButton_SeveralFoldersPicked_AddsEachAndSummarizesTheRest` and
+`MainWindow_DropFolders_OnGroupHeader_AddsThemToTheGroup`, covering `AgentControl-System-AddSeveralRepos`; the other
+drop targets, the drop feedback and the wording of the summary are the `LauncherUI` subsystem and
+`MainWindowViewModel` scenarios.
+
+**AgentControl_AddGitReposOnly_OnlyTheTopFolderOfAGitRepositoryIsAdded**: Verified one level down (see the
+Verification Approach). In the headless main window a picked folder that is not the top folder of a Git repository is
+not added and a message says why; with the real git, the working folder of a repository and a linked worktree of it
+(whose `.git` is a file) are repository roots while the repository's subfolder and a plain folder are not. This scenario
+is tested by `MainWindow_AddRepoButton_FolderThatIsNotAGitRepository_IsRefusedWithAMessage` and
+`GitIntegrationSubsystem_RepositoryRoot_RepositoryWorktreeAndSubfolder`, covering
+`AgentControl-System-AddGitReposOnly`; that the repos already in the list are kept whatever their folders hold is
+verified by the `MainWindowViewModel` unit tests.
 
 **AgentControl_SearchFilter_FilterTextBox_HidesAndRestoresCards**: Non-matching text is typed
 into the filter text box, hiding a repo card, and then the filter is cleared, restoring it;
@@ -364,10 +401,13 @@ by `GitClient_IsWorkingTreeClean_CleanRepo_ReturnsTrue` (one such passing test),
 `AgentControl-System-DiagnosticLogging`.
 
 **AgentControl_About_AboutButton_OpensAboutWindowShowingVersionAndCopyright**: The About
-button is clicked; the About window opens showing the application version, the copyright notice, the license
+button is clicked; the About window opens showing its banner (`AboutBanner`) with the application name
+(`AboutBannerTitleText`), the application version, the copyright notice, the license
 summary and a non-empty dependency list. This scenario is tested by
 `windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright`, covering
-`AgentControl-System-About` and `AgentControl-Program-Version`. That the dialog is modal is the
+`AgentControl-System-About` and `AgentControl-Program-Version`. The banner's logo and tagline, its legibility in both
+themes and the layout with one scrolling region are verified in the headless window tests of the `LauncherUI`
+subsystem. That the dialog is modal is the
 `AgentControl_DialogModal_SettingsAndAboutDisableTheMainWindowUntilTheyClose` scenario.
 
 **AgentControl_AboutVersionRow_VersionIsLabeledAndWithoutBuildMetadata**: In the same run the version is one short,
@@ -632,7 +672,9 @@ end to end (see the Verification Approach). This scenario is tested by
 
 **AgentControl_RepoGroupSections_FavoritesThenGroupsAlphabeticallyThenUngrouped**: With one favorite, repos in two
 groups and one repo in no group, the real application lists the sections in the order Favorites, then the groups
-alphabetically, then the repos in no group, with each repo under its section (a favorite only under Favorites); and
+alphabetically (no group order has been stored yet; a stored order is the
+`AgentControl_GroupReorder_MenuAndDragReorderGroupsAndOrderSurvivesRestart` scenario), then
+the repos in no group, with each repo under its section (a favorite only under Favorites); and
 after the last repo has been taken out of its group no section header is left. This scenario is tested by
 `windows@RepoList_FavoritesAndGroups_SectionsAreFavoritesThenGroupsAlphabeticallyThenUngrouped` and
 `windows@CardMenu_RemoveFromGroup_ReturnsRepoToUngroupedAndRemovesTheHeader`, covering
@@ -658,6 +700,25 @@ stays empty (nothing is written to the repository). This scenario is tested by
 `windows@CardMenu_MoveToExistingGroup_JoinsThatSectionAndStoresInSettingsOnly`, covering
 `AgentControl-System-RepoGroupsSettingsOnly`.
 
+**AgentControl_GroupColor_HeaderMenuColorsTheHeaderAndStoresInSettingsOnly**: In the real application, "Group
+color..." in a user group's header menu opens the group palette; choosing a swatch shows the accent on the group's
+header, named for assistive technology, and stores the color under the group's name in the settings file only, and
+"None" takes it away again. This scenario is tested by
+`windows@GroupHeaderMenu_GroupColor_ColorsHeaderAndStoresInSettingsOnly`, covering `AgentControl-System-GroupColor`.
+That the tiles of the group's repos without a color of their own take the group's color, that the accent is legible in
+both themes and that the color follows a rename and is forgotten with the group are verified in the `LauncherUI`
+subsystem (see the Verification Approach).
+
+**AgentControl_GroupReorder_MenuAndDragReorderGroupsAndOrderSurvivesRestart**: With the test repo in the group Alpha, a
+second repo in the group Beta and a third in no group, choosing "Move down" in the Alpha header's menu lists Alpha
+after Beta, stores the order of the groups in the settings file, and the order is the same after the application is
+closed and started again. In another run the Alpha header is dragged with the real mouse and dropped on the lower half
+of the Beta header: Alpha is listed after Beta and is not collapsed by the drag. These scenarios are tested by
+`windows@GroupHeaderMenu_MoveDown_ReordersGroupsAndKeepsOrderAfterRestart` and
+`windows@RepoList_DragGroupHeaderBelowAnother_ReordersGroups`, covering `AgentControl-System-GroupReorder`. That
+Favorites and Ungrouped keep their places and that reordering is off while the filter has text are verified in the
+headless window tests of the `LauncherUI` subsystem.
+
 **AgentControl_ListChangesKept_FavoriteCollapseAndColorAreStored**: The favorite star, a section's collapse and a
 card color are each changed in the real application and found in the settings file (the collapse also after a
 restart). That a change which cannot be saved changes nothing and is reported is verified in the `LauncherUI`
@@ -665,7 +726,10 @@ subsystem and unit tests, because a failing save cannot be provoked through the 
 is tested by `windows@FavoriteToggleButton_ToggledOnThenOff_MovesRepoBetweenSectionsAndStoresChoice`,
 `windows@GroupHeaderToggleButton_Click_CollapsesSectionAndRemembersItAfterRestart` and
 `windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly`, covering
-`AgentControl-System-ListChangesKept`.
+`AgentControl-System-ListChangesKept`. That a group color and the order of the groups are kept in the settings file
+(the order also after a restart) is shown by the
+`AgentControl_GroupColor_HeaderMenuColorsTheHeaderAndStoresInSettingsOnly` and
+`AgentControl_GroupReorder_MenuAndDragReorderGroupsAndOrderSurvivesRestart` scenarios.
 
 **AgentControl_Favorites_ToggleStarMovesRepoBetweenSections**: In the real application, with one repo in a
 group and one in none, the first card's star (accessible name "Favorite") is toggled on: a Favorites section

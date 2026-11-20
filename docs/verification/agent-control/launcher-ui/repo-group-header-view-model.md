@@ -3,7 +3,8 @@
 #### Verification Approach
 
 `RepoGroupHeaderViewModel` is verified with unit tests in `RepoGroupHeaderViewModelTests.cs`. Each test constructs a
-real header, drives it through its constructor, `Update` and its commands, and reads its properties and the events it
+real header, drives it through its constructor, `Update`, `UpdateColor`, `UpdateOrder` and its commands, and reads
+its properties and the events it
 raises; nothing is mocked and no Avalonia `Window` is constructed. How the owning `MainWindowViewModel` creates,
 updates and reacts to headers is verified by that unit, and how the window shows them by the headless window tests of
 the `LauncherUI` subsystem (`RepoGroupWindowTests.cs`).
@@ -23,6 +24,12 @@ N/A - standard test environment (no window, no files and no processes are involv
   cannot, no request is raised and its tooltip explains the filter.
 - The rename and remove commands raise exactly one request per execution and change nothing themselves.
 - The add-repository command raises exactly one request per execution and changes nothing itself.
+- A user group's color is exposed by name (canonical spelling), as the accent's style class, as the palette heading
+  and as the accent's description, with change notifications; an unknown color or none leaves no color, and
+  *Favorites* and *Ungrouped* never show one.
+- The Move up and Move down commands are unavailable until the owner says where the group stands, raise their request
+  only while available, explain an unavailable move in their tooltips, and are never available for *Favorites* and
+  *Ungrouped*.
 - A header without a name (blank or `null`) is refused.
 
 #### Test Scenarios
@@ -67,6 +74,23 @@ execution. This scenario is tested by `RepoGroupHeaderViewModel_RenameAndRemoveC
 **RepoGroupHeaderViewModel_AddRepoRequest**: The add-repository command is executed twice and two requests are raised.
 This scenario is tested by `RepoGroupHeaderViewModel_AddRepoCommand_RaisesRequest`, covering
 `AgentControl-RepoGroupHeaderViewModel-AddRepoRequest`.
+
+**RepoGroupHeaderViewModel_ShowsGroupColor**: A user group's header starts without a color (`Group color: None`); given
+`teal` it exposes `Teal`, `HasColor`, the style class `groupAccent5`, the heading and description `Group color: Teal`
+and change notifications of the style class and `HasColor`; given an unknown name (`Plaid`) it has no color, and given
+a color and then `null` it has none again with an empty style class. *Favorites* and *Ungrouped* headers given `Teal`
+stay uncolored. This scenario is tested by `RepoGroupHeaderViewModel_UpdateColor_ExposesNameClassHeadingAndDescription`
+and the theory `RepoGroupHeaderViewModel_UpdateColor_BuiltInSection_StaysUncolored`, covering
+`AgentControl-RepoGroupHeaderViewModel-ShowsGroupColor`.
+
+**RepoGroupHeaderViewModel_MoveRequests**: A new user group's Move up and Move down commands cannot execute; after the
+owner makes both available, executing them raises an up and then a down request and `CanExecuteChanged` was raised;
+after the owner gives a reason for up only, up cannot execute and down can. A move made unavailable with a reason shows
+that reason as its tooltip (with the tooltip's change notification) while the available one says what it does, and a
+*Favorites* header told that both moves are available still offers neither and still has a non-empty tooltip. This
+scenario is tested by `RepoGroupHeaderViewModel_MoveCommands_RaiseRequestsAndFollowAvailability` and
+`RepoGroupHeaderViewModel_UpdateOrder_DisabledMoveExplainsWhy`, covering
+`AgentControl-RepoGroupHeaderViewModel-MoveRequests`.
 
 **RepoGroupHeaderViewModel_RequiresName**: A blank name and a `null` name are refused. This scenario is tested by
 `RepoGroupHeaderViewModel_Constructor_BlankName_Throws`, covering `AgentControl-RepoGroupHeaderViewModel-RequiresName`.

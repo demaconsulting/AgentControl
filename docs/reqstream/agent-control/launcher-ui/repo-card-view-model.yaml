@@ -959,6 +959,21 @@ sections:
           - RepoCardViewModel_CardColor_Default_IsAutomatic
           - RepoCardViewModel_SetCardColor_ChoosesAndClearsColor
 
+      - id: AgentControl-RepoCardViewModel-GroupColorFallback
+        title: >-
+          The RepoCardViewModel class shall color the tile with the card's own color when it has
+          one, otherwise with its group's color (also while the repo is a favorite), otherwise with
+          the automatic color, and shall name the group color in its palette heading when the tile
+          follows it.
+        justification: |
+          A color the user chose for one repo is the more specific choice; the group color marks
+          the group's other repos, and the heading says which color is in effect.
+        tests:
+          - RepoCardViewModel_AvatarColorIndex_NoOwnColor_UsesGroupColor
+          - RepoCardViewModel_AvatarColorIndex_OwnColor_WinsOverGroupColor
+          - RepoCardViewModel_AvatarColorIndex_FavoriteInColoredGroup_KeepsGroupColor
+          - RepoCardViewModel_CardColorHeading_NoOwnColorInColoredGroup_NamesTheGroupColor
+
       - id: AgentControl-RepoCardViewModel-CardColorRecorded
         title: >-
           The RepoCardViewModel class shall record the chosen card color on the repo's settings

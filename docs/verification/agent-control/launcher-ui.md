@@ -28,11 +28,16 @@ and key input, the "Check again" menu item, the up-to-date check mark, the narro
 keyboard behavior of the dialogs, the About version row, the order of the AGENTS.md question and the release
 notes and the keep-or-update and launch-anyway questions about a repo's agent files,
 `RepoGroupWindowTests.cs` for the group headers, the card menu's
-"Move to group" submenu, the group-name prompt and the card color palette pop-up,
+"Move to group" submenu, the group-name prompt, the card and group color palette pop-ups (and the shared
+`ColorPalettePanel`), and adding several folders from the picker,
 `RepoReorderWindowTests.cs` for the user's own repo order (cards that stay put, the card menu's Reorder submenu, drag
 and drop through the window's drag-source seam and the platform's drop events, the insertion line and header tint,
 reordering turned off by the filter, the order after a restart; the real operating-system drag is covered only by the
-FlaUI tests), `RepoOrderingTests.cs` for the view model's rules behind them,
+FlaUI tests), the user's order of the groups (the header menu's Move items and header drags through the same
+`DragStarter` seam, pressing the header's toggle) and folders dropped from the file manager (a `DataTransfer` of
+`DataTransferItem.CreateFile` items for storage items obtained from the window's `StorageProvider` -
+`TryGetFolderFromPathAsync` / `TryGetFileFromPathAsync`, since user code cannot implement `IStorageItem` - raised with
+`window.DragDrop` offering Copy, Move and Link), `RepoOrderingTests.cs` for the view model's rules behind them,
 `SettingsWindowServerSourceTests.cs` for the Settings
 window, the source editor window and its connection test, `SourceEditorSignatureWindowTests.cs` for the signature
 section and "Forget saved sign-in" of the source editor, `SourceEditorGitWindowTests.cs` for the Git editor's
@@ -54,10 +59,14 @@ command's dependency-list data source has direct unit coverage
 (`ThirdPartyDependenciesTests.cs`), since it is a plain static data source independent of any
 Avalonia control; the About dialog itself still has no dedicated view-model class, so its
 end-to-end rendering (opening the window and showing the tagline, version, copyright, license,
-and a non-empty dependency list) is verified only via the FlaUI
-`DemaConsulting.AgentControl.UiTests` project. The logo image itself is not asserted by any
-automated test (it has no bound text content to check) and remains a visual-inspection-only
-element. `FavoriteIconConverter`, the favorite-star glyph's shape converter (its color is the theme resource
+and a non-empty dependency list) is verified via the FlaUI
+`DemaConsulting.AgentControl.UiTests` project, while its banner (logo, name and tagline above the details) and its
+layout (600 wide, limited height, the banner and Close outside the one scrolling region that holds every detail) are
+verified by headless tests in `DialogWindowTests.cs`, and the legibility of the banner text by `ThemeResourceTests`.
+The logo image itself is not asserted beyond its presence in the banner (it has no bound text content to check) and
+remains a visual-inspection-only element. The temporary repo folders the window tests add carry a `.git` folder whose
+`HEAD` names a branch, so the Git-repository check accepts them; the tests of that check use folders without one.
+`FavoriteIconConverter`, the favorite-star glyph's shape converter (its color is the theme resource
 `FavoriteStarForeground`, checked for contrast by `ThemeResourceTests`), is likewise a visual-only value converter
 with no bound text content to assert and remains a visual-inspection-only element;
 `RepoCardViewModel.IsFavorite` itself
@@ -139,6 +148,17 @@ executable.
   can be resized with its fields widening and a short window scrolling instead of clipping Save.
 - A group header's menu starts with "Add repository...", which uses the same folder picker as the top-bar add, puts
   the repo in that group (moving an already listed repo into it, and saying so), and changes nothing when cancelled.
+- The About window shows a banner with the logo, name and tagline legible in both themes, is 600 wide with a limited
+  height, and keeps the banner and Close in view while the details scroll in one region.
+- A user group can be given a palette color or none from its header menu; the header shows an accent named in words,
+  the tiles of its repos without a color of their own follow it, the accent reaches 3:1 in both themes, and the color
+  and position follow a rename and are forgotten with the group.
+- The groups are listed in the user's order (alphabetically until ordered) between Favorites and Ungrouped, are moved
+  with the header menu's Move items (disabled with a reason at the ends and while filtering) and by dragging a header
+  above or below another group's header (refused elsewhere and while filtering), and the order survives a restart.
+- The picker accepts several folders and folders dropped from the file manager are added (into the group dropped on,
+  otherwise ungrouped, with copy feedback that is cleared); only top folders of Git repositories are added, and one
+  message says which folders were not added and why.
 
 ### Test Scenarios
 
@@ -157,12 +177,47 @@ committed-files badges are each set correctly. This scenario is tested by
 `AgentControl-LauncherUI-StatusBadges`.
 
 **LauncherUI_AddRepo_ValidDuplicateAndMissingPaths_ProduceCorrectOutcomes**: `AddRepo` is
-called with a valid new folder path (inserted and persisted), a nonexistent path (rejected),
+called with a valid new folder path that is the top folder of a Git repository (inserted and persisted), a nonexistent
+path (rejected),
 and an already-tracked path (rejected). This scenario is tested by
 `MainWindowViewModel_AddRepo_ValidNewPath_InsertsCardAndPersistsSettings`,
 `MainWindowViewModel_AddRepo_PathDoesNotExist_ReturnsFalse`, and
 `MainWindowViewModel_AddRepo_DuplicatePath_ReturnsFalse`, covering
 `AgentControl-LauncherUI-AddRepo`.
+
+**LauncherUI_AddSeveralRepos_PickerTakesSeveralFoldersAndEachIsHandled**: In a headless main window whose folder picker
+seam answers with several paths, the app bar's Add adds each repository, skips the folders that cannot be added and
+tells the user in one message which were not added and why
+(`MainWindow_AddRepoButton_SeveralFoldersPicked_AddsEachAndSummarizesTheRest`); a group header's "Add repository..."
+puts every picked repository in that group, silently when all were added
+(`MainWindow_HeaderMenuAddRepository_SeveralFolders_JoinTheGroup`). These cover
+`AgentControl-LauncherUI-AddSeveralRepos` (child `AgentControl-MainWindowViewModel-AddRepos`).
+
+**LauncherUI_AddRepoDropFolders_FoldersFromTheFileManagerAreAdded**: Folders dropped from the file manager (raised as
+platform drag events with storage items for their paths) on a group's header, or on a card in a group's section, are
+added to that group and no card is moved (`MainWindow_DropFolders_OnGroupHeader_AddsThemToTheGroup`); dropped on the
+*Ungrouped* header, on the *Favorites* header or on empty space in the list they are added without a group
+(`MainWindow_DropFolders_OnUngroupedFavoritesOrEmptySpace_AddsThemUngrouped`); dropped on the empty-state panel of a
+window with no repo yet they are added (`MainWindow_DropFolders_OnEmptyStatePanel_AddsThem`); the drag is answered with
+the copy effect, the header of the group they would join is tinted and the list area is outlined where they would be
+added ungrouped, and the feedback is cleared when the drag leaves and after the drop
+(`MainWindow_DropFolders_ShowsCopyFeedbackAndClearsIt`); and a dropped file and a dropped folder that is not a Git
+repository are skipped and reported in one message while the repository dropped with them is added
+(`MainWindow_DropFile_IsSkippedAsNotARepository`). These cover `AgentControl-LauncherUI-AddRepoDropFolders` (child
+`AgentControl-MainWindowViewModel-AddRepos`).
+
+**LauncherUI_AddRepoGitRootOnly_FolderThatIsNotARepositoryIsRefused**: The app bar's Add with a picked folder that is
+not the top folder of a Git repository adds nothing and shows a message that says why
+(`MainWindow_AddRepoButton_FolderThatIsNotAGitRepository_IsRefusedWithAMessage`), and a dropped file or plain folder is
+skipped as not a repository (`MainWindow_DropFile_IsSkippedAsNotARepository`). These cover
+`AgentControl-LauncherUI-AddRepoGitRootOnly` (child `AgentControl-MainWindowViewModel-AddGitReposOnly`, whose unit
+tests include the subfolder, the `.git` file and the repos already listed).
+
+**LauncherUI_AddRepoSummary_OneMessageForSeveralFolders**: Adding several picked folders of which some cannot be added
+shows one summary message (`MainWindow_AddRepoButton_SeveralFoldersPicked_AddsEachAndSummarizesTheRest`), and so does
+a drop of a repository with a file and a plain folder (`MainWindow_DropFile_IsSkippedAsNotARepository`); a single
+folder keeps its single-add message. These cover `AgentControl-LauncherUI-AddRepoSummary` (child
+`AgentControl-MainWindowViewModel-AddReposSummary`, whose unit tests check every wording and the five-name limit).
 
 **LauncherUI_RemoveRepo_RequiresConfirmationBeforeMutatingState**: A card's `RemoveCommand` is
 executed (raising `RemoveRequested` without removing the card), and `MainWindowViewModel`'s
@@ -242,6 +297,37 @@ covering `AgentControl-LauncherUI-ReorderOffWhileFiltering`.
 **LauncherUI_RepoOrderRemembered_OrderSurvivesAWindowRestart**: After a drag and a menu move, the saved settings are
 loaded into a new view model and a new window, which shows the rows in the same order. This scenario is tested by
 `MainWindow_ReorderedList_OrderSurvivesAWindowRestart`, covering `AgentControl-LauncherUI-RepoOrderRemembered`.
+
+**LauncherUI_GroupOrder_StoredOrderThenAlphabeticalBetweenFavoritesAndUngrouped**: A headless main window over settings
+with a stored order of the groups lists Favorites first, then the groups in that order, then the groups without a
+stored position alphabetically, then Ungrouped
+(`MainWindow_GroupOrder_StoredOrderThenAlphabeticalBetweenFavoritesAndUngrouped`,
+covering `AgentControl-LauncherUI-GroupOrder`, child `AgentControl-MainWindowViewModel-GroupOrder`).
+
+**LauncherUI_GroupMoveMenu_MoveUpDownReorderAndDisableWithAReason**: A group header's menu moves the group up and down;
+Move up is disabled for the first group and Move down for the last, each with the reason as its tooltip, and both are
+disabled while the filter has text (`MainWindow_HeaderMenu_MoveUpDown_ReorderGroupsAndDisableAtTheEnds`); the menu
+holds the items in the documented order (`MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator`). These
+cover `AgentControl-LauncherUI-GroupMoveMenu` (children `AgentControl-MainWindowViewModel-MoveGroup`,
+`-MoveGroupAvailability` and `AgentControl-RepoGroupHeaderViewModel-MoveRequests`).
+
+**LauncherUI_GroupDragReorder_HeaderDraggedAboveOrBelowAnotherGroup**: A group header's toggle is pressed and moved far
+enough to start a drag through the window's `DragStarter` seam: the section is not collapsed or expanded by the press,
+the header is dimmed, the line shows below the target group's header, the group lands below it, a collapsed group stays
+collapsed and the feedback is cleared afterwards
+(`MainWindow_DragGroupHeader_BelowAnotherGroup_ReordersGroupsWithLineFeedback`); a dragged header dropped on the
+Favorites or Ungrouped header or on a card is refused and nothing changes, while a card drag keeps working
+(`MainWindow_DragGroupHeader_OntoBuiltInSectionOrCard_IsRefused` and
+`MainWindow_DragCard_WithinSection_ReordersAtDropPosition`); and while the filter has text a press and move on a group
+header starts no drag, and the Favorites and Ungrouped headers never start one
+(`MainWindow_FilterActive_GroupHeaderDragStartsNothing`). These cover `AgentControl-LauncherUI-GroupDragReorder`
+(child `AgentControl-MainWindowViewModel-DropGroup`). The real operating-system drag of a header is covered by the
+FlaUI test of `AgentControl-System-GroupReorder`.
+
+**LauncherUI_GroupOrderRemembered_OrderSurvivesAWindowRestart**: A group order made in the window (a header drag and a
+menu move) is what a new window over the saved settings shows
+(`MainWindow_ReorderedGroups_OrderSurvivesAWindowRestart`, covering `AgentControl-LauncherUI-GroupOrderRemembered`,
+child `AgentControl-MainWindowViewModel-GroupOrderPersisted`).
 
 **LauncherUI_Launch_OnlyTheUsersCancelOfAFailedRestoreStopsIt**: The Launch command is executed for
 a card whose agent files are already synced, recording the launch timestamp; the pre-launch check is exercised
@@ -335,9 +421,10 @@ existing recent-repos list while adopting the new field values. This scenario is
 
 **LauncherUI_About_EndToEndOnly_OpensAboutWindow**: The About dialog itself has no dedicated
 view-model class, so its end-to-end rendering is verified via the FlaUI project: opening the
-window over the main window and confirming the mission tagline, version, copyright, and license
+window over the main window and confirming the banner and its title, the mission tagline, version, copyright, and
+license
 text are all present and non-empty, and that the third-party dependency list control is present and
-rendered with at least one entry. The application logo image is not automated-asserted (it has
+rendered with at least one entry. The application logo image is not automated-asserted beyond its presence (it has
 no text content to check) and remains a visual-inspection-only element. The dependency list's
 underlying data source (name/license entries matching the direct runtime dependencies in the application's
 build-produced dependency manifest, no
@@ -350,6 +437,18 @@ duplicates, no empty fields, and the expected display format) has direct unit co
 and `DependencyInfo_ToString_RepresentativeEntry_ReturnsNameLicenseFormat`, covering
 `AgentControl-LauncherUI-About`. The labeled Version row is the scenario
 `LauncherUI_AboutVersionRow_VersionIsLabeledShortAndFullInTooltip` below.
+
+**LauncherUI_AboutBanner_LogoNameAndTaglineLegibleInBothThemes**: The headless About window starts with a banner across
+its full width, identified for assistive technology, that shows the logo, the name and the project's tagline above the
+details (`AboutWindow_Banner_ShowsLogoNameAndTaglineAboveTheDetails`); in the light and the dark theme the banner's
+name and tagline reach 4.5:1 on the band and on the band under each glow's strongest stop
+(`ThemeResources_AboutBanner_TextIsLegibleInLightAndDark`). These cover `AgentControl-LauncherUI-AboutBanner`.
+
+**LauncherUI_AboutScrollableDetails_BannerAndCloseStayInView**: The headless About window is 600 wide with a limited
+height, the banner and the Close button are outside the one scrolling region, and every detail - tagline, version,
+copyright, license and the dependency list - is inside it
+(`AboutWindow_Layout_BannerAndCloseStayOutsideTheOneScrollingRegion`, covering
+`AgentControl-LauncherUI-AboutScrollableDetails`).
 
 **LauncherUI_SourceAwareActions_UnitTestsCoverSourceMemoryAndTargetedInvalidation**: Source-aware
 select/upgrade/launch-sync behavior is verified by the `RepoCardViewModel`,
@@ -397,8 +496,10 @@ minimum scrolls its form and keeps the Save button inside the window. This scena
 dialog tests, which pass unchanged.
 
 **LauncherUI_GroupAddRepository_HeaderMenuAddsRepoToGroup**: The "..." menu of a user group's header has
-"Add repository..." (`GroupAddRepoMenuItem`, with a tooltip) as its first item, then a separator, then the rename and
-remove items; choosing it with the folder picker answered by a path adds a new card in that group; a cancelled
+"Add repository..." (`GroupAddRepoMenuItem`, with a tooltip) as its first item, then a separator, the Move up, Move
+down and Group color items, another separator and then the rename and
+remove items, each identified and explained; choosing it with the folder picker answered by a path adds a new card in
+that group; a cancelled
 picker changes nothing and shows no message; an already listed repo is moved into the group and a message says it was
 already in the list; and the top-bar add still adds ungrouped through the same picker and still refuses a repo that
 is already listed. This scenario is tested by `MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator`,
@@ -918,7 +1019,8 @@ next start, and when other settings change);
 shows every match, also in a collapsed section, with the count of matches only, no header for a section without a
 match and the collapse toggles disabled and explained meanwhile); and
 `RepoCardViewModel_GroupAndColor_NeverWriteToTheRepository` for `AgentControl-LauncherUI-RepoGroupsSettingsOnly`
-(groups, colors and collapsed sections are written to the user's settings only, never into the repository). The
+(groups, colors, group colors, the group order and collapsed sections are written to the user's settings only, never
+into the repository). The
 end-to-end checks of the same behavior are the system scenarios (`AgentControl-System-RepoGroups` and the
 requirements next to it).
 
@@ -958,6 +1060,41 @@ returns the tile to its path-derived palette class. This scenario is tested by
 every palette color and in both themes the letters on the fill are the better of white and near-black and have at
 least 4.5:1 contrast, tested by `AppStyles_TileLetters_AreTheBetterOfLightAndDarkTextOnEveryPaletteColor`, covering
 `AgentControl-LauncherUI-CardColorLettersLegible`.
+
+**LauncherUI_GroupColor_PalettePopupColorsTheHeaderAndNoneClears**: A headless main window opens the group palette from
+a user group's "Group color..." item and finds a swatch for every palette color and "None", each identified and
+explained; choosing a swatch colors the group - an accent on its header, named in its tooltip and accessible name, and
+the tiles of its uncolored repos - marks the swatch and closes the palette, and "None" takes the color away
+(`MainWindow_GroupColorPalette_ChoosingSwatchColorsHeaderAndNoneClears`). The shared `ColorPalettePanel` is checked on
+its own: one swatch per palette color in palette order, each with the AutomationId of its prefix and name, its name as
+accessible name, tooltip and tag and the swatch fill of its palette index, plus a heading and a clear button named
+from the prefix (`ColorPalettePanel_Swatches_OnePerPaletteColorWithPrefixedIdsNamesAndTooltips`); the chosen color, in
+any letter case, marks only its own swatch, and with none chosen the clear button shows its check mark
+(`ColorPalettePanel_SelectedColorName_MarksOnlyThatSwatch`); and a swatch click reports its color while the clear button
+reports none (`ColorPalettePanel_SwatchOrClearClicked_RaisesColorChosen`). These cover
+`AgentControl-LauncherUI-GroupColor` (children `AgentControl-MainWindowViewModel-GroupColor`, `-GroupColorShown` and
+`AgentControl-RepoGroupHeaderViewModel-ShowsGroupColor`).
+
+**LauncherUI_GroupColorOnCards_TilesFollowTheGroupUnlessTheyHaveTheirOwn**: In a headless main window the tiles of a
+colored group's repos without a card color of their own - a favorite in the group included - take the group's color,
+a card color of its own wins, and the card palette's heading says when the tile follows the group's color
+(`MainWindow_GroupColor_TilesWithoutOwnColorFollowAndOwnColorWins`, covering
+`AgentControl-LauncherUI-GroupColorOnCards`, child `AgentControl-RepoCardViewModel-GroupColorFallback`).
+
+**LauncherUI_GroupColorLegible_AccentReachesGraphicsContrast**: In the light and the dark theme every group accent
+brush reaches 3:1 on the page a header is drawn on and on the drop tint a header gets while something is dragged over
+it (`ThemeResources_GroupAccent_MeetsGraphicsContrastInLightAndDark`, covering
+`AgentControl-LauncherUI-GroupColorLegible`).
+
+**LauncherUI_GroupSettingsKeptInStep_ColorAndPositionFollowTheGroup**: The behavior is observable only in the view-model
+layer the window is drawn from, so the view-model tests are cited as the subsystem's convention (see the Verification
+Approach): renaming a group keeps its color and position under the new name, in memory and in the saved settings
+(`MainWindowViewModel_RenameGroup_KeepsColorAndPosition`); removing a group forgets both
+(`MainWindowViewModel_RemoveGroup_ForgetsColorAndPosition`); and applying settings from the Settings window keeps both
+(`MainWindowViewModel_ApplySettings_KeepsGroupColorsAndOrder`). These cover
+`AgentControl-LauncherUI-GroupSettingsKeptInStep` (children
+`AgentControl-MainWindowViewModel-GroupSettingsFollowRenameAndRemove`
+and `-GroupSettingsKeptOnApplySettings`).
 
 **LauncherUI_PackageSourceLocationTooltip_WholeLocationIsTheTooltip**: The location box of the source editor offers
 the whole entered folder or feed address as its tooltip, and none when it is empty. This scenario is tested by

@@ -145,6 +145,7 @@ reviews:
       - "src/**/LauncherUI/FavoriteColorConverter.cs"  # deleted: keeps the removal of the file reviewable
       - "src/**/LauncherUI/ThemePreferenceDisplayNameConverter.cs"
       - "src/**/LauncherUI/PathEllipsisText.cs"
+      - "src/**/LauncherUI/ColorPalettePanel.cs"
       - "src/**/LauncherUI/AppStyles.axaml"
       - "src/**/LauncherUI/GroupNameWindow.axaml"
       - "src/**/LauncherUI/GroupNameWindow.axaml.cs"

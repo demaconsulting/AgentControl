@@ -5,7 +5,10 @@ package AgentControl {
         doc
         /*
          * Presentation layer: the main window with its user-ordered repo list (Move
-         * items and drag and drop included), per-repo cards, the
+         * items and drag and drop included), user-colored groups in the user's own order (header
+         * menu and header drag), adding several repos at once (multi-select folder picker and
+         * folders dropped from the file manager, Git repository roots only, one combined summary),
+         * the About dialog with its banner, per-repo cards, the
          * package-selection window (opened as Select Package or, for a pinned repo, Change package),
          * the settings window, the package-source editor window (including its signed-package
          * options, its Git repository mode with tag pattern and tag preview, and "Forget saved
@@ -17,7 +20,8 @@ package AgentControl {
          * ConnectionTestResultKind, RepoCardStatus, CardColorPalette, ThirdPartyDependencies and
          * the shared AppStyles.axaml theme resources). The pure display helpers - the value
          * converters (FavoriteIconConverter, AgentToolKindDisplayNameConverter,
-         * ThemePreferenceDisplayNameConverter) and the PathEllipsisText control - are documented
+         * ThemePreferenceDisplayNameConverter) and the PathEllipsisText and ColorPalettePanel
+         * controls - are documented
          * as supporting types of this subsystem rather than as units of their own: each is a
          * presentational adapter with no behavior of its own beyond formatting or measuring for
          * the view, verified through the subsystem's requirements and its own test files
