@@ -67,8 +67,8 @@ holds:
 - the AgentControl **logo** (hover for its name; the name and a short description are in the **About** dialog),
 - the **filter box**, which stretches across the bar and narrows first when the window is made narrower (it is
   also the first stop when you press **Tab**), and
-- three icon buttons: **Add repository** (a folder with a plus), **Settings** (a gear) and **About** (an
-  information mark), each with a tooltip.
+- three icon buttons: **Add repository** (a folder with a plus; it adds one or more repositories, see *Adding a
+  Repository*), **Settings** (a gear) and **About** (an information mark), each with a tooltip.
 
 Below the app bar is the list of **repo cards**, described in the next section, in your own order within each
 section (see *Organizing Repos with Groups* and *Ordering Your Repos*). With no repos, or when the filter matches
@@ -82,8 +82,27 @@ themes; to always use one of them, choose a **Theme** in Settings (see *Settings
 # Adding a Repository
 
 Click the **Add repository** button (the folder-plus icon) in the main window's app bar. A folder-browse dialog
-opens; select the root folder of the git repository you want to manage. The repo is added to the
-repo list as a card, at the bottom of its section.
+opens; select the top folder of the Git repository you want to manage, or hold **Ctrl** or **Shift** while clicking
+to choose several folders at once. Each repo is added to the repo list as a card, at the bottom of its section.
+
+You can also drag one or more folders from File Explorer onto the repo list:
+
+- Dropped on a group's header, or on a card in a group's section, they join that group.
+- Dropped on **Favorites**, on **Ungrouped**, on the list while there are no groups, on empty space in the list or
+  on the message shown while the list is empty, they are added without a group (a drop on **Favorites** does not
+  make them favorites).
+- While you drag, the group's header is tinted, or the whole list area is outlined when the folders would be added
+  without a group. Dropped files are skipped.
+
+Only the top folder of a Git repository can be added: the folder that holds the repository's `.git` folder, or its
+`.git` file as in a Git worktree or submodule. A subfolder of a repository or a plain folder is refused, and a repo
+that is already in the list stays as it is.
+
+When you add one folder that cannot be added, a message says why, for example that it is not the top folder of a
+Git repository (it has no `.git` folder or file). When you add several folders, nothing is shown if all of them
+were added; otherwise one message says, for example, "Added 3 of 5 folders.", followed by a line for each reason
+(already in the list or moved into the group, not the top folder of a Git repository, not found, or not saved).
+Each line names at most five folders and then says how many more there are.
 
 Each repo card shows:
 
@@ -137,9 +156,10 @@ reasonable size; anything else is ignored and the colored tile stays. Pictures i
 
 ## Organizing Repos with Groups
 
-When you track many repos, put related ones into **groups** of your own. Groups (and the card colors below) are
-personal: they are stored only in your own AgentControl settings file and are never written to a repository or to its
-`.agentcontrol.json`, so they are not shared with anyone through git, and a repo is in at most one group.
+When you track many repos, put related ones into **groups** of your own. Groups (with their colors and order, and
+the card colors below) are personal: they are stored only in your own AgentControl settings file and are never
+written to a repository or to its `.agentcontrol.json`, so they are not shared with anyone through git, and a repo
+is in at most one group.
 
 1. Open the repo card's "..." menu and choose **Organize > Move to group**.
 2. Pick one of your existing groups (the repo's current group has a check mark), or choose **New group...**. The
@@ -154,17 +174,20 @@ name and how many repos it holds:
 - **Favorites** comes first and holds your starred repos. A favorite is listed **only** here, not again under its
   group, so every repo appears once; its card shows its group as a small chip, and it returns to its group when you
   remove the star.
-- Then come **your groups**, alphabetically (letter case ignored), and finally **Ungrouped**, the repos in no group.
-  A section with no repo has no header. Within a section the repos are in your own order, and a repo you add
-  goes to the bottom of its section (see *Ordering Your Repos*).
+- Then come **your groups**, in your own order (see *Ordering Your Repos*); a group you have not ordered yet, such as
+  a new one, follows the ordered ones, alphabetically (letter case ignored). Finally comes **Ungrouped**, the repos
+  in no group. A section with no repo has no header. Within a section the repos are in your own order, and a repo
+  you add goes to the bottom of its section (see *Ordering Your Repos*).
 
 Click a header (its chevron, name or count) to **collapse** or **expand** the section; AgentControl remembers which
 sections you collapsed. A group's header also has a "..." menu. Its first item, **Add repository...**, opens the same
-folder picker as the **Add repo** button in the app bar and puts the folder you choose straight into that group (if
-the repo is already in the list, it is moved into the group and a message tells you so; if you cancel the picker,
-nothing changes). After a separator come **Rename group...** (the same prompt; another
-group's name is refused) and **Remove group**, which asks for confirmation and leaves the group's repos in the
-list, ungrouped. Nothing on disk changes. The built-in **Favorites** and **Ungrouped** headers have no menu.
+folder picker as the **Add repository** button in the app bar, where you can choose one or more folders, and puts
+the repos you choose straight into that group (a repo that is already in the list is moved into the group and a
+message tells you so; if you cancel the picker, nothing changes). After a separator come **Move up** and
+**Move down** (see *Ordering Your Repos*) and **Group color...** (see *Choosing a Group Color*), and after another
+separator **Rename group...** (the same prompt; another group's name is refused) and **Remove group**, which asks for
+confirmation and leaves the group's repos in the list, ungrouped. Nothing on disk changes. The built-in **Favorites**
+and **Ungrouped** headers have no menu.
 
 ![The open "..." menu of the Client Work group header: Add repository..., then Rename group... and Remove
 group](images/group-menu.png)
@@ -209,16 +232,28 @@ leave the cards where they are, so a repo is always where you last put it.
   while the filter has text only some repos are shown, so their positions cannot be changed." Filtering itself
   never changes the order.
 
-Like groups and card colors, the order is stored only in your own AgentControl settings file
-(`%APPDATA%\AgentControl\settings.json`), never in the repository or its `.agentcontrol.json`. Removing a repo
-from the list also removes it from the order.
+**Ordering groups.** Your groups are listed in your own order too: **Favorites** first, then your groups, then
+**Ungrouped** last. A group you have not ordered yet, such as a new one, follows the ordered groups, alphabetically.
+
+- **Move up and Move down.** In a group header's "..." menu, **Move up** and **Move down** move the group one place.
+  They are disabled for the first and the last group, and the tooltip says why.
+- **Drag a header.** Press anywhere on a group's header except its "..." button and drag it above or below another
+  group's header; a line shows where it will land. **Favorites** and **Ungrouped** cannot be moved, and a group
+  cannot be dropped on them. A collapsed group stays collapsed.
+- **While the filter has text**, groups cannot be reordered either: clear the filter first.
+
+Like groups and card colors, the order of your repos and of your groups is stored only in your own AgentControl
+settings file (`%APPDATA%\AgentControl\settings.json`), never in the repository or its `.agentcontrol.json`, and it
+is kept when you restart AgentControl. Removing a repo from the list also removes it from the order.
 
 ## Choosing a Card Color
 
 Choose **Organize > Card color...** in a card's "..." menu to color that repo's tile. A small palette opens under
 the "..." button with ten colors (blue, violet, magenta, green, amber, teal, orange, indigo, red and lime) that look
-right in both the light and the dark theme; the chosen one shows a check mark. **Automatic** goes back to the color
-AgentControl derives from the repo's path. The letters on the tile are white or near-black, whichever is easier to
+right in both the light and the dark theme; the chosen one shows a check mark. **Automatic** goes back to the
+automatic color: the group's color when the repo is in a colored group (see *Choosing a Group Color*), otherwise the
+color AgentControl derives from the repo's path. The palette's heading says which one applies, for example "Card
+color: Automatic (group color Teal)". The letters on the tile are white or near-black, whichever is easier to
 read on that color (at least 4.5:1 contrast in both themes). A repo that shows its own picture (see *Giving a Repo a
 Card Icon*) keeps the picture's light backing so the picture stays legible, and the color appears as a ring around
 it. The **status bar** on the card's left edge never changes with the color: green, amber, red and grey keep their
@@ -226,6 +261,20 @@ meaning.
 
 ![The card color palette: ten colors with a check mark on the chosen one (Teal) and an Automatic
 button](images/card-color-palette.png)
+
+## Choosing a Group Color
+
+A group can have a color too. Choose **Group color...** in the "..." menu of one of your own group headers: the same
+palette as for a card opens under the "..." button, with the same ten colors and **None**, which removes the group's
+color. The chosen color shows as a short colored bar at the start of the group's header; hover over it to see its
+name, for example "Group color: Teal" (screen readers announce the same).
+
+The tiles of the group's repos that have no card color of their own use the group's color. A repo's own card color
+always wins (see *Choosing a Card Color*), and a favorite in a colored group keeps its group's color while it is
+listed under **Favorites**. The built-in **Favorites** and **Ungrouped** sections cannot be colored.
+
+Like the group itself, its color is stored only in your own AgentControl settings file. It follows the group when you
+rename it, and it is forgotten when the group is removed or its last repo leaves it.
 
 ## Reading the Chips
 
@@ -1228,11 +1277,14 @@ Tools section](images/settings-dark.png)
 # About
 
 The About dialog, reachable from the **About** (information) button in the main window's app bar, is a simple
-dialog (the main window waits until you close it) showing the application logo, a short mission tagline and the
-running build's application version
-(a labeled **Version** row; hover over it for the full build version, including the build identifier after
-a `+`), copyright, and license text, so you can identify the running build without inspecting file
-properties, along with a scrollable list of this application's direct third-party dependencies and their licenses.
+dialog (the main window waits until you close it). A banner across its top shows the application logo, the name
+AgentControl and its tagline, "A Desktop Launcher for Distributing Proprietary Agent Packages", in both the light and
+the dark theme. Everything below the banner scrolls together in one region: a short description of what AgentControl
+is for, the running build's application version (a labeled **Version** row; hover over it for the full build
+version, including the build identifier after a `+`), copyright, and license text, so you can identify the running
+build without inspecting file properties, and the list of this application's direct third-party dependencies and
+their licenses. The window is wide enough for the banner, and the **Close** button stays visible at the bottom
+however far you scroll.
 
 # Using the Keyboard in Dialogs
 

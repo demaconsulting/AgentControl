@@ -151,11 +151,18 @@ without it.
 ### AutomationIds
 
 - **Main** (`Agent Control`): `AppLogo` (the logo in the app bar; its name is `AgentControl`), `FilterTextBox`,
-  `AddRepoButton`, `OpenSettingsButton`, `OpenAboutButton`, `EmptyStatePanel`, `EmptyStateText`, `RepoListBox`.
+  `AddRepoButton`, `OpenSettingsButton`, `OpenAboutButton`, `EmptyStatePanel`, `EmptyStateText`, `RepoListBox`,
+  `ExternalDropOverlay` (the outline around the list area, shown only while folders dragged from File Explorer would
+  be added without a group).
 - **Group header** (repeated, one per section, in `RepoListBox`; only present once a repo is in a group):
   `GroupHeaderToggleButton` (collapses or expands; its name says the section, count and state, for example
   `Work, 2 repos, collapsed`, and so does its list item), `GroupHeaderNameText`, `GroupHeaderCountText`, and, for
-  the user's own groups, `GroupHeaderMenuButton` with the menu items `RenameGroupMenuItem` and `RemoveGroupMenuItem`.
+  the user's own groups, `GroupColorAccent` (the colored bar at the start of the header, only for a colored group;
+  its name is the color, for example `Group color: Teal`) and `GroupHeaderMenuButton` with the menu items
+  `GroupAddRepoMenuItem`, `MoveGroupUpMenuItem`, `MoveGroupDownMenuItem` (disabled for the first and last group and
+  while the filter has text), `GroupColorMenuItem`, `RenameGroupMenuItem` and `RemoveGroupMenuItem`. A user group's
+  header can also be dragged (press anywhere on it except `GroupHeaderMenuButton`) above or below another group's
+  header to reorder the groups.
   `--item` matches repo cards only, so a header command acts on the first header (the one at the top of the list);
   to start with a particular group collapsed, list it in `CollapsedGroups` in the settings file before `launch`.
 - **Repo card** (repeated, one per list item): `RepoNameText`, `RepoStatusAccent` (the status bar; its name is the
@@ -185,6 +192,9 @@ without it.
 - **Card color palette** (pop-up under `MoreActionsButton`, opened by `CardColorMenuItem`): `CardColorPalette`,
   one `CardColorSwatch_<Name>` per color (`CardColorSwatch_Teal`, ...; the name is also the accessible name) and
   `CardColorAutomaticButton`.
+- **Group color palette** (pop-up under `GroupHeaderMenuButton`, opened by `GroupColorMenuItem`): `GroupColorPalette`,
+  `GroupColorHeadingText`, one `GroupColorSwatch_<Name>` per color (`GroupColorSwatch_Teal`, ...) and
+  `GroupColorNoneButton`.
 - **New group / Rename group** (`New group`, `Rename group`): `GroupNamePromptText`, `GroupNameTextBox`,
   `GroupNameErrorText`, `GroupNameHintText`, `GroupNameCancelButton`, `GroupNameAcceptButton`.
 - **Settings** (`Agent Control Settings`): the package sources `SourcesList` (rows with `SourceAliasText`,
@@ -203,8 +213,9 @@ without it.
 - **Select Package** (`Select Package`): `SelectPackageSourceList`, `SelectPackageNameList`,
   `SelectPackageVersionList`, `SelectPackageCancelButton`, `SelectPackageConfirmButton` (and the inline error and retry
   controls).
-- **About** (`About Agent Control`): `AboutTaglineText`, `AboutVersionText`, `AboutCopyrightText`, `AboutLicenseText`,
-  `AboutDependenciesList`, `AboutCloseButton`.
+- **About** (`About Agent Control`): `AboutBanner` (with `AboutBannerTitleText` and `AboutBannerTaglineText`),
+  `AboutContentScroller` (the scrolling region below the banner, holding `AboutTaglineText`, `AboutVersionText`,
+  `AboutCopyrightText`, `AboutLicenseText` and `AboutDependenciesList`), `AboutCloseButton`.
 - **Confirmation** (`Agent Control`): `ConfirmationMessageText`, `ConfirmationNoButton`, `ConfirmationYesButton`.
 - **Message box**: `MessageText`, `MessageBoxOkButton`.
 - **Release notes**: `ReleaseNotesPanel`, `ReleaseNotesHeading`.
