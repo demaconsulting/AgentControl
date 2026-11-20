@@ -804,6 +804,44 @@ public sealed class PackageVersionCacheTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a read in flight when the failure memo is cleared does not record its failure when it
+    ///     finishes afterwards: the read used the state from before the clear (before a sign-in), so the
+    ///     next read of the round reaches the source instead of being given that failure.
+    /// </summary>
+    [Fact]
+    public async Task PackageVersionCache_FailureMemo_ClearedWhileReadInFlight_DoesNotRecordTheReadsFailure()
+    {
+        // Arrange: a round's read of a source that needs a sign-in, held open at the source
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new PackageSourceAccessException(
+                PackageSourceFailureKind.AuthenticationFailed, "Source 'Feed' needs a sign-in.")
+        };
+        var gate = new TaskCompletionSource();
+        feed.ListVersionsGate = gate.Task;
+        var registry = CreateRegistry(feed);
+        var cache = new PackageVersionCache();
+        var memo = new SourceFailureMemo();
+        var inFlight = cache.GetVersionsDescendingAsync(
+            registry, "Feed", "contoso-agents", CancellationToken.None, memo);
+        Assert.False(inFlight.IsCompleted);
+
+        // Act: the memo is cleared (the user signed in) and only then does the old read fail
+        memo.Clear();
+        gate.SetResult();
+        await Assert.ThrowsAsync<PackageSourceAccessException>(() => inFlight);
+
+        // Assert: the old failure was not recorded, so the round's next read reaches the source, which
+        // now answers
+        Assert.False(memo.TryGetFailure("Feed", "contoso-agents", out _));
+        feed.ListVersionsException = null;
+        var versions = await cache.GetVersionsDescendingAsync(
+            registry, "Feed", "contoso-agents", CancellationToken.None, memo);
+        Assert.Single(versions);
+        Assert.Equal(2, feed.ListVersionsCalls);
+    }
+
+    /// <summary>
     ///     Test that the cross-source upgrade check reports the newest version across the sources, that a
     ///     version offered by several sources is attributed to the first of them in configuration order.
     /// </summary>

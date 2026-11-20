@@ -265,8 +265,11 @@ failed upgrade check, once the Settings window has closed
   failed check until the next periodic round. A disposed view model starts nothing. After a save nothing is started,
   because `ApplySettings` always ends with `BeginUpgradeRefresh`, which checks every card: checking again would read
   every source twice. Otherwise it takes the cards that `CanRecheckUpgrade` accepts (pinned, not busy, folder present)
-  and that have `HasSourceProblem` or `IsUpgradeStatusUnknown`, and checks them with `CheckUpgradesAsync` - the
-  launch-style check: `allowPrompt` false (no sign-in dialog), `relistSources` false (the cache is not cleared: a
+  and that have `HasSourceProblem` or `IsUpgradeStatusUnknown`, or `IsCheckingUpgrade` (a background check is reading
+  a source for the card at this moment: that read began before the sign-in, and if it fails it would put "Sign-in
+  needed" on the card when it finishes, so a newer check is started and the card's generation counter ignores the
+  older one's result), and checks them with `CheckUpgradesAsync` - the launch-style check: `allowPrompt` false (no
+  sign-in dialog), `relistSources` false (the cache is not cleared: a
   failure is never cached, so these cards read their sources again, while a listing cached for another card still
   serves), a shared `SourceFailureMemo`, a few at a time, counted in `_launchChecksInFlight` so no periodic round starts
   over it. Like the check of an added repo (`BeginSingleCardUpgradeRefresh`) it runs with the token of
@@ -279,7 +282,9 @@ failed upgrade check, once the Settings window has closed
   "unreachable" for a source before the user signed in or the connection came back; without this, a card that check
   reaches afterwards would be given the old failure without the source being read, and because that check of the card
   started after this re-check's, the card would show the old failure in place of the re-check's result. After the
-  clear, those cards read the source again (with the session's sign-in). The memos are cleared whole rather than per
+  clear, those cards read the source again (with the session's sign-in). A read that is still in flight cannot record
+  its failure after the clear either: the memo moves to a new generation and drops a failure read in an earlier one
+  (see `SourceFailureMemo` in the package-version cache's design). The memos are cleared whole rather than per
   source: every card reads the same configured sources, and a forgotten failure costs one more read. After a save
   nothing is cleared: `StartUpgradeRefresh` cancels the running checks and starts one with a new memo. The
   package-version cache needs no clearing on this path: it never holds a failure, so the source behind a problem has

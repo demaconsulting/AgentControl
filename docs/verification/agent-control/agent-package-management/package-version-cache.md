@@ -112,11 +112,14 @@ whose read failed is read once however often it is asked (the later askers get t
 is read normally); the memo is keyed by source alias (case-insensitively) and package, so a failure for one package
 does not stop another package from being read at that source; and nothing outlives the memo - a read with the next
 round's memo, or with no memo, reaches the source again, and once the source recovers the cache serves its listing;
-after a memo that recorded a failure is cleared, the next read with it reaches the source again and returns its listing.
+after a memo that recorded a failure is cleared, the next read with it reaches the source again and returns its listing;
+and a read that is in flight when the memo is cleared and fails afterwards does not record its failure, so the round's
+next read reaches the source (which now answers) instead of being given the old failure.
 This scenario is tested by `PackageVersionCache_FailureMemo_SourceFailed_IsNotReadAgainAndRethrowsTheSameFailure`,
 `PackageVersionCache_FailureMemo_FailureIsNotPersistedBeyondTheMemo`,
-`PackageVersionCache_FailureMemo_FailureOfOnePackage_DoesNotAffectAnotherPackage` and
-`PackageVersionCache_FailureMemo_Cleared_ReadsTheSourceAgain`, covering
+`PackageVersionCache_FailureMemo_FailureOfOnePackage_DoesNotAffectAnotherPackage`,
+`PackageVersionCache_FailureMemo_Cleared_ReadsTheSourceAgain` and
+`PackageVersionCache_FailureMemo_ClearedWhileReadInFlight_DoesNotRecordTheReadsFailure`, covering
 `AgentControl-PackageVersionCache-RoundFailureMemo`.
 
 **PackageVersionCache_NewestAcrossSources_NewestWinsAndTieKeepsConfigurationOrder**: The upgrade check across sources

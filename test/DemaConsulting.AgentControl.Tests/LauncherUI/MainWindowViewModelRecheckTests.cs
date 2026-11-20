@@ -889,6 +889,47 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that closing Settings without saving checks again a card whose background check is reading
+    ///     the source at that moment: the read began before the sign-in, so when it then fails the card does
+    ///     not show "Sign-in needed" but the result of the newer check.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_RecheckAfterSettingsClosed_CardCheckInFlight_OldFailureIsNotShown()
+    {
+        // Arrange: a card that is up to date, and a periodic round whose read of the source (still with
+        // the state from before the sign-in) is held open
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"));
+        var viewModel = CreateViewModel(clock, feed, out var card);
+        await viewModel.BeginUpgradeRefresh();
+        Assert.False(card.HasSourceProblem);
+        var gate = new TaskCompletionSource();
+        feed.ListVersionsGate = gate.Task;
+        viewModel.StartPeriodicUpgradeRecheck();
+        clock.Advance(MainWindowViewModel.DefaultUpgradeRecheckInterval);
+        var round = viewModel.PendingPeriodicRecheck;
+        Assert.True(card.IsCheckingUpgrade);
+
+        // Act: the user signs in and closes Settings without saving (the source now answers); then the
+        // round's old read fails as needing a sign-in
+        feed.ListVersionsGate = null;
+        feed.Publish("contoso-agents", "1.1.0");
+        var recheck = viewModel.RecheckAfterSettingsClosed(settingsSaved: false);
+        await recheck;
+        feed.ListVersionsException = new PackageSourceAccessException(
+            PackageSourceFailureKind.AuthenticationFailed, "Source 'Feed' needs a sign-in.");
+        gate.SetResult();
+        await round;
+
+        // Assert: the card shows the newer check's result, not the old failure
+        Assert.False(card.SourceNeedsSignIn);
+        Assert.False(card.HasSourceProblem);
+        Assert.False(card.IsUpgradeStatusUnknown);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("1.1.0", card.LatestAvailableVersion);
+    }
+
+    /// <summary>
     ///     Test the user's scenario end to end against a NuGet server that needs a sign-in: the background
     ///     check says "Sign-in needed" without asking, the user signs in through Settings' Test connection,
     ///     and closing Settings without saving clears the chip using that sign-in, without asking again.

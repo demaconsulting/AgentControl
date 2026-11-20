@@ -462,8 +462,10 @@ itself is not checked while the other is (exactly one read); and after the view 
 started. With a periodic round that recorded a server's sign-in failure for the first of two cards and is held at a
 second source, being told that Settings closed without saving (after the server started answering) makes the round
 read the server again for the second card rather than replay the recorded failure, so neither card is left showing
-"Sign-in needed" and both offer the upgrade. End to end against an in-process mock NuGet server that requires a
-sign-in (with a real `MainWindowViewModel`,
+"Sign-in needed" and both offer the upgrade. With a card that is up to date and a periodic round held while reading
+the source for it, being told that Settings closed without saving checks that card again, and when the round's old read
+then fails as needing a sign-in the card still shows the newer check's result (the upgrade) rather than "Sign-in
+needed". End to end against an in-process mock NuGet server that requires a sign-in (with a real `MainWindowViewModel`,
 its real providers and a `PackageCredentialContext` over a `SessionCredentialStore` and a scripted prompt): the launch
 check reports "Sign-in needed" without asking, a listing through `CreateConnectionTestProvider` - the Settings
 window's Test connection - asks once and signs in, and the re-check after Settings closed without saving then clears
@@ -474,6 +476,7 @@ the problem and offers the upgrade without asking again. This scenario is tested
 `MainWindowViewModel_RecheckAfterSettingsClosed_SettingsSaved_StartsNoSecondCheck`,
 `MainWindowViewModel_RecheckAfterSettingsClosed_CardIsBusy_IsSkipped`,
 `MainWindowViewModel_RecheckAfterSettingsClosed_Disposed_ChecksNothing`,
-`MainWindowViewModel_RecheckAfterSettingsClosed_RoundRecordedFailureBeforeSignIn_RoundReadsTheSourceAgain` and
+`MainWindowViewModel_RecheckAfterSettingsClosed_RoundRecordedFailureBeforeSignIn_RoundReadsTheSourceAgain`,
+`MainWindowViewModel_RecheckAfterSettingsClosed_CardCheckInFlight_OldFailureIsNotShown` and
 `MainWindowViewModel_RecheckAfterSettingsClosed_SignedInDuringConnectionTest_UsesTheSignInWithoutAsking`, covering
 `AgentControl-MainWindowViewModel-RecheckAfterSettingsClosed`.

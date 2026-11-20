@@ -40,7 +40,14 @@ is read, and the user asked, at most once. Only reads outside any such check (Up
 pinned files at launch) pass none, and every cache miss of theirs reads the source. `Clear()` forgets every recorded
 failure (under the same lock), so the round's next read of each source reaches it again; `MainWindowViewModel` calls it
 on the memos of the checks that are running when the Settings window closes without saving, because a sign-in made there
-(or a connection that came back) may have fixed the failures recorded before.
+(or a connection that came back) may have fixed the failures recorded before. Emptying the entries alone would leave a
+race: a read already in flight when the memo is cleared - one that used the state from before the sign-in - would record
+its failure when it finishes, and the cards that follow in the round would be given the old "Sign-in needed" again. So
+the memo also keeps a generation counter: `GetVersionsDescendingAsync` takes the memo's `Generation` when its read
+starts and passes it to `Record`, `Clear()` increments the generation, and `Record` keeps a failure only while the
+generation it was given is still the current one. The comparison and the increment are made under the memo's lock, so a
+read either finished before the clear (its failure is dropped by it) or started after it (its failure is recorded); a
+failure read with the state from before the clear never outlives it.
 
 **\_timeProvider**: `TimeProvider` — the clock that dates fetches and judges expiry; the system
 clock unless a test supplies another through the constructor, so tests move time without waiting.

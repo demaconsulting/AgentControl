@@ -708,17 +708,19 @@ sections:
           saving, check again in the background, without ever asking the user to sign in and using the
           credentials of the session, the upgrade availability of each card that has a pin, is not
           busy, whose folder is not missing and that shows a package source problem or a failed
-          upgrade check, without reading a source for any other card or canceling a check that is
-          running, shall make a check that is running read again a source whose failure it recorded
-          before being told, and shall start no further check when told that the settings were saved
-          or after it was disposed.
+          upgrade check or is being checked by a background check at that moment, without reading a
+          source for any other card or canceling a check that is running, shall make a check that is
+          running read again a source whose failure it recorded before being told, and shall start
+          no further check when told that the settings were saved or after it was disposed.
         justification: |
           A sign-in made with Test connection, or a connection that came back, while Settings was open
           must show on the cards when Settings closes, not only at the next periodic round; checking
           only the cards with a problem keeps the extra reads small, and a save already checks every
           card, so checking again would read every source twice. A periodic round still running
           when Settings closes would otherwise give the cards it reaches afterwards the failure it
-          recorded before the sign-in, putting "Sign-in needed" back on a card the re-check cleared.
+          recorded before the sign-in, putting "Sign-in needed" back on a card the re-check cleared;
+          and a card whose source read was in flight would show that read's failure, made with the
+          state from before the sign-in, unless a newer check of the card replaces it.
         tests:
           - MainWindowViewModel_RecheckAfterSettingsClosed_SourceNoLongerNeedsSignIn_ClearsTheProblem
           - MainWindowViewModel_RecheckAfterSettingsClosed_SourceUnreachableBefore_ChecksAgain
@@ -727,4 +729,5 @@ sections:
           - MainWindowViewModel_RecheckAfterSettingsClosed_CardIsBusy_IsSkipped
           - MainWindowViewModel_RecheckAfterSettingsClosed_Disposed_ChecksNothing
           - MainWindowViewModel_RecheckAfterSettingsClosed_RoundRecordedFailureBeforeSignIn_RoundReadsTheSourceAgain
+          - MainWindowViewModel_RecheckAfterSettingsClosed_CardCheckInFlight_OldFailureIsNotShown
           - MainWindowViewModel_RecheckAfterSettingsClosed_SignedInDuringConnectionTest_UsesTheSignInWithoutAsking

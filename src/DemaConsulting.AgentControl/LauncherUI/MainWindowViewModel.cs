@@ -795,14 +795,19 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     </para>
     ///     <para>
     ///     Otherwise only the cards that a periodic round would check (not busy, folder present, a
-    ///     pin) and that show a source problem or a failed check are checked; a card whose state is
-    ///     already known reads no source. The check is the background one: it never asks the user to
-    ///     sign in, and it uses the credentials of this session's
-    ///     <see cref="PackageCredentialContext"/> - the same store the connection test signs in to -
-    ///     so a sign-in typed during the test is used. Failures are never cached, so each of these
-    ///     cards reads its source again. Like the check of an added repo it does not cancel a check
-    ///     that is running, it is canceled by a later full check or by <see cref="Dispose"/>, and it
-    ///     holds off the periodic round while it runs. Must be called on the UI thread.
+    ///     pin) and that show a source problem or a failed check, or whose background check is
+    ///     reading a source at this moment, are checked; a card whose state is already known reads
+    ///     no source. A card in the middle of a background check is included because its read began
+    ///     before the sign-in: if that read fails it would put "Sign-in needed" on the card when it
+    ///     finishes, so a newer check of the card is started and, the newest check of a card being
+    ///     the one whose result is shown, the older one's result is ignored. The check is the
+    ///     background one: it never asks the user to sign in, and it uses the credentials of this
+    ///     session's <see cref="PackageCredentialContext"/> - the same store the connection test
+    ///     signs in to - so a sign-in typed during the test is used. Failures are never cached, so
+    ///     each of these cards reads its source again. Like the check of an added repo it does not
+    ///     cancel a check that is running, it is canceled by a later full check or by
+    ///     <see cref="Dispose"/>, and it holds off the periodic round while it runs. Must be called
+    ///     on the UI thread.
     ///     </para>
     ///     <para>
     ///     A check that is running (a periodic round, or a launch-style check) may have recorded a
@@ -810,9 +815,11 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     forget it (see <see cref="ForgetRecordedSourceFailures"/>), even when no card needs this
     ///     re-check, so the cards it checks from now on read the source again instead of being given
     ///     the old failure - which, as the newer check of the card, would replace what this re-check
-    ///     shows. The package-version cache is not cleared: it never holds a failure, so the source
-    ///     behind a problem has no listing to serve, and the listings it holds for sources that
-    ///     answered are within their five minutes, as for any background check.
+    ///     shows. A read that is still in flight cannot record its failure afterwards either (the
+    ///     memo moves to a new generation when it is cleared). The package-version cache is not
+    ///     cleared: it never holds a failure, so the source behind a problem has no listing to
+    ///     serve, and the listings it holds for sources that answered are within their five
+    ///     minutes, as for any background check.
     ///     </para>
     /// </remarks>
     /// <param name="settingsSaved"><see langword="true"/> when the Settings window saved the
@@ -841,9 +848,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // back on a card this re-check clears
         ForgetRecordedSourceFailures();
 
-        // Only the cards whose shown state a sign-in or a returned connection could change
+        // Only the cards whose shown state a sign-in or a returned connection could change: those
+        // showing a problem or a failed check, and those a running background check is reading
+        // for - such a read began before the sign-in and its failure must not land on the card, so
+        // a newer check of the card is started and the older one's result is ignored
         var cards = RepoCards
-            .Where(card => CanRecheckUpgrade(card) && (card.HasSourceProblem || card.IsUpgradeStatusUnknown))
+            .Where(card => CanRecheckUpgrade(card)
+                && (card.HasSourceProblem || card.IsUpgradeStatusUnknown || card.IsCheckingUpgrade))
             .ToList();
         if (cards.Count == 0)
         {

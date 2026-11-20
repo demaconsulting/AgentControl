@@ -123,19 +123,22 @@ sections:
           check round, read a source that failed for a package at most once in that round and give
           every later read of it the same failure, key the memo by source alias and package, and
           keep no failure beyond the memo, so that a read without a memo, with a later round's
-          memo, or after the memo was cleared reads the source again.
+          memo, or after the memo was cleared reads the source again, and a read that was in
+          flight when the memo was cleared does not record its failure.
         justification: |
           A failed read is deliberately never cached, so a background round over many cards that
           pin the same package would otherwise retry an unreachable (or sign-in-requiring) source
           once per card; remembering the failure for the round alone stops that without hiding a
           source that has recovered from the next round or from a user action. Clearing lets a
           round that is still running stop replaying a failure that a sign-in, or a connection that
-          came back, has just fixed.
+          came back, has just fixed; a read that started before the clear used the state from
+          before it, so its failure must not be replayed to the cards that follow either.
         tests:
           - PackageVersionCache_FailureMemo_SourceFailed_IsNotReadAgainAndRethrowsTheSameFailure
           - PackageVersionCache_FailureMemo_FailureIsNotPersistedBeyondTheMemo
           - PackageVersionCache_FailureMemo_FailureOfOnePackage_DoesNotAffectAnotherPackage
           - PackageVersionCache_FailureMemo_Cleared_ReadsTheSourceAgain
+          - PackageVersionCache_FailureMemo_ClearedWhileReadInFlight_DoesNotRecordTheReadsFailure
 
       - id: AgentControl-PackageVersionCache-NewestAcrossSources
         title: >-
