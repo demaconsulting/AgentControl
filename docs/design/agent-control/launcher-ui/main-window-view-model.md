@@ -200,6 +200,19 @@ with many tracked repos.
   same way, and `ApplySettings` starts a new round against the new sources
   (`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`); closing the Settings window without saving re-checks
   only the cards that show a problem (`RecheckAfterSettingsClosed`, below).
+- *Busy cards*: `CheckUpgradesAsync` (the check behind `BeginUpgradeRefresh`, `ApplySettings`, an added repo and
+  `RecheckAfterSettingsClosed`) skips a card that `IsBusy` with an action of its own (Refresh, Upgrade, Select Package,
+  Launch, Pull) when its turn comes, as a periodic round does: a check beside the action would break the card's
+  one-action-at-a-time rule and, being the card's newest check, could replace the action's result with its own. The
+  card is not checked when it is queued but once it holds one of the few slots, immediately before its
+  `RefreshUpgradeStatusAsync` starts, so an action the user started while the card waited for a slot is seen. The test
+  of `IsBusy` and the synchronous start of `RefreshUpgradeStatusAsync` (which claims the card's newest check generation
+  and sets `IsCheckingUpgrade`) run with no `await` between them, and the continuation after the slot wait resumes on
+  the UI thread (the check is started there and its `await`s capture the UI synchronization context), the thread where
+  the card's commands set `IsBusy`; so no action can start between the test and the start of the check. A card whose
+  background check is running is not busy and is checked: the newer check's result replaces the older one's, which
+  `RecheckAfterSettingsClosed` relies on. A skipped card keeps its state until the action checks it (Refresh, Upgrade,
+  Select Package and Pull do) or until the next periodic round.
 
 **StartPeriodicUpgradeRecheck**: Starts a timer that checks every card's upgrade availability again every
 `_upgradeRecheckInterval` (five minutes) until the view model is disposed
@@ -268,7 +281,8 @@ failed upgrade check, once the Settings window has closed
   and that have `HasSourceProblem` or `IsUpgradeStatusUnknown`, or `IsCheckingUpgrade` (a background check is reading
   a source for the card at this moment: that read began before the sign-in, and if it fails it would put "Sign-in
   needed" on the card when it finishes, so a newer check is started and the card's generation counter ignores the
-  older one's result), and checks them with `CheckUpgradesAsync` - the launch-style check: `allowPrompt` false (no
+  older one's result), and checks them with `CheckUpgradesAsync` - the launch-style check (which, when a card's turn
+  comes, skips it if the user has meanwhile started an action on it; see *Busy cards* above): `allowPrompt` false (no
   sign-in dialog), `relistSources` false (the cache is not cleared: a
   failure is never cached, so these cards read their sources again, while a listing cached for another card still
   serves), a shared `SourceFailureMemo`, a few at a time, counted in `_launchChecksInFlight` so no periodic round starts

@@ -800,6 +800,74 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a card waiting for its turn in the re-check after Settings closed (more cards than are
+    ///     checked at once) and that the user then starts refreshing is not checked by the re-check when its
+    ///     turn comes, so the re-check's result never replaces the result of the user's refresh.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_RecheckAfterSettingsClosed_WaitingCardBecomesBusy_IsNotChecked()
+    {
+        // Arrange: five cards whose launch check failed (more than are checked at once)
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"))
+        {
+            ListVersionsException = new IOException("Feed is unreachable.")
+        };
+        var viewModel = CreateViewModel(clock, feed, repoCount: 5);
+        await viewModel.BeginUpgradeRefresh();
+        Assert.All(viewModel.RepoCards, card => Assert.True(card.IsUpgradeStatusUnknown));
+        feed.ListVersionsException = null;
+
+        // Act: Settings closes; the re-check's first cards are held at their reads while the last waits its
+        // turn and the user starts refreshing it; the re-check's reads then fail and it finishes, and only
+        // after that does the user's refresh read the source
+        var (check, waiting, refresh, refreshGate) = StartCheckAndRefreshTheWaitingCard(
+            viewModel, feed, () => viewModel.RecheckAfterSettingsClosed(settingsSaved: false));
+        await check;
+        var busyWhenCheckEnded = waiting.IsBusy;
+        feed.ListVersionsException = null;
+        refreshGate.SetResult();
+        await refresh;
+
+        // Assert: the re-check did not check the busy card, which shows what the user's refresh read
+        Assert.True(busyWhenCheckEnded);
+        Assert.False(waiting.IsUpgradeStatusUnknown);
+        Assert.True(waiting.IsUpgradeAvailable);
+        Assert.Equal("1.1.0", waiting.LatestAvailableVersion);
+    }
+
+    /// <summary>
+    ///     Test that a card waiting for its turn in the launch-time check (more cards than are checked at
+    ///     once) and that the user then starts refreshing is not checked by the launch-time check when its
+    ///     turn comes, so that check's result never replaces the result of the user's refresh.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_LaunchCheck_WaitingCardBecomesBusy_IsNotChecked()
+    {
+        // Arrange: five cards (more than are checked at once)
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"));
+        var viewModel = CreateViewModel(clock, feed, repoCount: 5);
+
+        // Act: the launch check starts; its first cards are held at their reads while the last waits its
+        // turn and the user starts refreshing it; the check's reads then fail and it finishes, and only
+        // after that does the user's refresh read the source
+        var (check, waiting, refresh, refreshGate) = StartCheckAndRefreshTheWaitingCard(
+            viewModel, feed, viewModel.BeginUpgradeRefresh);
+        await check;
+        var busyWhenCheckEnded = waiting.IsBusy;
+        feed.ListVersionsException = null;
+        refreshGate.SetResult();
+        await refresh;
+
+        // Assert: the launch check did not check the busy card, which shows what the user's refresh read
+        Assert.True(busyWhenCheckEnded);
+        Assert.False(waiting.IsUpgradeStatusUnknown);
+        Assert.True(waiting.IsUpgradeAvailable);
+        Assert.Equal("1.1.0", waiting.LatestAvailableVersion);
+    }
+
+    /// <summary>
     ///     Test that closing Settings after the main window's view model was disposed checks nothing.
     /// </summary>
     [Fact]
@@ -979,6 +1047,42 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
         Assert.True(card.IsUpgradeAvailable);
         Assert.Equal("1.1.0", card.LatestAvailableVersion);
         viewModel.Dispose();
+    }
+
+    /// <summary>
+    ///     Starts a background check of five cards with the source's reads held open, so four cards are
+    ///     reading and the fifth waits for its turn; starts the user's refresh of the waiting card, whose read
+    ///     is held open by a gate of its own; then makes every later read fail at once and lets the
+    ///     background check's held reads go on (they fail too).
+    /// </summary>
+    /// <remarks>
+    ///     A background check started on the busy card when its turn comes would read the source at once,
+    ///     fail, and - being the card's newest check - make the card show that failure in place of what the
+    ///     user's refresh reads afterwards.
+    /// </remarks>
+    /// <param name="viewModel">The view model, over five cards.</param>
+    /// <param name="feed">The cards' only source.</param>
+    /// <param name="startCheck">Starts the background check.</param>
+    /// <returns>The background check, the waiting card, the user's refresh of it and the gate that holds
+    ///     that refresh's read.</returns>
+    private static (Task Check, RepoCardViewModel Waiting, Task Refresh, TaskCompletionSource RefreshGate)
+        StartCheckAndRefreshTheWaitingCard(
+            MainWindowViewModel viewModel, FakePackageSourceProvider feed, Func<Task> startCheck)
+    {
+        var checkGate = new TaskCompletionSource();
+        feed.ListVersionsGate = checkGate.Task;
+        var check = startCheck();
+        var waiting = Assert.Single(viewModel.RepoCards, card => !card.IsCheckingUpgrade);
+
+        var refreshGate = new TaskCompletionSource();
+        feed.ListVersionsGate = refreshGate.Task;
+        var refresh = waiting.RefreshAsync(TestContext.Current.CancellationToken);
+        Assert.True(waiting.IsBusy);
+
+        feed.ListVersionsGate = null;
+        feed.ListVersionsException = new IOException("Feed is unreachable.");
+        checkGate.SetResult();
+        return (check, waiting, refresh, refreshGate);
     }
 
     /// <summary>

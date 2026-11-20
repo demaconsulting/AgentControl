@@ -756,7 +756,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     Called by the main window once it is shown, and after settings change. Each card reads
     ///     only the source its pin names; at most a few cards read sources at the same time so a
     ///     long recent-repos list cannot flood a slow source. A failing source only affects the
-    ///     cards pinned to it.
+    ///     cards pinned to it. A card busy with an action of its own when its turn comes is skipped
+    ///     (see <see cref="CheckUpgradesAsync"/>).
     /// </remarks>
     /// <returns>A task that completes when every card's check has finished (also available as
     ///     <see cref="PendingRefresh"/>).</returns>
@@ -800,7 +801,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     no source. A card in the middle of a background check is included because its read began
     ///     before the sign-in: if that read fails it would put "Sign-in needed" on the card when it
     ///     finishes, so a newer check of the card is started and, the newest check of a card being
-    ///     the one whose result is shown, the older one's result is ignored. The check is the
+    ///     the one whose result is shown, the older one's result is ignored. A card that becomes busy
+    ///     with an action of its own while it waits for its turn is skipped when the turn comes (see
+    ///     <see cref="CheckUpgradesAsync"/>). The check is the
     ///     background one: it never asks the user to sign in, and it uses the credentials of this
     ///     session's <see cref="PackageCredentialContext"/> - the same store the connection test
     ///     signs in to - so a sign-in typed during the test is used. Failures are never cached, so
@@ -1107,10 +1110,23 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <returns>A task that completes when every check has finished or been cancelled; a
     ///     cancelled check is not an error.</returns>
     /// <remarks>
+    ///     <para>
+    ///     A card that is busy with an action of its own (<see cref="RepoCardViewModel.IsBusy"/>)
+    ///     when its turn comes is skipped, as a periodic round skips it: a background check beside
+    ///     the action would break the card's one-action-at-a-time rule and could replace the
+    ///     action's result with its own (the newest check of a card is the one shown). Refresh,
+    ///     Upgrade, Select Package and Pull check the card themselves; any card is checked again by
+    ///     the next periodic round. Whether the card is busy is read once the card holds its slot,
+    ///     right before its check starts, so an action started while it waited for a slot is seen.
+    ///     A card whose own background check is running is not busy and is checked: the newer
+    ///     check's result replaces the older one's.
+    ///     </para>
+    ///     <para>
     ///     Counted in <see cref="_launchChecksInFlight"/> from the call until it has unwound, so a
     ///     check that was superseded (and canceled) but is still inside a provider call that ignores
     ///     cancellation keeps holding off the periodic round, even though
     ///     <see cref="PendingRefresh"/> no longer refers to it.
+    ///     </para>
     /// </remarks>
     private async Task CheckUpgradesAsync(
         IReadOnlyList<RepoCardViewModel> cards, CancellationToken cancellationToken)
@@ -1131,7 +1147,16 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 await throttle.WaitAsync(cancellationToken);
                 try
                 {
-                    await card.RefreshUpgradeStatusAsync(cancellationToken, failureMemo: failures);
+                    // Decided when the card's turn comes, not when it was queued: the user may have
+                    // started an action on it (Refresh, Upgrade, Select Package, Launch, Pull) while it
+                    // waited, and a check started now would run beside that action and could replace
+                    // its result. The check and the start of the card's check run in one go, with no
+                    // await between them, on the thread the action's busy flag is set on (the UI
+                    // thread), so no action can start in between.
+                    if (!card.IsBusy)
+                    {
+                        await card.RefreshUpgradeStatusAsync(cancellationToken, failureMemo: failures);
+                    }
                 }
                 finally
                 {

@@ -237,10 +237,16 @@ covering `AgentControl-MainWindowViewModel-ApplySettings`.
 Constructing the view model with a pinned repo reads no package source until the upgrade refresh
 begins; when the refresh runs with one source unreachable, the other (readable) source still offers its upgrade
 to the pinned cards; and adding a pinned repo checks its upgrade status in
-the background. This scenario is tested by
+the background. In `MainWindowViewModelRecheckTests.cs`, with five cards (more than are checked at once) and the
+source's reads held open, the launch-time check starts four cards and the fifth waits for its turn; the user then
+starts refreshing that card (its read held by a gate of its own), every later read is made to fail at once and the
+four held reads are let go: the launch check finishes without checking the busy card, whose refresh then shows what it
+read (the upgrade) rather than the failure a background check started beside it would have put on the card as its
+newest result. This scenario is tested by
 `MainWindowViewModel_Constructor_DoesNotReadSourcesUntilUpgradeRefreshBegins`,
-`MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_ReadableSourceStillOffersUpgrades`, and
-`MainWindowViewModel_AddRepo_PinnedRepo_UpgradeCheckRunsInBackground`, covering
+`MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_ReadableSourceStillOffersUpgrades`,
+`MainWindowViewModel_AddRepo_PinnedRepo_UpgradeCheckRunsInBackground`, and
+`MainWindowViewModel_LaunchCheck_WaitingCardBecomesBusy_IsNotChecked`, covering
 `AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`.
 
 **MainWindowViewModel_ConnectionTestProvider_UsesTheSharedCredentialFacilities**: The view model hands out a
@@ -458,7 +464,10 @@ source needs a sign-in, or could not reach it, is checked again when the view mo
 without saving, and once the source answers it shows no problem and offers the upgrade; when no card shows a problem
 or a failed check, no source is read; after a save (`ApplySettings`, which checks every card) being told that Settings
 closed after saving reads the source no further time; with two cards whose check failed, the one busy refreshing
-itself is not checked while the other is (exactly one read); and after the view model was disposed nothing is
+itself is not checked while the other is (exactly one read); with five cards whose check failed (more than are checked
+at once), a card that waits for its turn in the re-check and that the user starts refreshing meanwhile is not checked
+when its turn comes, so it shows what the user's refresh read rather than the re-check's failure; and after the view
+model was disposed nothing is
 started. With a periodic round that recorded a server's sign-in failure for the first of two cards and is held at a
 second source, being told that Settings closed without saving (after the server started answering) makes the round
 read the server again for the second card rather than replay the recorded failure, so neither card is left showing
@@ -475,6 +484,7 @@ the problem and offers the upgrade without asking again. This scenario is tested
 `MainWindowViewModel_RecheckAfterSettingsClosed_NoCardHasAProblem_ReadsNoSource`,
 `MainWindowViewModel_RecheckAfterSettingsClosed_SettingsSaved_StartsNoSecondCheck`,
 `MainWindowViewModel_RecheckAfterSettingsClosed_CardIsBusy_IsSkipped`,
+`MainWindowViewModel_RecheckAfterSettingsClosed_WaitingCardBecomesBusy_IsNotChecked`,
 `MainWindowViewModel_RecheckAfterSettingsClosed_Disposed_ChecksNothing`,
 `MainWindowViewModel_RecheckAfterSettingsClosed_RoundRecordedFailureBeforeSignIn_RoundReadsTheSourceAgain`,
 `MainWindowViewModel_RecheckAfterSettingsClosed_CardCheckInFlight_OldFailureIsNotShown` and

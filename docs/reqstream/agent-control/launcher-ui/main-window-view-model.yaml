@@ -303,15 +303,19 @@ sections:
           The MainWindowViewModel class shall not read any package source while it is being
           constructed, shall check every card's upgrade availability in the background when
           asked, when a repo is added and after settings are applied - a few cards at a time,
-          with a source that cannot be read hiding nothing the readable sources offer.
+          with a source that cannot be read hiding nothing the readable sources offer, and
+          skipping a card that is busy with an action of its own when its turn comes.
         justification: |
           Starting the window must not wait for package sources, which may be slow network
           locations; one offline source must not hide the upgrade state of repos served by
-          other sources.
+          other sources. A background check running beside an action the user started on the
+          card would break the card's one-action-at-a-time rule and could replace the action's
+          result with its own.
         tests:
           - MainWindowViewModel_Constructor_DoesNotReadSourcesUntilUpgradeRefreshBegins
           - MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_ReadableSourceStillOffersUpgrades
           - MainWindowViewModel_AddRepo_PinnedRepo_UpgradeCheckRunsInBackground
+          - MainWindowViewModel_LaunchCheck_WaitingCardBecomesBusy_IsNotChecked
 
       - id: AgentControl-MainWindowViewModel-ConnectionTestProvider
         title: >-
@@ -727,6 +731,7 @@ sections:
           - MainWindowViewModel_RecheckAfterSettingsClosed_NoCardHasAProblem_ReadsNoSource
           - MainWindowViewModel_RecheckAfterSettingsClosed_SettingsSaved_StartsNoSecondCheck
           - MainWindowViewModel_RecheckAfterSettingsClosed_CardIsBusy_IsSkipped
+          - MainWindowViewModel_RecheckAfterSettingsClosed_WaitingCardBecomesBusy_IsNotChecked
           - MainWindowViewModel_RecheckAfterSettingsClosed_Disposed_ChecksNothing
           - MainWindowViewModel_RecheckAfterSettingsClosed_RoundRecordedFailureBeforeSignIn_RoundReadsTheSourceAgain
           - MainWindowViewModel_RecheckAfterSettingsClosed_CardCheckInFlight_OldFailureIsNotShown
