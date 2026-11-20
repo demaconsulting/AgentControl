@@ -313,8 +313,8 @@ public sealed class RepoGroupingTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that groups and card colors are never written into the repository: the repo folders
-    ///     stay empty and only the settings file changes.
+    ///     Test that groups, card colors and group colors are never written into the repository: the
+    ///     repo folder keeps exactly the entries it had and only the settings file changes.
     /// </summary>
     [Fact]
     public void RepoCardViewModel_GroupAndColor_NeverWriteToTheRepository()
@@ -323,15 +323,17 @@ public sealed class RepoGroupingTests : IDisposable
         var configDir = CreateTempDirectory();
         var viewModel = CreateViewModel(configDir, new Spec("a"));
         var card = viewModel.RepoCards.Single();
+        var before = Directory.EnumerateFileSystemEntries(card.RepoPath, "*", SearchOption.AllDirectories).Order().ToList();
 
         // Act
         card.MoveToGroup("Work");
         card.SetCardColor("Teal");
         viewModel.ToggleGroupCollapsed("Work");
         viewModel.RenameGroup("Work", "Office");
+        viewModel.SetGroupColor("Office", "Lime");
 
         // Assert: the repository has no new file or folder, the settings do
-        Assert.Empty(Directory.EnumerateFileSystemEntries(card.RepoPath));
+        Assert.Equal(before, Directory.EnumerateFileSystemEntries(card.RepoPath, "*", SearchOption.AllDirectories).Order());
         var json = File.ReadAllText(Path.Combine(configDir, "settings.json"));
         Assert.Contains("Office", json, StringComparison.Ordinal);
         Assert.Contains("Teal", json, StringComparison.Ordinal);
@@ -584,7 +586,7 @@ public sealed class RepoGroupingTests : IDisposable
         var result = viewModel.AddRepoToGroup(missing, "Work");
 
         // Assert
-        Assert.Equal(AddRepoResult.NotAdded, result);
+        Assert.Equal(AddRepoResult.Missing, result);
         Assert.Single(viewModel.RepoCards);
     }
 
@@ -625,6 +627,206 @@ public sealed class RepoGroupingTests : IDisposable
         // Act / Assert
         Assert.Throws<ArgumentException>(() => viewModel.AddRepoToGroup(CreateRepoDirectory("fresh"), groupName));
         Assert.Single(viewModel.RepoCards);
+    }
+
+    /// <summary>
+    ///     Test that a group color is stored (under the group's own spelling, as the palette names the
+    ///     color) and saved only in the settings, and that choosing no color clears it.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_SetGroupColor_StoresColorAndNoneClears()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        var viewModel = CreateViewModel(configDir, new Spec("w1", Group: "Work"), new Spec("loose"));
+
+        // Act: letter case of the group and of the color does not matter
+        var colored = viewModel.SetGroupColor("work", "teal");
+
+        // Assert
+        Assert.True(colored);
+        Assert.Equal("Teal", viewModel.Settings.FindGroupColor("Work"));
+        Assert.Equal("Teal", SettingsStore.Load(configDir).GroupColors["Work"]);
+        Assert.True(viewModel.SetGroupColor("Work", "Teal"));
+
+        // Act: no color
+        var cleared = viewModel.SetGroupColor("Work", null);
+
+        // Assert
+        Assert.True(cleared);
+        Assert.Null(viewModel.Settings.FindGroupColor("Work"));
+        Assert.Empty(SettingsStore.Load(configDir).GroupColors);
+    }
+
+    /// <summary>
+    ///     Test that a color the palette does not know, a group that does not exist and the built-in
+    ///     Favorites and Ungrouped sections are refused, and nothing changes.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_SetGroupColor_UnknownColorGroupOrBuiltInSection_ChangesNothing()
+    {
+        // Arrange
+        var viewModel = CreateViewModel(new Spec("w1", Group: "Work"), new Spec("fav", IsFavorite: true), new Spec("loose"));
+
+        // Act / Assert
+        Assert.False(viewModel.SetGroupColor("Work", "Plaid"));
+        Assert.False(viewModel.SetGroupColor("Nope", "Teal"));
+        Assert.False(viewModel.SetGroupColor(RepoGroupName.FavoritesName, "Teal"));
+        Assert.False(viewModel.SetGroupColor(RepoGroupName.UngroupedName, "Teal"));
+        Assert.Empty(viewModel.Settings.GroupColors);
+        Assert.All(viewModel.DisplayedItems.OfType<RepoGroupHeaderViewModel>(), header => Assert.False(header.HasColor));
+    }
+
+    /// <summary>
+    ///     Test that a group color shows on the group's header (not on Favorites or Ungrouped) and on
+    ///     the tiles of the group's repos that have no card color of their own - a favorite in the group
+    ///     included - while a card color of its own wins and other repos keep their colors.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_SetGroupColor_UpdatesHeaderAndCardsOfTheGroup()
+    {
+        // Arrange
+        var viewModel = CreateViewModel(
+            new Spec("plain", Group: "Work"), new Spec("own", Group: "Work"), new Spec("fav", Group: "Work", IsFavorite: true),
+            new Spec("loose"));
+        var plain = viewModel.RepoCards.Single(card => card.RepoName == "plain");
+        var own = viewModel.RepoCards.Single(card => card.RepoName == "own");
+        var favorite = viewModel.RepoCards.Single(card => card.RepoName == "fav");
+        var loose = viewModel.RepoCards.Single(card => card.RepoName == "loose");
+        Assert.True(own.SetCardColor("Red"));
+        var looseClass = loose.AvatarStyleClass;
+        var changed = new List<string?>();
+        plain.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        // Act
+        Assert.True(viewModel.SetGroupColor("Work", "Teal"));
+
+        // Assert: the header names the color; only the user's group has one
+        var headers = viewModel.DisplayedItems.OfType<RepoGroupHeaderViewModel>().ToList();
+        var work = headers.Single(header => header.IsUserGroup);
+        Assert.Equal("Teal", work.ColorName);
+        Assert.Equal("groupAccent5", work.ColorStyleClass);
+        Assert.Equal("Group color: Teal", work.ColorDescription);
+        Assert.All(headers.Where(header => !header.IsUserGroup), header => Assert.False(header.HasColor));
+
+        // The tiles: the group color, except for the card with its own color and the ungrouped repo
+        Assert.Equal("avatar5", plain.AvatarStyleClass);
+        Assert.Equal("avatar5", favorite.AvatarStyleClass);
+        Assert.Equal("avatar8", own.AvatarStyleClass);
+        Assert.Equal(looseClass, loose.AvatarStyleClass);
+        Assert.Contains(nameof(RepoCardViewModel.AvatarStyleClass), changed);
+        Assert.True(plain.IsTileColorChosen);
+    }
+
+    /// <summary>
+    ///     Test that renaming a group keeps its color and its place in the user's group order under
+    ///     the new name, in memory and in the saved settings.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_RenameGroup_KeepsColorAndPosition()
+    {
+        // Arrange: Work is colored and moved before Alpha
+        var configDir = CreateTempDirectory();
+        var viewModel = CreateViewModel(
+            configDir, new Spec("a", Group: "Alpha"), new Spec("w", Group: "Work"), new Spec("z", Group: "Zed"));
+        Assert.True(viewModel.SetGroupColor("Work", "Teal"));
+        Assert.True(viewModel.MoveGroup("Work", RepoGroupMove.Up));
+
+        // Act
+        Assert.True(viewModel.RenameGroup("Work", "Office"));
+
+        // Assert: same place, same color, under the new name
+        Assert.Equal(["[Office 1]", "w", "[Alpha 1]", "a", "[Zed 1]", "z"], Describe(viewModel));
+        Assert.Equal("Teal", viewModel.Settings.FindGroupColor("Office"));
+        Assert.Equal("Teal", viewModel.DisplayedItems.OfType<RepoGroupHeaderViewModel>().First().ColorName);
+        var saved = SettingsStore.Load(configDir);
+        Assert.Equal(["Office"], saved.GroupColors.Keys);
+        Assert.Equal(["Office", "Alpha", "Zed"], saved.GroupOrder);
+    }
+
+    /// <summary>
+    ///     Test that removing a group forgets its color and its place in the group order, so a new group
+    ///     of the same name starts without them.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_RemoveGroup_ForgetsColorAndPosition()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        var viewModel = CreateViewModel(configDir, new Spec("a", Group: "Alpha"), new Spec("w", Group: "Work"));
+        Assert.True(viewModel.SetGroupColor("Work", "Teal"));
+        Assert.True(viewModel.MoveGroup("Work", RepoGroupMove.Up));
+
+        // Act
+        Assert.True(viewModel.RemoveGroup("Work"));
+
+        // Assert
+        Assert.Empty(viewModel.Settings.GroupColors);
+        Assert.Equal(["Alpha"], viewModel.Settings.GroupOrder);
+        var saved = SettingsStore.Load(configDir);
+        Assert.Empty(saved.GroupColors);
+        Assert.Equal(["Alpha"], saved.GroupOrder);
+
+        // Act: a new group of the same name
+        Assert.True(viewModel.RepoCards.Single(card => card.RepoName == "w").MoveToGroup("Work"));
+
+        // Assert: no color, alphabetical place
+        Assert.Equal(["[Alpha 1]", "a", "[Work 1]", "w"], Describe(viewModel));
+        Assert.False(viewModel.DisplayedItems.OfType<RepoGroupHeaderViewModel>().Last().HasColor);
+    }
+
+    /// <summary>
+    ///     Test that a group whose last repo leaves it forgets its color and its place in the group
+    ///     order, like a removed group.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_LastRepoLeavesGroup_ForgetsColorAndPosition()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        var viewModel = CreateViewModel(configDir, new Spec("a", Group: "Alpha"), new Spec("w", Group: "Work"));
+        Assert.True(viewModel.SetGroupColor("Work", "Teal"));
+        Assert.True(viewModel.MoveGroup("Work", RepoGroupMove.Up));
+        var last = viewModel.RepoCards.Single(card => card.RepoName == "w");
+
+        // Act
+        Assert.True(last.MoveToGroup(null));
+
+        // Assert
+        Assert.Null(viewModel.Settings.FindGroupColor("Work"));
+        Assert.Equal(["Alpha"], viewModel.Settings.GroupOrder);
+        Assert.Empty(SettingsStore.Load(configDir).GroupColors);
+
+        // Act: back into a group of that name
+        Assert.True(last.MoveToGroup("Work"));
+
+        // Assert: it starts afresh
+        Assert.Null(last.GroupColorName);
+        Assert.Equal(["[Alpha 1]", "a", "[Work 1]", "w"], Describe(viewModel));
+    }
+
+    /// <summary>
+    ///     Test that applying new settings (as the Settings window does) keeps the group colors and the
+    ///     group order.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_ApplySettings_KeepsGroupColorsAndOrder()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        var viewModel = CreateViewModel(configDir, new Spec("a", Group: "Alpha"), new Spec("w", Group: "Work"));
+        Assert.True(viewModel.SetGroupColor("Work", "Teal"));
+        Assert.True(viewModel.MoveGroup("Work", RepoGroupMove.Up));
+
+        // Act
+        viewModel.ApplySettings(new AppSettings { Theme = ThemePreference.Dark });
+
+        // Assert
+        Assert.Equal(["[Work 1]", "w", "[Alpha 1]", "a"], Describe(viewModel));
+        Assert.Equal("Teal", viewModel.Settings.FindGroupColor("Work"));
+        var saved = SettingsStore.Load(configDir);
+        Assert.Equal("Teal", saved.GroupColors["Work"]);
+        Assert.Equal(["Work", "Alpha"], saved.GroupOrder);
     }
 
     /// <summary>
@@ -695,6 +897,8 @@ public sealed class RepoGroupingTests : IDisposable
     {
         var path = Path.Combine(CreateTempDirectory(), name);
         Directory.CreateDirectory(path);
+        Directory.CreateDirectory(Path.Combine(path, ".git"));
+        File.WriteAllText(Path.Combine(path, ".git", "HEAD"), "ref: refs/heads/main\n");
         return path;
     }
 

@@ -29,7 +29,8 @@ namespace DemaConsulting.AgentControl.UiTests;
 ///     End-to-end tests of the user's own repo order in the real application: a card keeps its place
 ///     when its repo is launched, the card menu's Reorder items reorder it, a real mouse drag reorders
 ///     it (and moves it into a group when dropped on the group's header), and the order is stored only
-///     in AgentControl's settings and is still there after a restart.
+///     in AgentControl's settings and is still there after a restart; and the order of the groups,
+///     changed from a group header's menu or by dragging a header.
 /// </summary>
 public sealed class RepoOrderTests
 {
@@ -204,6 +205,116 @@ public sealed class RepoOrderTests
             TimeSpan.FromSeconds(10),
             TimeSpan.FromMilliseconds(200)).Result);
         Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(context.RootDirectory, "second")));
+    }
+
+    /// <summary>
+    ///     Choosing "Move down" in the first group header's menu puts that group after the next one,
+    ///     stores the order of the groups in the settings file and keeps it after a restart.
+    /// </summary>
+    [Fact]
+    public void GroupHeaderMenu_MoveDown_ReordersGroupsAndKeepsOrderAfterRestart()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: two groups (Alpha, Beta) and an ungrouped repo
+        using var context = new AgentControlTestContext(customizeSettings: SeedTwoGroups);
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+        Assert.Equal(["Alpha, 1 repo, expanded", "Beta, 1 repo, expanded", "Ungrouped, 1 repo, expanded"], HeaderNames(mainWindow));
+
+        // Act: ... on the Alpha header > Move down
+        Find(mainWindow, "GroupHeaderMenuButton", candidate => candidate.Name == "Actions for group Alpha").AsButton().Invoke();
+        Assert.False(Find(mainWindow, "MoveGroupUpMenuItem").IsEnabled);
+        Find(mainWindow, "MoveGroupDownMenuItem").AsMenuItem().Invoke();
+
+        // Assert: Beta first, stored, and still so after a restart
+        Assert.True(Retry.WhileFalse(
+            () => HeaderNames(mainWindow).SequenceEqual(["Beta, 1 repo, expanded", "Alpha, 1 repo, expanded", "Ungrouped, 1 repo, expanded"]),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.True(Retry.WhileFalse(
+            () => StoredGroupOrder(context).SequenceEqual(["Beta", "Alpha"]),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        context.CloseApplication();
+        var restarted = context.Launch();
+        restarted.SetForeground();
+        Assert.Equal(["Beta, 1 repo, expanded", "Alpha, 1 repo, expanded", "Ungrouped, 1 repo, expanded"], HeaderNames(restarted));
+    }
+
+    /// <summary>
+    ///     Dragging the first group's header with the real mouse and dropping it on the lower half of the
+    ///     next group's header puts that group after it, without collapsing it.
+    /// </summary>
+    [Fact]
+    public void RepoList_DragGroupHeaderBelowAnother_ReordersGroups()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange
+        using var context = new AgentControlTestContext(customizeSettings: SeedTwoGroups);
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+
+        // Act: grab the Alpha header and drop it on the lower half of the Beta header
+        var alpha = Find(mainWindow, "GroupHeaderToggleButton", candidate => candidate.Name.StartsWith("Alpha", StringComparison.Ordinal));
+        var beta = Find(mainWindow, "GroupHeaderToggleButton", candidate => candidate.Name.StartsWith("Beta", StringComparison.Ordinal));
+        var below = new System.Drawing.Point(Center(beta).X, beta.BoundingRectangle.Bottom - 3);
+        Drag(Center(alpha), below);
+
+        // Assert: Beta first, Alpha still expanded, and the order stored
+        Assert.True(Retry.WhileFalse(
+            () => HeaderNames(mainWindow).SequenceEqual(["Beta, 1 repo, expanded", "Alpha, 1 repo, expanded", "Ungrouped, 1 repo, expanded"]),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.True(Retry.WhileFalse(
+            () => StoredGroupOrder(context).SequenceEqual(["Beta", "Alpha"]),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+    }
+
+    /// <summary>
+    ///     Seeds the settings with the test repo in the group "Alpha", a second repo in the group "Beta"
+    ///     and a third in no group.
+    /// </summary>
+    /// <param name="settings">The settings dictionary to edit.</param>
+    /// <param name="context">The test context, whose repo is the first one.</param>
+    private static void SeedTwoGroups(Dictionary<string, object?> settings, AgentControlTestContext context)
+    {
+        SeedThreeRepos(settings, context);
+        settings["RecentRepos"] = new object[]
+        {
+            new { Path = context.RepoPath, GroupName = "Alpha" },
+            new { Path = Path.Combine(context.RootDirectory, "second"), GroupName = "Beta" },
+            new { Path = Path.Combine(context.RootDirectory, "third") }
+        };
+    }
+
+    /// <summary>
+    ///     Reads the stored order of the groups from the settings file.
+    /// </summary>
+    /// <param name="context">The running test context.</param>
+    /// <returns>The group names in <c>GroupOrder</c>, or none when the file or the list is missing.</returns>
+    private static List<string> StoredGroupOrder(AgentControlTestContext context)
+    {
+        var text = ReadSettings(context);
+        if (text.Length == 0)
+        {
+            return [];
+        }
+
+        using var document = JsonDocument.Parse(text);
+        return document.RootElement.TryGetProperty("GroupOrder", out var order) && order.ValueKind == JsonValueKind.Array
+            ? [.. order.EnumerateArray().Select(name => name.GetString() ?? string.Empty)]
+            : [];
     }
 
     /// <summary>

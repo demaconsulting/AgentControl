@@ -260,6 +260,92 @@ public class RepoCardColorTests
     }
 
     /// <summary>
+    ///     Test that a card without a color of its own takes its group's color for the tile, and that
+    ///     the tile counts as a chosen color (the ring around a picture).
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_AvatarColorIndex_NoOwnColor_UsesGroupColor()
+    {
+        // Arrange: the group color is stored in other letter case than the group is spelled
+        var recent = new RecentRepo { Path = @"C:\repos\sample", GroupName = "Work" };
+        var settings = new AppSettings { RecentRepos = [recent], GroupColors = new() { ["work"] = "Teal" } };
+        var card = new RepoCardViewModel(recent, () => settings, new PackageVersionCache());
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal("Teal", card.GroupColorName),
+            () => Assert.Equal(5, card.AvatarColorIndex),
+            () => Assert.Equal("avatar5", card.AvatarStyleClass),
+            () => Assert.True(card.IsCardColorAutomatic),
+            () => Assert.False(card.HasCustomCardColor),
+            () => Assert.True(card.IsTileColorChosen));
+    }
+
+    /// <summary>
+    ///     Test that a card's own color wins over its group's color, and that going back to Automatic
+    ///     shows the group's color again.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_AvatarColorIndex_OwnColor_WinsOverGroupColor()
+    {
+        // Arrange
+        var recent = new RecentRepo { Path = @"C:\repos\sample", GroupName = "Work", CardColor = "Red" };
+        var settings = new AppSettings { RecentRepos = [recent], GroupColors = new() { ["Work"] = "Teal" } };
+        var card = new RepoCardViewModel(recent, () => settings, new PackageVersionCache());
+
+        // Assert: its own color
+        Assert.Equal("avatar8", card.AvatarStyleClass);
+
+        // Act: Automatic
+        Assert.True(card.SetCardColor(null));
+
+        // Assert: the group's color
+        Assert.Equal("avatar5", card.AvatarStyleClass);
+        Assert.True(card.IsTileColorChosen);
+    }
+
+    /// <summary>
+    ///     Test that a favorite keeps its group's color: starring a repo lists it under Favorites but
+    ///     does not repaint its tile.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_AvatarColorIndex_FavoriteInColoredGroup_KeepsGroupColor()
+    {
+        // Arrange
+        var recent = new RecentRepo { Path = @"C:\repos\sample", GroupName = "Work" };
+        var settings = new AppSettings { RecentRepos = [recent], GroupColors = new() { ["Work"] = "Lime" } };
+        var card = new RepoCardViewModel(recent, () => settings, new PackageVersionCache());
+
+        // Act
+        card.IsFavorite = true;
+
+        // Assert
+        Assert.True(card.IsFavorite);
+        Assert.Equal("avatar9", card.AvatarStyleClass);
+    }
+
+    /// <summary>
+    ///     Test that the palette heading names the group color in effect when the card has no color of
+    ///     its own, its own color when it has one, and plain Automatic otherwise.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_CardColorHeading_NoOwnColorInColoredGroup_NamesTheGroupColor()
+    {
+        // Arrange
+        var grouped = new RecentRepo { Path = @"C:\repos\grouped", GroupName = "Work" };
+        var loose = new RecentRepo { Path = @"C:\repos\loose" };
+        var settings = new AppSettings { RecentRepos = [grouped, loose], GroupColors = new() { ["Work"] = "Teal" } };
+        var groupedCard = new RepoCardViewModel(grouped, () => settings, new PackageVersionCache());
+        var looseCard = new RepoCardViewModel(loose, () => settings, new PackageVersionCache());
+
+        // Act / Assert
+        Assert.Equal("Card color: Automatic (group color Teal)", groupedCard.CardColorHeading);
+        Assert.Equal("Card color: Automatic", looseCard.CardColorHeading);
+        Assert.True(groupedCard.SetCardColor("Violet"));
+        Assert.Equal("Card color: Violet", groupedCard.CardColorHeading);
+    }
+
+    /// <summary>
     ///     Creates a card over a settings entry, with settings that contain just that entry.
     /// </summary>
     /// <param name="recent">The settings entry.</param>

@@ -222,6 +222,69 @@ public class SettingsSubsystemTests
     }
 
     /// <summary>
+    ///     Test that the color and the position of each of the user's groups are kept for the next
+    ///     session in the settings file only, found by group name ignoring letter case, and that damaged
+    ///     entries, unknown colors and entries of groups no repo is in are dropped (and not written
+    ///     back) while the values around them are kept.
+    /// </summary>
+    [Fact]
+    public void SettingsSubsystem_GroupOrganization_ColorAndOrderSurviveSessionsAndDamagedOrStaleEntriesAreDropped()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            var firstSession = new AppSettings
+            {
+                RecentRepos =
+                [
+                    new RecentRepo { Path = @"C:\repos\a", GroupName = "Client Work" },
+                    new RecentRepo { Path = @"C:\repos\b", GroupName = "Home", IsFavorite = true },
+                    new RecentRepo { Path = @"C:\repos\c" }
+                ],
+                GroupColors = new() { ["Client Work"] = "Teal", ["Home"] = "Amber" },
+                GroupOrder = ["Home", "Client Work"]
+            };
+
+            // Act: the first session saves; a later session loads and finds the values by name
+            SettingsStore.Save(firstSession, configDir);
+            var secondSession = SettingsStore.Load(configDir);
+
+            // Assert
+            Assert.Multiple(
+                () => Assert.Equal("Teal", secondSession.FindGroupColor("client work")),
+                () => Assert.Equal("Amber", secondSession.FindGroupColor("Home")),
+                () => Assert.Equal(["Home", "Client Work"], secondSession.GroupOrder),
+                () => Assert.Equal(
+                    ["settings.json"], Directory.GetFileSystemEntries(configDir).Select(Path.GetFileName)));
+
+            // Arrange: a damaged file - wrong types, an unknown color, a stale group, a built-in name
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                "{ \"RecentRepos\": [ { \"Path\": \"a\", \"GroupName\": \"Work\" } ]," +
+                " \"GroupColors\": { \"work\": \"lime\", \"Gone\": \"Teal\", \"Ungrouped\": \"Red\", \"x\": 3 }," +
+                " \"GroupOrder\": [ \"Gone\", 4, \"WORK\" ], \"GitExecutablePath\": \"git-after\" }");
+
+            // Act
+            var damaged = SettingsStore.Load(configDir);
+            SettingsStore.Save(damaged, configDir);
+            var json = File.ReadAllText(Path.Combine(configDir, "settings.json"));
+
+            // Assert: only the usable entries, spelled as the group is, and nothing stale written back
+            Assert.Multiple(
+                () => Assert.Equal(["Work"], damaged.GroupColors.Keys),
+                () => Assert.Equal("Lime", damaged.GroupColors["Work"]),
+                () => Assert.Equal(["Work"], damaged.GroupOrder),
+                () => Assert.Equal("git-after", damaged.GitExecutablePath),
+                () => Assert.DoesNotContain("Gone", json, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Test that the user's own repo order is kept for the next session in the settings file only,
     ///     that a file written before the order was stored is arranged once as favorites first and then
     ///     the most recently launched (and that arrangement is what later sessions see, even when

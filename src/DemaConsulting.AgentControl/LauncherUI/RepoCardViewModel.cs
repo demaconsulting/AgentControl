@@ -516,6 +516,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasGroup));
         OnPropertyChanged(nameof(ShowGroupChip));
         RemoveFromGroupCommand.RaiseCanExecuteChanged();
+
+        // The tile follows the group's color when the card has none of its own
+        OnPropertyChanged(nameof(GroupColorName));
+        OnPropertyChanged(nameof(IsTileColorChosen));
+        OnPropertyChanged(nameof(CardColorHeading));
+        OnPropertyChanged(nameof(AvatarColorIndex));
+        OnPropertyChanged(nameof(AvatarStyleClass));
     }
 
     /// <summary>
@@ -545,14 +552,50 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Gets a value indicating whether the tile uses the automatic color (the opposite of
     ///     <see cref="HasCustomCardColor"/>), for the palette popup's "Automatic" entry.
     /// </summary>
+    /// <remarks>
+    ///     "Automatic" means the card has no color of its own: the tile then takes its group's color
+    ///     (<see cref="GroupColorName"/>) when the group has one, otherwise the color derived from the
+    ///     repo path.
+    /// </remarks>
     public bool IsCardColorAutomatic => !HasCustomCardColor;
 
     /// <summary>
-    ///     Gets the palette heading's text: <c>Card color: Teal</c>, or <c>Card color: Automatic</c>,
-    ///     so the chosen color is named in words in the palette itself and not only by a swatch's
-    ///     tooltip, accessible name and check mark.
+    ///     Gets the color the user chose for this repo's group, or <see langword="null"/> when the
+    ///     repo is in no group or the group has no color.
     /// </summary>
-    public string CardColorHeading => $"Card color: {CardColorName ?? "Automatic"}";
+    /// <remarks>
+    ///     Read from the live settings each time (see <see cref="AppSettings.FindGroupColor"/>), so a
+    ///     group color chosen, changed or cleared elsewhere is seen once the owning view model calls
+    ///     <see cref="RaiseGroupPropertiesChanged"/>. A favorite keeps its group's color: starring a repo
+    ///     lists it under Favorites but does not repaint its tile.
+    /// </remarks>
+    public string? GroupColorName => _getSettings().FindGroupColor(GroupName);
+
+    /// <summary>
+    ///     Gets a value indicating whether the tile's color was chosen by the user - for this card, or
+    ///     for its group - rather than derived from the repo path; it shows as a ring around a repo's
+    ///     picture so the chosen color stays visible.
+    /// </summary>
+    public bool IsTileColorChosen => HasCustomCardColor || GroupColorName is not null;
+
+    /// <summary>
+    ///     Gets the palette heading's text: <c>Card color: Teal</c> for a card color of its own,
+    ///     <c>Card color: Automatic (group color Teal)</c> when the tile follows its group's color, or
+    ///     <c>Card color: Automatic</c>, so the color in effect is named in words in the palette itself
+    ///     and not only by a swatch's tooltip, accessible name and check mark.
+    /// </summary>
+    public string CardColorHeading
+    {
+        get
+        {
+            if (CardColorName is { } own)
+            {
+                return $"Card color: {own}";
+            }
+
+            return GroupColorName is { } group ? $"Card color: Automatic (group color {group})" : "Card color: Automatic";
+        }
+    }
 
     /// <summary>
     ///     Chooses the color of this repo's tile.
@@ -589,6 +632,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(CardColorName));
         OnPropertyChanged(nameof(HasCustomCardColor));
         OnPropertyChanged(nameof(IsCardColorAutomatic));
+        OnPropertyChanged(nameof(IsTileColorChosen));
         OnPropertyChanged(nameof(CardColorHeading));
         OnPropertyChanged(nameof(AvatarColorIndex));
         OnPropertyChanged(nameof(AvatarStyleClass));
@@ -1064,11 +1108,15 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     Gets the index (0 up to <see cref="AvatarPaletteSize"/> - 1) of the palette color of this
-    ///     repo's tile: the color the user chose (<see cref="CardColorName"/>), otherwise the
-    ///     automatic color, derived from a stable hash of the repo path so the same repo always has
-    ///     the same color in every session and on every machine.
+    ///     repo's tile: the color the user chose for this card (<see cref="CardColorName"/>), otherwise
+    ///     the color of its group (<see cref="GroupColorName"/>), otherwise the automatic color,
+    ///     derived from a stable hash of the repo path so the same repo always has the same color in
+    ///     every session and on every machine.
     /// </summary>
-    public int AvatarColorIndex => CardColorPalette.Find(_recentRepo.CardColor)?.Index ?? GetAvatarColorIndex(RepoPath);
+    public int AvatarColorIndex =>
+        CardColorPalette.Find(_recentRepo.CardColor)?.Index
+        ?? CardColorPalette.Find(GroupColorName)?.Index
+        ?? GetAvatarColorIndex(RepoPath);
 
     /// <summary>
     ///     Gets the style class (<c>avatar0</c>, <c>avatar1</c>, ...) that selects this repo's avatar

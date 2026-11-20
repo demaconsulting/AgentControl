@@ -846,6 +846,223 @@ public sealed class RepoOrderingTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that the groups are listed in the user's stored order, the groups without a stored
+    ///     position after them alphabetically, between Favorites first and Ungrouped last, and that the
+    ///     stored order is repaired to the groups that exist, spelled like them.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_DisplayedItems_GroupsInStoredOrderThenAlphabetically()
+    {
+        // Arrange: a stored order naming two groups (in other letter case) and one that no longer exists
+        var fixture = CreateFixture(
+            new AppSettings { GroupOrder = ["zed", "Gone", "MID"] },
+            Spec("a", "Alpha"), Spec("m", "Mid"), Spec("u"), Spec("z", "Zed"), Spec("f", favorite: true), Spec("b", "Beta"));
+
+        // Act
+        var shown = fixture.Describe();
+
+        // Assert
+        Assert.Equal(
+            [
+                "[Favorites 1]", "f",
+                "[Zed 1]", "z",
+                "[Mid 1]", "m",
+                "[Alpha 1]", "a",
+                "[Beta 1]", "b",
+                "[Ungrouped 1]", "u"
+            ],
+            shown);
+        Assert.Equal(["Zed", "Mid"], fixture.ViewModel.Settings.GroupOrder);
+    }
+
+    /// <summary>
+    ///     Test that moving a group up or down swaps it with the group before or after it, and that the
+    ///     whole order of the groups as shown is stored and saved.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_MoveGroup_UpAndDown_SwapsWithNeighborAndStoresTheFullOrder()
+    {
+        // Arrange: three groups without a stored order (alphabetical)
+        var fixture = CreateFixture(Spec("a", "Alpha"), Spec("b", "Beta"), Spec("g", "Gamma"), Spec("u"));
+
+        // Act
+        var movedUp = fixture.ViewModel.MoveGroup("Gamma", RepoGroupMove.Up);
+
+        // Assert
+        Assert.True(movedUp);
+        Assert.Equal(["Alpha", "Gamma", "Beta"], GroupSections(fixture));
+        Assert.Equal(["Alpha", "Gamma", "Beta"], fixture.ViewModel.Settings.GroupOrder);
+        Assert.Equal(["Alpha", "Gamma", "Beta"], SettingsStore.Load(fixture.ConfigDirectory).GroupOrder);
+
+        // Act: letter case of the name does not matter
+        var movedDown = fixture.ViewModel.MoveGroup("alpha", RepoGroupMove.Down);
+
+        // Assert: the cards stay in their groups and in their order
+        Assert.True(movedDown);
+        Assert.Equal(["Gamma", "Alpha", "Beta"], GroupSections(fixture));
+        Assert.Equal(["[Gamma 1]", "g", "[Alpha 1]", "a", "[Beta 1]", "b", "[Ungrouped 1]", "u"], fixture.Describe());
+        Assert.Equal(["a", "b", "g", "u"], fixture.SavedNames());
+        Assert.Empty(fixture.Failures);
+    }
+
+    /// <summary>
+    ///     Test that a group cannot move up when it is the first group or down when it is the last, that
+    ///     Favorites, Ungrouped, unknown groups and groups without a section of their own never move,
+    ///     that nothing moves while the filter has text, and that the headers offer the moves accordingly.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_GetGroupMoveDisabledReason_EndsBuiltInSectionsAndFilter()
+    {
+        // Arrange: Alpha and Beta have sections; Starred's only repo is a favorite, so it has none
+        var fixture = CreateFixture(Spec("a", "Alpha"), Spec("b", "Beta"), Spec("s", "Starred", favorite: true), Spec("u"));
+        var viewModel = fixture.ViewModel;
+
+        // Act / Assert: the ends
+        Assert.Equal("This group is already the first group.", viewModel.GetGroupMoveDisabledReason("Alpha", RepoGroupMove.Up));
+        Assert.Null(viewModel.GetGroupMoveDisabledReason("Alpha", RepoGroupMove.Down));
+        Assert.Null(viewModel.GetGroupMoveDisabledReason("Beta", RepoGroupMove.Up));
+        Assert.Equal("This group is already the last group.", viewModel.GetGroupMoveDisabledReason("Beta", RepoGroupMove.Down));
+
+        // Built-in sections, a group without a section and an unknown group
+        Assert.NotNull(viewModel.GetGroupMoveDisabledReason(RepoGroupName.FavoritesName, RepoGroupMove.Down));
+        Assert.NotNull(viewModel.GetGroupMoveDisabledReason(RepoGroupName.UngroupedName, RepoGroupMove.Up));
+        Assert.NotNull(viewModel.GetGroupMoveDisabledReason("Starred", RepoGroupMove.Up));
+        Assert.NotNull(viewModel.GetGroupMoveDisabledReason("Nope", RepoGroupMove.Down));
+        Assert.False(viewModel.MoveGroup("Alpha", RepoGroupMove.Up));
+        Assert.False(viewModel.MoveGroup(RepoGroupName.UngroupedName, RepoGroupMove.Up));
+
+        // The headers: Alpha can only move down, Beta only up, with the reason as the tooltip
+        var alpha = fixture.Header("Alpha");
+        Assert.False(alpha.MoveUpCommand.CanExecute(null));
+        Assert.True(alpha.MoveDownCommand.CanExecute(null));
+        Assert.Equal("This group is already the first group.", alpha.MoveUpTooltip);
+        Assert.True(fixture.Header("Beta").MoveUpCommand.CanExecute(null));
+        Assert.False(fixture.Header("Beta").MoveDownCommand.CanExecute(null));
+
+        // Act: a filter
+        viewModel.FilterText = "a";
+
+        // Assert: nothing moves, and the reason says why
+        Assert.Equal(
+            MainWindowViewModel.GroupReorderDisabledWhileFilteringMessage,
+            viewModel.GetGroupMoveDisabledReason("Alpha", RepoGroupMove.Down));
+        Assert.False(viewModel.CanMoveGroup("Alpha", RepoGroupMove.Down));
+        Assert.False(viewModel.MoveGroup("Alpha", RepoGroupMove.Down));
+        Assert.False(fixture.Header("Alpha").MoveDownCommand.CanExecute(null));
+        Assert.Empty(viewModel.Settings.GroupOrder);
+    }
+
+    /// <summary>
+    ///     Test that dropping a group header before or after another group's header puts the group
+    ///     there, that a collapsed group stays collapsed, and that the order is saved.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_DropGroup_BeforeOrAfterAnotherGroup_Reorders()
+    {
+        // Arrange: Alpha is collapsed
+        var fixture = CreateFixture(Spec("a", "Alpha"), Spec("b", "Beta"), Spec("g", "Gamma"));
+        fixture.ViewModel.ToggleGroupCollapsed("Alpha");
+
+        // Act: Alpha after Gamma
+        var afterGamma = fixture.ViewModel.DropGroup("Alpha", new GroupDropTarget("Gamma", InsertBefore: false));
+
+        // Assert
+        Assert.True(afterGamma);
+        Assert.Equal(["Beta", "Gamma", "Alpha"], GroupSections(fixture));
+        Assert.True(fixture.Header("Alpha").IsCollapsed);
+
+        // Act: Gamma before Beta
+        var beforeBeta = fixture.ViewModel.DropGroup("Gamma", new GroupDropTarget("beta", InsertBefore: true));
+
+        // Assert
+        Assert.True(beforeBeta);
+        Assert.Equal(["Gamma", "Beta", "Alpha"], GroupSections(fixture));
+        Assert.Equal(["Gamma", "Beta", "Alpha"], SettingsStore.Load(fixture.ConfigDirectory).GroupOrder);
+        Assert.True(fixture.ViewModel.IsGroupCollapsed("Alpha"));
+    }
+
+    /// <summary>
+    ///     Test that a group header cannot be dropped on its own header, on Favorites or Ungrouped, on a
+    ///     group that is not listed, nor while the filter has text, and that a refused drop changes
+    ///     nothing.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_CanDropGroup_SelfBuiltInUnknownOrFiltering_Refused()
+    {
+        // Arrange
+        var fixture = CreateFixture(Spec("a", "Alpha"), Spec("b", "Beta"), Spec("f", favorite: true), Spec("u"));
+        var viewModel = fixture.ViewModel;
+
+        // Act / Assert
+        Assert.True(viewModel.CanDropGroup("Alpha", new GroupDropTarget("Beta", InsertBefore: false)));
+        Assert.False(viewModel.CanDropGroup("Alpha", new GroupDropTarget("alpha", InsertBefore: false)));
+        Assert.False(viewModel.CanDropGroup("Alpha", new GroupDropTarget(RepoGroupName.FavoritesName, InsertBefore: false)));
+        Assert.False(viewModel.CanDropGroup("Alpha", new GroupDropTarget(RepoGroupName.UngroupedName, InsertBefore: true)));
+        Assert.False(viewModel.CanDropGroup(RepoGroupName.UngroupedName, new GroupDropTarget("Alpha", InsertBefore: true)));
+        Assert.False(viewModel.CanDropGroup("Nope", new GroupDropTarget("Alpha", InsertBefore: true)));
+        Assert.False(viewModel.CanDropGroup("Alpha", new GroupDropTarget("Nope", InsertBefore: true)));
+
+        viewModel.FilterText = "a";
+        Assert.False(viewModel.CanDropGroup("Alpha", new GroupDropTarget("Beta", InsertBefore: false)));
+        Assert.False(viewModel.DropGroup("Alpha", new GroupDropTarget("Beta", InsertBefore: false)));
+        viewModel.FilterText = null;
+        Assert.Equal(["Alpha", "Beta"], GroupSections(fixture));
+        Assert.Empty(viewModel.Settings.GroupOrder);
+    }
+
+    /// <summary>
+    ///     Test that the order of the groups is kept in the settings file, so a view model created from
+    ///     the saved settings (the next start) shows the groups in the same order.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_MoveGroup_PersistsOrderForANewViewModel()
+    {
+        // Arrange
+        var fixture = CreateFixture(Spec("a", "Alpha"), Spec("b", "Beta"), Spec("g", "Gamma"));
+        Assert.True(fixture.ViewModel.MoveGroup("Gamma", RepoGroupMove.Up));
+        Assert.True(fixture.ViewModel.MoveGroup("Gamma", RepoGroupMove.Up));
+
+        // Act: start again from what was saved
+        var restarted = new MainWindowViewModel(SettingsStore.Load(fixture.ConfigDirectory), configDirectory: fixture.ConfigDirectory);
+
+        // Assert
+        Assert.Equal(
+            ["Gamma", "Alpha", "Beta"],
+            restarted.DisplayedItems.OfType<RepoGroupHeaderViewModel>().Select(header => header.Name));
+    }
+
+    /// <summary>
+    ///     Test that moving a group whose save fails changes nothing and reports the failure.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_MoveGroup_SaveFails_ChangesNothingAndReports()
+    {
+        // Arrange
+        var fixture = CreateFixture(Spec("a", "Alpha"), Spec("b", "Beta"));
+        fixture.BreakSaving();
+
+        // Act
+        var moved = fixture.ViewModel.MoveGroup("Beta", RepoGroupMove.Up);
+
+        // Assert
+        Assert.False(moved);
+        Assert.Equal(["Alpha", "Beta"], GroupSections(fixture));
+        Assert.Empty(fixture.ViewModel.Settings.GroupOrder);
+        Assert.Single(fixture.Failures);
+    }
+
+    /// <summary>
+    ///     Lists the names of the user's groups that have a header, in the order shown.
+    /// </summary>
+    /// <param name="fixture">The fixture.</param>
+    /// <returns>The group names.</returns>
+    private static List<string> GroupSections(Fixture fixture) =>
+        [.. fixture.ViewModel.DisplayedItems
+            .OfType<RepoGroupHeaderViewModel>()
+            .Where(header => header.IsUserGroup)
+            .Select(header => header.Name)];
+
+    /// <summary>
     ///     Gets whether each of the four moves is available for a card.
     /// </summary>
     /// <param name="viewModel">The view model.</param>
@@ -919,6 +1136,8 @@ public sealed class RepoOrderingTests : IDisposable
         var parent = Path.Combine(Path.GetTempPath(), "agentcontrol_ordering_" + Guid.NewGuid().ToString("N"));
         var path = Path.Combine(parent, name);
         Directory.CreateDirectory(path);
+        Directory.CreateDirectory(Path.Combine(path, ".git"));
+        File.WriteAllText(Path.Combine(path, ".git", "HEAD"), "ref: refs/heads/main\n");
         _tempPaths.Add(parent);
         return path;
     }

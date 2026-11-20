@@ -25,11 +25,11 @@ using Avalonia.Markup.Xaml;
 namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
-///     Modal "About Agent Control" window showing the app name, logo, a short mission
-///     tagline, a labeled "Version" row (<see cref="Program.Version"/> without its build metadata,
-///     which is the row's tooltip), copyright, a short license summary, and a
-///     scrollable list of this application's direct third-party runtime dependencies with their
-///     SPDX license identifiers.
+///     Modal "About Agent Control" window: a banner across the top with the logo, the app name and the
+///     project tagline, then, in one scrolling region, a short mission statement, a labeled "Version"
+///     row (<see cref="Program.Version"/> without its build metadata, which is the row's tooltip),
+///     copyright, a short license summary and the list of this application's direct third-party
+///     runtime dependencies with their SPDX license identifiers, and a Close button below.
 /// </summary>
 /// <remarks>
 ///     Callers show it with <c>ShowDialog</c> and the main window as owner, like every other
@@ -42,7 +42,12 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 ///     <see cref="ThirdPartyDependencies"/> list rather than from a view model or by parsing the
 ///     project file at runtime. The logo reuses the existing <c>Assets/AppIcon.ico</c> (the same
 ///     icon already used for the main window's title bar and the Windows taskbar/exe icon)
-///     rather than adding a new binary image asset.
+///     rather than adding a new binary image asset; the rest of the banner (its band, glows and
+///     gradient line) is composed in XAML from theme-keyed brushes (<c>AboutBanner*</c> in
+///     <c>AppStyles.axaml</c>, defined for the light and the dark theme), so it needs no image either.
+///     The banner and the Close button stay in view; only the details between them scroll, in a
+///     single region of limited height, so the window keeps a sensible size however long the
+///     dependency list (or a future license text) grows.
 /// </remarks>
 internal sealed partial class AboutWindow : Window
 {
@@ -56,13 +61,21 @@ internal sealed partial class AboutWindow : Window
         + "without ever committing that proprietary content to source control.";
 
     /// <summary>
-    ///     Initializes a new <see cref="AboutWindow"/>, populating its tagline/version/copyright/
-    ///     license text.
+    ///     The project's tagline, shown under the name in the banner.
+    /// </summary>
+    internal const string BannerTagline = "A Desktop Launcher for Distributing Proprietary Agent Packages";
+
+    /// <summary>
+    ///     Initializes a new <see cref="AboutWindow"/>, populating its banner tagline and its
+    ///     tagline/version/copyright/license text.
     /// </summary>
     public AboutWindow()
     {
         AvaloniaXamlLoader.Load(this);
 
+        var bannerTaglineText = this.FindControl<TextBlock>("AboutBannerTaglineText")
+                                 ?? throw new InvalidOperationException(
+                                     "AboutBannerTaglineText control not found in AboutWindow.axaml.");
         var taglineText = this.FindControl<TextBlock>("AboutTaglineText")
                            ?? throw new InvalidOperationException(
                                "AboutTaglineText control not found in AboutWindow.axaml.");
@@ -79,6 +92,7 @@ internal sealed partial class AboutWindow : Window
                                 ?? throw new InvalidOperationException(
                                     "AboutDependenciesList control not found in AboutWindow.axaml.");
 
+        bannerTaglineText.Text = BannerTagline;
         taglineText.Text = Tagline;
         versionText.Text = DisplayVersion(Program.Version);
         if (!string.Equals(versionText.Text, Program.Version, StringComparison.Ordinal))

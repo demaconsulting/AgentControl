@@ -141,7 +141,8 @@ internal sealed class RecentRepo
     /// <remarks>
     ///     Owned here, where the value is stored, so that <see cref="AppSettings.NormalizeNulls"/>
     ///     can repair an unknown name at load time; the launcher's color palette takes its entries
-    ///     from this list rather than repeating it.
+    ///     from this list rather than repeating it. The same names are the valid group colors
+    ///     (<see cref="AppSettings.GroupColors"/>), so a group and a card are colored from one palette.
     /// </remarks>
     internal static readonly IReadOnlyList<string> CardColorNames =
         ["Blue", "Violet", "Magenta", "Green", "Amber", "Teal", "Orange", "Indigo", "Red", "Lime"];

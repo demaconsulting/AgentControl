@@ -226,7 +226,8 @@ public sealed class SelectPackageAndAboutTests
     }
 
     /// <summary>
-    ///     Clicking "About" must open a modal window showing the app name, its tagline, a labeled
+    ///     Clicking "About" must open a modal window showing a banner with the app name, its tagline, a
+    ///     labeled
     ///     version (the <c>Program.Version</c> without its build metadata, the full text in the tooltip),
     ///     a copyright/license summary, and a non-empty third-party dependency list.
     /// </summary>
@@ -249,6 +250,12 @@ public sealed class SelectPackageAndAboutTests
         // A modal dialog is found by something it contains: its title is not a dependable match target
         var aboutWindow = context.WaitForWindowWithDescendant("AboutCloseButton", TimeSpan.FromSeconds(15));
         Assert.NotNull(aboutWindow);
+
+        // The banner across the top carries the product name
+        Assert.NotNull(aboutWindow.FindFirstDescendant(cf => cf.ByAutomationId("AboutBanner")));
+        var bannerTitle = aboutWindow.FindFirstDescendant(cf => cf.ByAutomationId("AboutBannerTitleText"))?.AsLabel();
+        Assert.NotNull(bannerTitle);
+        Assert.Equal("AgentControl", bannerTitle.Text);
 
         var taglineText = aboutWindow.FindFirstDescendant(cf => cf.ByAutomationId("AboutTaglineText"))?.AsLabel();
         Assert.NotNull(taglineText);

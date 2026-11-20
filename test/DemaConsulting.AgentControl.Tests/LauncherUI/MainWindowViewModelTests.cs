@@ -81,7 +81,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     {
         // Arrange: an empty recent-repos list and a config directory to persist to
         var configDir = CreateTempDirectory();
-        var newRepo = CreateTempDirectory();
+        var newRepo = CreateRepoDirectory();
         var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: configDir);
 
         // Act: add the new repo
@@ -133,6 +133,247 @@ public sealed class MainWindowViewModelTests : IDisposable
         // Assert: not added again
         Assert.False(added);
         Assert.Single(viewModel.RepoCards);
+    }
+
+    /// <summary>
+    ///     Test that a folder without a <c>.git</c> folder or file is refused as not a Git repository
+    ///     and nothing is added.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_AddRepo_FolderWithoutGit_IsRefusedAsNotAGitRepository()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        var plainFolder = CreateTempDirectory();
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: configDir);
+
+        // Act
+        var added = viewModel.AddRepo(plainFolder);
+        var outcomes = viewModel.AddRepos([plainFolder], null);
+
+        // Assert
+        Assert.False(added);
+        Assert.Equal(AddRepoResult.NotAGitRepository, Assert.Single(outcomes).Result);
+        Assert.Empty(viewModel.RepoCards);
+        Assert.Empty(viewModel.Settings.RecentRepos);
+    }
+
+    /// <summary>
+    ///     Test that a subfolder of a Git repository is refused: only the repository's top folder can be
+    ///     added, whatever group it is added to.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_AddRepo_SubfolderOfARepository_IsRefused()
+    {
+        // Arrange
+        var repo = CreateRepoDirectory();
+        var subfolder = Path.Combine(repo, "src");
+        Directory.CreateDirectory(subfolder);
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory());
+
+        // Act
+        var plain = viewModel.AddRepo(subfolder);
+        var grouped = viewModel.AddRepoToGroup(subfolder, "Work");
+
+        // Assert
+        Assert.False(plain);
+        Assert.Equal(AddRepoResult.NotAGitRepository, grouped);
+        Assert.Empty(viewModel.RepoCards);
+    }
+
+    /// <summary>
+    ///     Test that a folder with a <c>.git</c> file (a linked worktree or a submodule) is the top
+    ///     folder of a Git repository and is added.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_AddRepo_FolderWithGitFile_IsAdded()
+    {
+        // Arrange
+        var worktree = CreateTempDirectory();
+        File.WriteAllText(Path.Combine(worktree, ".git"), "gitdir: ../main/.git/worktrees/feature\n");
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory());
+
+        // Act
+        var added = viewModel.AddRepo(worktree);
+
+        // Assert
+        Assert.True(added);
+        Assert.Equal(worktree, Assert.Single(viewModel.RepoCards).RepoPath);
+    }
+
+    /// <summary>
+    ///     Test that a file (as dropped from the file manager) is not added and is reported as not a Git
+    ///     repository, while a path that does not exist is reported as missing.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_AddRepos_ExistingFile_IsNotAGitRepository()
+    {
+        // Arrange
+        var file = Path.Combine(CreateTempDirectory(), "notes.txt");
+        File.WriteAllText(file, "not a repository");
+        var missing = Path.Combine(CreateTempDirectory(), "gone");
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory());
+
+        // Act
+        var outcomes = viewModel.AddRepos([file, missing], null);
+
+        // Assert
+        Assert.Equal(
+            [AddRepoResult.NotAGitRepository, AddRepoResult.Missing],
+            outcomes.Select(outcome => outcome.Result));
+        Assert.Empty(viewModel.RepoCards);
+    }
+
+    /// <summary>
+    ///     Test that repos already in the list are kept as they are even when they are not (or no
+    ///     longer) Git repositories: the check applies only to folders being added.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_Constructor_ListedFolderWithoutGit_IsKept()
+    {
+        // Arrange: a listed repo whose folder has no .git
+        var plainFolder = CreateTempDirectory();
+        var configDir = CreateTempDirectory();
+        var settings = new AppSettings { RecentRepos = [new RecentRepo { Path = plainFolder }] };
+
+        // Act
+        var viewModel = new MainWindowViewModel(settings, configDirectory: configDir);
+        var again = viewModel.AddRepos([plainFolder], null);
+        Assert.True(viewModel.AddRepo(CreateRepoDirectory()));
+
+        // Assert: still listed (and saved with the next change), and reported as already listed
+        Assert.Equal(plainFolder, viewModel.RepoCards[0].RepoPath);
+        Assert.Equal(AddRepoResult.AlreadyListed, Assert.Single(again).Result);
+        Assert.Contains(SettingsStore.Load(configDir).RecentRepos, repo => repo.Path == plainFolder);
+    }
+
+    /// <summary>
+    ///     Test that adding several folders reports an outcome for each, in order, adds the repositories
+    ///     and skips the others, and handles a folder given twice once.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_AddRepos_MixedPaths_ReportsAnOutcomePerPath()
+    {
+        // Arrange: a listed repo, two new repositories, a plain folder and a missing path
+        var listed = CreateRepoDirectory();
+        var first = CreateRepoDirectory();
+        var second = CreateRepoDirectory();
+        var plainFolder = CreateTempDirectory();
+        var missing = Path.Combine(CreateTempDirectory(), "gone");
+        var configDir = CreateTempDirectory();
+        var settings = new AppSettings { RecentRepos = [new RecentRepo { Path = listed }] };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: configDir);
+
+        // Act
+        var outcomes = viewModel.AddRepos([first, listed, plainFolder, missing, second, first.ToUpperInvariant(), "  "], null);
+
+        // Assert
+        Assert.Equal([first, listed, plainFolder, missing, second], outcomes.Select(outcome => outcome.Path));
+        Assert.Equal(
+            [
+                AddRepoResult.Added, AddRepoResult.AlreadyListed, AddRepoResult.NotAGitRepository, AddRepoResult.Missing,
+                AddRepoResult.Added
+            ],
+            outcomes.Select(outcome => outcome.Result));
+        Assert.Equal([listed, first, second], viewModel.RepoCards.Select(card => card.RepoPath));
+        Assert.Equal([listed, first, second], SettingsStore.Load(configDir).RecentRepos.Select(repo => repo.Path));
+    }
+
+    /// <summary>
+    ///     Test that adding several folders into a collapsed group adds them all to the group, moves a
+    ///     listed repo into it, and opens the group once so the repos can be seen.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_AddRepos_IntoCollapsedGroup_OpensItOnce()
+    {
+        // Arrange: Work holds one repo and is collapsed; another repo is ungrouped
+        var member = CreateRepoDirectory();
+        var loose = CreateRepoDirectory();
+        var settings = new AppSettings
+        {
+            RecentRepos = [new RecentRepo { Path = member, GroupName = "Work" }, new RecentRepo { Path = loose }],
+            CollapsedGroups = ["Work"]
+        };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+        var fresh = CreateRepoDirectory();
+
+        // Act: the group in other letter case
+        var outcomes = viewModel.AddRepos([fresh, loose], "work");
+
+        // Assert
+        Assert.Equal([AddRepoResult.Added, AddRepoResult.MovedExisting], outcomes.Select(outcome => outcome.Result));
+        Assert.All(viewModel.RepoCards, card => Assert.Equal("Work", card.GroupName));
+        Assert.False(viewModel.IsGroupCollapsed("Work"));
+        Assert.Equal(3, viewModel.DisplayedRepoCards.Count);
+        Assert.Throws<ArgumentException>(() => viewModel.AddRepos([fresh], RepoGroupName.FavoritesName));
+    }
+
+    /// <summary>
+    ///     Test that an add in which every folder was added needs no message.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_DescribeAddOutcomes_AllAdded_ReturnsNull()
+    {
+        // Arrange
+        AddRepoOutcome[] outcomes = [new(@"C:\repos\a", AddRepoResult.Added), new(@"C:\repos\b", AddRepoResult.Added)];
+
+        // Act / Assert
+        Assert.Null(MainWindowViewModel.DescribeAddOutcomes(outcomes, null));
+        Assert.Null(MainWindowViewModel.DescribeAddOutcomes([outcomes[0]], null));
+        Assert.Null(MainWindowViewModel.DescribeAddOutcomes([], null));
+    }
+
+    /// <summary>
+    ///     Test that adding one folder keeps the single-add messages, each naming the folder and saying
+    ///     why it was not added (or that it was moved into the group).
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_DescribeAddOutcomes_Single_KeepsTheSingleAddMessages()
+    {
+        // Arrange
+        const string path = @"C:\repos\a";
+
+        // Act
+        static string? Describe(AddRepoResult result, string? problem = null) =>
+            MainWindowViewModel.DescribeAddOutcomes([new AddRepoOutcome(path, result, problem)], "Work");
+
+        // Assert
+        Assert.Equal($"'{path}' is already in the list, so it was moved into the group \"Work\".", Describe(AddRepoResult.MovedExisting));
+        Assert.Equal($"'{path}' could not be added: it is already in the list.", Describe(AddRepoResult.AlreadyListed));
+        Assert.Equal($"'{path}' could not be added: it does not exist.", Describe(AddRepoResult.Missing));
+        Assert.Equal(
+            $"'{path}' could not be added: it is not the top folder of a Git repository (it has no .git folder or file).",
+            Describe(AddRepoResult.NotAGitRepository));
+        Assert.Equal($"'{path}' could not be added. Disk full.", Describe(AddRepoResult.SaveFailed, "Disk full."));
+        Assert.Null(Describe(AddRepoResult.MoveFailed));
+    }
+
+    /// <summary>
+    ///     Test that several folders get one summary: how many were added, then one line per kind of
+    ///     outcome naming the folders, at most five names per line followed by how many more.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_DescribeAddOutcomes_SeveralMixed_OneSummaryByOutcomeWithAtMostFiveNames()
+    {
+        // Arrange: one added, seven not repositories, one missing, one already listed
+        var outcomes = new List<AddRepoOutcome> { new(@"C:\repos\added", AddRepoResult.Added) };
+        outcomes.AddRange(Enumerable.Range(1, 7).Select(i => new AddRepoOutcome($@"C:\docs\plain{i}\", AddRepoResult.NotAGitRepository)));
+        outcomes.Add(new AddRepoOutcome(@"C:\repos\gone", AddRepoResult.Missing));
+        outcomes.Add(new AddRepoOutcome(@"C:\repos\known", AddRepoResult.AlreadyListed));
+
+        // Act
+        var message = MainWindowViewModel.DescribeAddOutcomes(outcomes, null);
+
+        // Assert
+        Assert.NotNull(message);
+        var lines = message.Split('\n');
+        Assert.Equal("Added 1 of 10 folders.", lines[0]);
+        Assert.Contains("Already in the list: known.", lines);
+        Assert.Contains(
+            "Not the top folder of a Git repository (no .git folder or file): plain1, plain2, plain3, plain4, plain5 and 2 more.",
+            lines);
+        Assert.Contains("Not found: gone.", lines);
+        Assert.Equal(4, lines.Length);
     }
 
     /// <summary>
@@ -758,7 +999,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     public async Task MainWindowViewModel_AddRepo_PinnedRepo_UpgradeCheckRunsInBackground()
     {
         // Arrange: a pinned repo that is not yet in the list, and a source with a newer version
-        var repoPath = CreateTempDirectory();
+        var repoPath = CreateRepoDirectory();
         RepoPinStore.Save(repoPath, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
         var sourceDir = CreateTempDirectory();
         CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
@@ -961,6 +1202,19 @@ public sealed class MainWindowViewModelTests : IDisposable
         var path = Path.Combine(Path.GetTempPath(), "agentcontrol_main_vm_test_" + Guid.NewGuid());
         Directory.CreateDirectory(path);
         _tempPaths.Add(path);
+        return path;
+    }
+
+    /// <summary>
+    ///     Creates a unique temporary folder that is the top folder of a Git repository as far as the
+    ///     add is concerned (a <c>.git</c> folder whose <c>HEAD</c> names a branch), removed on disposal.
+    /// </summary>
+    /// <returns>The folder's path.</returns>
+    private string CreateRepoDirectory()
+    {
+        var path = CreateTempDirectory();
+        Directory.CreateDirectory(Path.Combine(path, ".git"));
+        File.WriteAllText(Path.Combine(path, ".git", "HEAD"), "ref: refs/heads/main\n");
         return path;
     }
 

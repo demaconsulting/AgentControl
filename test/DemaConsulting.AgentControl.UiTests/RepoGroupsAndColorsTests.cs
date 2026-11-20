@@ -491,6 +491,53 @@ public sealed class RepoGroupsAndColorsTests
     }
 
     /// <summary>
+    ///     Choosing "Group color..." in a group header's menu opens the group palette; choosing a swatch
+    ///     shows the group's accent (named for assistive technology), stores the color by group name in
+    ///     the settings file only, and "None" takes it away again.
+    /// </summary>
+    [Fact]
+    public void GroupHeaderMenu_GroupColor_ColorsHeaderAndStoresInSettingsOnly()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: the repo is in "Work", another repo is in no group
+        using var context = new AgentControlTestContext(customizeSettings: SeedWorkGroupAndUngroupedRepo);
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+
+        // Act: ... on the Work header > Group color... > Teal
+        Find(mainWindow, "GroupHeaderMenuButton").AsButton().Invoke();
+        Find(mainWindow, "GroupColorMenuItem").AsMenuItem().Invoke();
+        Assert.NotNull(Find(mainWindow, "GroupColorPalette"));
+        Assert.NotNull(Find(mainWindow, "GroupColorNoneButton"));
+        Find(mainWindow, "GroupColorSwatch_Teal").AsButton().Invoke();
+
+        // Assert: the accent names the color, it is stored for the group only in the settings, and the
+        // repository is untouched
+        Assert.NotNull(Find(mainWindow, "GroupColorAccent", candidate => candidate.Name == "Group color: Teal"));
+        Assert.True(Retry.WhileFalse(
+            () => ReadSettings(context).Contains("\"Work\": \"Teal\"", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(context.RepoPath));
+
+        // Act: None
+        Find(mainWindow, "GroupHeaderMenuButton").AsButton().Invoke();
+        Find(mainWindow, "GroupColorMenuItem").AsMenuItem().Invoke();
+        Find(mainWindow, "GroupColorNoneButton").AsButton().Invoke();
+
+        // Assert
+        Assert.True(Retry.WhileFalse(
+            () => !ReadSettings(context).Contains("Teal", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+    }
+
+    /// <summary>
     ///     Seeds the settings with the repo in the group "Work" and a second repo in no group.
     /// </summary>
     /// <param name="settings">The settings dictionary to edit.</param>

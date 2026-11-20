@@ -275,6 +275,90 @@ public class DialogWindowTests
     });
 
     /// <summary>
+    ///     Test that the About window starts with a banner across its full width that shows the logo,
+    ///     the name and the project's tagline, above the details, and that the banner is identified for
+    ///     assistive technology.
+    /// </summary>
+    [Fact]
+    public void AboutWindow_Banner_ShowsLogoNameAndTaglineAboveTheDetails() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var window = new AboutWindow();
+        window.Show();
+
+        try
+        {
+            // Act
+            var banner = window.FindControl<Border>("AboutBanner")!;
+            var title = window.FindControl<TextBlock>("AboutBannerTitleText")!;
+            var tagline = window.FindControl<TextBlock>("AboutBannerTaglineText")!;
+            var version = window.FindControl<TextBlock>("AboutVersionText")!;
+
+            // Assert: the name, the tagline and the logo are in the banner
+            Assert.Equal("AgentControl", title.Text);
+            Assert.Equal("A Desktop Launcher for Distributing Proprietary Agent Packages", tagline.Text);
+            Assert.Contains(title, banner.GetVisualDescendants());
+            Assert.Contains(tagline, banner.GetVisualDescendants());
+            Assert.NotEmpty(banner.GetVisualDescendants().OfType<Image>());
+            Assert.Equal("AboutBanner", Avalonia.Automation.AutomationProperties.GetAutomationId(banner));
+            Assert.False(string.IsNullOrWhiteSpace(Avalonia.Automation.AutomationProperties.GetName(banner)));
+
+            // The banner spans the window and sits above the details
+            Assert.Equal(window.ClientSize.Width, banner.Bounds.Width, precision: 0);
+            var bannerBottom = Avalonia.VisualExtensions.TranslatePoint(banner, new Avalonia.Point(0, banner.Bounds.Height), window)?.Y;
+            var versionTop = Avalonia.VisualExtensions.TranslatePoint(version, new Avalonia.Point(0, 0), window)?.Y;
+            Assert.True(bannerBottom <= versionTop, $"banner bottom {bannerBottom} is below the version at {versionTop}");
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that the About window is 600 wide with a limited height, that the banner and the Close
+    ///     button are outside the one scrolling region, and that every detail (tagline, version,
+    ///     copyright, license and the dependency list) is inside it.
+    /// </summary>
+    [Fact]
+    public void AboutWindow_Layout_BannerAndCloseStayOutsideTheOneScrollingRegion() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var window = new AboutWindow();
+        window.Show();
+
+        try
+        {
+            // Act
+            var scrollViewers = window.GetVisualDescendants().OfType<ScrollViewer>().ToList();
+            var content = window.FindControl<ScrollViewer>("AboutContentScroller")!;
+
+            // Assert: one scrolling region
+            Assert.Equal([content], scrollViewers);
+            Assert.Equal(600, window.Width);
+            Assert.True(window.ClientSize.Height <= window.MaxHeight, $"height {window.ClientSize.Height}");
+            Assert.True(double.IsFinite(content.MaxHeight));
+
+            // The banner and Close are fixed, outside it
+            Assert.DoesNotContain(window.FindControl<Border>("AboutBanner")!, content.GetVisualDescendants());
+            Assert.DoesNotContain(window.FindControl<Button>("AboutCloseButton")!, content.GetVisualDescendants());
+
+            // Every detail scrolls with it
+            var inside = content.GetVisualDescendants().ToList();
+            foreach (var name in new[] { "AboutTaglineText", "AboutVersionText", "AboutCopyrightText", "AboutLicenseText" })
+            {
+                Assert.Contains(window.FindControl<TextBlock>(name)!, inside);
+            }
+
+            Assert.Contains(window.FindControl<ItemsControl>("AboutDependenciesList")!, inside);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that the agent tool picker shows friendly names (not the raw enum names) and that
     ///     choosing one still stores the enum value, so the saved setting is unchanged.
     /// </summary>

@@ -45,15 +45,16 @@ internal enum RepoGroupKind
 
 /// <summary>
 ///     The collapsible header row that starts a section of the main window's repo list: the
-///     section's name, how many repos match in it, and (for the user's own groups) the actions
-///     that rename or remove the group.
+///     section's name, how many repos match in it, and (for the user's own groups) the group's
+///     color and the actions that add a repo to, move, color, rename or remove the group.
 /// </summary>
 /// <remarks>
 ///     Headers sit among the repo cards in <see cref="MainWindowViewModel.DisplayedItems"/>. The
 ///     owning <see cref="MainWindowViewModel"/> keeps one instance per section and updates its
-///     <see cref="Count"/> and collapsed state in place (so a header keeps keyboard focus when it
-///     is toggled), and handles the three request events; the actions that need a dialog are
-///     forwarded to the window. Not thread-safe; used on the UI thread only.
+///     <see cref="Count"/>, collapsed state, color (<see cref="UpdateColor"/>) and move availability
+///     (<see cref="UpdateOrder"/>) in place (so a header keeps keyboard focus when it is toggled), and
+///     handles the request events; the actions that need a dialog are forwarded to the window. Not
+///     thread-safe; used on the UI thread only.
 /// </remarks>
 internal sealed class RepoGroupHeaderViewModel : ViewModelBase
 {
@@ -65,6 +66,21 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
 
     /// <summary>Backing field for <see cref="IsToggleEnabled"/>.</summary>
     private bool _isToggleEnabled = true;
+
+    /// <summary>Backing field for <see cref="ColorName"/>.</summary>
+    private string? _colorName;
+
+    /// <summary>Why "Move up" is unavailable now, or <see langword="null"/> when it is available.</summary>
+    private string? _moveUpDisabledReason = NotMovableReason;
+
+    /// <summary>Why "Move down" is unavailable now, or <see langword="null"/> when it is available.</summary>
+    private string? _moveDownDisabledReason = NotMovableReason;
+
+    /// <summary>
+    ///     The explanation of a disabled Move item before the owning view model has said where the
+    ///     group stands (a header that is not in the list yet cannot be moved).
+    /// </summary>
+    private const string NotMovableReason = "This section cannot be moved.";
 
     /// <summary>
     ///     Initializes a new header.
@@ -84,6 +100,10 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
         RenameCommand = new RelayCommand(() => RenameRequested?.Invoke(this, EventArgs.Empty));
         AddRepoCommand = new RelayCommand(() => AddRepoRequested?.Invoke(this, EventArgs.Empty));
         RemoveGroupCommand = new RelayCommand(() => RemoveGroupRequested?.Invoke(this, EventArgs.Empty));
+        MoveUpCommand = new RelayCommand(
+            () => MoveRequested?.Invoke(this, RepoGroupMove.Up), () => _moveUpDisabledReason is null);
+        MoveDownCommand = new RelayCommand(
+            () => MoveRequested?.Invoke(this, RepoGroupMove.Down), () => _moveDownDisabledReason is null);
     }
 
     /// <summary>
@@ -242,6 +262,116 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     ///     Raised when the user asks to remove the group; the window confirms first.
     /// </summary>
     public event EventHandler? RemoveGroupRequested;
+
+    /// <summary>
+    ///     Gets the command that asks to move the group one place up; it raises
+    ///     <see cref="MoveRequested"/> with <see cref="RepoGroupMove.Up"/>. Available only when
+    ///     <see cref="UpdateOrder"/> said so (never for Favorites or Ungrouped).
+    /// </summary>
+    public RelayCommand MoveUpCommand { get; }
+
+    /// <summary>
+    ///     Gets the command that asks to move the group one place down; it raises
+    ///     <see cref="MoveRequested"/> with <see cref="RepoGroupMove.Down"/>. Available only when
+    ///     <see cref="UpdateOrder"/> said so (never for Favorites or Ungrouped).
+    /// </summary>
+    public RelayCommand MoveDownCommand { get; }
+
+    /// <summary>
+    ///     Gets the tooltip of the "Move up" item: what it does, or why it is unavailable now.
+    /// </summary>
+    public string MoveUpTooltip => _moveUpDisabledReason ?? "Move this group one place up in the list";
+
+    /// <summary>
+    ///     Gets the tooltip of the "Move down" item: what it does, or why it is unavailable now.
+    /// </summary>
+    public string MoveDownTooltip => _moveDownDisabledReason ?? "Move this group one place down in the list";
+
+    /// <summary>
+    ///     Raised when the user asks to move the group up or down; the owning view model moves it.
+    /// </summary>
+    public event EventHandler<RepoGroupMove>? MoveRequested;
+
+    /// <summary>
+    ///     Gets the name of the palette color the user chose for this group, or
+    ///     <see langword="null"/> for none (always none for Favorites and Ungrouped).
+    /// </summary>
+    public string? ColorName
+    {
+        get => _colorName;
+        private set
+        {
+            if (SetField(ref _colorName, value))
+            {
+                OnPropertyChanged(nameof(HasColor));
+                OnPropertyChanged(nameof(ColorStyleClass));
+                OnPropertyChanged(nameof(ColorHeading));
+                OnPropertyChanged(nameof(ColorDescription));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether the group has a color, which shows the accent bar on its
+    ///     header.
+    /// </summary>
+    public bool HasColor => _colorName is not null;
+
+    /// <summary>
+    ///     Gets the style class (<c>groupAccent0</c>, <c>groupAccent1</c>, ...) that selects the
+    ///     accent bar's theme-aware brush, or an empty string when the group has no color, so no color
+    ///     value lives in the view model or the template.
+    /// </summary>
+    public string ColorStyleClass =>
+        CardColorPalette.Find(_colorName) is { } color ? $"groupAccent{color.Index}" : string.Empty;
+
+    /// <summary>
+    ///     Gets the group palette's heading: <c>Group color: Teal</c>, or <c>Group color: None</c>, so
+    ///     the chosen color is named in words in the palette itself.
+    /// </summary>
+    public string ColorHeading => $"Group color: {_colorName ?? "None"}";
+
+    /// <summary>
+    ///     Gets the accent bar's tooltip and accessible name, <c>Group color: Teal</c>, so the color is
+    ///     never conveyed by color alone.
+    /// </summary>
+    public string ColorDescription => $"Group color: {_colorName ?? "None"}";
+
+    /// <summary>
+    ///     Brings the header's color up to date.
+    /// </summary>
+    /// <param name="colorName">The group's palette color name (letter case ignored), or
+    ///     <see langword="null"/> for none. Ignored (no color) for Favorites and Ungrouped, which
+    ///     cannot be colored, and for a name the palette does not know.</param>
+    public void UpdateColor(string? colorName) =>
+        ColorName = IsUserGroup ? CardColorPalette.Find(colorName)?.Name : null;
+
+    /// <summary>
+    ///     Brings the availability of "Move up" and "Move down" up to date.
+    /// </summary>
+    /// <param name="moveUpDisabledReason">Why the group cannot move up now (shown as the item's
+    ///     tooltip), or <see langword="null"/> when it can. Ignored for Favorites and Ungrouped,
+    ///     which never move.</param>
+    /// <param name="moveDownDisabledReason">Why the group cannot move down now, or
+    ///     <see langword="null"/> when it can. Ignored for Favorites and Ungrouped.</param>
+    public void UpdateOrder(string? moveUpDisabledReason, string? moveDownDisabledReason)
+    {
+        var up = IsUserGroup ? moveUpDisabledReason : NotMovableReason;
+        var down = IsUserGroup ? moveDownDisabledReason : NotMovableReason;
+        if (!string.Equals(up, _moveUpDisabledReason, StringComparison.Ordinal))
+        {
+            _moveUpDisabledReason = up;
+            OnPropertyChanged(nameof(MoveUpTooltip));
+            MoveUpCommand.RaiseCanExecuteChanged();
+        }
+
+        if (!string.Equals(down, _moveDownDisabledReason, StringComparison.Ordinal))
+        {
+            _moveDownDisabledReason = down;
+            OnPropertyChanged(nameof(MoveDownTooltip));
+            MoveDownCommand.RaiseCanExecuteChanged();
+        }
+    }
 
     /// <summary>
     ///     Gets the text that identifies this row to assistive technology: the list item that hosts

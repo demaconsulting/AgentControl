@@ -25,6 +25,7 @@ using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Input.Raw;
 using Avalonia.Interactivity;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using DemaConsulting.AgentControl.LauncherUI;
@@ -37,13 +38,16 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 ///     Headless tests of the main window's repo order as the user meets it: cards that stay where they
 ///     are, the card menu's Move items, drag and drop within and between sections and onto headers,
 ///     the insertion line and header tint, the filter turning reordering off, and the order surviving a
-///     restart.
+///     restart; the user's order of the groups (the header menu's Move items and dragging a header);
+///     and folders dropped from the file manager.
 /// </summary>
 /// <remarks>
 ///     The headless platform has no drag source, so a drag is started with a real pointer press and
 ///     move on the card (which calls the window's <c>DragStarter</c> seam, here a fake that records the
 ///     dragged data) and finished with the platform's drag events raised on the window at the pointer
-///     position, exactly as the operating system would raise them. The real operating-system drag is
+///     position, exactly as the operating system would raise them. Folders from the file manager are
+///     dropped the same way, with a data transfer that carries storage items for their paths. The real
+///     operating-system drag is
 ///     covered only by the UI tests. Runs in the <c>RealProcess</c> collection because showing cards
 ///     spawns real git subprocesses as part of each card's eager refresh.
 /// </remarks>
@@ -611,6 +615,426 @@ public sealed class RepoReorderWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that the window lists Favorites first, then the groups in the user's stored order, then
+    ///     the groups without a stored position alphabetically, then Ungrouped.
+    /// </summary>
+    [Fact]
+    public void MainWindow_GroupOrder_StoredOrderThenAlphabeticalBetweenFavoritesAndUngrouped() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange / Act: Gamma and Beta have stored positions, Alpha and Delta do not
+        var (window, _, _) = CreateWindow(
+            ["Gamma", "beta"],
+            Spec("a", "Alpha"), Spec("b", "Beta"), Spec("u"), Spec("d", "Delta"), Spec("g", "Gamma"), Spec("f", favorite: true));
+
+        try
+        {
+            // Assert
+            Assert.Equal(["Favorites", "Gamma", "Beta", "Alpha", "Delta", "Ungrouped"], HeaderNames(window));
+            Assert.Equal(["f", "g", "b", "a", "d", "u"], RowNames(window));
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that a group header's menu moves the group up and down, that Move up is disabled for the
+    ///     first group and Move down for the last (with the reason as the tooltip), and that both are
+    ///     disabled while the filter has text.
+    /// </summary>
+    [Fact]
+    public void MainWindow_HeaderMenu_MoveUpDown_ReorderGroupsAndDisableAtTheEnds() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, viewModel, _) = CreateWindow(Spec("a", "Alpha"), Spec("b", "Beta"), Spec("g", "Gamma"));
+
+        try
+        {
+            // Assert: the first group cannot move up, the last cannot move down
+            var menu = OpenHeaderMenu(window, "Alpha");
+            var up = FindMenuItem(menu, "MoveGroupUpMenuItem");
+            Assert.False(up.IsEffectivelyEnabled);
+            Assert.Equal("This group is already the first group.", ToolTip.GetTip(up)?.ToString());
+            Assert.True(FindMenuItem(menu, "MoveGroupDownMenuItem").IsEffectivelyEnabled);
+
+            // Act: Alpha down
+            Click(FindMenuItem(menu, "MoveGroupDownMenuItem"));
+            menu.Hide();
+
+            // Assert
+            Assert.Equal(["Beta", "Alpha", "Gamma"], HeaderNames(window));
+
+            // Act: Gamma up
+            menu = OpenHeaderMenu(window, "Gamma");
+            Assert.False(FindMenuItem(menu, "MoveGroupDownMenuItem").IsEffectivelyEnabled);
+            Click(FindMenuItem(menu, "MoveGroupUpMenuItem"));
+            menu.Hide();
+
+            // Assert
+            Assert.Equal(["Beta", "Gamma", "Alpha"], HeaderNames(window));
+            Assert.Equal(["b", "g", "a"], RowNames(window));
+
+            // Act: a filter turns both off
+            viewModel.FilterText = "a";
+            Dispatcher.UIThread.RunJobs();
+            menu = OpenHeaderMenu(window, "Gamma");
+
+            // Assert
+            Assert.False(FindMenuItem(menu, "MoveGroupUpMenuItem").IsEffectivelyEnabled);
+            Assert.False(FindMenuItem(menu, "MoveGroupDownMenuItem").IsEffectivelyEnabled);
+            Assert.Equal(
+                MainWindowViewModel.GroupReorderDisabledWhileFilteringMessage,
+                ToolTip.GetTip(FindMenuItem(menu, "MoveGroupUpMenuItem"))?.ToString());
+            menu.Hide();
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that a group header can be dragged (pressed on its toggle, without collapsing or expanding
+    ///     the section) below another group's header: the header is dimmed, the line shows below the
+    ///     target header, the group lands there, it keeps its collapsed state, and the feedback is
+    ///     cleared afterwards.
+    /// </summary>
+    [Fact]
+    public void MainWindow_DragGroupHeader_BelowAnotherGroup_ReordersGroupsWithLineFeedback() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: Alpha is collapsed
+        var (window, viewModel, _) = CreateWindow(Spec("a", "Alpha"), Spec("b", "Beta"), Spec("g", "Gamma"), Spec("u"));
+        viewModel.ToggleGroupCollapsed("Alpha");
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            // Act: start dragging Alpha's header
+            var drag = BeginGroupDrag(window, "Alpha");
+
+            // Assert: the group's name is dragged, as a group (not a card); the header is dimmed and
+            // the press did not toggle the section
+            Assert.NotNull(drag.Transfer);
+            Assert.Equal("Alpha", drag.Transfer.TryGetValue(MainWindow.RepoGroupDataFormat));
+            Assert.False(drag.Transfer.Contains(MainWindow.RepoCardDataFormat));
+            Assert.Contains("dragging", FindHeaderRow(window, "Alpha").Classes);
+            Assert.True(viewModel.IsGroupCollapsed("Alpha"));
+
+            // Act: over the lower half of Gamma's header
+            var point = PointIn(window, FindHeaderRow(window, "Gamma"), 0.75);
+            Raise(window, drag, RawDragEventType.DragEnter, point);
+            Raise(window, drag, RawDragEventType.DragOver, point);
+
+            // Assert: the line below Gamma's header
+            Assert.True(IsVisible(FindHeaderRow(window, "Gamma"), "GroupDropIndicatorBelow"));
+            Assert.False(IsVisible(FindHeaderRow(window, "Gamma"), "GroupDropIndicatorAbove"));
+
+            // Act: drop
+            Raise(window, drag, RawDragEventType.Drop, point);
+            await drag.CompleteAsync();
+
+            // Assert: Alpha is last, still collapsed, and nothing is left shown
+            Assert.Equal(["Beta", "Gamma", "Alpha", "Ungrouped"], HeaderNames(window));
+            Assert.True(viewModel.IsGroupCollapsed("Alpha"));
+            Assert.Equal(["Beta", "Gamma", "Alpha"], viewModel.Settings.GroupOrder);
+            Assert.All(
+                window.FindControl<ListBox>("RepoListBox")!.GetVisualDescendants().OfType<ListBoxItem>(),
+                row => Assert.DoesNotContain(row.Classes, name => name is "dropAbove" or "dropBelow" or "dropHeader" or "dragging"));
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that a dragged group header cannot be dropped on the Favorites or Ungrouped header or on a
+    ///     card (the drop is refused and nothing changes), while the card drag keeps working as before.
+    /// </summary>
+    [Fact]
+    public void MainWindow_DragGroupHeader_OntoBuiltInSectionOrCard_IsRefused() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange
+        var (window, viewModel, _) = CreateWindow(Spec("f", favorite: true), Spec("a", "Alpha"), Spec("b", "Beta"), Spec("u"));
+
+        try
+        {
+            // Act / Assert: onto Ungrouped, Favorites and a card - refused
+            var drag = BeginGroupDrag(window, "Beta");
+            Assert.Equal(DragDropEffects.None, DropAndGetEffects(window, drag, OnHeader(window, "Ungrouped")));
+            Assert.Equal(DragDropEffects.None, DropAndGetEffects(window, drag, OnHeader(window, "Favorites")));
+            Assert.Equal(DragDropEffects.None, DropAndGetEffects(window, drag, UpperHalf(window, "a")));
+            await drag.CompleteAsync();
+
+            // Assert
+            Assert.Equal(["Favorites", "Alpha", "Beta", "Ungrouped"], HeaderNames(window));
+            Assert.Empty(viewModel.Settings.GroupOrder);
+
+            // Act: a card is still dragged as a card
+            var cardDrag = BeginDrag(window, "u");
+            Drop(window, cardDrag, LowerHalf(window, "a"));
+            await cardDrag.CompleteAsync();
+
+            // Assert
+            Assert.Equal("Alpha", viewModel.RepoCards.Single(card => card.RepoName == "u").GroupName);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that while the filter has text a press and move on a group header starts no drag, and
+    ///     that Favorites and Ungrouped headers never start one.
+    /// </summary>
+    [Fact]
+    public void MainWindow_FilterActive_GroupHeaderDragStartsNothing() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, viewModel, _) = CreateWindow(Spec("f", favorite: true), Spec("alpha", "Alpha"), Spec("u"));
+
+        try
+        {
+            // Act / Assert: the built-in headers never drag
+            Assert.Null(BeginGroupDrag(window, "Favorites").Transfer);
+            Assert.Null(BeginGroupDrag(window, "Ungrouped").Transfer);
+
+            // Act: a filter
+            viewModel.FilterText = "a";
+            Dispatcher.UIThread.RunJobs();
+            var drag = BeginGroupDrag(window, "Alpha");
+
+            // Assert
+            Assert.Null(drag.Transfer);
+            Assert.DoesNotContain("dragging", FindHeaderRow(window, "Alpha").Classes);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that a group order made in the window (a header drag and a menu move) is what a new
+    ///     window over the saved settings shows (a restart).
+    /// </summary>
+    [Fact]
+    public void MainWindow_ReorderedGroups_OrderSurvivesAWindowRestart() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange
+        var (window, _, configDirectory) = CreateWindow(Spec("a", "Alpha"), Spec("b", "Beta"), Spec("g", "Gamma"));
+        MainWindow? restarted = null;
+
+        try
+        {
+            // Act: Gamma dragged above Alpha, then Beta moved up; then a "restart"
+            var drag = BeginGroupDrag(window, "Gamma");
+            Drop(window, drag, PointIn(window, FindHeaderRow(window, "Alpha"), 0.25));
+            await drag.CompleteAsync();
+            var menu = OpenHeaderMenu(window, "Beta");
+            Click(FindMenuItem(menu, "MoveGroupUpMenuItem"));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+            var expected = HeaderNames(window);
+
+            var viewModel = new MainWindowViewModel(SettingsStore.Load(configDirectory), configDirectory: configDirectory);
+            restarted = new MainWindow { DataContext = viewModel, Width = 900, Height = 1600 };
+            restarted.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert
+            Assert.Equal(["Gamma", "Beta", "Alpha"], expected);
+            Assert.Equal(expected, HeaderNames(restarted));
+        }
+        finally
+        {
+            restarted?.Close();
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that folders dropped from the file manager on a group's header, or on a card in a group's
+    ///     section, are added to that group (and no card is moved).
+    /// </summary>
+    [Fact]
+    public void MainWindow_DropFolders_OnGroupHeader_AddsThemToTheGroup() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, viewModel, _) = CreateWindow(Spec("w1", "Work"), Spec("h1", "Home"), Spec("u1"));
+        var first = CreateRepoDirectory("first");
+        var second = CreateRepoDirectory("second");
+        var third = CreateRepoDirectory("third");
+
+        try
+        {
+            // Act: two folders onto the Work header, one onto the Home card
+            var effects = DropExternal(window, OnHeader(window, "Work"), first, second);
+            DropExternal(window, UpperHalf(window, "h1"), third);
+
+            // Assert
+            Assert.Equal(DragDropEffects.Copy, effects);
+            Assert.Equal("Work", viewModel.RepoCards.Single(card => card.RepoName == "first").GroupName);
+            Assert.Equal("Work", viewModel.RepoCards.Single(card => card.RepoName == "second").GroupName);
+            Assert.Equal("Home", viewModel.RepoCards.Single(card => card.RepoName == "third").GroupName);
+            Assert.Equal(["h1", "third", "w1", "first", "second", "u1"], RowNames(window));
+            Assert.Empty(window.OwnedWindows);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that folders dropped on the Ungrouped header, on the Favorites header (a favorite is a mark
+    ///     on a repo, not a place to add to) or on empty space in the list are added without a group.
+    /// </summary>
+    [Fact]
+    public void MainWindow_DropFolders_OnUngroupedFavoritesOrEmptySpace_AddsThemUngrouped() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, viewModel, _) = CreateWindow(Spec("f", "Work", favorite: true), Spec("w1", "Work"), Spec("u1"));
+        var onUngrouped = CreateRepoDirectory("dropUngrouped");
+        var onFavorites = CreateRepoDirectory("dropFavorites");
+        var onEmpty = CreateRepoDirectory("dropEmpty");
+
+        try
+        {
+            // Act
+            DropExternal(window, OnHeader(window, "Ungrouped"), onUngrouped);
+            DropExternal(window, OnHeader(window, "Favorites"), onFavorites);
+            DropExternal(window, BelowTheRows(window), onEmpty);
+
+            // Assert: all three ungrouped, none a favorite
+            foreach (var name in new[] { "dropUngrouped", "dropFavorites", "dropEmpty" })
+            {
+                var card = viewModel.RepoCards.Single(other => other.RepoName == name);
+                Assert.Null(card.GroupName);
+                Assert.False(card.IsFavorite);
+            }
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that folders dropped on the empty-state panel (no repo listed yet) are added.
+    /// </summary>
+    [Fact]
+    public void MainWindow_DropFolders_OnEmptyStatePanel_AddsThem() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: no repos, so the empty-state panel is shown
+        var (window, viewModel, _) = CreateWindow();
+        var repo = CreateRepoDirectory("first");
+        var panel = window.FindControl<Border>("EmptyStatePanel")!;
+        Assert.True(panel.IsVisible);
+        var center = panel.TranslatePoint(new Point(panel.Bounds.Width / 2, panel.Bounds.Height / 2), window)!.Value;
+
+        try
+        {
+            // Act
+            var effects = DropExternal(window, center, repo);
+
+            // Assert
+            Assert.Equal(DragDropEffects.Copy, effects);
+            Assert.Equal(repo, Assert.Single(viewModel.RepoCards).RepoPath);
+            Assert.False(panel.IsVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that folders dragged from the file manager are answered with the copy effect, that a group
+    ///     header they would join is tinted and the list area is outlined where they would be added
+    ///     ungrouped, and that the feedback is cleared when the drag leaves and after the drop.
+    /// </summary>
+    [Fact]
+    public void MainWindow_DropFolders_ShowsCopyFeedbackAndClearsIt() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, _, _) = CreateWindow(Spec("w1", "Work"), Spec("u1"));
+        var transfer = CreateFileTransfer(window, CreateRepoDirectory("fresh"));
+        var area = window.FindControl<Grid>("RepoListArea")!;
+        var overlay = window.FindControl<Border>("ExternalDropOverlay")!;
+
+        try
+        {
+            // Act / Assert: over the Work header - copy, the header is tinted, no outline
+            var effects = RaiseExternal(window, transfer, RawDragEventType.DragEnter, OnHeader(window, "Work"));
+            Assert.Equal(DragDropEffects.Copy, effects);
+            Assert.Contains("dropHeader", FindHeaderRow(window, "Work").Classes);
+            Assert.False(overlay.IsVisible);
+
+            // Over the Ungrouped header: the outline instead of the tint
+            effects = RaiseExternal(window, transfer, RawDragEventType.DragOver, OnHeader(window, "Ungrouped"));
+            Assert.Equal(DragDropEffects.Copy, effects);
+            Assert.DoesNotContain("dropHeader", FindHeaderRow(window, "Work").Classes);
+            Assert.True(overlay.IsVisible);
+
+            // Leaving clears everything
+            RaiseExternal(window, transfer, RawDragEventType.DragLeave, OnHeader(window, "Ungrouped"));
+            Assert.False(overlay.IsVisible);
+            Assert.DoesNotContain("externalDrop", area.Classes);
+
+            // A drop clears too
+            RaiseExternal(window, transfer, RawDragEventType.DragEnter, OnHeader(window, "Work"));
+            RaiseExternal(window, transfer, RawDragEventType.Drop, OnHeader(window, "Work"));
+            Assert.False(overlay.IsVisible);
+            Assert.All(
+                window.FindControl<ListBox>("RepoListBox")!.GetVisualDescendants().OfType<ListBoxItem>(),
+                row => Assert.DoesNotContain("dropHeader", row.Classes));
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that a dropped file and a dropped folder that is not a Git repository are skipped and the
+    ///     user is told so in one message, while the repository dropped with them is added; no card is
+    ///     moved by the drop.
+    /// </summary>
+    [Fact]
+    public void MainWindow_DropFile_IsSkippedAsNotARepository() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, viewModel, _) = CreateWindow(Spec("u1"), Spec("u2"));
+        var repo = CreateRepoDirectory("fresh");
+        var file = Path.Combine(CreateTempDirectory(), "notes.txt");
+        File.WriteAllText(file, "a file, not a folder");
+        var plain = Path.Combine(CreateTempDirectory(), "plain");
+        Directory.CreateDirectory(plain);
+
+        try
+        {
+            // Act: dropped on a card, which must not be taken for a card move
+            DropExternal(window, UpperHalf(window, "u1"), file, repo, plain);
+
+            // Assert
+            Assert.Equal(["u1", "u2", "fresh"], viewModel.RepoCards.Select(card => card.RepoName));
+            var message = Assert.Single(window.OwnedWindows.OfType<MessageBoxWindow>());
+            var text = message.FindControl<TextBlock>("MessageText")!.Text!;
+            Assert.StartsWith("Added 1 of 3 folders.", text, StringComparison.Ordinal);
+            Assert.Contains("notes.txt", text, StringComparison.Ordinal);
+            Assert.Contains("plain", text, StringComparison.Ordinal);
+            message.Close();
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Deletes the temporary folders the tests created.
     /// </summary>
     public void Dispose()
@@ -722,11 +1146,22 @@ public sealed class RepoReorderWindowTests : IDisposable
     /// <param name="specs">The repos, in the user's stored order.</param>
     /// <returns>The window, its view model and its configuration directory.</returns>
     private (MainWindow Window, MainWindowViewModel ViewModel, string ConfigDirectory) CreateWindow(
-        params RepoSpec[] specs)
+        params RepoSpec[] specs) => CreateWindow([], specs);
+
+    /// <summary>
+    ///     Creates a shown main window over repos in the given (stored) order and with a stored order of
+    ///     the groups, like <see cref="CreateWindow(RepoSpec[])"/>.
+    /// </summary>
+    /// <param name="groupOrder">The user's stored order of the groups.</param>
+    /// <param name="specs">The repos, in the user's stored order.</param>
+    /// <returns>The window, its view model and its configuration directory.</returns>
+    private (MainWindow Window, MainWindowViewModel ViewModel, string ConfigDirectory) CreateWindow(
+        IReadOnlyList<string> groupOrder, params RepoSpec[] specs)
     {
         var configDirectory = CreateTempDirectory();
         var settings = new AppSettings
         {
+            GroupOrder = [.. groupOrder],
             AgentTool = AgentToolKind.Custom,
             CustomAgentCommand = "my-agent",
             ShellPreference = "pwsh",
@@ -855,6 +1290,150 @@ public sealed class RepoReorderWindowTests : IDisposable
     }
 
     /// <summary>
+    ///     Lists the section headers that are shown, top to bottom.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <returns>The sections' names.</returns>
+    private static List<string> HeaderNames(MainWindow window) =>
+        [.. window.FindControl<ListBox>("RepoListBox")!.GetVisualDescendants().OfType<ListBoxItem>()
+            .Where(row => row.DataContext is RepoGroupHeaderViewModel)
+            .OrderBy(row => row.TranslatePoint(new Point(0, 0), window)!.Value.Y)
+            .Select(row => ((RepoGroupHeaderViewModel)row.DataContext!).Name)];
+
+    /// <summary>
+    ///     Gets a point in the list below its last row (empty space).
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <returns>The point, in window coordinates.</returns>
+    private static Point BelowTheRows(MainWindow window)
+    {
+        var list = window.FindControl<ListBox>("RepoListBox")!;
+        return list.TranslatePoint(new Point(list.Bounds.Width / 2, list.Bounds.Height - 20), window)
+               ?? throw new InvalidOperationException("The list is not in the window.");
+    }
+
+    /// <summary>
+    ///     Opens the "..." menu of a group's header.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <param name="groupName">The group's name.</param>
+    /// <returns>The open menu.</returns>
+    private static MenuFlyout OpenHeaderMenu(MainWindow window, string groupName)
+    {
+        var button = window.GetVisualDescendantsOf<Button>("GroupHeaderMenuButton")
+            .Single(candidate => candidate.DataContext is RepoGroupHeaderViewModel header && header.Name == groupName);
+        var flyout = Assert.IsType<MenuFlyout>(button.Flyout);
+        flyout.ShowAt(button);
+        Dispatcher.UIThread.RunJobs();
+        return flyout;
+    }
+
+    /// <summary>
+    ///     Presses the left button on a section header's toggle (as a user grabs a header) and moves the
+    ///     pointer far enough to start a drag, with the window's drag starter replaced by one that
+    ///     records the dragged data and leaves the drag open.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <param name="sectionName">The section whose header is dragged.</param>
+    /// <returns>The drag; its <see cref="DragSession.Transfer"/> is <see langword="null"/> when no drag
+    ///     started.</returns>
+    private static DragSession BeginGroupDrag(MainWindow window, string sectionName)
+    {
+        var session = new DragSession();
+        window.DragStarter = (_, transfer, _) =>
+        {
+            session.Transfer = transfer;
+            return session.Completion.Task;
+        };
+
+        var toggle = FindHeaderRow(window, sectionName).GetVisualDescendants().OfType<Button>()
+            .Single(button => button.Name == "GroupHeaderToggleButton");
+        var start = toggle.TranslatePoint(new Point(toggle.Bounds.Width / 2, toggle.Bounds.Height / 2), window)
+                    ?? throw new InvalidOperationException("The header is not in the window.");
+        window.MouseDown(start, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+        window.MouseMove(new Point(start.X + 2, start.Y + 20), RawInputModifiers.LeftMouseButton);
+        window.MouseUp(new Point(start.X + 2, start.Y + 20), MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+        return session;
+    }
+
+    /// <summary>
+    ///     Builds the data the file manager hands over when files or folders are dragged: one storage
+    ///     item per path, as the window's storage provider describes the file or folder.
+    /// </summary>
+    /// <param name="window">The window whose storage provider describes the items.</param>
+    /// <param name="paths">The dragged files' and folders' paths.</param>
+    /// <returns>The data transfer.</returns>
+    private static DataTransfer CreateFileTransfer(MainWindow window, params string[] paths)
+    {
+        var transfer = new DataTransfer();
+        foreach (var path in paths)
+        {
+            IStorageItem? item = Directory.Exists(path)
+                ? window.StorageProvider.TryGetFolderFromPathAsync(path).GetAwaiter().GetResult()
+                : window.StorageProvider.TryGetFileFromPathAsync(path).GetAwaiter().GetResult();
+            transfer.Add(DataTransferItem.CreateFile(item ?? throw new InvalidOperationException($"No storage item for '{path}'.")));
+        }
+
+        return transfer;
+    }
+
+    /// <summary>
+    ///     Raises one platform drag event of a drag from the file manager (which offers copy, move and
+    ///     link) on the window, and returns the effect the window answered with.
+    /// </summary>
+    /// <remarks>
+    ///     The platform raises a drag-enter instead of a drag-over when the element under the pointer
+    ///     has changed (a header that is tinted is hit itself), so the effect of whichever drag event
+    ///     was raised last is returned.
+    /// </remarks>
+    /// <param name="window">The main window.</param>
+    /// <param name="transfer">The dragged data.</param>
+    /// <param name="type">The drag event.</param>
+    /// <param name="point">The pointer position, in window coordinates.</param>
+    /// <returns>The effect the window set on the last drag event it handled.</returns>
+    private static DragDropEffects RaiseExternal(MainWindow window, IDataTransfer transfer, RawDragEventType type, Point point)
+    {
+        var effects = DragDropEffects.None;
+        EventHandler<DragEventArgs> record = (_, e) => effects = e.DragEffects;
+        RoutedEvent<DragEventArgs>[] events = [DragDrop.DragEnterEvent, DragDrop.DragOverEvent, DragDrop.DropEvent];
+        foreach (var routedEvent in events)
+        {
+            window.AddHandler(routedEvent, record, RoutingStrategies.Bubble, handledEventsToo: true);
+        }
+
+        try
+        {
+            window.DragDrop(point, type, transfer, DragDropEffects.Copy | DragDropEffects.Move | DragDropEffects.Link);
+            Dispatcher.UIThread.RunJobs();
+            return effects;
+        }
+        finally
+        {
+            foreach (var routedEvent in events)
+            {
+                window.RemoveHandler(routedEvent, record);
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Drops files or folders from the file manager at a point: the pointer enters, moves and releases.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <param name="point">The pointer position, in window coordinates.</param>
+    /// <param name="paths">The dropped files' and folders' paths.</param>
+    /// <returns>The effect the window answered the drag over the point with.</returns>
+    private static DragDropEffects DropExternal(MainWindow window, Point point, params string[] paths)
+    {
+        var transfer = CreateFileTransfer(window, paths);
+        RaiseExternal(window, transfer, RawDragEventType.DragEnter, point);
+        var effects = RaiseExternal(window, transfer, RawDragEventType.DragOver, point);
+        RaiseExternal(window, transfer, RawDragEventType.Drop, point);
+        return effects;
+    }
+
+    /// <summary>
     ///     Raises one platform drag event on the window at a point, carrying the dragged data.
     /// </summary>
     /// <param name="window">The main window.</param>
@@ -956,6 +1535,8 @@ public sealed class RepoReorderWindowTests : IDisposable
     {
         var path = Path.Combine(CreateTempDirectory(), name);
         Directory.CreateDirectory(path);
+        Directory.CreateDirectory(Path.Combine(path, ".git"));
+        File.WriteAllText(Path.Combine(path, ".git", "HEAD"), "ref: refs/heads/main\n");
         return path;
     }
 

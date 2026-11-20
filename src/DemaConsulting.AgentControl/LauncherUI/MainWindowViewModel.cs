@@ -21,6 +21,7 @@
 using System.Collections.ObjectModel;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.AgentToolLauncher;
+using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.Settings;
@@ -29,16 +30,11 @@ using DemaConsulting.AgentControl.Startup;
 namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
-///     What became of a repo that was asked to be added to a group (see
-///     <see cref="MainWindowViewModel.AddRepoToGroup"/>).
+///     What became of a folder that was asked to be added to the repo list (see
+///     <see cref="MainWindowViewModel.AddRepoToGroup"/> and <see cref="MainWindowViewModel.AddRepos"/>).
 /// </summary>
 internal enum AddRepoResult
 {
-    /// <summary>
-    ///     The repo was not added: its folder does not exist, or (for the plain add) it is already listed.
-    /// </summary>
-    NotAdded,
-
     /// <summary>
     ///     The repo was added as a new entry (in the requested group, if one was given).
     /// </summary>
@@ -54,8 +50,62 @@ internal enum AddRepoResult
     ///     saved; the failure has already been reported through
     ///     <see cref="MainWindowViewModel.SettingsSaveFailed"/>.
     /// </summary>
-    MoveFailed
+    MoveFailed,
+
+    /// <summary>
+    ///     The repo is already listed and no group was requested, so nothing changed.
+    /// </summary>
+    AlreadyListed,
+
+    /// <summary>
+    ///     The folder does not exist.
+    /// </summary>
+    Missing,
+
+    /// <summary>
+    ///     The path is not the top folder of a Git repository (it has no <c>.git</c> folder or file
+    ///     directly in it), or it is a file rather than a folder; nothing was added.
+    /// </summary>
+    NotAGitRepository,
+
+    /// <summary>
+    ///     The repo could not be added because the settings could not be saved; nothing changed.
+    /// </summary>
+    SaveFailed
 }
+
+/// <summary>
+///     What became of one folder of a multi-folder add (see <see cref="MainWindowViewModel.AddRepos"/>).
+/// </summary>
+/// <param name="Path">The folder's path, as it was given.</param>
+/// <param name="Result">What became of it.</param>
+/// <param name="Problem">For <see cref="AddRepoResult.SaveFailed"/>, the reason the settings could not
+///     be saved, safe to show (secrets redacted); otherwise <see langword="null"/>.</param>
+internal sealed record AddRepoOutcome(string Path, AddRepoResult Result, string? Problem = null);
+
+/// <summary>
+///     The two ways the "Move" items of a group header's menu change the group's place in the list.
+/// </summary>
+internal enum RepoGroupMove
+{
+    /// <summary>
+    ///     One place towards the top of the list (never above Favorites).
+    /// </summary>
+    Up,
+
+    /// <summary>
+    ///     One place towards the bottom of the list (never below Ungrouped).
+    /// </summary>
+    Down
+}
+
+/// <summary>
+///     Where a dragged group header is dropped: next to another of the user's groups.
+/// </summary>
+/// <param name="GroupName">The group whose header the dragged one is dropped on.</param>
+/// <param name="InsertBefore"><see langword="true"/> to put the dragged group before
+///     <paramref name="GroupName"/> (the upper half of its header), <see langword="false"/> after it.</param>
+internal sealed record GroupDropTarget(string GroupName, bool InsertBefore);
 
 /// <summary>
 ///     The four ways the "Move" items of a card's menu change a repo's place within its section.
@@ -323,6 +373,10 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // A first run, or settings built in memory, still have to get the order older versions
         // displayed; a stored user order is left alone
         settings.EnsureRepoOrder();
+
+        // Settings built in memory have not been through the load's repair: the group colors and
+        // order are made to match the groups that exist, as a load would leave them
+        settings.RepairGroupSettings();
         _registryFactory = registryFactory;
         _processStarter = processStarter;
         _shellDetector = shellDetector;
@@ -385,8 +439,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <remarks>
     ///     <b>Sections.</b> When at least one repo is in a group (<see cref="HasGroups"/>) the list is
     ///     sectioned: <c>Favorites</c> first (the favorite repos - a favorite is listed only there,
-    ///     not again under its group, and its card shows a group chip), then the user's groups
-    ///     alphabetically, then <c>Ungrouped</c> last; sections with no matching repo have no header.
+    ///     not again under its group, and its card shows a group chip), then the user's groups in the
+    ///     user's own order (<see cref="AppSettings.GroupOrder"/>; groups without a stored position
+    ///     follow alphabetically), then <c>Ungrouped</c> last; sections with no matching repo have no header.
     ///     When no repo is in a group there are no headers at all and the list looks as it always
     ///     did, favorites first. Within a section repos are in the user's own order (the relative
     ///     order of <see cref="RepoCards"/>); the time of a launch plays no part. <b>Collapsing.</b>
@@ -488,8 +543,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="repoPath">Absolute path to the repository root to add.</param>
     /// <returns>
     ///     <see langword="true"/> if the repo was added; <see langword="false"/> if
-    ///     <paramref name="repoPath"/> does not exist or is already present in the list (compared
-    ///     case-insensitively, since Windows filesystem paths are case-insensitive).
+    ///     <paramref name="repoPath"/> does not exist, is already present in the list (compared
+    ///     case-insensitively, since Windows filesystem paths are case-insensitive), or is not the top
+    ///     folder of a Git repository (see <see cref="GitClient.IsRepositoryRoot"/>).
     /// </returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="repoPath"/> is null,
     ///     empty, or whitespace.</exception>
@@ -503,16 +559,19 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     of that group.
     /// </summary>
     /// <remarks>
-    ///     The same add as <see cref="AddRepo"/> (same folder check, same pin loading, one save), with
-    ///     the group set on the new entry before it is saved, so the repo never shows up ungrouped in
-    ///     between. A group that is collapsed is expanded afterwards so the repo that was just added
-    ///     is visible. The group is a per-user setting and is never written to the repository.
+    ///     The same add as <see cref="AddRepo"/> (same folder and Git repository checks, same pin
+    ///     loading, one save), with the group set on the new entry before it is saved, so the repo
+    ///     never shows up ungrouped in between. A group that is collapsed is expanded afterwards so the
+    ///     repo that was just added is visible. The group is a per-user setting and is never written to
+    ///     the repository.
     /// </remarks>
     /// <param name="repoPath">Absolute path to the repository root to add.</param>
     /// <param name="groupName">The group to put the repo in; it must be a valid group name (see
     ///     <see cref="RepoGroupName.Validate"/>). A name matching an existing group ignoring letter
     ///     case joins that group under its own spelling.</param>
-    /// <returns>What became of the repo (see <see cref="AddRepoResult"/>).</returns>
+    /// <returns>What became of the repo (see <see cref="AddRepoResult"/>); never
+    ///     <see cref="AddRepoResult.AlreadyListed"/> for a repo that has a card (it is moved), nor
+    ///     <see cref="AddRepoResult.SaveFailed"/> (a failed save throws).</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="repoPath"/> is null, empty or
     ///     whitespace, or <paramref name="groupName"/> is not a valid group name.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
@@ -521,29 +580,210 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoPath);
 
+        var target = ResolveAddTargetGroup(groupName);
+        var result = AddRepoCore(repoPath, target);
+        OpenGroupAfterAdd(target, [result]);
+        return result;
+    }
+
+    /// <summary>
+    ///     Adds several folders at once - from the folder picker with several folders chosen, or
+    ///     dropped from the file manager - each as <see cref="AddRepo"/> (or, with a group,
+    ///     <see cref="AddRepoToGroup"/>) would, and reports what became of each.
+    /// </summary>
+    /// <remarks>
+    ///     Every folder is checked and added on its own: one that is missing, not a Git repository
+    ///     root, already listed or that cannot be saved does not stop the others. A path that appears
+    ///     more than once (ignoring letter case) is handled once; blank entries are ignored. With a
+    ///     group, a repo that is already listed is moved into it, and a collapsed group is opened once
+    ///     at the end when anything was added to or moved into it. Each new repo is saved as it is
+    ///     added (so the list, the cards and the file stay in step whatever fails), and its upgrade
+    ///     check starts in the background.
+    /// </remarks>
+    /// <param name="repoPaths">The folders' absolute paths, in the order to add them.</param>
+    /// <param name="groupName">The group to put the repos in, or <see langword="null"/> for none;
+    ///     when given it must be a valid group name (see <see cref="RepoGroupName.Validate"/>), and a
+    ///     name matching an existing group ignoring letter case joins that group.</param>
+    /// <returns>One outcome per distinct, non-blank path, in the order given.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="repoPaths"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="groupName"/> is given but is
+    ///     not a valid group name; nothing was added.</exception>
+    public IReadOnlyList<AddRepoOutcome> AddRepos(IEnumerable<string> repoPaths, string? groupName)
+    {
+        ArgumentNullException.ThrowIfNull(repoPaths);
+
+        var target = groupName is null ? null : ResolveAddTargetGroup(groupName);
+        var outcomes = new List<AddRepoOutcome>();
+        foreach (var path in repoPaths
+                     .Where(path => !string.IsNullOrWhiteSpace(path))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                outcomes.Add(new AddRepoOutcome(path, AddRepoCore(path, target)));
+            }
+            catch (InvalidOperationException ex)
+            {
+                // This folder was not saved; the next ones are still tried
+                outcomes.Add(new AddRepoOutcome(path, AddRepoResult.SaveFailed, SecretRedactor.SafeMessage(ex)));
+            }
+        }
+
+        if (target is not null)
+        {
+            OpenGroupAfterAdd(target, outcomes.Select(outcome => outcome.Result));
+        }
+
+        return outcomes;
+    }
+
+    /// <summary>
+    ///     Checks the group an add was asked to put repos in and finds how it is spelled.
+    /// </summary>
+    /// <param name="groupName">The requested group name.</param>
+    /// <returns>The canonical name: the existing group's spelling when one matches ignoring letter
+    ///     case, otherwise the normalized requested name.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="groupName"/> is not a valid
+    ///     group name.</exception>
+    private string ResolveAddTargetGroup(string groupName)
+    {
         var requested = RepoGroupName.Normalize(groupName);
         if (requested is null || RepoGroupName.Validate(requested) != RepoGroupNameProblem.None)
         {
             throw new ArgumentException("The group name is not valid.", nameof(groupName));
         }
 
-        var target = RepoGroupName.Canonicalize(requested, GroupNames);
-        var result = AddRepoCore(repoPath, target);
+        return RepoGroupName.Canonicalize(requested, GroupNames);
+    }
 
-        // The repo that was just added or moved must be visible, so a collapsed group is opened
-        if (result is AddRepoResult.Added or AddRepoResult.MovedExisting && IsGroupCollapsed(target))
+    /// <summary>
+    ///     Opens a collapsed group after repos were added to or moved into it, so they are visible.
+    /// </summary>
+    /// <param name="groupName">The group the repos were put in.</param>
+    /// <param name="results">What became of each repo; the group is opened only when at least one
+    ///     was added or moved in.</param>
+    private void OpenGroupAfterAdd(string groupName, IEnumerable<AddRepoResult> results)
+    {
+        if (!results.Any(result => result is AddRepoResult.Added or AddRepoResult.MovedExisting) ||
+            !IsGroupCollapsed(groupName))
         {
-            try
-            {
-                ToggleGroupCollapsed(target);
-            }
-            catch (InvalidOperationException)
-            {
-                // The repo is in its group; only remembering that the group is open failed
-            }
+            return;
         }
 
-        return result;
+        try
+        {
+            ToggleGroupCollapsed(groupName);
+        }
+        catch (InvalidOperationException)
+        {
+            // The repos are in their group; only remembering that the group is open failed
+        }
+    }
+
+    /// <summary>
+    ///     The most folder names one category of <see cref="DescribeAddOutcomes"/>'s summary lists
+    ///     before it says how many more there are, so the message box stays a manageable size.
+    /// </summary>
+    private const int MaxNamesPerSummaryLine = 5;
+
+    /// <summary>
+    ///     Words what the user needs to know about an add: nothing when everything was added, the
+    ///     single-add message for one folder, or one combined summary for several.
+    /// </summary>
+    /// <remarks>
+    ///     A single folder gets the same messages a single add always gave, with the reason made
+    ///     specific (already listed, missing, not a Git repository, could not be saved, moved into the
+    ///     group); an added folder, or one whose move failed (already reported), needs no message.
+    ///     Several folders get one message, so a drop of many folders never opens a box per folder:
+    ///     <c>Added N of M folders.</c> followed by one line per kind of outcome that occurred, each
+    ///     naming the folders (at most five, then how many more). Pure.
+    /// </remarks>
+    /// <param name="outcomes">What became of each folder (see <see cref="AddRepos"/>).</param>
+    /// <param name="groupName">The group the folders were added to, or <see langword="null"/>.</param>
+    /// <returns>The message, or <see langword="null"/> when there is nothing to tell.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="outcomes"/> is
+    ///     <see langword="null"/>.</exception>
+    internal static string? DescribeAddOutcomes(IReadOnlyList<AddRepoOutcome> outcomes, string? groupName)
+    {
+        ArgumentNullException.ThrowIfNull(outcomes);
+
+        // One folder: the single-add messages
+        if (outcomes.Count == 1)
+        {
+            var (path, result, saveProblem) = outcomes[0];
+            return result switch
+            {
+                AddRepoResult.MovedExisting =>
+                    $"'{path}' is already in the list, so it was moved into the group \"{groupName}\".",
+                AddRepoResult.AlreadyListed => $"'{path}' could not be added: it is already in the list.",
+                AddRepoResult.Missing => $"'{path}' could not be added: it does not exist.",
+                AddRepoResult.NotAGitRepository =>
+                    $"'{path}' could not be added: it is not the top folder of a Git repository " +
+                    "(it has no .git folder or file).",
+                AddRepoResult.SaveFailed => $"'{path}' could not be added. {saveProblem}",
+                _ => null
+            };
+        }
+
+        // Several folders: silent when all were added, otherwise one summary by kind of outcome
+        if (outcomes.All(outcome => outcome.Result == AddRepoResult.Added))
+        {
+            return null;
+        }
+
+        var added = outcomes.Count(outcome => outcome.Result == AddRepoResult.Added);
+        var lines = new List<string> { $"Added {added} of {outcomes.Count} folders." };
+        AddSummaryLine(lines, outcomes, $"Already in the list, moved into \"{groupName}\"", AddRepoResult.MovedExisting);
+        AddSummaryLine(lines, outcomes, "Already in the list", AddRepoResult.AlreadyListed);
+        AddSummaryLine(
+            lines, outcomes, "Not the top folder of a Git repository (no .git folder or file)", AddRepoResult.NotAGitRepository);
+        AddSummaryLine(lines, outcomes, "Not found", AddRepoResult.Missing);
+        AddSummaryLine(lines, outcomes, "Not saved", AddRepoResult.SaveFailed, AddRepoResult.MoveFailed);
+        var problem = outcomes.FirstOrDefault(outcome => outcome.Problem is not null)?.Problem;
+        if (problem is not null)
+        {
+            lines.Add(problem);
+        }
+
+        return string.Join("\n", lines);
+    }
+
+    /// <summary>
+    ///     Adds one line of the multi-folder summary, naming the folders that had one of the given
+    ///     outcomes, when there are any.
+    /// </summary>
+    /// <param name="lines">The summary's lines so far.</param>
+    /// <param name="outcomes">Every folder's outcome.</param>
+    /// <param name="caption">The line's caption, for example <c>Not found</c>.</param>
+    /// <param name="results">The outcomes the line covers.</param>
+    private static void AddSummaryLine(
+        List<string> lines, IReadOnlyList<AddRepoOutcome> outcomes, string caption, params AddRepoResult[] results)
+    {
+        var names = outcomes
+            .Where(outcome => results.Contains(outcome.Result))
+            .Select(outcome => GetFolderDisplayName(outcome.Path))
+            .ToList();
+        if (names.Count == 0)
+        {
+            return;
+        }
+
+        var shown = string.Join(", ", names.Take(MaxNamesPerSummaryLine));
+        var more = names.Count > MaxNamesPerSummaryLine ? $" and {names.Count - MaxNamesPerSummaryLine} more" : string.Empty;
+        lines.Add($"{caption}: {shown}{more}.");
+    }
+
+    /// <summary>
+    ///     Gets the short name a summary uses for a folder: its last path segment, or the whole path
+    ///     when it has none (a drive root).
+    /// </summary>
+    /// <param name="path">The folder's path.</param>
+    /// <returns>The display name.</returns>
+    private static string GetFolderDisplayName(string path)
+    {
+        var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
+        return string.IsNullOrEmpty(name) ? path : name;
     }
 
     /// <summary>
@@ -551,10 +791,19 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     <paramref name="groupName"/> when given) or, for a repo already listed, moves its entry
     ///     into <paramref name="groupName"/> when given.
     /// </summary>
+    /// <remarks>
+    ///     The checks, in order: a path that is not a folder is <see cref="AddRepoResult.Missing"/>, or
+    ///     <see cref="AddRepoResult.NotAGitRepository"/> when it is a file (a dropped file); a repo
+    ///     that is already listed is <see cref="AddRepoResult.AlreadyListed"/> or moved into the group -
+    ///     it is never subject to the Git check, so the repos already in the list are left as they are;
+    ///     a folder that is not the top folder of a Git repository (see
+    ///     <see cref="GitClient.IsRepositoryRoot"/>) is <see cref="AddRepoResult.NotAGitRepository"/>.
+    /// </remarks>
     /// <param name="repoPath">Absolute path to the repository root.</param>
     /// <param name="groupName">The already validated and canonical group to put the repo in, or
     ///     <see langword="null"/> for none (the top-bar add).</param>
-    /// <returns>What became of the repo.</returns>
+    /// <returns>What became of the repo; never <see cref="AddRepoResult.SaveFailed"/> (a failed save
+    ///     throws).</returns>
     /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
     ///     nothing was added.</exception>
     private AddRepoResult AddRepoCore(string repoPath, string? groupName)
@@ -563,7 +812,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (!Directory.Exists(repoPath))
         {
-            return AddRepoResult.NotAdded;
+            return File.Exists(repoPath) ? AddRepoResult.NotAGitRepository : AddRepoResult.Missing;
         }
 
         // A repo that is already listed is not added twice; the group flow moves it instead
@@ -573,7 +822,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (groupName is null || existing is null)
             {
-                return AddRepoResult.NotAdded;
+                return AddRepoResult.AlreadyListed;
             }
 
             // A failed save is reported through SettingsSaveFailed by the card, and nothing moved
@@ -586,6 +835,12 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // that place is reported, and the repo stays in the group where it was
             PlaceCard(existing, null, false);
             return AddRepoResult.MovedExisting;
+        }
+
+        // Only the top folder of a Git repository can be tracked (synced, pulled, launched in)
+        if (!GitClient.IsRepositoryRoot(repoPath))
+        {
+            return AddRepoResult.NotAGitRepository;
         }
 
         var pin = TryLoadPin(repoPath);
@@ -654,8 +909,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     ///     Replaces the current settings with <paramref name="updated"/> (preserving the
-    ///     repo list and its order, which are only ever changed via <see cref="AddRepo"/>/
-    ///     <see cref="RemoveRepo"/>/<see cref="MoveCard"/>/<see cref="DropCard"/>), persists them (adopting them only if that succeeds), invalidates the shared
+    ///     repo list and its order, the collapsed sections and the group colors and order, which are
+    ///     only ever changed from the main window, e.g. via <see cref="AddRepo"/>/
+    ///     <see cref="RemoveRepo"/>/<see cref="MoveCard"/>/<see cref="DropCard"/>/<see cref="SetGroupColor"/>/<see cref="MoveGroup"/>), persists them (adopting them only if that succeeds), invalidates the shared
     ///     <see cref="PackageVersionCache"/> for each package source that was changed or removed
     ///     (cached results for an edited source would otherwise be silently reused; sources that
     ///     did not change keep theirs), and
@@ -714,6 +970,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         updated.RecentRepos = _settings.RecentRepos;
         updated.HasUserRepoOrder = _settings.HasUserRepoOrder;
         updated.CollapsedGroups = _settings.CollapsedGroups;
+        updated.GroupColors = _settings.GroupColors;
+        updated.GroupOrder = _settings.GroupOrder;
         SettingsStore.Save(updated, _configDirectory);
         _settings = updated;
         OnPropertyChanged(nameof(Settings));
@@ -1245,7 +1503,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     ///     Raised when a change the user made in the main window (marking a favorite, choosing a group
-    ///     or a card color, collapsing a section, a launch being recorded) could not be saved. The
+    ///     or a card color, coloring or moving a group, collapsing a section, a launch being recorded)
+    ///     could not be saved. The
     ///     change was not applied, so the list still shows what is on disk; the argument is the
     ///     message for the user and the window shows it.
     /// </summary>
@@ -1260,28 +1519,39 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     This is what keeps memory, the displayed list and the settings file in step. A failed save
     ///     leaves the live settings untouched, so a later, unrelated save can never write the change
     ///     that failed. The candidate copies the repos (so the change never reaches the live
-    ///     entries) and the collapsed list; everything else is shared and must not be changed by
-    ///     <paramref name="change"/>. The change runs twice (on the candidate, then on the live
-    ///     settings), so it must give the same result both times and must not depend on state that the
-    ///     first run changed.
+    ///     entries), the collapsed list, the group colors and the group order; everything else is
+    ///     shared and must not be changed by <paramref name="change"/>. The change runs twice (on the
+    ///     candidate, then on the live settings), so it must give the same result both times and must
+    ///     not depend on state that the first run changed. After each run the group colors and order
+    ///     are repaired (see <see cref="AppSettings.RepairGroupSettings"/>), so a group that lost its
+    ///     last repo forgets its color and position in the file and in memory alike.
     /// </remarks>
     /// <param name="change">The change, expressed on the settings it is given.</param>
     /// <exception cref="InvalidOperationException">Thrown when the candidate cannot be saved (the
     ///     file cannot be written, or a source embeds a credential); the live settings are unchanged.</exception>
     private void CommitSettingsChange(Action<AppSettings> change)
     {
-        // Candidate copy: the user's repos and collapsed sections are copied, so the trial change
-        // cannot reach the live objects
+        // Candidate copy: the user's repos, collapsed sections, group colors and group order are
+        // copied, so the trial change cannot reach the live objects
         var candidate = _settings.CreatePersistedCopy();
         candidate.RecentRepos = [.. _settings.RecentRepos.Select(repo => repo.Clone())];
         candidate.CollapsedGroups = [.. _settings.CollapsedGroups ?? []];
+        candidate.GroupColors = new Dictionary<string, string>(RepoGroupName.Comparer);
+        foreach (var (group, color) in _settings.GroupColors ?? new Dictionary<string, string>())
+        {
+            candidate.GroupColors.TryAdd(group, color);
+        }
+
+        candidate.GroupOrder = [.. _settings.GroupOrder ?? []];
         change(candidate);
+        candidate.RepairGroupSettings();
 
         // Save the candidate; an exception here leaves the live settings as they were
         SettingsStore.Save(candidate, _configDirectory);
 
         // Saved: adopt the change
         change(_settings);
+        _settings.RepairGroupSettings();
     }
 
     /// <summary>
@@ -1393,11 +1663,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // A favorite is listed only under Favorites; every other repo under its group or, with
             // none, under Ungrouped
             AddSection(RepoGroupKind.Favorites, RepoGroupName.FavoritesName, matches.Where(card => card.IsFavorite));
-            var groupNames = matches
-                .Where(card => !card.IsFavorite && card.HasGroup)
-                .Select(card => card.GroupName!)
-                .Distinct(RepoGroupName.Comparer)
-                .Order(RepoGroupName.Comparer);
+            var groupNames = ArrangeGroups(
+                matches.Where(card => !card.IsFavorite && card.HasGroup).Select(card => card.GroupName!),
+                _settings.GroupOrder);
             foreach (var groupName in groupNames)
             {
                 AddSection(
@@ -1438,6 +1706,14 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var collapsed = !isFiltering && IsGroupCollapsed(name);
             var header = GetHeader(kind, name);
             header.Update(members.Count, collapsed, isToggleEnabled: !isFiltering);
+            header.UpdateColor(kind == RepoGroupKind.Group ? _settings.FindGroupColor(name) : null);
+            if (kind == RepoGroupKind.Group)
+            {
+                header.UpdateOrder(
+                    GetGroupMoveDisabledReason(name, RepoGroupMove.Up),
+                    GetGroupMoveDisabledReason(name, RepoGroupMove.Down));
+            }
+
             usedHeaders.Add(header);
             items.Add(header);
             if (!collapsed)
@@ -1508,6 +1784,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         header.RenameRequested += (_, _) => GroupRenameRequested?.Invoke(this, header.Name);
         header.RemoveGroupRequested += (_, _) => GroupRemoveRequested?.Invoke(this, header.Name);
         header.AddRepoRequested += (_, _) => GroupAddRepoRequested?.Invoke(this, header.Name);
+        header.MoveRequested += (_, move) => MoveGroup(header.Name, move);
         _headers[key] = header;
         return header;
     }
@@ -1553,8 +1830,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    ///     Renames a group: every repo in it moves to the new name, and its collapsed state moves
-    ///     with it.
+    ///     Renames a group: every repo in it moves to the new name, and its collapsed state, its color
+    ///     and its place in the user's group order move with it.
     /// </summary>
     /// <param name="oldName">The group's current name; letter case is ignored.</param>
     /// <param name="newName">The new name. It must be valid (see <see cref="RepoGroupName.Validate"/>)
@@ -1577,8 +1854,14 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return false;
         }
 
-        // Every member takes the new spelling; the collapsed state follows the name
+        // Every member takes the new spelling; the collapsed state, the color and the place in the
+        // user's group order follow the name. Decided once, from the live state, so the trial change
+        // and the real one agree.
         var wasCollapsed = IsGroupCollapsed(oldName);
+        var color = _settings.FindGroupColor(oldName);
+        var order = (_settings.GroupOrder ?? [])
+            .Select(entry => RepoGroupName.Comparer.Equals(entry, oldName) ? target : entry)
+            .ToList();
         CommitSettingsChange(settings =>
         {
             foreach (var repo in settings.RecentRepos.Where(repo => IsInGroup(repo, oldName)))
@@ -1591,6 +1874,14 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 (settings.CollapsedGroups ??= []).Add(target);
             }
+
+            RemoveGroupColor(settings, oldName);
+            if (color is not null)
+            {
+                settings.GroupColors[target] = color;
+            }
+
+            settings.GroupOrder = [.. order];
         });
 
         FinishGroupEdit();
@@ -1598,8 +1889,22 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    ///     Removes every color entry of a group (letter case ignored) from some settings.
+    /// </summary>
+    /// <param name="settings">The settings to change.</param>
+    /// <param name="groupName">The group's name.</param>
+    private static void RemoveGroupColor(AppSettings settings, string groupName)
+    {
+        settings.GroupColors ??= new Dictionary<string, string>(RepoGroupName.Comparer);
+        foreach (var key in settings.GroupColors.Keys.Where(key => RepoGroupName.Comparer.Equals(key, groupName)).ToList())
+        {
+            settings.GroupColors.Remove(key);
+        }
+    }
+
+    /// <summary>
     ///     Removes a group: its repos become ungrouped (nothing on disk or in any repository changes)
-    ///     and its remembered collapsed state is forgotten.
+    ///     and its remembered collapsed state, color and place in the group order are forgotten.
     /// </summary>
     /// <param name="name">The group's name; letter case is ignored.</param>
     /// <returns><see langword="true"/> when the group existed and was removed.</returns>
@@ -1620,6 +1925,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             settings.CollapsedGroups?.RemoveAll(entry => RepoGroupName.Comparer.Equals(entry, name));
+            RemoveGroupColor(settings, name);
+            settings.GroupOrder?.RemoveAll(entry => RepoGroupName.Comparer.Equals(entry, name));
         });
 
         FinishGroupEdit();
@@ -1637,6 +1944,274 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         UpdateDisplayedRepoCards();
+    }
+
+    /// <summary>
+    ///     Gives one of the user's groups a color from the card color palette, or takes its color
+    ///     away, and saves the choice.
+    /// </summary>
+    /// <remarks>
+    ///     The color shows as an accent on the group's header and is the tile color of the group's
+    ///     repos that have no card color of their own (a card's own color wins). It is stored only in
+    ///     the per-user settings (<see cref="AppSettings.GroupColors"/>), never in a repository, and is
+    ///     saved before it is applied, so a failed save changes nothing; the failure is reported
+    ///     through <see cref="SettingsSaveFailed"/> because the change comes from a menu the user used.
+    ///     Favorites and Ungrouped are not groups of the user's own and cannot be colored.
+    /// </remarks>
+    /// <param name="groupName">The group's name; letter case is ignored.</param>
+    /// <param name="colorName">A palette color's name (letter case ignored), or
+    ///     <see langword="null"/> (or blank) for no color.</param>
+    /// <returns><see langword="true"/> when the group now has the requested color (including when it
+    ///     already had); <see langword="false"/> when the group does not exist (or is a built-in
+    ///     section), the color is not in the palette, or the choice could not be saved - nothing
+    ///     changed then.</returns>
+    public bool SetGroupColor(string groupName, string? colorName)
+    {
+        var name = RepoGroupName.Sanitize(groupName);
+        var requested = string.IsNullOrWhiteSpace(colorName) ? null : CardColorPalette.Find(colorName);
+        if (name is null ||
+            !GroupNames.Contains(name, RepoGroupName.Comparer) ||
+            (requested is null && !string.IsNullOrWhiteSpace(colorName)))
+        {
+            return false;
+        }
+
+        // Stored under the group's own spelling; nothing to save when the color is already so
+        var group = RepoGroupName.Canonicalize(name, GroupNames);
+        var color = requested?.Name;
+        if (string.Equals(_settings.FindGroupColor(group), color, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        try
+        {
+            CommitSettingsChange(settings =>
+            {
+                RemoveGroupColor(settings, group);
+                if (color is not null)
+                {
+                    settings.GroupColors[group] = color;
+                }
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            ReportSaveFailure(ex);
+            return false;
+        }
+
+        FinishGroupEdit();
+        return true;
+    }
+
+    /// <summary>
+    ///     The explanation shown (as a tooltip on the disabled Move items of a group header's menu)
+    ///     while the filter has text and so the order of the groups cannot be changed.
+    /// </summary>
+    public const string GroupReorderDisabledWhileFilteringMessage =
+        "Clear the filter to change the order of the groups: while the filter has text only some groups " +
+        "are shown, so their positions cannot be changed.";
+
+    /// <summary>
+    ///     Puts group names in the order the list shows them: the ones with a stored position in that
+    ///     order, then the others alphabetically.
+    /// </summary>
+    /// <remarks>
+    ///     Pure. A stored name that matches none of <paramref name="names"/> is skipped; names are
+    ///     compared ignoring letter case and returned as spelled in <paramref name="names"/>.
+    /// </remarks>
+    /// <param name="names">The groups to arrange (duplicates ignoring letter case are dropped).</param>
+    /// <param name="order">The user's stored group order (<see cref="AppSettings.GroupOrder"/>), or
+    ///     <see langword="null"/> for none.</param>
+    /// <returns>The arranged names.</returns>
+    private static List<string> ArrangeGroups(IEnumerable<string> names, IReadOnlyList<string>? order)
+    {
+        var remaining = names.Distinct(RepoGroupName.Comparer).ToList();
+        var arranged = new List<string>();
+        foreach (var stored in order ?? [])
+        {
+            var match = remaining.FirstOrDefault(name => RepoGroupName.Comparer.Equals(name, stored));
+            if (match is not null)
+            {
+                arranged.Add(match);
+                remaining.Remove(match);
+            }
+        }
+
+        arranged.AddRange(remaining.Order(RepoGroupName.Comparer));
+        return arranged;
+    }
+
+    /// <summary>
+    ///     Gets the groups that have a section of their own (at least one repo that is not a
+    ///     favorite), in the order the list shows them - the groups a Move or a drag can reorder.
+    /// </summary>
+    /// <returns>The groups' names, first to last.</returns>
+    private List<string> GetMovableGroups() =>
+        ArrangeGroups(
+            RepoCards.Where(card => !card.IsFavorite && card.HasGroup).Select(card => card.GroupName!),
+            _settings.GroupOrder);
+
+    /// <summary>
+    ///     Gets why a group cannot be moved up or down now.
+    /// </summary>
+    /// <remarks>
+    ///     The wording is what the header's menu shows as the tooltip of the disabled item. A group is
+    ///     moved among the groups that have a section, so a group whose repos are all favorites (it has
+    ///     no header) cannot be moved; Favorites stays first and Ungrouped last.
+    /// </remarks>
+    /// <param name="groupName">The group's name; letter case is ignored.</param>
+    /// <param name="move">The move.</param>
+    /// <returns>The reason, or <see langword="null"/> when the move is allowed: the filter has no
+    ///     text, the group has a section, and it is not already at that end of the groups.</returns>
+    public string? GetGroupMoveDisabledReason(string groupName, RepoGroupMove move)
+    {
+        ArgumentNullException.ThrowIfNull(groupName);
+
+        if (!IsReorderEnabled)
+        {
+            return GroupReorderDisabledWhileFilteringMessage;
+        }
+
+        if (RepoGroupName.IsReserved(groupName))
+        {
+            return "Favorites always come first and Ungrouped last, so they cannot be moved.";
+        }
+
+        var groups = GetMovableGroups();
+        var index = groups.FindIndex(group => RepoGroupName.Comparer.Equals(group, groupName));
+        return index switch
+        {
+            < 0 => "This group is no longer in the list.",
+            0 when move == RepoGroupMove.Up => "This group is already the first group.",
+            _ when move == RepoGroupMove.Down && index == groups.Count - 1 => "This group is already the last group.",
+            _ => null
+        };
+    }
+
+    /// <summary>
+    ///     Gets whether a group can be moved the given way now.
+    /// </summary>
+    /// <param name="groupName">The group's name; letter case is ignored.</param>
+    /// <param name="move">The move.</param>
+    /// <returns><see langword="true"/> when <see cref="GetGroupMoveDisabledReason"/> has no reason.</returns>
+    public bool CanMoveGroup(string groupName, RepoGroupMove move) => GetGroupMoveDisabledReason(groupName, move) is null;
+
+    /// <summary>
+    ///     Moves a group one place up or down among the groups and saves the new order.
+    /// </summary>
+    /// <remarks>
+    ///     The group swaps places with the group before (or after) it in the list. The whole order of
+    ///     the groups as shown is then stored (<see cref="AppSettings.GroupOrder"/>), so groups that had
+    ///     no stored position yet keep the place they were shown at. Nothing changes (and nothing is
+    ///     saved) when the move is not allowed.
+    /// </remarks>
+    /// <param name="groupName">The group's name; letter case is ignored.</param>
+    /// <param name="move">The move.</param>
+    /// <returns><see langword="true"/> when the group was moved; <see langword="false"/> when the move
+    ///     is not allowed (see <see cref="GetGroupMoveDisabledReason"/>) or the order could not be
+    ///     saved (reported through <see cref="SettingsSaveFailed"/>); nothing changed then.</returns>
+    public bool MoveGroup(string groupName, RepoGroupMove move)
+    {
+        if (!CanMoveGroup(groupName, move))
+        {
+            return false;
+        }
+
+        var groups = GetMovableGroups();
+        var index = groups.FindIndex(group => RepoGroupName.Comparer.Equals(group, groupName));
+        var neighbor = groups[move == RepoGroupMove.Up ? index - 1 : index + 1];
+        return PlaceGroup(groups[index], neighbor, insertBefore: move == RepoGroupMove.Up);
+    }
+
+    /// <summary>
+    ///     Gets whether a dragged group header may be dropped on another group's header.
+    /// </summary>
+    /// <remarks>
+    ///     Pure: nothing is changed. Refused while the filter has text, for a group (dragged or
+    ///     target) that has no section of its own, for Favorites and Ungrouped, and for a drop on the
+    ///     dragged group's own header.
+    /// </remarks>
+    /// <param name="groupName">The dragged group's name; letter case is ignored.</param>
+    /// <param name="target">The place.</param>
+    /// <returns><see langword="true"/> when <see cref="DropGroup"/> would accept the drop.</returns>
+    public bool CanDropGroup(string groupName, GroupDropTarget target)
+    {
+        ArgumentNullException.ThrowIfNull(groupName);
+        ArgumentNullException.ThrowIfNull(target);
+
+        if (!IsReorderEnabled || RepoGroupName.Comparer.Equals(groupName, target.GroupName))
+        {
+            return false;
+        }
+
+        var groups = GetMovableGroups();
+        return groups.Contains(groupName, RepoGroupName.Comparer) && groups.Contains(target.GroupName, RepoGroupName.Comparer);
+    }
+
+    /// <summary>
+    ///     Drops a dragged group header before or after another group's header, and saves the new
+    ///     order of the groups.
+    /// </summary>
+    /// <remarks>
+    ///     Stores the whole order of the groups as shown (see <see cref="MoveGroup"/>). A collapsed
+    ///     group stays collapsed. A drop that leaves the order as it was saves nothing.
+    /// </remarks>
+    /// <param name="groupName">The dragged group's name; letter case is ignored.</param>
+    /// <param name="target">The place; see <see cref="CanDropGroup"/> for what is refused.</param>
+    /// <returns><see langword="true"/> when the group is now at the place; <see langword="false"/> when
+    ///     the drop was refused or the order could not be saved (reported through
+    ///     <see cref="SettingsSaveFailed"/>).</returns>
+    public bool DropGroup(string groupName, GroupDropTarget target)
+    {
+        if (!CanDropGroup(groupName, target))
+        {
+            return false;
+        }
+
+        var groups = GetMovableGroups();
+        var dragged = groups.First(group => RepoGroupName.Comparer.Equals(group, groupName));
+        var anchor = groups.First(group => RepoGroupName.Comparer.Equals(group, target.GroupName));
+        return PlaceGroup(dragged, anchor, target.InsertBefore);
+    }
+
+    /// <summary>
+    ///     Puts a group before or after another one in the order of all groups, saves that order and
+    ///     updates the list.
+    /// </summary>
+    /// <param name="groupName">The group to place, as spelled.</param>
+    /// <param name="anchor">The group to place it next to, as spelled.</param>
+    /// <param name="insertBefore"><see langword="true"/> to place it before <paramref name="anchor"/>,
+    ///     <see langword="false"/> after it.</param>
+    /// <returns><see langword="true"/> when the group is at the place (including when it already was,
+    ///     in which case nothing is saved); <see langword="false"/> when the order could not be saved
+    ///     (reported through <see cref="SettingsSaveFailed"/>), in which case nothing changed.</returns>
+    private bool PlaceGroup(string groupName, string anchor, bool insertBefore)
+    {
+        // Every group (also those whose repos are all favorites) keeps a place, so the order stays
+        // complete; decided once, from the live state, so the trial change and the real one agree
+        var current = ArrangeGroups(GroupNames, _settings.GroupOrder);
+        var order = current.Where(group => !RepoGroupName.Comparer.Equals(group, groupName)).ToList();
+        var index = order.FindIndex(group => RepoGroupName.Comparer.Equals(group, anchor));
+        order.Insert(insertBefore ? index : index + 1, groupName);
+        if (order.SequenceEqual(current, RepoGroupName.Comparer))
+        {
+            return true;
+        }
+
+        try
+        {
+            CommitSettingsChange(settings => settings.GroupOrder = [.. order]);
+        }
+        catch (InvalidOperationException ex)
+        {
+            ReportSaveFailure(ex);
+            return false;
+        }
+
+        UpdateDisplayedRepoCards();
+        return true;
     }
 
     /// <summary>
@@ -1663,8 +2238,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     ///     Raised when the user asks to add a repository to a group from its header's menu (the
-    ///     group's name is the argument); the window shows the folder picker and calls
-    ///     <see cref="AddRepoToGroup"/>.
+    ///     group's name is the argument); the window shows the folder picker (several folders may be
+    ///     chosen) and calls <see cref="AddRepos"/> with the group.
     /// </summary>
     public event EventHandler<string>? GroupAddRepoRequested;
 

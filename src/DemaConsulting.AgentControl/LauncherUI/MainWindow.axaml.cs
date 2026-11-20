@@ -53,10 +53,12 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 ///     to a message box) - all Launch/Pull/Upgrade/settings-persistence business logic lives in
 ///     <see cref="MainWindowViewModel"/> and <see cref="RepoCardViewModel"/> so it stays testable
 ///     without this window ever being constructed in a unit test. That includes the reordering
-///     rules: this class also owns the drag-and-drop plumbing (starting a drag from a card,
-///     translating the pointer position into a <see cref="RepoDropTarget"/>, drawing the insertion
-///     line and the header tint, auto-scrolling) and the enabling of the card menu's Move items,
-///     while <see cref="MainWindowViewModel"/> decides what is allowed and does it.
+///     rules: this class also owns the drag-and-drop plumbing (starting a drag from a card or a group
+///     header, translating the pointer position into a <see cref="RepoDropTarget"/> or a
+///     <see cref="GroupDropTarget"/>, drawing the insertion line and the header tint, auto-scrolling,
+///     and accepting folders dropped from the file manager), the color palette pop-ups of cards and
+///     groups, the folder picker (several folders at once) and the enabling of the card menu's Move
+///     items, while <see cref="MainWindowViewModel"/> decides what is allowed and does it.
 /// </remarks>
 internal sealed partial class MainWindow : Window
 {
@@ -893,8 +895,17 @@ internal sealed partial class MainWindow : Window
         DataFormat.CreateStringApplicationFormat("DemaConsulting.AgentControl.RepoCard");
 
     /// <summary>
+    ///     The data format of a dragged group header: one string item, the group's name. Separate from
+    ///     <see cref="RepoCardDataFormat"/>, so a dragged group is never taken for a card (or the other
+    ///     way round) and neither is ever taken for folders from the file manager.
+    /// </summary>
+    internal static readonly DataFormat<string> RepoGroupDataFormat =
+        DataFormat.CreateStringApplicationFormat("DemaConsulting.AgentControl.RepoGroup");
+
+    /// <summary>
     ///     How far (in device-independent pixels) the pointer must move with the button held on a card
-    ///     before a drag starts, so a plain click or a slightly unsteady one never drags.
+    ///     or a group header before a drag starts, so a plain click or a slightly unsteady one never
+    ///     drags.
     /// </summary>
     private const double DragThreshold = 6;
 
@@ -905,8 +916,8 @@ internal sealed partial class MainWindow : Window
     private const double AutoScrollEdge = 24;
 
     /// <summary>
-    ///     Starts the operating system's drag-and-drop for a card; <see langword="null"/> uses
-    ///     <see cref="DragDrop.DoDragDropAsync"/>.
+    ///     Starts the operating system's drag-and-drop for a card or a group header;
+    ///     <see langword="null"/> uses <see cref="DragDrop.DoDragDropAsync"/>.
     /// </summary>
     /// <remarks>
     ///     A test seam, like <see cref="RepoFolderPicker"/>: the headless platform has no drag source, so
@@ -918,10 +929,10 @@ internal sealed partial class MainWindow : Window
     internal Func<PointerPressedEventArgs, IDataTransfer, DragDropEffects, Task<DragDropEffects>>? DragStarter { get; set; }
 
     /// <summary>
-    ///     The card the pointer was pressed on (and the press that did it) while it may still turn
-    ///     into a drag; <see langword="null"/> when no press is pending.
+    ///     The card or group header the pointer was pressed on (and the press that did it) while it may
+    ///     still turn into a drag; <see langword="null"/> when no press is pending.
     /// </summary>
-    private (RepoCardViewModel Card, ListBoxItem Container, PointerPressedEventArgs Press, Point Start)? _dragCandidate;
+    private (object Item, ListBoxItem Container, PointerPressedEventArgs Press, Point Start)? _dragCandidate;
 
     /// <summary>
     ///     The list row that currently shows drop feedback and the class that does it, so the feedback
@@ -930,15 +941,21 @@ internal sealed partial class MainWindow : Window
     private (ListBoxItem Container, string Class)? _dropFeedback;
 
     /// <summary>
-    ///     Connects the repo list's drag source and drop target handlers.
+    ///     Connects the repo list's drag source and drop target handlers, and the list area's drop
+    ///     target for folders from the file manager.
     /// </summary>
     /// <remarks>
-    ///     The press is observed on the way down (and also when something handled it), so a card that
-    ///     is pressed on can become a drag whatever its list row does with the press. Every business
-    ///     rule - what may be dropped where, and what a drop does - is the view model's
-    ///     (<see cref="MainWindowViewModel.CanDrop"/> and <see cref="MainWindowViewModel.DropCard"/>);
-    ///     this class only translates pointer positions into <see cref="RepoDropTarget"/>s and shows
-    ///     the feedback.
+    ///     The press is observed on the way down (and also when something handled it), so a card or a
+    ///     group header that is pressed on can become a drag whatever its list row does with the press.
+    ///     Every business rule - what may be dropped where, and what a drop does - is the view model's
+    ///     (<see cref="MainWindowViewModel.CanDrop"/>/<see cref="MainWindowViewModel.DropCard"/> for
+    ///     cards, <see cref="MainWindowViewModel.CanDropGroup"/>/<see cref="MainWindowViewModel.DropGroup"/>
+    ///     for groups, <see cref="MainWindowViewModel.AddRepos"/> for folders); this class only
+    ///     translates pointer positions into targets and shows the feedback. A drag is told apart by its
+    ///     data, always in the same order - a card, then a group, then files - so folders from the file
+    ///     manager are never taken for a card move, and a card or a group is never taken for folders.
+    ///     The list handles every drag over it; the list area's handlers only see the drags the list did
+    ///     not handle (over the empty-state panel or the margins).
     /// </remarks>
     private void WireRepoListDragAndDrop()
     {
@@ -956,11 +973,21 @@ internal sealed partial class MainWindow : Window
         DragDrop.AddDragOverHandler(list, RepoList_DragOver);
         DragDrop.AddDragLeaveHandler(list, RepoList_DragLeave);
         DragDrop.AddDropHandler(list, RepoList_Drop);
+
+        var area = this.FindControl<Grid>("RepoListArea");
+        if (area is not null)
+        {
+            DragDrop.AddDragEnterHandler(area, RepoListArea_DragOver);
+            DragDrop.AddDragOverHandler(area, RepoListArea_DragOver);
+            DragDrop.AddDragLeaveHandler(area, RepoListArea_DragLeave);
+            DragDrop.AddDropHandler(area, RepoListArea_Drop);
+        }
     }
 
     /// <summary>
-    ///     Remembers the card the left button was pressed on as a possible drag, unless reordering is
-    ///     off, the press is on one of the card's own controls, or the row is a section header.
+    ///     Remembers the card, or the user's group header, the left button was pressed on as a possible
+    ///     drag, unless reordering is off or the press is on one of the row's own controls (for a card:
+    ///     a button, the star, a menu or a text box; for a header: its "..." menu button).
     /// </summary>
     /// <param name="sender">The list.</param>
     /// <param name="e">The press.</param>
@@ -975,20 +1002,28 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        // A press on a button, the star, a menu or a text box is that control's, not the card's
         var ancestors = source.GetSelfAndVisualAncestors().ToList();
         var container = ancestors.OfType<ListBoxItem>().FirstOrDefault();
-        var inCardControl = ancestors
-            .TakeWhile(visual => visual is not ListBoxItem)
-            .Any(visual => visual is Button or TextBox or MenuItem or ScrollBar);
-        if (container is { DataContext: RepoCardViewModel card } && !inCardControl)
+        var inRow = ancestors.TakeWhile(visual => visual is not ListBoxItem).ToList();
+        // A press on a card's button, star, menu or text box is that control's, not the card's
+        if (container is { DataContext: RepoCardViewModel card } &&
+            !inRow.Any(visual => visual is Button or TextBox or MenuItem or ScrollBar))
         {
             _dragCandidate = (card, container, e, e.GetPosition(list));
+        }
+
+        // The whole header of a user's group drags, except its "..." menu button; Favorites and
+        // Ungrouped never do
+        else if (container is { DataContext: RepoGroupHeaderViewModel { IsUserGroup: true } header } &&
+                 !inRow.Any(visual => visual is Button { Name: "GroupHeaderMenuButton" } or MenuItem or TextBox or ScrollBar))
+        {
+            _dragCandidate = (header, container, e, e.GetPosition(list));
         }
     }
 
     /// <summary>
-    ///     Starts the drag once the pointer has moved far enough from where it was pressed on a card.
+    ///     Starts the drag once the pointer has moved far enough from where it was pressed on a card or
+    ///     a group header.
     /// </summary>
     /// <param name="sender">The list.</param>
     /// <param name="e">The move.</param>
@@ -1013,7 +1048,12 @@ internal sealed partial class MainWindow : Window
         }
 
         _dragCandidate = null;
-        _ = StartDragAsync(candidate.Card, candidate.Container, candidate.Press);
+        _ = candidate.Item switch
+        {
+            RepoCardViewModel card => StartDragAsync(card, candidate.Container, candidate.Press),
+            RepoGroupHeaderViewModel header => StartGroupDragAsync(header, candidate.Container, candidate.Press),
+            _ => Task.CompletedTask
+        };
     }
 
     /// <summary>
@@ -1035,6 +1075,39 @@ internal sealed partial class MainWindow : Window
     {
         var transfer = new DataTransfer();
         transfer.Add(DataTransferItem.Create(RepoCardDataFormat, card.RepoPath));
+        container.Classes.Add("dragging");
+        try
+        {
+            var starter = DragStarter ?? DragDrop.DoDragDropAsync;
+            await starter(press, transfer, DragDropEffects.Move);
+        }
+        finally
+        {
+            container.Classes.Remove("dragging");
+            ClearDropFeedback();
+        }
+    }
+
+    /// <summary>
+    ///     Runs a drag of a group header: dims the header, hands the group's name to the drag source
+    ///     and, when the drag ends however it ends, removes the dimming and any drop feedback.
+    /// </summary>
+    /// <remarks>
+    ///     The header's toggle button took the pointer capture when it was pressed; the capture is
+    ///     released first, so the button loses its pressed state and the release at the end of the drag
+    ///     is not taken as a click that would collapse or expand the section. A collapsed group stays
+    ///     collapsed.
+    /// </remarks>
+    /// <param name="header">The dragged group's header.</param>
+    /// <param name="container">The header's list row.</param>
+    /// <param name="press">The press that started the drag.</param>
+    /// <returns>A task that completes when the drag has ended.</returns>
+    private async Task StartGroupDragAsync(
+        RepoGroupHeaderViewModel header, ListBoxItem container, PointerPressedEventArgs press)
+    {
+        press.Pointer.Capture(null);
+        var transfer = new DataTransfer();
+        transfer.Add(DataTransferItem.Create(RepoGroupDataFormat, header.Name));
         container.Classes.Add("dragging");
         try
         {
@@ -1073,14 +1146,50 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Decides whether a card is dropped before or after the card it is over, from the pointer's
-    ///     height within that card's row.
+    ///     Gets the group whose header is being dragged over the list, from the data of the drag.
+    /// </summary>
+    /// <param name="e">The drag event.</param>
+    /// <param name="viewModel">The window's view model.</param>
+    /// <param name="groupName">The dragged group's name when this returns <see langword="true"/>.</param>
+    /// <returns><see langword="true"/> when the drag carries a group name and the window has its view
+    ///     model.</returns>
+    private bool TryGetDraggedGroup(
+        DragEventArgs e,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out MainWindowViewModel? viewModel,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? groupName)
+    {
+        viewModel = DataContext as MainWindowViewModel;
+        groupName = viewModel is null ? null : e.DataTransfer.TryGetValue(RepoGroupDataFormat);
+        return viewModel is not null && !string.IsNullOrWhiteSpace(groupName);
+    }
+
+    /// <summary>
+    ///     Decides whether a card or a group header is dropped before or after the row it is over, from
+    ///     the pointer's height within that row.
     /// </summary>
     /// <param name="y">The pointer's vertical position within the row.</param>
     /// <param name="height">The row's height.</param>
     /// <returns><see langword="true"/> for the upper half (insert before),
     ///     <see langword="false"/> for the lower half (insert after).</returns>
     internal static bool IsUpperHalf(double y, double height) => y < height / 2;
+
+    /// <summary>
+    ///     Gets the list row the pointer of a drag is over.
+    /// </summary>
+    /// <param name="e">The drag event.</param>
+    /// <returns>The row, or <see langword="null"/> when the pointer is not over one (or the list is
+    ///     hidden).</returns>
+    private ListBoxItem? GetRowUnderPointer(DragEventArgs e)
+    {
+        var list = this.FindControl<ListBox>("RepoListBox");
+        if (list is null || !list.IsVisible)
+        {
+            return null;
+        }
+
+        var hit = list.InputHitTest(e.GetPosition(list)) as Visual;
+        return hit?.GetSelfAndVisualAncestors().OfType<ListBoxItem>().FirstOrDefault();
+    }
 
     /// <summary>
     ///     Works out where a drop at the pointer's position would put a card.
@@ -1090,14 +1199,7 @@ internal sealed partial class MainWindow : Window
     ///     is not over a card or a section header.</returns>
     private (RepoDropTarget Target, ListBoxItem Container)? GetDropTarget(DragEventArgs e)
     {
-        var list = this.FindControl<ListBox>("RepoListBox");
-        if (list is null)
-        {
-            return null;
-        }
-
-        var hit = list.InputHitTest(e.GetPosition(list)) as Visual;
-        var container = hit?.GetSelfAndVisualAncestors().OfType<ListBoxItem>().FirstOrDefault();
+        var container = GetRowUnderPointer(e);
         switch (container?.DataContext)
         {
             case RepoGroupHeaderViewModel header:
@@ -1115,12 +1217,52 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Answers a drag over the list: says whether a drop here is possible, shows where the card
-    ///     would land and scrolls the list when the pointer is near its top or bottom edge.
+    ///     Works out where a drop at the pointer's position would put a dragged group: before or after
+    ///     the user's group whose header the pointer is over.
+    /// </summary>
+    /// <param name="e">The drag event.</param>
+    /// <returns>The place and the header's row, or <see langword="null"/> when the pointer is not over
+    ///     the header of one of the user's groups (a card, Favorites, Ungrouped or empty space).</returns>
+    private (GroupDropTarget Target, ListBoxItem Container)? GetGroupDropTarget(DragEventArgs e)
+    {
+        var container = GetRowUnderPointer(e);
+        if (container is not { DataContext: RepoGroupHeaderViewModel { IsUserGroup: true } header })
+        {
+            return null;
+        }
+
+        var position = e.GetPosition(container);
+        return (new GroupDropTarget(header.Name, IsUpperHalf(position.Y, container.Bounds.Height)), container);
+    }
+
+    /// <summary>
+    ///     Answers a drag over the list: a dragged card, a dragged group header, or folders from the file
+    ///     manager, told apart in that order by the data of the drag.
     /// </summary>
     /// <param name="sender">The list.</param>
     /// <param name="e">The drag event.</param>
     private void RepoList_DragOver(object? sender, DragEventArgs e)
+    {
+        if (e.DataTransfer.Contains(RepoCardDataFormat))
+        {
+            CardDragOver(e);
+        }
+        else if (e.DataTransfer.Contains(RepoGroupDataFormat))
+        {
+            GroupDragOver(e);
+        }
+        else if (e.DataTransfer.Contains(DataFormat.File))
+        {
+            ExternalDragOver(e, overList: true);
+        }
+    }
+
+    /// <summary>
+    ///     Answers a card dragged over the list: says whether a drop here is possible, shows where the
+    ///     card would land and scrolls the list when the pointer is near its top or bottom edge.
+    /// </summary>
+    /// <param name="e">The drag event.</param>
+    private void CardDragOver(DragEventArgs e)
     {
         if (!TryGetDraggedCard(e, out var viewModel, out var card))
         {
@@ -1146,20 +1288,70 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Removes the drop feedback when the dragged card leaves the list.
+    ///     Answers a group header dragged over the list: says whether a drop here is possible (only on
+    ///     another of the user's group headers), shows the line above or below that header and scrolls
+    ///     the list near its edges.
+    /// </summary>
+    /// <param name="e">The drag event.</param>
+    private void GroupDragOver(DragEventArgs e)
+    {
+        if (!TryGetDraggedGroup(e, out var viewModel, out var groupName))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        var found = GetGroupDropTarget(e);
+        var allowed = found is { } target && viewModel.CanDropGroup(groupName, target.Target);
+        e.DragEffects = allowed ? DragDropEffects.Move : DragDropEffects.None;
+        if (allowed && found is { } shown)
+        {
+            ShowDropFeedback(shown.Container, shown.Target.InsertBefore ? "dropAbove" : "dropBelow");
+        }
+        else
+        {
+            ClearDropFeedback();
+        }
+
+        AutoScrollList(e);
+    }
+
+    /// <summary>
+    ///     Removes the drop feedback when the drag leaves the list.
     /// </summary>
     /// <param name="sender">The list (unused).</param>
     /// <param name="e">The drag event (unused).</param>
     private void RepoList_DragLeave(object? sender, DragEventArgs e) => ClearDropFeedback();
 
     /// <summary>
-    ///     Drops the dragged card where the pointer is, through the view model.
+    ///     Drops what is dragged where the pointer is: a card or a group header through the view model's
+    ///     reordering, or folders from the file manager through its add.
     /// </summary>
     /// <param name="sender">The list.</param>
     /// <param name="e">The drag event.</param>
     private void RepoList_Drop(object? sender, DragEventArgs e)
     {
         ClearDropFeedback();
+        if (e.DataTransfer.Contains(RepoCardDataFormat))
+        {
+            CardDrop(e);
+        }
+        else if (e.DataTransfer.Contains(RepoGroupDataFormat))
+        {
+            GroupDrop(e);
+        }
+        else if (e.DataTransfer.Contains(DataFormat.File))
+        {
+            ExternalDrop(e, overList: true);
+        }
+    }
+
+    /// <summary>
+    ///     Drops the dragged card where the pointer is, through the view model.
+    /// </summary>
+    /// <param name="e">The drag event.</param>
+    private void CardDrop(DragEventArgs e)
+    {
         if (!TryGetDraggedCard(e, out var viewModel, out var card))
         {
             return;
@@ -1177,6 +1369,228 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
+    ///     Drops the dragged group header before or after the group header the pointer is over, through
+    ///     the view model.
+    /// </summary>
+    /// <param name="e">The drag event.</param>
+    private void GroupDrop(DragEventArgs e)
+    {
+        if (!TryGetDraggedGroup(e, out var viewModel, out var groupName))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        e.DragEffects = GetGroupDropTarget(e) is { } found && viewModel.DropGroup(groupName, found.Target)
+            ? DragDropEffects.Move
+            : DragDropEffects.None;
+    }
+
+    /// <summary>
+    ///     Answers a drag over the list area that the list did not handle (the empty-state panel or the
+    ///     margins): folders from the file manager would be added ungrouped; anything else cannot be
+    ///     dropped there.
+    /// </summary>
+    /// <param name="sender">The list area.</param>
+    /// <param name="e">The drag event.</param>
+    private void RepoListArea_DragOver(object? sender, DragEventArgs e)
+    {
+        if (IsExternalFileDrag(e))
+        {
+            ExternalDragOver(e, overList: false);
+        }
+        else
+        {
+            e.Handled = true;
+            e.DragEffects = DragDropEffects.None;
+        }
+    }
+
+    /// <summary>
+    ///     Removes every drop feedback when the drag leaves the list area.
+    /// </summary>
+    /// <param name="sender">The list area (unused).</param>
+    /// <param name="e">The drag event (unused).</param>
+    private void RepoListArea_DragLeave(object? sender, DragEventArgs e) => ClearExternalDropFeedback();
+
+    /// <summary>
+    ///     Adds the folders dropped on the list area outside the list (the empty-state panel or the
+    ///     margins), ungrouped.
+    /// </summary>
+    /// <param name="sender">The list area.</param>
+    /// <param name="e">The drag event.</param>
+    private void RepoListArea_Drop(object? sender, DragEventArgs e)
+    {
+        ClearExternalDropFeedback();
+        if (IsExternalFileDrag(e))
+        {
+            ExternalDrop(e, overList: false);
+        }
+    }
+
+    /// <summary>
+    ///     Gets whether a drag carries files or folders from outside the application (and not a card or
+    ///     a group header of this window).
+    /// </summary>
+    /// <param name="e">The drag event.</param>
+    /// <returns><see langword="true"/> for files or folders from the file manager.</returns>
+    private static bool IsExternalFileDrag(DragEventArgs e) =>
+        !e.DataTransfer.Contains(RepoCardDataFormat) &&
+        !e.DataTransfer.Contains(RepoGroupDataFormat) &&
+        e.DataTransfer.Contains(DataFormat.File);
+
+    /// <summary>
+    ///     Works out which group folders dropped at the pointer's position would join.
+    /// </summary>
+    /// <remarks>
+    ///     Over the header of one of the user's groups, or over a card listed in such a group's section,
+    ///     the folders join that group (and that header is the one to tint, when its row is realized).
+    ///     Everywhere else - Favorites (a favorite is a per-repo mark, not a place to add to), Ungrouped,
+    ///     the flat list and empty space - they are added ungrouped.
+    /// </remarks>
+    /// <param name="e">The drag event.</param>
+    /// <returns>The group (or <see langword="null"/> for none) and the row of its header to tint (or
+    ///     <see langword="null"/>).</returns>
+    private (string? GroupName, ListBoxItem? HeaderContainer) GetExternalDropGroup(DragEventArgs e)
+    {
+        var container = GetRowUnderPointer(e);
+        switch (container?.DataContext)
+        {
+            case RepoGroupHeaderViewModel { IsUserGroup: true } header:
+                return (header.Name, container);
+
+            case RepoCardViewModel { IsFavorite: false, GroupName: { } groupName }
+                when DataContext is MainWindowViewModel viewModel:
+                var groupHeader = viewModel.DisplayedItems
+                    .OfType<RepoGroupHeaderViewModel>()
+                    .FirstOrDefault(other => other.IsUserGroup && RepoGroupName.Comparer.Equals(other.Name, groupName));
+                var list = this.FindControl<ListBox>("RepoListBox");
+                var headerContainer = groupHeader is null ? null : list?.ContainerFromItem(groupHeader) as ListBoxItem;
+                return (groupName, headerContainer);
+
+            default:
+                return (null, null);
+        }
+    }
+
+    /// <summary>
+    ///     Answers folders from the file manager dragged over the list or the list area: they can be
+    ///     added (a copy - nothing is moved on disk) and the feedback shows where - the tinted header of
+    ///     the group they would join, or the outlined list area when they would be added ungrouped.
+    /// </summary>
+    /// <param name="e">The drag event.</param>
+    /// <param name="overList">Whether the drag is over the list (where the row under the pointer can
+    ///     name a group) rather than elsewhere in the list area.</param>
+    private void ExternalDragOver(DragEventArgs e, bool overList)
+    {
+        if (DataContext is not MainWindowViewModel)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        e.DragEffects &= DragDropEffects.Copy;
+        if (e.DragEffects == DragDropEffects.None)
+        {
+            ClearExternalDropFeedback();
+            return;
+        }
+
+        var (groupName, headerContainer) = overList ? GetExternalDropGroup(e) : (null, null);
+        if (groupName is null)
+        {
+            ClearDropFeedback();
+            ShowExternalDropOverlay(true);
+        }
+        else
+        {
+            ShowExternalDropOverlay(false);
+            if (headerContainer is not null)
+            {
+                ShowDropFeedback(headerContainer, "dropHeader");
+            }
+            else
+            {
+                ClearDropFeedback();
+            }
+        }
+
+        if (overList)
+        {
+            AutoScrollList(e);
+        }
+    }
+
+    /// <summary>
+    ///     Adds the folders dropped from the file manager - into the group they were dropped on, or
+    ///     ungrouped - and then tells the user, in one message, what was not added and why.
+    /// </summary>
+    /// <remarks>
+    ///     The folders are added at once; the message (if any) is shown afterwards, posted to the UI
+    ///     thread, so no dialog opens inside the operating system's drag-and-drop loop. Dropped files
+    ///     are not repositories and are reported as such.
+    /// </remarks>
+    /// <param name="e">The drag event.</param>
+    /// <param name="overList">Whether the drop is on the list (where the row under the pointer can name
+    ///     a group) rather than elsewhere in the list area.</param>
+    private void ExternalDrop(DragEventArgs e, bool overList)
+    {
+        ClearExternalDropFeedback();
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        var paths = GetDroppedPaths(e);
+        if ((e.DragEffects & DragDropEffects.Copy) == DragDropEffects.None || paths.Count == 0)
+        {
+            e.DragEffects = DragDropEffects.None;
+            return;
+        }
+
+        var groupName = overList ? GetExternalDropGroup(e).GroupName : null;
+        var outcomes = viewModel.AddRepos(paths, groupName);
+        e.DragEffects = DragDropEffects.Copy;
+
+        var notice = MainWindowViewModel.DescribeAddOutcomes(outcomes, groupName);
+        if (notice is not null)
+        {
+            Dispatcher.UIThread.Post(() => _ = ShowNoticeAsync(notice));
+        }
+    }
+
+    /// <summary>
+    ///     Gets the local paths of the files and folders a drag carries.
+    /// </summary>
+    /// <param name="e">The drag event.</param>
+    /// <returns>The paths, in the order the drag lists them; items without a local path are left
+    ///     out.</returns>
+    private static List<string> GetDroppedPaths(DragEventArgs e) =>
+    [
+        .. (e.DataTransfer.TryGetFiles() ?? [])
+            .Select(item => item.TryGetLocalPath() ?? (item.Path is { IsAbsoluteUri: true, IsFile: true } uri ? uri.LocalPath : null))
+            .OfType<string>()
+    ];
+
+    /// <summary>
+    ///     Shows or hides the outline over the list area that says dropped folders would be added
+    ///     ungrouped.
+    /// </summary>
+    /// <param name="show">Whether to show it.</param>
+    private void ShowExternalDropOverlay(bool show) =>
+        this.FindControl<Grid>("RepoListArea")?.Classes.Set("externalDrop", show);
+
+    /// <summary>
+    ///     Removes every feedback of a drag from the file manager: the area outline and a header tint.
+    /// </summary>
+    private void ClearExternalDropFeedback()
+    {
+        ShowExternalDropOverlay(false);
+        ClearDropFeedback();
+    }
+
+    /// <summary>
     ///     Shows where a card would land: a line above or below the card the pointer is over, or a tint on
     ///     the header it is over.
     /// </summary>
@@ -1190,6 +1604,17 @@ internal sealed partial class MainWindow : Window
             feedbackClass = target.InsertBefore ? "dropAbove" : "dropBelow";
         }
 
+        ShowDropFeedback(container, feedbackClass);
+    }
+
+    /// <summary>
+    ///     Shows drop feedback on one list row: <c>dropAbove</c> or <c>dropBelow</c> (the insertion
+    ///     line) or <c>dropHeader</c> (the header tint), removing any feedback shown elsewhere.
+    /// </summary>
+    /// <param name="container">The list row.</param>
+    /// <param name="feedbackClass">The feedback class.</param>
+    private void ShowDropFeedback(ListBoxItem container, string feedbackClass)
+    {
         if (_dropFeedback is { } current && ReferenceEquals(current.Container, container) && current.Class == feedbackClass)
         {
             return;
@@ -1267,7 +1692,7 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        var button = FindControlOfCard<Button>(card, "MoreActionsButton");
+        var button = FindControlOfItem<Button>(card, "MoreActionsButton");
         if (button is null)
         {
             return;
@@ -1282,18 +1707,14 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Applies the color of the clicked swatch (or "Automatic") to the card whose palette is open,
-    ///     then closes the palette.
+    ///     Applies the color chosen in a card's palette (a swatch, or "Automatic") to the card whose
+    ///     palette is open, then closes the palette.
     /// </summary>
-    /// <param name="sender">The clicked swatch or "Automatic" <see cref="Button"/>; its tag is the
-    ///     palette color's name, or empty for Automatic.</param>
-    /// <param name="e">Routed event arguments (unused).</param>
-    private void CardColorSwatch_Click(object? sender, RoutedEventArgs e)
+    /// <param name="sender">The card's <see cref="ColorPalettePanel"/> (unused).</param>
+    /// <param name="e">The chosen color's name, or <see langword="null"/> for Automatic.</param>
+    private void CardColorPalette_ColorChosen(object? sender, ColorChosenEventArgs e)
     {
-        if (sender is Button { Tag: string name } && _paletteCard is { } card)
-        {
-            card.SetCardColor(name.Length == 0 ? null : name);
-        }
+        _paletteCard?.SetCardColor(e.ColorName);
 
         _paletteFlyout?.Hide();
         _paletteFlyout = null;
@@ -1301,18 +1722,74 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Finds a named control inside a card's list row.
+    ///     The group whose color palette is open, so a swatch click knows which group to color; set
+    ///     while the pop-up is shown.
+    /// </summary>
+    private RepoGroupHeaderViewModel? _paletteHeader;
+
+    /// <summary>
+    ///     Opens the color palette pop-up of the group whose "Group color..." menu item was clicked,
+    ///     anchored to that header's "..." button.
+    /// </summary>
+    /// <remarks>
+    ///     Shown after the menu has finished closing (posted), for the same reason as
+    ///     <see cref="CardColorMenuItem_Click"/>.
+    /// </remarks>
+    /// <param name="sender">The clicked "Group color..." <see cref="MenuItem"/>.</param>
+    /// <param name="e">Routed event arguments (unused).</param>
+    private void GroupColorMenuItem_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: RepoGroupHeaderViewModel { IsUserGroup: true } header })
+        {
+            return;
+        }
+
+        var button = FindControlOfItem<Button>(header, "GroupHeaderMenuButton");
+        if (button is null)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            _paletteHeader = header;
+            _paletteFlyout = FlyoutBase.GetAttachedFlyout(button);
+            FlyoutBase.ShowAttachedFlyout(button);
+        });
+    }
+
+    /// <summary>
+    ///     Applies the color chosen in a group's palette (a swatch, or "None") to the group whose
+    ///     palette is open, through the view model, then closes the palette.
+    /// </summary>
+    /// <param name="sender">The group's <see cref="ColorPalettePanel"/> (unused).</param>
+    /// <param name="e">The chosen color's name, or <see langword="null"/> for None.</param>
+    private void GroupColorPalette_ColorChosen(object? sender, ColorChosenEventArgs e)
+    {
+        // A failed save is reported to the user by the view model
+        if (_paletteHeader is { } header && DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.SetGroupColor(header.Name, e.ColorName);
+        }
+
+        _paletteFlyout?.Hide();
+        _paletteFlyout = null;
+        _paletteHeader = null;
+    }
+
+    /// <summary>
+    ///     Finds a named control inside the list row of an item (a card or a section header).
     /// </summary>
     /// <typeparam name="T">The control type.</typeparam>
-    /// <param name="card">The card whose row to search.</param>
+    /// <param name="item">The card or header whose row to search.</param>
     /// <param name="name">The control's <see cref="StyledElement.Name"/>.</param>
-    /// <returns>The control, or <see langword="null"/> when the card is not shown (for example it
-    ///     is in a collapsed group or filtered out).</returns>
-    private T? FindControlOfCard<T>(RepoCardViewModel card, string name)
+    /// <returns>The control, or <see langword="null"/> when the item is not shown (for example a
+    ///     card in a collapsed group, or filtered out).</returns>
+    private T? FindControlOfItem<T>(object item, string name)
         where T : Control
     {
         var list = this.FindControl<ListBox>("RepoListBox");
-        return list?.ContainerFromItem(card)?
+        return list?.ContainerFromItem(item)?
             .GetVisualDescendants()
             .OfType<T>()
             .FirstOrDefault(control => control.Name == name);
@@ -1423,79 +1900,57 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Gets or sets how the user picks a repository folder; <see langword="null"/> uses the
-    ///     native folder-browse dialog. A seam so tests can answer with a path (or cancel) without
-    ///     a real dialog.
+    ///     Gets or sets how the user picks repository folders; <see langword="null"/> uses the
+    ///     native folder-browse dialog (which allows several folders). A seam so tests can answer with
+    ///     paths (or an empty list, for a cancel) without a real dialog.
     /// </summary>
-    internal Func<Task<string?>>? RepoFolderPicker { get; set; }
+    internal Func<Task<IReadOnlyList<string>>>? RepoFolderPicker { get; set; }
 
     /// <summary>
     ///     The add-repository flow shared by the top-bar "Add Repo" button and a group header's
-    ///     "Add repository..." menu item: asks the user for a folder, adds it through the view model,
-    ///     and says what the user needs to know about the outcome.
+    ///     "Add repository..." menu item: asks the user for one or more folders, adds them through the
+    ///     view model, and says what the user needs to know about the outcome.
     /// </summary>
     /// <remarks>
-    ///     A cancelled picker changes nothing and says nothing. With a group, a repo that is already
-    ///     listed is moved into the group (and the notice says so); without one it is refused, as
-    ///     the top-bar add always did.
+    ///     A cancelled picker changes nothing and says nothing. Each folder is handled as a single add
+    ///     would handle it (see <see cref="MainWindowViewModel.AddRepos"/>): with a group, a repo that
+    ///     is already listed is moved into the group; without one it is refused; a folder that is not
+    ///     the top folder of a Git repository is refused. One folder gets the single-add message,
+    ///     several get one combined summary (see <see cref="MainWindowViewModel.DescribeAddOutcomes"/>).
     /// </remarks>
     /// <param name="viewModel">The main view model that owns the repo list.</param>
-    /// <param name="groupName">The group to put the repo in, or <see langword="null"/> for the plain
+    /// <param name="groupName">The group to put the repos in, or <see langword="null"/> for the plain
     ///     add.</param>
-    /// <returns>A message for the user, or <see langword="null"/> when the repo was added (or the
+    /// <returns>A message for the user, or <see langword="null"/> when everything was added (or the
     ///     picker was cancelled, or the failure was already reported).</returns>
     internal async Task<string?> AddRepoAsync(MainWindowViewModel viewModel, string? groupName)
     {
-        var path = await (RepoFolderPicker ?? BrowseForRepoPathAsync)();
-        if (string.IsNullOrWhiteSpace(path))
+        var paths = await (RepoFolderPicker ?? BrowseForRepoPathsAsync)();
+        if (paths.Count == 0)
         {
             return null;
         }
 
-        AddRepoResult result;
-        try
-        {
-            if (groupName is null)
-            {
-                result = viewModel.AddRepo(path) ? AddRepoResult.Added : AddRepoResult.NotAdded;
-            }
-            else
-            {
-                result = viewModel.AddRepoToGroup(path, groupName);
-            }
-        }
-        catch (InvalidOperationException ex)
-        {
-            // The repo was not added because the list could not be saved; say why
-            return $"'{path}' could not be added. {SecretRedactor.SafeMessage(ex)}";
-        }
-
-        return result switch
-        {
-            AddRepoResult.NotAdded when groupName is null =>
-                $"'{path}' could not be added: it does not exist or is already in the list.",
-            AddRepoResult.NotAdded => $"'{path}' could not be added: it does not exist.",
-            AddRepoResult.MovedExisting => $"'{path}' is already in the list, so it was moved into the group \"{groupName}\".",
-            _ => null
-        };
+        var outcomes = viewModel.AddRepos(paths, groupName);
+        return MainWindowViewModel.DescribeAddOutcomes(outcomes, groupName);
     }
 
     /// <summary>
-    ///     Shows the native folder-browse dialog and returns the chosen folder's local path.
+    ///     Shows the native folder-browse dialog, allowing several folders, and returns the chosen
+    ///     folders' local paths.
     /// </summary>
-    /// <returns>The selected folder's local path, or <see langword="null"/> if the user
-    ///     canceled the dialog (honoring the OK/Cancel result rather than assuming a folder was
-    ///     always chosen).</returns>
-    private async Task<string?> BrowseForRepoPathAsync()
+    /// <returns>The selected folders' local paths (folders without a local path are left out), or
+    ///     an empty list if the user canceled the dialog (honoring the OK/Cancel result rather than
+    ///     assuming a folder was always chosen).</returns>
+    private async Task<IReadOnlyList<string>> BrowseForRepoPathsAsync()
     {
         var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "Select a repository folder",
-            AllowMultiple = false
+            Title = "Select one or more repository folders",
+            AllowMultiple = true
         });
 
-        var folder = folders.Count > 0 ? folders[0] : null;
-        return folder?.TryGetLocalPath();
+        return [.. folders.Select(folder => folder.TryGetLocalPath()).OfType<string>()];
     }
 
     /// <summary>

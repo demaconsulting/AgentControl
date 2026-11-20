@@ -756,6 +756,118 @@ public class GitClientTests
             Directory.Delete(repoDir, recursive: true);
         }
     }
+
+    /// <summary>
+    ///     Test that a folder with a <c>.git</c> folder directly in it is a repository root.
+    /// </summary>
+    [Fact]
+    public void GitClient_IsRepositoryRoot_GitDirectory_ReturnsTrue()
+    {
+        // Arrange
+        var folder = Directory.CreateTempSubdirectory("agentcontrol_root_").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(folder, ".git"));
+
+            // Act / Assert
+            Assert.True(GitClient.IsRepositoryRoot(folder));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a folder with a <c>.git</c> file directly in it (a linked worktree or a submodule)
+    ///     is a repository root.
+    /// </summary>
+    [Fact]
+    public void GitClient_IsRepositoryRoot_GitFile_ReturnsTrue()
+    {
+        // Arrange
+        var folder = Directory.CreateTempSubdirectory("agentcontrol_root_").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(folder, ".git"), "gitdir: ../main/.git/worktrees/feature\n");
+
+            // Act / Assert
+            Assert.True(GitClient.IsRepositoryRoot(folder));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a folder without a <c>.git</c> folder or file is not a repository root.
+    /// </summary>
+    [Fact]
+    public void GitClient_IsRepositoryRoot_NoGit_ReturnsFalse()
+    {
+        // Arrange
+        var folder = Directory.CreateTempSubdirectory("agentcontrol_root_").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(folder, "README.md"), "not a repository");
+
+            // Act / Assert
+            Assert.False(GitClient.IsRepositoryRoot(folder));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a subfolder of a repository is not a repository root: the parent folders are not
+    ///     searched for a <c>.git</c>.
+    /// </summary>
+    [Fact]
+    public void GitClient_IsRepositoryRoot_SubfolderOfRepository_ReturnsFalse()
+    {
+        // Arrange
+        var folder = Directory.CreateTempSubdirectory("agentcontrol_root_").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(folder, ".git"));
+            var subfolder = Directory.CreateDirectory(Path.Combine(folder, "src", "app")).FullName;
+
+            // Act / Assert
+            Assert.False(GitClient.IsRepositoryRoot(subfolder));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a folder that does not exist is not a repository root (and the check does not
+    ///     fail).
+    /// </summary>
+    [Fact]
+    public void GitClient_IsRepositoryRoot_MissingFolder_ReturnsFalse()
+    {
+        // Arrange
+        var missing = Path.Combine(Path.GetTempPath(), "agentcontrol_missing_root_" + Guid.NewGuid().ToString("N"));
+
+        // Act / Assert
+        Assert.False(GitClient.IsRepositoryRoot(missing));
+    }
+
+    /// <summary>
+    ///     Test that a blank path is refused with an <see cref="ArgumentException"/>.
+    /// </summary>
+    /// <param name="path">The blank path.</param>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void GitClient_IsRepositoryRoot_BlankPath_ThrowsArgumentException(string path)
+    {
+        // Act / Assert
+        Assert.ThrowsAny<ArgumentException>(() => GitClient.IsRepositoryRoot(path));
+    }
 }
-
-

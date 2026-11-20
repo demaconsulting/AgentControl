@@ -43,7 +43,10 @@ internal sealed record CardColor(string Name, int Index);
 ///     color values. Entries are looked up by name, never by position, so reordering the palette in a
 ///     later version cannot change anyone's choice. The names themselves come from
 ///     <see cref="RecentRepo.CardColorNames"/>, which is also what the settings load repairs an
-///     unknown stored name against. Stateless and thread-safe.
+///     unknown stored name against. The same palette colors a group (see
+///     <see cref="AppSettings.GroupColors"/>): its header accent uses the <c>GroupAccent{Index}</c>
+///     resources (lighter or darker than the tile where needed so the bar reaches 3:1 on the page in
+///     both themes) and its uncolored cards' tiles use the tile resources. Stateless and thread-safe.
 /// </remarks>
 internal static class CardColorPalette
 {

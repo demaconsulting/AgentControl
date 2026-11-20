@@ -279,6 +279,81 @@ public class ThemeResourceTests
     });
 
     /// <summary>
+    ///     Test that the About banner's name and tagline reach AA text contrast in both themes, on the
+    ///     banner's band and where its glows are strongest.
+    /// </summary>
+    /// <param name="variantName">The theme variant to check.</param>
+    [Theory]
+    [InlineData("Light")]
+    [InlineData("Dark")]
+    public void ThemeResources_AboutBanner_TextIsLegibleInLightAndDark(string variantName) => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: the band, and the band under the strongest point of each glow
+        var palette = LoadPalette(variantName == "Light" ? ThemeVariant.Light : ThemeVariant.Dark);
+        var band = Opaque(palette, "AboutBannerBackground");
+        var surfaces = new List<(string Name, Color Color)> { ("band", band) };
+        foreach (var glow in new[] { "AboutBannerGlowPrimary", "AboutBannerGlowSecondary" })
+        {
+            var brush = Assert.IsType<RadialGradientBrush>(palette[glow]);
+            var strongest = brush.GradientStops.OrderByDescending(stop => stop.Color.A).First().Color;
+            surfaces.Add((glow, Over(new SolidColorBrush(strongest), band)));
+        }
+
+        Assert.IsType<LinearGradientBrush>(palette["AboutBannerAccent"]);
+        var failures = new List<string>();
+
+        // Act: the name and the tagline on every surface
+        foreach (var text in new[] { "AboutBannerForeground", "AboutBannerTaglineForeground" })
+        {
+            foreach (var (name, color) in surfaces)
+            {
+                var ratio = Contrast(Opaque(palette, text), color);
+                if (ratio < TextContrast)
+                {
+                    failures.Add($"{text} on {name}: {ratio:F2}");
+                }
+            }
+        }
+
+        // Assert
+        Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
+    });
+
+    /// <summary>
+    ///     Test that every group color accent reaches graphics contrast (3:1) on the page a header is
+    ///     drawn on and on the tint a header gets while something is dragged over it, in both themes.
+    /// </summary>
+    /// <param name="variantName">The theme variant to check.</param>
+    [Theory]
+    [InlineData("Light")]
+    [InlineData("Dark")]
+    public void ThemeResources_GroupAccent_MeetsGraphicsContrastInLightAndDark(string variantName) => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var palette = LoadPalette(variantName == "Light" ? ThemeVariant.Light : ThemeVariant.Dark);
+        var page = Opaque(palette, "PageBackground");
+        var tinted = Over(Brush(palette, "RepoDropTargetBackground"), page);
+        var failures = new List<string>();
+
+        // Act: one accent per palette color
+        foreach (var color in CardColorPalette.All)
+        {
+            var accent = Opaque(palette, $"GroupAccent{color.Index}");
+            foreach (var (name, surface) in new[] { ("page", page), ("drop tint", tinted) })
+            {
+                var ratio = Contrast(accent, surface);
+                if (ratio < GraphicContrast)
+                {
+                    failures.Add($"{color.Name} on {name}: {ratio:F2}");
+                }
+            }
+        }
+
+        // Assert
+        Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
+    });
+
+    /// <summary>
     ///     Loads the theme dictionary of one variant from the shared styles file.
     /// </summary>
     /// <param name="variant">The variant (<see cref="ThemeVariant.Light"/> or
