@@ -58,8 +58,10 @@ runtime.
 
 # The Main Window
 
-![The AgentControl main window in the dark theme: the app bar, then repo cards in the Favorites and Client Work
-sections](images/main-window-dark.png)
+![The AgentControl main window in the dark theme: the app bar, then repo cards in the Favorites section and in the
+Internal and Client Work groups, listed in the user's own order; the Client Work header has a teal color bar, and the
+repos of that group without a card color of their own, including the favorite payments-api, have teal
+tiles](images/main-window-dark.png)
 
 The top of the main window is one compact **app bar** below the window's normal title bar. From left to right it
 holds:
@@ -133,8 +135,8 @@ Each repo card shows:
   **Move up**, **Move down** and **Move to bottom**) and **Card color...** (see *Organizing Repos with Groups*,
   *Ordering Your Repos* and *Choosing a Card Color*). Then **Remove from list**.
 
-![A card with the repo's own picture and an up-to-date package, a section header, and a card with an upgrade chip
-and an uncommitted-changes warning](images/repo-card-anatomy.png)
+![A card with the repo's own picture and an up-to-date package, a group header with its teal color bar, and a card
+with a teal tile from its group, an upgrade chip and an uncommitted-changes warning](images/repo-card-anatomy.png)
 
 ![The open "..." menu of a card: Git Pull and Refresh under Repository, Change package... under Agent files, Move to
 group, Reorder (its submenu open, with Move to top, Move up, Move down and Move to bottom) and Card color under
@@ -189,7 +191,8 @@ separator **Rename group...** (the same prompt; another group's name is refused)
 confirmation and leaves the group's repos in the list, ungrouped. Nothing on disk changes. The built-in **Favorites**
 and **Ungrouped** headers have no menu.
 
-![The open "..." menu of the Client Work group header: Add repository..., then Rename group... and Remove
+![The open "..." menu of the Client Work group header, which has a teal color bar: Add repository..., then Move up,
+Move down (disabled, as Client Work is the last group) and Group color..., then Rename group... and Remove
 group](images/group-menu.png)
 
 The **filter box** always searches all repos: while it has text, every section is shown expanded and a section
@@ -271,7 +274,8 @@ name, for example "Group color: Teal" (screen readers announce the same).
 
 The tiles of the group's repos that have no card color of their own use the group's color. A repo's own card color
 always wins (see *Choosing a Card Color*), and a favorite in a colored group keeps its group's color while it is
-listed under **Favorites**. The built-in **Favorites** and **Ungrouped** sections cannot be colored.
+listed under **Favorites**. The built-in **Favorites** and **Ungrouped** sections cannot be colored. In the main
+window picture, Client Work is a teal group.
 
 Like the group itself, its color is stored only in your own AgentControl settings file. It follows the group when you
 rename it, and it is forgotten when the group is removed or its last repo leaves it.
@@ -1285,6 +1289,9 @@ version, including the build identifier after a `+`), copyright, and license tex
 build without inspecting file properties, and the list of this application's direct third-party dependencies and
 their licenses. The window is wide enough for the banner, and the **Close** button stays visible at the bottom
 however far you scroll.
+
+![The About window in the dark theme: the banner with the AgentControl logo, name and tagline, then the description,
+the Version row, copyright, license and the list of dependencies, and the Close button](images/about.png)
 
 # Using the Keyboard in Dialogs
 
