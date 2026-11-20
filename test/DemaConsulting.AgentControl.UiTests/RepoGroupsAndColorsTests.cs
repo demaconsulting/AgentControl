@@ -493,10 +493,11 @@ public sealed class RepoGroupsAndColorsTests
     /// <summary>
     ///     Choosing "Group color..." in a group header's menu opens the group palette; choosing a swatch
     ///     shows the group's accent (named for assistive technology), stores the color by group name in
-    ///     the settings file only, and "None" takes it away again.
+    ///     the settings file only, the accent is still shown after a restart (as is a card color chosen
+    ///     from the card's palette before it), and "None" takes it away again.
     /// </summary>
     [Fact]
-    public void GroupHeaderMenu_GroupColor_ColorsHeaderAndStoresInSettingsOnly()
+    public void GroupHeaderMenu_GroupColor_ColorsHeaderStoresInSettingsOnlyAndKeepsItAfterRestart()
     {
         if (!System.OperatingSystem.IsWindows())
         {
@@ -516,19 +517,38 @@ public sealed class RepoGroupsAndColorsTests
         Assert.NotNull(Find(mainWindow, "GroupColorNoneButton"));
         Find(mainWindow, "GroupColorSwatch_Teal").AsButton().Invoke();
 
-        // Assert: the accent names the color, it is stored for the group only in the settings, and the
+        // Act: ... on the first card (the repo in Work) > Card color... > Red
+        OpenCardColorPalette(mainWindow);
+        Find(mainWindow, "CardColorSwatch_Red").AsButton().Invoke();
+
+        // Assert: the accent names the color, both colors are stored only in the settings, and the
         // repository is untouched
         Assert.NotNull(Find(mainWindow, "GroupColorAccent", candidate => candidate.Name == "Group color: Teal"));
         Assert.True(Retry.WhileFalse(
             () => ReadSettings(context).Contains("\"Work\": \"Teal\"", StringComparison.Ordinal),
             TimeSpan.FromSeconds(10),
             TimeSpan.FromMilliseconds(200)).Result);
+        Assert.True(Retry.WhileFalse(
+            () => ReadSettings(context).Contains("\"CardColor\": \"Red\"", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
         Assert.Empty(Directory.EnumerateFileSystemEntries(context.RepoPath));
 
+        // Act: restart the application against the same settings
+        context.CloseApplication();
+        var restarted = context.Launch();
+        restarted.SetForeground();
+
+        // Assert: the group's accent is still there, and the card's palette still names its own color
+        Assert.NotNull(Find(restarted, "GroupColorAccent", candidate => candidate.Name == "Group color: Teal"));
+        OpenCardColorPalette(restarted);
+        Assert.Equal("Card color: Red", Find(restarted, "CardColorHeadingText").Name);
+        Find(restarted, "CardColorSwatch_Red").AsButton().Invoke();
+
         // Act: None
-        Find(mainWindow, "GroupHeaderMenuButton").AsButton().Invoke();
-        Find(mainWindow, "GroupColorMenuItem").AsMenuItem().Invoke();
-        Find(mainWindow, "GroupColorNoneButton").AsButton().Invoke();
+        Find(restarted, "GroupHeaderMenuButton").AsButton().Invoke();
+        Find(restarted, "GroupColorMenuItem").AsMenuItem().Invoke();
+        Find(restarted, "GroupColorNoneButton").AsButton().Invoke();
 
         // Assert
         Assert.True(Retry.WhileFalse(

@@ -903,6 +903,39 @@ public sealed class RepoGroupWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that a picked folder that does not exist (gone between the pick and the add) is refused
+    ///     with a message that says why, and nothing is added.
+    /// </summary>
+    [Fact]
+    public void MainWindow_AddRepoButton_FolderThatDoesNotExist_IsRefusedWithAMessage() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, viewModel) = CreateWindow(("a", null, false));
+        var missing = Path.Combine(CreateTempDirectory(), "gone");
+        window.RepoFolderPicker = () => Task.FromResult<IReadOnlyList<string>>([missing]);
+
+        try
+        {
+            // Act
+            window.FindControl<Button>("AddRepoButton")!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert
+            Assert.Single(viewModel.RepoCards);
+            Assert.Single(viewModel.Settings.RecentRepos);
+            var message = Assert.Single(window.OwnedWindows.OfType<MessageBoxWindow>());
+            Assert.Equal(
+                $"'{missing}' could not be added: it does not exist.",
+                message.FindControl<TextBlock>("MessageText")!.Text);
+            message.Close();
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that a favorite repo that is in a group shows the group's name as a chip, and a repo
     ///     that is not a favorite does not.
     /// </summary>

@@ -45,9 +45,11 @@ corresponding `LauncherUI` and `Settings` requirements say is verified one level
   `AgentControl-System-CardColor` and its two companions, `AgentControl-System-GroupColor` and
   `AgentControl-System-GroupReorder`): the scenarios below name what is exercised. Renaming and
   removing a group from its header and the keeping of the keyboard focus on the star are not exercised end to end;
-  they are verified in the headless window tests of the `LauncherUI` subsystem. For a group color only the header
-  accent and the stored color are shown end to end; that the tiles of the group's repos follow it is verified in the
-  headless window tests, because a tile's automatic color may happen to equal the chosen one.
+  they are verified in the headless window tests of the `LauncherUI` subsystem. For a group color the header accent,
+  the stored color and the accent after a restart are shown end to end; that the tiles of the group's repos follow it
+  is verified in the headless window tests, because a tile's automatic color may happen to equal the chosen one.
+- About (`AgentControl-System-About`): the banner's name and tagline are shown end to end; the logo is hidden from UI
+  Automation as decorative and is verified in the headless window tests of the `LauncherUI` subsystem.
 - A change that cannot be saved (`AgentControl-System-ListChangesKept`): a failing save cannot be provoked through
   the published application, so only the keeping of the changes is shown end to end; the refusal and the message are
   verified in the `LauncherUI` subsystem and unit tests.
@@ -188,7 +190,8 @@ test's temporary folder as its last location for `AgentControl.exe`.
   repo inside a collapsed group; groups and card colors are stored only in the user's settings (the repository stays
   untouched), and a chosen card color leaves the card's status unchanged.
 - A group's color chosen from its header menu shows as an accent on its header, named for assistive technology, is
-  stored by group name only in the user's settings, and None takes it away; a group moved down from its header menu or
+  stored by group name only in the user's settings, is still shown after a restart (as is a card color), and None
+  takes it away; a group moved down from its header menu or
   dragged with the real mouse below another group's header is listed after it, without being collapsed, and the order
   is stored in the user's settings and is still there after a restart.
 - Several folders chosen at once in the folder picker are added, with one message that says how many were added and
@@ -404,12 +407,12 @@ by `GitClient_IsWorkingTreeClean_CleanRepo_ReturnsTrue` (one such passing test),
 
 **AgentControl_About_AboutButton_OpensAboutWindowShowingVersionAndCopyright**: The About
 button is clicked; the About window opens showing its banner (`AboutBanner`) with the application name
-(`AboutBannerTitleText`), the application version, the copyright notice, the license
-summary and a non-empty dependency list. This scenario is tested by
+(`AboutBannerTitleText`) and its tagline (`AboutBannerTaglineText`), the application version, the copyright notice,
+the license summary and a non-empty dependency list. This scenario is tested by
 `windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright`, covering
-`AgentControl-System-About` and `AgentControl-Program-Version`. The banner's logo and tagline, its legibility in both
-themes and the layout with one scrolling region are verified in the headless window tests of the `LauncherUI`
-subsystem. That the dialog is modal is the
+`AgentControl-System-About` and `AgentControl-Program-Version`. The banner's logo (hidden from UI Automation as
+decorative), its legibility in both themes and the layout with one scrolling region are verified in the headless
+window tests of the `LauncherUI` subsystem. That the dialog is modal is the
 `AgentControl_DialogModal_SettingsAndAboutDisableTheMainWindowUntilTheyClose` scenario.
 
 **AgentControl_AboutVersionRow_VersionIsLabeledAndWithoutBuildMetadata**: In the same run the version is one short,
@@ -672,14 +675,15 @@ end to end (see the Verification Approach). This scenario is tested by
 `windows@CardMenu_RemoveFromGroup_ReturnsRepoToUngroupedAndRemovesTheHeader`, covering
 `AgentControl-System-RepoGroups`.
 
-**AgentControl_RepoGroupSections_FavoritesThenGroupsAlphabeticallyThenUngrouped**: With one favorite, repos in two
+**AgentControl_RepoGroupSections_FavoritesThenGroupsInTheUsersOrderThenUngrouped**: With one favorite, repos in two
 groups and one repo in no group, the real application lists the sections in the order Favorites, then the groups
-alphabetically (no group order has been stored yet; a stored order is the
-`AgentControl_GroupReorder_MenuAndDragReorderGroupsAndOrderSurvivesRestart` scenario), then
-the repos in no group, with each repo under its section (a favorite only under Favorites); and
-after the last repo has been taken out of its group no section header is left. This scenario is tested by
-`windows@RepoList_FavoritesAndGroups_SectionsAreFavoritesThenGroupsAlphabeticallyThenUngrouped` and
-`windows@CardMenu_RemoveFromGroup_ReturnsRepoToUngroupedAndRemovesTheHeader`, covering
+alphabetically (no group order has been stored yet), then the repos in no group, with each repo under its section (a
+favorite only under Favorites); after the last repo has been taken out of its group no section header is left; and,
+with the groups Alpha and Beta and a repo in no group, choosing Move down in the Alpha header's menu lists Beta, then
+Alpha, then Ungrouped - the user's own order - also after a restart. This scenario is tested by
+`windows@RepoList_FavoritesAndGroups_SectionsAreFavoritesThenGroupsAlphabeticallyThenUngrouped`,
+`windows@CardMenu_RemoveFromGroup_ReturnsRepoToUngroupedAndRemovesTheHeader` and
+`windows@GroupHeaderMenu_MoveDown_ReordersGroupsAndKeepsOrderAfterRestart`, covering
 `AgentControl-System-RepoGroupSections`.
 
 **AgentControl_RepoGroupCollapseRemembered_CollapsedSectionStaysCollapsedAfterRestart**: Clicking a section header
@@ -704,9 +708,12 @@ stays empty (nothing is written to the repository). This scenario is tested by
 
 **AgentControl_GroupColor_HeaderMenuColorsTheHeaderAndStoresInSettingsOnly**: In the real application, "Group
 color..." in a user group's header menu opens the group palette; choosing a swatch shows the accent on the group's
-header, named for assistive technology, and stores the color under the group's name in the settings file only, and
-"None" takes it away again. This scenario is tested by
-`windows@GroupHeaderMenu_GroupColor_ColorsHeaderAndStoresInSettingsOnly`, covering `AgentControl-System-GroupColor`.
+header, named for assistive technology, and stores the color under the group's name in the settings file only. A
+card color chosen from the first card's palette is stored in the settings file too, and the repository stays empty.
+After the application is closed and started again the accent is still shown and the card's palette still names the
+card's own color ("Card color: Red"), and "None" takes the group's color away again. This scenario is tested by
+`windows@GroupHeaderMenu_GroupColor_ColorsHeaderStoresInSettingsOnlyAndKeepsItAfterRestart`, covering
+`AgentControl-System-GroupColor`.
 That the tiles of the group's repos without a color of their own take the group's color, that the accent is legible in
 both themes and that the color follows a rename and is forgotten with the group are verified in the `LauncherUI`
 subsystem (see the Verification Approach).
@@ -721,17 +728,17 @@ of the Beta header: Alpha is listed after Beta and is not collapsed by the drag.
 Favorites and Ungrouped keep their places and that reordering is off while the filter has text are verified in the
 headless window tests of the `LauncherUI` subsystem.
 
-**AgentControl_ListChangesKept_FavoriteCollapseAndColorAreStored**: The favorite star, a section's collapse and a
-card color are each changed in the real application and found in the settings file (the collapse also after a
-restart). That a change which cannot be saved changes nothing and is reported is verified in the `LauncherUI`
+**AgentControl_ListChangesKept_FavoriteCollapseColorsAndGroupOrderAreKept**: The favorite star, a section's
+collapse, a card color, a group color and the order of the groups are each changed in the real application and found
+in the settings file. The collapse, the card color, the group color and the group order are also still there after a
+restart. That a change which cannot be saved changes nothing and is reported is verified in the `LauncherUI`
 subsystem and unit tests, because a failing save cannot be provoked through the published application. This scenario
 is tested by `windows@FavoriteToggleButton_ToggledOnThenOff_MovesRepoBetweenSectionsAndStoresChoice`,
-`windows@GroupHeaderToggleButton_Click_CollapsesSectionAndRemembersItAfterRestart` and
-`windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly`, covering
-`AgentControl-System-ListChangesKept`. That a group color and the order of the groups are kept in the settings file
-(the order also after a restart) is shown by the
-`AgentControl_GroupColor_HeaderMenuColorsTheHeaderAndStoresInSettingsOnly` and
-`AgentControl_GroupReorder_MenuAndDragReorderGroupsAndOrderSurvivesRestart` scenarios.
+`windows@GroupHeaderToggleButton_Click_CollapsesSectionAndRemembersItAfterRestart`,
+`windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly`,
+`windows@GroupHeaderMenu_GroupColor_ColorsHeaderStoresInSettingsOnlyAndKeepsItAfterRestart` and
+`windows@GroupHeaderMenu_MoveDown_ReordersGroupsAndKeepsOrderAfterRestart`, covering
+`AgentControl-System-ListChangesKept`.
 
 **AgentControl_Favorites_ToggleStarMovesRepoBetweenSections**: In the real application, with one repo in a
 group and one in none, the first card's star (accessible name "Favorite") is toggled on: a Favorites section

@@ -82,24 +82,29 @@ launch). This scenario is tested by
 `MainWindowViewModel_Constructor_DoesNotInvokeWorkingTreeDirtyCheckSubprocess`, covering
 `AgentControl-MainWindowViewModel-PopulateRecentRepos`.
 
-**MainWindowViewModel_AddRepo_ValidatesExistenceAndDuplication**: `AddRepo` is called with a
+**MainWindowViewModel_AddRepo_ValidatesExistenceDuplicationAndGitRoot**: `AddRepo` is called with a
 valid new existing path (inserted and persisted), a nonexistent path (rejected, returns
-false), and an already-tracked path (rejected, returns false). This scenario is tested by
+false), an already-tracked path (rejected, returns false), and a folder without a `.git` folder or file and a
+subfolder of a repository (rejected as not a Git repository). This scenario is tested by
 `MainWindowViewModel_AddRepo_ValidNewPath_InsertsCardAndPersistsSettings`,
-`MainWindowViewModel_AddRepo_PathDoesNotExist_ReturnsFalse`, and
-`MainWindowViewModel_AddRepo_DuplicatePath_ReturnsFalse`, covering
+`MainWindowViewModel_AddRepo_PathDoesNotExist_ReturnsFalse`,
+`MainWindowViewModel_AddRepo_DuplicatePath_ReturnsFalse`,
+`MainWindowViewModel_AddRepo_FolderWithoutGit_IsRefusedAsNotAGitRepository` and
+`MainWindowViewModel_AddRepo_SubfolderOfARepository_IsRefused`, covering
 `AgentControl-MainWindowViewModel-AddRepo`.
 
 **MainWindowViewModel_AddRepoToGroup_AddsOrMovesRepoIntoTheGroup**: `AddRepoToGroup` (tested in
 `RepoGroupingTests.cs`) puts a new repo in the requested group - spelled as the existing group when only the letter case
 differs - saves once and lists it in that group's section; moves the existing entry into the group when the repo is
-already listed (still two cards, not three); returns `Missing` for a folder that does not exist; opens a collapsed
-target group; and refuses a blank or built-in section name with `ArgumentException`, adding nothing. This scenario is
-tested by `MainWindowViewModel_AddRepoToGroup_NewRepo_AddsCardInTheGroupAndPersistsIt`,
+already listed (still two cards, not three); returns `Missing` for a folder that does not exist; refuses a subfolder
+of a repository as `NotAGitRepository` (`MainWindowViewModel_AddRepo_SubfolderOfARepository_IsRefused`); opens a
+collapsed target group; and refuses a blank or built-in section name with `ArgumentException`, adding nothing. This
+scenario is tested by `MainWindowViewModel_AddRepoToGroup_NewRepo_AddsCardInTheGroupAndPersistsIt`,
 `MainWindowViewModel_AddRepoToGroup_RepoAlreadyListed_MovesItIntoTheGroup`,
 `MainWindowViewModel_AddRepoToGroup_FolderMissing_AddsNothing`,
-`MainWindowViewModel_AddRepoToGroup_CollapsedGroup_ExpandsIt` and
-`MainWindowViewModel_AddRepoToGroup_InvalidGroupName_ThrowsAndAddsNothing`, covering
+`MainWindowViewModel_AddRepoToGroup_CollapsedGroup_ExpandsIt`,
+`MainWindowViewModel_AddRepoToGroup_InvalidGroupName_ThrowsAndAddsNothing` and
+`MainWindowViewModel_AddRepo_SubfolderOfARepository_IsRefused`, covering
 `AgentControl-MainWindowViewModel-AddRepoToGroup`.
 
 **MainWindowViewModel_AddGitReposOnly_OnlyTopFoldersOfGitRepositoriesAreAdded**: A folder without a `.git` folder or
@@ -373,10 +378,14 @@ the folder name). Settings with no group give a flat list without any header, fa
 (`AgentControl-MainWindowViewModel-FlatListWithoutGroups`, tested by
 `MainWindowViewModel_DisplayedItems_NoGroups_FlatListWithoutHeaders`). Settings with groups and no stored group order
 give Favorites first, the
-groups alphabetically ignoring letter case, then Ungrouped; names that differ only in letter case form one section
-(`AgentControl-MainWindowViewModel-GroupSections`, tested by
-`MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered` and
-`MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection`). Each section has a header with its count and a
+groups alphabetically ignoring letter case, then Ungrouped; with a stored group order the groups follow it and the
+groups without a stored place come after them alphabetically
+(`MainWindowViewModel_DisplayedItems_GroupsInStoredOrderThenAlphabetically`); names that differ only in letter case
+form one section (`AgentControl-MainWindowViewModel-GroupSections`, tested by
+`MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered`,
+`MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection` and
+`MainWindowViewModel_DisplayedItems_GroupsInStoredOrderThenAlphabetically`). Each section has a header with its
+count and a
 section without a repo has none (`AgentControl-MainWindowViewModel-GroupSectionHeaders`, tested by
 `MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered` and
 `MainWindowViewModel_DisplayedItems_EmptySections_HaveNoHeader`); repos within a section are in the user's own order,

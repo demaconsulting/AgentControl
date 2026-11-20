@@ -36,7 +36,9 @@ reordering turned off by the filter, the order after a restart; the real operati
 FlaUI tests), the user's order of the groups (the header menu's Move items and header drags through the same
 `DragStarter` seam, pressing the header's toggle) and that a group's color and place follow a rename (through the name
 prompt), are forgotten when the group is removed or its last repo leaves it, and are kept when the Settings window is
-saved, and folders dropped from the file manager (a `DataTransfer` of
+saved, that the user's organizing choices made through the window (a group, a card color, a group color, the group
+order and a collapsed section) are written to the settings file only, never into a repo folder, and folders dropped
+from the file manager (a `DataTransfer` of
 `DataTransferItem.CreateFile` items for storage items obtained from the window's `StorageProvider` -
 `TryGetFolderFromPathAsync` / `TryGetFileFromPathAsync`, since user code cannot implement `IStorageItem` - raised with
 `window.DragDrop` offering Copy, Move and Link), `RepoOrderingTests.cs` for the view model's rules behind them,
@@ -149,7 +151,8 @@ executable.
   (its tooltip naming a pinned publisher by the start and end of the fingerprint only), and, like the source editor,
   can be resized with its fields widening and a short window scrolling instead of clipping Save.
 - A group header's menu starts with "Add repository...", which uses the same folder picker as the top-bar add, puts
-  the repo in that group (moving an already listed repo into it, and saying so), and changes nothing when cancelled.
+  the picked repos (one or more) in that group (moving an already listed repo into it, and saying so), and changes
+  nothing when cancelled.
 - The About window shows a banner with the logo, name and tagline legible in both themes, is 600 wide with a limited
   height, and keeps the banner and Close in view while the details scroll in one region.
 - A user group can be given a palette color or none from its header menu; the header shows an accent named in words,
@@ -178,14 +181,14 @@ committed-files badges are each set correctly. This scenario is tested by
 `RepoCardViewModel_RefreshCheap_UnchangedHeadHash_CommittedFilesBadgeIsCached`, covering
 `AgentControl-LauncherUI-StatusBadges`.
 
-**LauncherUI_AddRepo_ValidDuplicateAndMissingPaths_ProduceCorrectOutcomes**: `AddRepo` is
-called with a valid new folder path that is the top folder of a Git repository (inserted and persisted), a nonexistent
-path (rejected),
-and an already-tracked path (rejected). This scenario is tested by
-`MainWindowViewModel_AddRepo_ValidNewPath_InsertsCardAndPersistsSettings`,
-`MainWindowViewModel_AddRepo_PathDoesNotExist_ReturnsFalse`, and
-`MainWindowViewModel_AddRepo_DuplicatePath_ReturnsFalse`, covering
-`AgentControl-LauncherUI-AddRepo`.
+**LauncherUI_AddRepo_GitRootAddedOthersRefusedWithAMessage**: In a headless main window whose folder picker seam
+answers with one path, the app bar's Add adds a new folder that is the top folder of a Git repository as an ungrouped
+card. It refuses, with a message, a folder that is already listed, which stays in its group
+(`MainWindow_AddRepoButton_UsesSamePickerAndAddsUngrouped`). It refuses a folder that is not the top folder of a Git
+repository (`MainWindow_AddRepoButton_FolderThatIsNotAGitRepository_IsRefusedWithAMessage`) and a folder that does
+not exist (`MainWindow_AddRepoButton_FolderThatDoesNotExist_IsRefusedWithAMessage`), adding nothing. These cover
+`AgentControl-LauncherUI-AddRepo`. The child `AgentControl-MainWindowViewModel-AddRepo` has unit tests that check the
+returned results and the saved settings.
 
 **LauncherUI_AddSeveralRepos_PickerTakesSeveralFoldersAndEachIsHandled**: In a headless main window whose folder picker
 seam answers with several paths, the app bar's Add adds each repository, skips the folders that cannot be added and
@@ -503,10 +506,13 @@ down and Group color items, another separator and then the rename and
 remove items, each identified and explained; choosing it with the folder picker answered by a path adds a new card in
 that group; a cancelled
 picker changes nothing and shows no message; an already listed repo is moved into the group and a message says it was
-already in the list; and the top-bar add still adds ungrouped through the same picker and still refuses a repo that
-is already listed. This scenario is tested by `MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator`,
+already in the list; several picked folders all join the group, silently when all were added
+(`MainWindow_HeaderMenuAddRepository_SeveralFolders_JoinTheGroup`); and the top-bar add still adds ungrouped through
+the same picker and still refuses a repo that is already listed. This scenario is tested by
+`MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator`,
 `MainWindow_HeaderMenuAddRepository_PickedFolderJoinsGroup_CancelChangesNothing`,
-`MainWindow_HeaderMenuAddRepository_AlreadyListedRepo_MovesIntoGroupAndSaysSo` and
+`MainWindow_HeaderMenuAddRepository_AlreadyListedRepo_MovesIntoGroupAndSaysSo`,
+`MainWindow_HeaderMenuAddRepository_SeveralFolders_JoinTheGroup` and
 `MainWindow_AddRepoButton_UsesSamePickerAndAddsUngrouped`, covering `AgentControl-LauncherUI-GroupAddRepository`
 (children `AgentControl-RepoGroupHeaderViewModel-AddRepoRequest` and `AgentControl-MainWindowViewModel-AddRepoToGroup`).
 
@@ -996,8 +1002,16 @@ the group chip and another repo does not; and that the prompt window validates w
 name. The requirements are split by behavior; each is covered by the tests that exercise it:
 
 - `AgentControl-LauncherUI-RepoGroups` (sections, order, headers with name and count, a favorite listed once, with
-  its group on its card): `MainWindow_GroupedRepos_ShowHeadersWithNameCountAndState` and
-  `MainWindow_FavoriteInGroup_ShowsGroupChip`.
+  its group on its card): `MainWindow_GroupedRepos_ShowHeadersWithNameCountAndState`,
+  `MainWindow_FavoriteInGroup_ShowsGroupChip` and
+  `MainWindow_GroupOrder_StoredOrderThenAlphabeticalBetweenFavoritesAndUngrouped` (the groups in the user's stored
+  order, then alphabetically, between Favorites and Ungrouped).
+- `AgentControl-LauncherUI-RepoGroupsSettingsOnly` (groups, card colors, group colors, the group order and collapsed
+  sections only in the user's settings): `MainWindow_GroupsColorsAndOrder_WriteNothingIntoTheRepository`
+  (`RepoReorderWindowTests.cs`). Through the window a repo is moved into a group from the card menu, a card color and
+  a group color are chosen from the palette pop-ups, a group is moved down from its header menu and a section is
+  collapsed. Every repo folder keeps exactly the entries it had, and the settings file holds the group, the card
+  color, the group color, the order and the collapsed section.
 - `AgentControl-LauncherUI-RepoGroupsFlatList` (no header while no repo is in a group):
   `MainWindow_NoGroups_ShowsNoHeader`.
 - `AgentControl-LauncherUI-RepoGroupMove` (the card menu's move into an existing group, a new group or out of the
@@ -1015,14 +1029,11 @@ view-model tests of the units that realize them, cited at this level as the subs
 Verification Approach): `MainWindowViewModel_ToggleGroupCollapsed_HidesCardsAndPersists` and
 `MainWindowViewModel_ApplySettings_KeepsCollapsedGroups` for
 `AgentControl-LauncherUI-RepoGroupCollapseRemembered` (the sections the user collapsed are still collapsed at the
-next start, and when other settings change);
+next start, and when other settings change); and
 `MainWindowViewModel_FilterText_ShowsMatchesInCollapsedGroupsAndHidesEmptyOnes` and
 `MainWindowViewModel_FilterText_NoMatch_ShowsNothing` for `AgentControl-LauncherUI-RepoGroupFilter` (the filter
 shows every match, also in a collapsed section, with the count of matches only, no header for a section without a
-match and the collapse toggles disabled and explained meanwhile); and
-`RepoCardViewModel_GroupAndColor_NeverWriteToTheRepository` for `AgentControl-LauncherUI-RepoGroupsSettingsOnly`
-(groups, colors, group colors, the group order and collapsed sections are written to the user's settings only, never
-into the repository). The
+match and the collapse toggles disabled and explained meanwhile). The
 end-to-end checks of the same behavior are the system scenarios (`AgentControl-System-RepoGroups` and the
 requirements next to it).
 

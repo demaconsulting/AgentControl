@@ -21,10 +21,12 @@
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Input.Raw;
 using Avalonia.Interactivity;
+using Avalonia.LogicalTree;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -1000,6 +1002,74 @@ public sealed class RepoReorderWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that the user's organizing choices made through the window - moving a repo into a group,
+    ///     a card color, a group color, moving a group down and collapsing a section - are written to the
+    ///     settings file only, and every repo folder keeps exactly the entries it had.
+    /// </summary>
+    [Fact]
+    public void MainWindow_GroupsColorsAndOrder_WriteNothingIntoTheRepository() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: Alpha and Beta (alphabetical, no stored order) and an ungrouped repo
+        var (window, viewModel, configDirectory) = CreateWindow(Spec("a", "Alpha"), Spec("b", "Beta"), Spec("u"));
+        var before = viewModel.RepoCards.ToDictionary(card => card.RepoPath, card => ListEntries(card.RepoPath));
+
+        try
+        {
+            // Act: "u" into Beta from its card menu's Move to group
+            var menu = OpenCardMenu(window, "u");
+            Click(FindMenuItem(menu, "MoveToGroupMenuItem").Items.OfType<MenuItem>()
+                .Single(item => AutomationProperties.GetName(item) == "Beta"));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+
+            // Act: Card color... > Teal on "a"
+            menu = OpenCardMenu(window, "a");
+            Click(FindMenuItem(menu, "CardColorMenuItem"));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+            ChooseInPalette(
+                window.GetVisualDescendantsOf<Button>("MoreActionsButton")
+                    .Single(button => button.DataContext is RepoCardViewModel { RepoName: "a" }),
+                "CardColorSwatch_Teal");
+
+            // Act: Group color... > Red on Beta
+            ClickHeaderMenuItem(window, "Beta", "GroupColorMenuItem");
+            ChooseInPalette(
+                window.GetVisualDescendantsOf<Button>("GroupHeaderMenuButton")
+                    .Single(button => button.DataContext is RepoGroupHeaderViewModel { Name: "Beta" }),
+                "GroupColorSwatch_Red");
+
+            // Act: Alpha moved down, then collapsed from its header
+            ClickHeaderMenuItem(window, "Alpha", "MoveGroupDownMenuItem");
+            FindHeaderRow(window, "Alpha").GetVisualDescendants().OfType<Button>()
+                .Single(button => button.Name == "GroupHeaderToggleButton").Command!.Execute(null);
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the window shows the choices
+            Assert.Equal(["Beta", "Alpha"], HeaderNames(window));
+            Assert.Equal("Group color: Red", GroupAccentName(window, "Beta"));
+
+            // Assert: every repo folder keeps exactly the entries it had
+            foreach (var (path, entries) in before)
+            {
+                Assert.Equal(entries, ListEntries(path));
+            }
+
+            // Assert: the settings file holds every choice
+            var saved = SettingsStore.Load(configDirectory);
+            Assert.Equal("Beta", saved.RecentRepos.Single(repo => Path.GetFileName(repo.Path) == "u").GroupName);
+            Assert.Equal("Teal", saved.RecentRepos.Single(repo => Path.GetFileName(repo.Path) == "a").CardColor);
+            Assert.Equal("Red", saved.GroupColors["Beta"]);
+            Assert.Equal(["Beta", "Alpha"], saved.GroupOrder);
+            Assert.Equal(["Alpha"], saved.CollapsedGroups);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that folders dropped from the file manager on a group's header, or on a card in a group's
     ///     section, are added to that group (and no card is moved).
     /// </summary>
@@ -1698,6 +1768,31 @@ public sealed class RepoReorderWindowTests : IDisposable
             .Single(border => border.Name == "GroupColorAccent");
         return accent.IsVisible ? AutomationProperties.GetName(accent) : null;
     }
+
+    /// <summary>
+    ///     Chooses a swatch (or the clear button) of the color palette pop-up attached to a button, as a
+    ///     click does.
+    /// </summary>
+    /// <param name="owner">The button the palette pop-up is attached to (a card's or a header's "...").</param>
+    /// <param name="automationId">The AutomationId of the palette button to click.</param>
+    private static void ChooseInPalette(Button owner, string automationId)
+    {
+        var flyout = Assert.IsType<Flyout>(FlyoutBase.GetAttachedFlyout(owner));
+        Assert.True(flyout.IsOpen);
+        var palette = Assert.IsAssignableFrom<Control>(flyout.Content);
+        palette.GetLogicalDescendants().OfType<Button>()
+            .Single(button => AutomationProperties.GetAutomationId(button) == automationId)
+            .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+    }
+
+    /// <summary>
+    ///     Lists every file and folder inside a folder, at any depth, in ordinal order.
+    /// </summary>
+    /// <param name="path">The folder.</param>
+    /// <returns>The entries' paths.</returns>
+    private static List<string> ListEntries(string path) =>
+        [.. Directory.EnumerateFileSystemEntries(path, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal)];
 
     /// <summary>
     ///     Runs the UI thread's jobs until the condition holds (or about thirty seconds passed), then asserts it.

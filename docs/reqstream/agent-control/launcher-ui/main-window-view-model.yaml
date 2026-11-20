@@ -32,6 +32,8 @@ sections:
           - MainWindowViewModel_AddRepo_ValidNewPath_InsertsCardAndPersistsSettings
           - MainWindowViewModel_AddRepo_PathDoesNotExist_ReturnsFalse
           - MainWindowViewModel_AddRepo_DuplicatePath_ReturnsFalse
+          - MainWindowViewModel_AddRepo_FolderWithoutGit_IsRefusedAsNotAGitRepository
+          - MainWindowViewModel_AddRepo_SubfolderOfARepository_IsRefused
 
       - id: AgentControl-MainWindowViewModel-AddRepoToGroup
         title: >-
@@ -50,6 +52,7 @@ sections:
           - MainWindowViewModel_AddRepoToGroup_FolderMissing_AddsNothing
           - MainWindowViewModel_AddRepoToGroup_CollapsedGroup_ExpandsIt
           - MainWindowViewModel_AddRepoToGroup_InvalidGroupName_ThrowsAndAddsNothing
+          - MainWindowViewModel_AddRepo_SubfolderOfARepository_IsRefused
 
       - id: AgentControl-MainWindowViewModel-AddRepos
         title: >-
@@ -434,6 +437,7 @@ sections:
         tests:
           - MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered
           - MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection
+          - MainWindowViewModel_DisplayedItems_GroupsInStoredOrderThenAlphabetically
 
       - id: AgentControl-MainWindowViewModel-GroupOrder
         title: >-

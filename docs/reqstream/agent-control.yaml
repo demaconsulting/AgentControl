@@ -161,8 +161,9 @@ sections:
       - id: AgentControl-System-ListChangesKept
         title: >-
           The tool shall keep the changes the user makes to the recent-repos list (favorite, group,
-          group color, group order, card color, collapsed sections) in the user's settings, so they are still there when the
-          tool is started again, and shall never show a change that it could not save.
+          group color, group order, card color, collapsed sections) in the user's settings, so they
+          are still there when the tool is started again, and shall never show a change that it
+          could not save.
         tags: [system]
         justification: |
           A choice that has to be repeated at every start is not a choice that was kept, and a
@@ -172,12 +173,15 @@ sections:
           - AgentControl-LauncherUI-FailedSaveChangesNothing
           - AgentControl-LauncherUI-FailedSaveReported
         tests:
-          # End to end the saving of a change is shown; a save that fails cannot be provoked
-          # through the published application, so that part is verified at the LauncherUI
-          # subsystem and unit levels.
+          # End to end the keeping of a change is shown (the collapse, a group color, a card color
+          # and the order of the groups also after a restart); a save that fails cannot be provoked
+          # through the published application, so that part is verified at the LauncherUI subsystem
+          # and unit levels.
           - windows@FavoriteToggleButton_ToggledOnThenOff_MovesRepoBetweenSectionsAndStoresChoice
           - windows@GroupHeaderToggleButton_Click_CollapsesSectionAndRemembersItAfterRestart
           - windows@CardMenu_CardColor_ChooseSwatchStoresColorInSettingsOnly
+          - windows@GroupHeaderMenu_GroupColor_ColorsHeaderStoresInSettingsOnlyAndKeepsItAfterRestart
+          - windows@GroupHeaderMenu_MoveDown_ReordersGroupsAndKeepsOrderAfterRestart
 
       - id: AgentControl-System-SearchFilter
         title: >-
@@ -349,6 +353,7 @@ sections:
         tests:
           - windows@RepoList_FavoritesAndGroups_SectionsAreFavoritesThenGroupsAlphabeticallyThenUngrouped
           - windows@CardMenu_RemoveFromGroup_ReturnsRepoToUngroupedAndRemovesTheHeader
+          - windows@GroupHeaderMenu_MoveDown_ReordersGroupsAndKeepsOrderAfterRestart
 
       - id: AgentControl-System-RepoGroupCollapseRemembered
         title: >-
@@ -421,10 +426,10 @@ sections:
           - AgentControl-LauncherUI-GroupSettingsKeptInStep
           - AgentControl-Settings-GroupOrganization
         tests:
-          # End to end the header accent and the stored color are shown; the tiles that follow the
-          # group's color are verified at the LauncherUI subsystem level (headless window tests),
-          # because a tile's automatic color may equal the chosen one.
-          - windows@GroupHeaderMenu_GroupColor_ColorsHeaderAndStoresInSettingsOnly
+          # End to end the header accent, the stored color and the accent after a restart are shown;
+          # the tiles that follow the group's color are verified at the LauncherUI subsystem level
+          # (headless window tests), because a tile's automatic color may equal the chosen one.
+          - windows@GroupHeaderMenu_GroupColor_ColorsHeaderStoresInSettingsOnlyAndKeepsItAfterRestart
 
       - id: AgentControl-System-GroupReorder
         title: >-
@@ -1526,6 +1531,9 @@ sections:
           - AgentControl-LauncherUI-AboutScrollableDetails
           - AgentControl-Program-Version
         tests:
+          # End to end the banner with the name and the tagline, the version, copyright and license
+          # are shown; the logo is decorative (hidden from UI Automation) and is verified in the
+          # headless window tests of the LauncherUI subsystem.
           - windows@AboutButton_Click_OpensAboutWindowShowingVersionAndCopyright
 
       - id: AgentControl-System-AboutVersionRow

@@ -308,6 +308,7 @@ sections:
         tests:
           - MainWindow_GroupedRepos_ShowHeadersWithNameCountAndState
           - MainWindow_FavoriteInGroup_ShowsGroupChip
+          - MainWindow_GroupOrder_StoredOrderThenAlphabeticalBetweenFavoritesAndUngrouped
 
       - id: AgentControl-LauncherUI-GroupAddRepository
         title: >-
@@ -327,6 +328,7 @@ sections:
           - MainWindow_HeaderMenuAddRepository_PickedFolderJoinsGroup_CancelChangesNothing
           - MainWindow_HeaderMenuAddRepository_AlreadyListedRepo_MovesIntoGroupAndSaysSo
           - MainWindow_AddRepoButton_UsesSamePickerAndAddsUngrouped
+          - MainWindow_HeaderMenuAddRepository_SeveralFolders_JoinTheGroup
 
       - id: AgentControl-LauncherUI-RepoGroupsFlatList
         title: >-
@@ -454,7 +456,7 @@ sections:
         children:
           - AgentControl-MainWindowViewModel-GroupSettingsOnly
         tests:
-          - RepoCardViewModel_GroupAndColor_NeverWriteToTheRepository
+          - MainWindow_GroupsColorsAndOrder_WriteNothingIntoTheRepository
 
       - id: AgentControl-LauncherUI-CardColor
         title: >-
@@ -811,9 +813,9 @@ sections:
         children:
           - AgentControl-MainWindowViewModel-AddRepo
         tests:
-          - MainWindowViewModel_AddRepo_ValidNewPath_InsertsCardAndPersistsSettings
-          - MainWindowViewModel_AddRepo_PathDoesNotExist_ReturnsFalse
-          - MainWindowViewModel_AddRepo_DuplicatePath_ReturnsFalse
+          - MainWindow_AddRepoButton_UsesSamePickerAndAddsUngrouped
+          - MainWindow_AddRepoButton_FolderThatIsNotAGitRepository_IsRefusedWithAMessage
+          - MainWindow_AddRepoButton_FolderThatDoesNotExist_IsRefusedWithAMessage
 
       - id: AgentControl-LauncherUI-AddSeveralRepos
         title: >-
