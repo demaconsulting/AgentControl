@@ -34,7 +34,9 @@ notes and the keep-or-update and launch-anyway questions about a repo's agent fi
 and drop through the window's drag-source seam and the platform's drop events, the insertion line and header tint,
 reordering turned off by the filter, the order after a restart; the real operating-system drag is covered only by the
 FlaUI tests), the user's order of the groups (the header menu's Move items and header drags through the same
-`DragStarter` seam, pressing the header's toggle) and folders dropped from the file manager (a `DataTransfer` of
+`DragStarter` seam, pressing the header's toggle) and that a group's color and place follow a rename (through the name
+prompt), are forgotten when the group is removed or its last repo leaves it, and are kept when the Settings window is
+saved, and folders dropped from the file manager (a `DataTransfer` of
 `DataTransferItem.CreateFile` items for storage items obtained from the window's `StorageProvider` -
 `TryGetFolderFromPathAsync` / `TryGetFileFromPathAsync`, since user code cannot implement `IStorageItem` - raised with
 `window.DragDrop` offering Copy, Move and Link), `RepoOrderingTests.cs` for the view model's rules behind them,
@@ -1086,15 +1088,16 @@ brush reaches 3:1 on the page a header is drawn on and on the drop tint a header
 it (`ThemeResources_GroupAccent_MeetsGraphicsContrastInLightAndDark`, covering
 `AgentControl-LauncherUI-GroupColorLegible`).
 
-**LauncherUI_GroupSettingsKeptInStep_ColorAndPositionFollowTheGroup**: The behavior is observable only in the view-model
-layer the window is drawn from, so the view-model tests are cited as the subsystem's convention (see the Verification
-Approach): renaming a group keeps its color and position under the new name, in memory and in the saved settings
-(`MainWindowViewModel_RenameGroup_KeepsColorAndPosition`); removing a group forgets both
-(`MainWindowViewModel_RemoveGroup_ForgetsColorAndPosition`); and applying settings from the Settings window keeps both
-(`MainWindowViewModel_ApplySettings_KeepsGroupColorsAndOrder`). These cover
+**LauncherUI_GroupSettingsKeptInStep_ColorAndPositionFollowTheGroup**: In the headless main window, a group with a
+color and a stored place is renamed through its header menu and the name prompt: the header keeps the color accent
+(named "Group color: Teal") and its place in the list, also in the saved settings
+(`MainWindow_RenameGroup_KeepsItsColorAccentAndItsPlace`). A group removed from its header menu, and a group whose last
+repo leaves it through "Remove from group", lose both: their color and place are gone from the saved settings, and a
+new group of the same name is listed alphabetically without an accent
+(`MainWindow_RemoveGroupOrItsLastRepo_ForgetsItsColorAccentAndItsPlace`). Saving the Settings window keeps the accent
+and the order (`MainWindow_SettingsSaved_KeepsGroupColorAccentsAndOrder`). These cover
 `AgentControl-LauncherUI-GroupSettingsKeptInStep` (children
-`AgentControl-MainWindowViewModel-GroupSettingsFollowRenameAndRemove`
-and `-GroupSettingsKeptOnApplySettings`).
+`AgentControl-MainWindowViewModel-GroupSettingsFollowRenameAndRemove` and `-GroupSettingsKeptOnApplySettings`).
 
 **LauncherUI_PackageSourceLocationTooltip_WholeLocationIsTheTooltip**: The location box of the source editor offers
 the whole entered folder or feed address as its tooltip, and none when it is empty. This scenario is tested by

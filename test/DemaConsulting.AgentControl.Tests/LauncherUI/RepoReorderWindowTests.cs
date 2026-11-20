@@ -39,7 +39,8 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 ///     are, the card menu's Move items, drag and drop within and between sections and onto headers,
 ///     the insertion line and header tint, the filter turning reordering off, and the order surviving a
 ///     restart; the user's order of the groups (the header menu's Move items and dragging a header);
-///     and folders dropped from the file manager.
+///     a group's color and place following a rename, being forgotten when the group goes and being
+///     kept when the Settings window is saved; and folders dropped from the file manager.
 /// </summary>
 /// <remarks>
 ///     The headless platform has no drag source, so a drag is started with a real pointer press and
@@ -856,6 +857,149 @@ public sealed class RepoReorderWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that a group renamed through its header menu and the name prompt keeps its color accent
+    ///     and its place in the list, in the window and in the saved settings.
+    /// </summary>
+    [Fact]
+    public void MainWindow_RenameGroup_KeepsItsColorAccentAndItsPlace() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: Work is first only because of its stored place (alphabetically it would be last)
+        var (window, viewModel, configDirectory) = CreateWindow(
+            ["Work"], Spec("a", "Alpha"), Spec("w", "Work"), Spec("z", "Zed"));
+
+        try
+        {
+            Assert.True(viewModel.SetGroupColor("Work", "Teal"));
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(["Work", "Alpha", "Zed"], HeaderNames(window));
+            Assert.Equal("Group color: Teal", GroupAccentName(window, "Work"));
+
+            // Act: Rename group... and a new name in the prompt
+            ClickHeaderMenuItem(window, "Work", "RenameGroupMenuItem");
+            var prompt = Assert.Single(window.OwnedWindows.OfType<GroupNameWindow>());
+            ((GroupNameViewModel)prompt.DataContext!).Text = "Office";
+            DialogWindowTests.Click(prompt, "GroupNameAcceptButton");
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: still first (alphabetically it would be between Alpha and Zed) and still teal
+            Assert.Equal(["Office", "Alpha", "Zed"], HeaderNames(window));
+            Assert.Equal("Group color: Teal", GroupAccentName(window, "Office"));
+            var saved = SettingsStore.Load(configDirectory);
+            Assert.Equal(["Office"], saved.GroupColors.Keys);
+            Assert.Equal("Teal", saved.GroupColors["Office"]);
+            Assert.Equal(["Office"], saved.GroupOrder);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that a group removed through its header menu, and a group whose last repo leaves it
+    ///     through "Remove from group", lose their color and their place, and that a new group of the
+    ///     same name is listed alphabetically and without a color accent.
+    /// </summary>
+    [Fact]
+    public void MainWindow_RemoveGroupOrItsLastRepo_ForgetsItsColorAccentAndItsPlace() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: two colored groups with stored places ahead of Alpha
+        var (window, viewModel, configDirectory) = CreateWindow(
+            ["Work", "Home"], Spec("a", "Alpha"), Spec("w", "Work"), Spec("h", "Home"));
+
+        try
+        {
+            Assert.True(viewModel.SetGroupColor("Work", "Teal"));
+            Assert.True(viewModel.SetGroupColor("Home", "Red"));
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(["Work", "Home", "Alpha"], HeaderNames(window));
+
+            // Act: Remove group, confirmed
+            ClickHeaderMenuItem(window, "Work", "RemoveGroupMenuItem");
+            var confirmation = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+            DialogWindowTests.Click(confirmation, "ConfirmationYesButton");
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: Work's color and place are gone
+            Assert.Equal(["Home", "Alpha", "Ungrouped"], HeaderNames(window));
+            var saved = SettingsStore.Load(configDirectory);
+            Assert.Equal(["Home"], saved.GroupColors.Keys);
+            Assert.Equal(["Home"], saved.GroupOrder);
+
+            // Act: the last repo leaves Home
+            var menu = OpenCardMenu(window, "h");
+            Click(FindMenuItem(menu, "MoveToGroupMenuItem").Items.OfType<MenuItem>()
+                .Single(item => AutomationProperties.GetAutomationId(item) == "RemoveFromGroupMenuItem"));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: Home's color and place are gone
+            Assert.Equal(["Alpha", "Ungrouped"], HeaderNames(window));
+            saved = SettingsStore.Load(configDirectory);
+            Assert.Empty(saved.GroupColors);
+            Assert.Empty(saved.GroupOrder);
+
+            // Act: a new group of the old name
+            menu = OpenCardMenu(window, "w");
+            Click(FindMenuItem(menu, "MoveToGroupMenuItem").Items.OfType<MenuItem>()
+                .Single(item => AutomationProperties.GetAutomationId(item) == "NewGroupMenuItem"));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+            var prompt = Assert.Single(window.OwnedWindows.OfType<GroupNameWindow>());
+            ((GroupNameViewModel)prompt.DataContext!).Text = "Work";
+            DialogWindowTests.Click(prompt, "GroupNameAcceptButton");
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: listed alphabetically (no old place) and without an accent (no old color)
+            Assert.Equal(["Alpha", "Work", "Ungrouped"], HeaderNames(window));
+            Assert.Null(GroupAccentName(window, "Work"));
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that saving the Settings window (whose settings carry no group colors or order) keeps
+    ///     the groups' color accents and their order, in the window and in the saved settings.
+    /// </summary>
+    [Fact]
+    public void MainWindow_SettingsSaved_KeepsGroupColorAccentsAndOrder() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: Work is first only because of its stored place, and teal
+        var (window, viewModel, configDirectory) = CreateWindow(["Work"], Spec("a", "Alpha"), Spec("w", "Work"));
+
+        try
+        {
+            Assert.True(viewModel.SetGroupColor("Work", "Teal"));
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(["Work", "Alpha"], HeaderNames(window));
+
+            // Act: open Settings, change the agent command (not the theme, which is application-wide) and save
+            DialogWindowTests.Click(window, "OpenSettingsButton");
+            Dispatcher.UIThread.RunJobs();
+            var settingsWindow = Assert.Single(window.OwnedWindows.OfType<SettingsWindow>());
+            Assert.IsType<SettingsWindowViewModel>(settingsWindow.DataContext).CustomAgentCommand = "other-agent";
+            DialogWindowTests.Click(settingsWindow, "SaveSettingsButton");
+            await WaitUntilAsync(() => window.OwnedWindows.Count == 0 && viewModel.PendingRefresh.IsCompleted);
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the save happened, and the accent and the order are kept
+            Assert.Equal(["Work", "Alpha"], HeaderNames(window));
+            Assert.Equal("Group color: Teal", GroupAccentName(window, "Work"));
+            var saved = SettingsStore.Load(configDirectory);
+            Assert.Equal("other-agent", saved.CustomAgentCommand);
+            Assert.Equal("Teal", saved.GroupColors["Work"]);
+            Assert.Equal(["Work"], saved.GroupOrder);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that folders dropped from the file manager on a group's header, or on a card in a group's
     ///     section, are added to that group (and no card is moved).
     /// </summary>
@@ -1524,6 +1668,51 @@ public sealed class RepoReorderWindowTests : IDisposable
     {
         item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
+    }
+
+    /// <summary>
+    ///     Opens a group header's "..." menu, clicks one of its items and closes the menu, as a user does.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <param name="groupName">The group's name.</param>
+    /// <param name="itemName">The item's XAML name.</param>
+    private static void ClickHeaderMenuItem(MainWindow window, string groupName, string itemName)
+    {
+        var menu = OpenHeaderMenu(window, groupName);
+        Click(FindMenuItem(menu, itemName));
+        menu.Hide();
+        Dispatcher.UIThread.RunJobs();
+    }
+
+    /// <summary>
+    ///     Gets the accessible name of a section header's color accent, or <see langword="null"/> when
+    ///     the accent is not shown.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <param name="groupName">The group's name.</param>
+    /// <returns>The accent's accessible name, for example <c>Group color: Teal</c>, or
+    ///     <see langword="null"/>.</returns>
+    private static string? GroupAccentName(MainWindow window, string groupName)
+    {
+        var accent = FindHeaderRow(window, groupName).GetVisualDescendants().OfType<Border>()
+            .Single(border => border.Name == "GroupColorAccent");
+        return accent.IsVisible ? AutomationProperties.GetName(accent) : null;
+    }
+
+    /// <summary>
+    ///     Runs the UI thread's jobs until the condition holds (or about thirty seconds passed), then asserts it.
+    /// </summary>
+    /// <param name="condition">The condition to wait for.</param>
+    /// <returns>A task that completes when the condition holds.</returns>
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        for (var attempt = 0; attempt < 1200 && !condition(); attempt++)
+        {
+            Dispatcher.UIThread.RunJobs();
+            await Task.Delay(25, TestContext.Current.CancellationToken);
+        }
+
+        Assert.True(condition());
     }
 
     /// <summary>

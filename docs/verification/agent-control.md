@@ -20,21 +20,13 @@ level down instead, with the limitation disclosed rather than a fabricated end-t
   file's contents; the only test-suite touch point is indirect, via `TestLoggingFixture.cs`
   (see the `Logging` subsystem verification design for the full disclosure).
 
-Two system requirements about adding repos (`AgentControl-System-AddSeveralRepos` and
-`AgentControl-System-AddGitReposOnly`) are likewise not verified by FlaUI: the operating system's multi-select folder
-picker is a native dialog, and a drag from the file manager has its drag source in another process, so neither can be
-driven dependably through UI Automation. Their evidence is the headless window tests of the `LauncherUI` subsystem,
-which answer the picker through the window's `RepoFolderPicker` seam and raise the platform's drag-and-drop events
-with the dropped folders as storage items, and - for the Git-repository rule - the `GitIntegration` subsystem test,
-which runs the real git to make a repository, a linked worktree (whose `.git` is a file) and a subfolder.
-
 `AgentControl-System-ResponsiveOperations` states only what UI automation can observe: a background upgrade
 check never opens a sign-in dialog. That the window stays responsive, shows progress and can cancel is verified one
 level down, with deliberately slow and failing package sources, because a frozen UI thread is not observable through
 UI automation without an artificially slow share; those behaviors are specified by the `LauncherUI` requirements and
 are not claimed as system-level behavior.
 
-Four groups of system requirements state only what the end-to-end tests can observe; the rest of what the
+Five groups of system requirements state only what the end-to-end tests can observe; the rest of what the
 corresponding `LauncherUI` and `Settings` requirements say is verified one level down, and is not claimed here:
 
 - Modal dialogs and keyboard (`AgentControl-System-DialogModal`, `AgentControl-System-DialogKeyboard`): the real
@@ -59,6 +51,13 @@ corresponding `LauncherUI` and `Settings` requirements say is verified one level
 - A change that cannot be saved (`AgentControl-System-ListChangesKept`): a failing save cannot be provoked through
   the published application, so only the keeping of the changes is shown end to end; the refusal and the message are
   verified in the `LauncherUI` subsystem and unit tests.
+- Adding repos (`AgentControl-System-AddSeveralRepos`, `AgentControl-System-AddGitReposOnly`): the folders are chosen
+  in the operating system's own folder picker (`AddRepoTests.cs`), driven through UI Automation. The picker's address
+  bar is reached with Alt+D, and the path is typed with the real keyboard. Several folders are selected in its list,
+  and a single folder is typed into its folder box. A drop from the file manager has its drag source in another
+  process, so it can't be driven dependably and is verified in the headless window tests of the `LauncherUI`
+  subsystem. That a linked worktree (whose `.git` is a file) counts as a repository root is verified with the real git
+  in the `GitIntegration` subsystem tests.
 
 `AgentControl-System-AgentsMdOfferBeforeReleaseNotes` is verified end to end by
 `MainWindow_UpgradeWithAgentsMdOfferInRealUi_ShowsQuestionFirstThenReleaseNotes` in `AgentsMdTemplateOfferTests.cs`; the
@@ -132,7 +131,9 @@ supported platform with no additional environment setup
 (`AgentControl-Platform-Net10`). The server-source end-to-end test also needs loopback networking: it starts
 the in-process mock feed (Kestrel, hosted by the ASP.NET Core shared framework that the test project references)
 on a fresh port; the Git sign-in tests likewise start the private Git server (Kestrel with TLS on a fresh loopback
-port, and the real `git upload-pack`).
+port, and the real `git upload-pack`). The add-repo tests use the Windows folder picker (the Common Item Dialog), so,
+like the modal-dialog tests, they send real keyboard input. They need the desktop, and the picker may remember the
+test's temporary folder as its last location for `AgentControl.exe`.
 
 ## Acceptance Criteria
 
@@ -190,9 +191,10 @@ port, and the real `git upload-pack`).
   stored by group name only in the user's settings, and None takes it away; a group moved down from its header menu or
   dragged with the real mouse below another group's header is listed after it, without being collapsed, and the order
   is stored in the user's settings and is still there after a restart.
-- Several folders can be added at once and folders dropped from the file manager are added, with one message for what
-  was not added; only the top folder of a Git repository (a `.git` folder or file directly in it) is added - verified
-  one level down, as disclosed in the Verification Approach.
+- Several folders chosen at once in the folder picker are added, with one message that says how many were added and
+  names the folder that was not added and why. A folder that is not the top folder of a Git repository (a plain
+  folder, a subfolder of a repository) is refused with a message. A listed folder without `.git` stays listed.
+  Folders dropped from the file manager are verified one level down, as disclosed in the Verification Approach.
 - Launching a repo leaves its card where it is; the card menu's Reorder items and a real mouse drag reorder the cards
   and a drag onto a group's header moves a card into the group; the order is stored only in the user's settings and is
   still there after a restart.
@@ -220,23 +222,23 @@ is gated on user confirmation. This scenario is tested by
 `windows@RemoveMenuItem_ClickThenConfirm_RemovesCard_DecliningLeavesItInPlace`, covering
 `AgentControl-System-AddRemoveRepo`.
 
-**AgentControl_AddSeveralRepos_PickerAndFileManagerDropAddSeveralWithOneMessage**: Verified one level down (see the
-Verification Approach). In the headless main window the app bar's Add, with the folder picker seam answering with
-several folders, adds each repository and shows one message naming the folders that were not added and why; and
-folders dropped from the file manager on a group's header, raised as the platform's drag-and-drop events, are added to
-that group. This scenario is tested by `MainWindow_AddRepoButton_SeveralFoldersPicked_AddsEachAndSummarizesTheRest` and
-`MainWindow_DropFolders_OnGroupHeader_AddsThemToTheGroup`, covering `AgentControl-System-AddSeveralRepos`; the other
-drop targets, the drop feedback and the wording of the summary are the `LauncherUI` subsystem and
-`MainWindowViewModel` scenarios.
+**AgentControl_AddSeveralRepos_FolderPickerAddsSeveralWithOneMessage**: In the published application the app bar's
+Add opens the operating system's folder picker. In it, a folder holding two Git repositories and a plain folder is
+opened, and all three are selected. The two repositories are added as cards, and one message says "Added 2 of 3
+folders." and names the plain folder as not the top folder of a Git repository. Nothing is written into the plain
+folder. This scenario is tested by
+`windows@AddRepoButton_FolderPickerWithTwoReposAndAPlainFolder_AddsTheReposAndSummarizesTheRest`, covering
+`AgentControl-System-AddSeveralRepos`. Folders dropped from the file manager, the other drop targets and the summary's
+other lines are verified in the `LauncherUI` subsystem (see the Verification Approach).
 
-**AgentControl_AddGitReposOnly_OnlyTheTopFolderOfAGitRepositoryIsAdded**: Verified one level down (see the
-Verification Approach). In the headless main window a picked folder that is not the top folder of a Git repository is
-not added and a message says why; with the real git, the working folder of a repository and a linked worktree of it
-(whose `.git` is a file) are repository roots while the repository's subfolder and a plain folder are not. This scenario
-is tested by `MainWindow_AddRepoButton_FolderThatIsNotAGitRepository_IsRefusedWithAMessage` and
-`GitIntegrationSubsystem_RepositoryRoot_RepositoryWorktreeAndSubfolder`, covering
-`AgentControl-System-AddGitReposOnly`; that the repos already in the list are kept whatever their folders hold is
-verified by the `MainWindowViewModel` unit tests.
+**AgentControl_AddGitReposOnly_OnlyTheTopFolderOfAGitRepositoryIsAdded**: The repo seeded in the settings has no
+`.git` and is listed when the application starts. A subfolder of a Git repository chosen in the folder picker is not
+added; a message says it is not the top folder of a Git repository, and the seeded repo is still listed and stored. In
+the multi-folder scenario the two folders with a `.git` folder are added and the plain folder is not. These scenarios
+are tested by `windows@AddRepoButton_FolderPickerWithASubfolderOfARepo_RefusesItAndKeepsTheListedFolderWithoutGit` and
+`windows@AddRepoButton_FolderPickerWithTwoReposAndAPlainFolder_AddsTheReposAndSummarizesTheRest`, covering
+`AgentControl-System-AddGitReposOnly`. A linked worktree is verified with the real git in the `GitIntegration`
+subsystem tests.
 
 **AgentControl_SearchFilter_FilterTextBox_HidesAndRestoresCards**: Non-matching text is typed
 into the filter text box, hiding a repo card, and then the filter is cleared, restoring it;

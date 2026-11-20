@@ -532,11 +532,9 @@ sections:
           - AgentControl-MainWindowViewModel-GroupSettingsFollowRenameAndRemove
           - AgentControl-MainWindowViewModel-GroupSettingsKeptOnApplySettings
         tests:
-          # The rename and removal are verified in the view-model layer the window is drawn from
-          # (see the header of this file).
-          - MainWindowViewModel_RenameGroup_KeepsColorAndPosition
-          - MainWindowViewModel_RemoveGroup_ForgetsColorAndPosition
-          - MainWindowViewModel_ApplySettings_KeepsGroupColorsAndOrder
+          - MainWindow_RenameGroup_KeepsItsColorAccentAndItsPlace
+          - MainWindow_RemoveGroupOrItsLastRepo_ForgetsItsColorAccentAndItsPlace
+          - MainWindow_SettingsSaved_KeepsGroupColorAccentsAndOrder
 
       - id: AgentControl-LauncherUI-CardColorKeepsStatus
         title: >-

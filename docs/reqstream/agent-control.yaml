@@ -139,12 +139,7 @@ sections:
           - AgentControl-LauncherUI-AddRepoDropFolders
           - AgentControl-LauncherUI-AddRepoSummary
         tests:
-          # The operating system's folder picker and a drag from the file manager cannot be driven
-          # dependably by the UI Automation tests (native dialogs, and a drag source in another
-          # process), so the evidence is the headless window tests, which answer the picker through
-          # its seam and raise the platform's drag events with the dropped folders.
-          - MainWindow_AddRepoButton_SeveralFoldersPicked_AddsEachAndSummarizesTheRest
-          - MainWindow_DropFolders_OnGroupHeader_AddsThemToTheGroup
+          - windows@AddRepoButton_FolderPickerWithTwoReposAndAPlainFolder_AddsTheReposAndSummarizesTheRest
 
       - id: AgentControl-System-AddGitReposOnly
         title: >-
@@ -160,11 +155,8 @@ sections:
           - AgentControl-LauncherUI-AddRepoGitRootOnly
           - AgentControl-GitIntegration-RepositoryRoot
         tests:
-          # As for AgentControl-System-AddSeveralRepos the adding paths cannot be driven end to end
-          # dependably; the headless window test and the GitIntegration subsystem test with the
-          # real git (a repository, a worktree and a subfolder) are the evidence.
-          - MainWindow_AddRepoButton_FolderThatIsNotAGitRepository_IsRefusedWithAMessage
-          - GitIntegrationSubsystem_RepositoryRoot_RepositoryWorktreeAndSubfolder
+          - windows@AddRepoButton_FolderPickerWithTwoReposAndAPlainFolder_AddsTheReposAndSummarizesTheRest
+          - windows@AddRepoButton_FolderPickerWithASubfolderOfARepo_RefusesItAndKeepsTheListedFolderWithoutGit
 
       - id: AgentControl-System-ListChangesKept
         title: >-

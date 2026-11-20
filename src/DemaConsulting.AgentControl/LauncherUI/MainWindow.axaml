@@ -141,161 +141,161 @@
                          group header can be dragged above or below another group's header; the two
                          lines show where it would land. -->
                     <Panel>
-                    <Grid Name="GroupHeader" ColumnDefinitions="Auto,*,Auto" Margin="0,8,0,0">
-                        <!-- Group color accent: a fixed-width slot, so headers stay aligned whether or
-                             not the group has a color. Named in words by its tooltip and accessible
-                             name (never color alone). -->
-                        <Panel Grid.Column="0" Width="8" VerticalAlignment="Center">
-                            <Border Name="GroupColorAccent"
-                                     AutomationProperties.AutomationId="GroupColorAccent"
-                                     AutomationProperties.AccessibilityView="Content"
-                                     AutomationProperties.Name="{Binding ColorDescription}"
-                                     ToolTip.Tip="{Binding ColorDescription}"
-                                     Classes="GroupColorAccent"
-                                     Classes.groupAccent0="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent0}"
-                                     Classes.groupAccent1="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent1}"
-                                     Classes.groupAccent2="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent2}"
-                                     Classes.groupAccent3="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent3}"
-                                     Classes.groupAccent4="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent4}"
-                                     Classes.groupAccent5="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent5}"
-                                     Classes.groupAccent6="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent6}"
-                                     Classes.groupAccent7="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent7}"
-                                     Classes.groupAccent8="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent8}"
-                                     Classes.groupAccent9="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent9}"
-                                     IsVisible="{Binding HasColor}"
-                                     HorizontalAlignment="Left" />
-                        </Panel>
-                        <Button Grid.Column="1"
-                                 Name="GroupHeaderToggleButton"
-                                 AutomationProperties.AutomationId="GroupHeaderToggleButton"
-                                 AutomationProperties.Name="{Binding AccessibleName}"
-                                 Classes="groupToggle"
-                                 HorizontalAlignment="Left"
-                                 Command="{Binding ToggleCommand}"
-                                 ToolTip.Tip="{Binding ToggleTooltip}"
-                                 ToolTip.ShowOnDisabled="True">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <materialIcons:MaterialIcon Classes="chevron" Kind="ChevronDown" Width="18" Height="18"
-                                                              IsVisible="{Binding IsExpanded}" />
-                                <materialIcons:MaterialIcon Classes="chevron" Kind="ChevronRight" Width="18" Height="18"
-                                                              IsVisible="{Binding IsCollapsed}" />
-                                <materialIcons:MaterialIcon Kind="Star" Width="16" Height="16"
-                                                              Foreground="{DynamicResource FavoriteStarForeground}"
-                                                              IsVisible="{Binding IsFavoritesSection}" />
-                                <materialIcons:MaterialIcon Kind="Folder" Width="16" Height="16"
-                                                              IsVisible="{Binding IsUserGroup}" />
-                                <materialIcons:MaterialIcon Kind="FolderOutline" Width="16" Height="16"
-                                                              IsVisible="{Binding IsUngroupedSection}" />
-                                <TextBlock Name="GroupHeaderNameText"
-                                            AutomationProperties.AutomationId="GroupHeaderNameText"
-                                            Text="{Binding Name}"
-                                            FontWeight="SemiBold" FontSize="14"
-                                            MaxWidth="360" TextTrimming="CharacterEllipsis"
-                                            VerticalAlignment="Center" />
-                                <Border Classes="Chip grey" ToolTip.Tip="{Binding CountTooltip}">
-                                    <TextBlock Name="GroupHeaderCountText"
-                                                AutomationProperties.AutomationId="GroupHeaderCountText"
-                                                Text="{Binding Count}" />
-                                </Border>
-                            </StackPanel>
-                        </Button>
+                        <Grid Name="GroupHeader" ColumnDefinitions="Auto,*,Auto" Margin="0,8,0,0">
+                            <!-- Group color accent: a fixed-width slot, so headers stay aligned whether or
+                                 not the group has a color. Named in words by its tooltip and accessible
+                                 name (never color alone). -->
+                            <Panel Grid.Column="0" Width="8" VerticalAlignment="Center">
+                                <Border Name="GroupColorAccent"
+                                         AutomationProperties.AutomationId="GroupColorAccent"
+                                         AutomationProperties.AccessibilityView="Content"
+                                         AutomationProperties.Name="{Binding ColorDescription}"
+                                         ToolTip.Tip="{Binding ColorDescription}"
+                                         Classes="GroupColorAccent"
+                                         Classes.groupAccent0="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent0}"
+                                         Classes.groupAccent1="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent1}"
+                                         Classes.groupAccent2="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent2}"
+                                         Classes.groupAccent3="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent3}"
+                                         Classes.groupAccent4="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent4}"
+                                         Classes.groupAccent5="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent5}"
+                                         Classes.groupAccent6="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent6}"
+                                         Classes.groupAccent7="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent7}"
+                                         Classes.groupAccent8="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent8}"
+                                         Classes.groupAccent9="{Binding ColorStyleClass, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=groupAccent9}"
+                                         IsVisible="{Binding HasColor}"
+                                         HorizontalAlignment="Left" />
+                            </Panel>
+                            <Button Grid.Column="1"
+                                     Name="GroupHeaderToggleButton"
+                                     AutomationProperties.AutomationId="GroupHeaderToggleButton"
+                                     AutomationProperties.Name="{Binding AccessibleName}"
+                                     Classes="groupToggle"
+                                     HorizontalAlignment="Left"
+                                     Command="{Binding ToggleCommand}"
+                                     ToolTip.Tip="{Binding ToggleTooltip}"
+                                     ToolTip.ShowOnDisabled="True">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <materialIcons:MaterialIcon Classes="chevron" Kind="ChevronDown" Width="18" Height="18"
+                                                                  IsVisible="{Binding IsExpanded}" />
+                                    <materialIcons:MaterialIcon Classes="chevron" Kind="ChevronRight" Width="18" Height="18"
+                                                                  IsVisible="{Binding IsCollapsed}" />
+                                    <materialIcons:MaterialIcon Kind="Star" Width="16" Height="16"
+                                                                  Foreground="{DynamicResource FavoriteStarForeground}"
+                                                                  IsVisible="{Binding IsFavoritesSection}" />
+                                    <materialIcons:MaterialIcon Kind="Folder" Width="16" Height="16"
+                                                                  IsVisible="{Binding IsUserGroup}" />
+                                    <materialIcons:MaterialIcon Kind="FolderOutline" Width="16" Height="16"
+                                                                  IsVisible="{Binding IsUngroupedSection}" />
+                                    <TextBlock Name="GroupHeaderNameText"
+                                                AutomationProperties.AutomationId="GroupHeaderNameText"
+                                                Text="{Binding Name}"
+                                                FontWeight="SemiBold" FontSize="14"
+                                                MaxWidth="360" TextTrimming="CharacterEllipsis"
+                                                VerticalAlignment="Center" />
+                                    <Border Classes="Chip grey" ToolTip.Tip="{Binding CountTooltip}">
+                                        <TextBlock Name="GroupHeaderCountText"
+                                                    AutomationProperties.AutomationId="GroupHeaderCountText"
+                                                    Text="{Binding Count}" />
+                                    </Border>
+                                </StackPanel>
+                            </Button>
 
-                        <Button Grid.Column="2"
-                                 Name="GroupHeaderMenuButton"
-                                 AutomationProperties.AutomationId="GroupHeaderMenuButton"
-                                 AutomationProperties.Name="{Binding Name, StringFormat='Actions for group {0}'}"
-                                 Classes="iconGhost"
-                                 Margin="0,0,15,0"
-                                 IsVisible="{Binding IsUserGroup}"
-                                 ToolTip.Tip="Add a repository to this group, or move, color, rename or remove the group">
-                            <materialIcons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
-                            <Button.Flyout>
-                                <MenuFlyout>
-                                    <MenuItem Name="GroupAddRepoMenuItem"
-                                               AutomationProperties.AutomationId="GroupAddRepoMenuItem"
-                                               Header="Add repository..."
-                                               ToolTip.Tip="Choose one or more repository folders and add them to this group"
-                                               Command="{Binding AddRepoCommand}">
-                                        <MenuItem.Icon>
-                                            <materialIcons:MaterialIcon Kind="FolderPlus" />
-                                        </MenuItem.Icon>
-                                    </MenuItem>
-                                    <Separator />
-                                    <!-- Move up / Move down: disabled (with the reason as the tooltip) at
-                                         the ends of the groups and while the filter has text -->
-                                    <MenuItem Name="MoveGroupUpMenuItem"
-                                               AutomationProperties.AutomationId="MoveGroupUpMenuItem"
-                                               Header="Move up"
-                                               ToolTip.Tip="{Binding MoveUpTooltip}"
-                                               ToolTip.ShowOnDisabled="True"
-                                               Command="{Binding MoveUpCommand}">
-                                        <MenuItem.Icon>
-                                            <materialIcons:MaterialIcon Kind="ArrowUp" />
-                                        </MenuItem.Icon>
-                                    </MenuItem>
-                                    <MenuItem Name="MoveGroupDownMenuItem"
-                                               AutomationProperties.AutomationId="MoveGroupDownMenuItem"
-                                               Header="Move down"
-                                               ToolTip.Tip="{Binding MoveDownTooltip}"
-                                               ToolTip.ShowOnDisabled="True"
-                                               Command="{Binding MoveDownCommand}">
-                                        <MenuItem.Icon>
-                                            <materialIcons:MaterialIcon Kind="ArrowDown" />
-                                        </MenuItem.Icon>
-                                    </MenuItem>
-                                    <MenuItem Name="GroupColorMenuItem"
-                                               AutomationProperties.AutomationId="GroupColorMenuItem"
-                                               Header="Group color..."
-                                               ToolTip.Tip="Choose a color for this group's header and for the tiles of its repos that have no card color (stored only in your AgentControl settings)"
-                                               Click="GroupColorMenuItem_Click">
-                                        <MenuItem.Icon>
-                                            <materialIcons:MaterialIcon Kind="Palette" />
-                                        </MenuItem.Icon>
-                                    </MenuItem>
-                                    <Separator />
-                                    <MenuItem Name="RenameGroupMenuItem"
-                                               AutomationProperties.AutomationId="RenameGroupMenuItem"
-                                               Header="Rename group..."
-                                               ToolTip.Tip="Give this group a different name"
-                                               Command="{Binding RenameCommand}">
-                                        <MenuItem.Icon>
-                                            <materialIcons:MaterialIcon Kind="Pencil" />
-                                        </MenuItem.Icon>
-                                    </MenuItem>
-                                    <MenuItem Name="RemoveGroupMenuItem"
-                                               AutomationProperties.AutomationId="RemoveGroupMenuItem"
-                                               Header="Remove group"
-                                               ToolTip.Tip="Remove this group; its repos stay in the list, ungrouped"
-                                               Command="{Binding RemoveGroupCommand}">
-                                        <MenuItem.Icon>
-                                            <materialIcons:MaterialIcon Kind="FolderRemove" />
-                                        </MenuItem.Icon>
-                                    </MenuItem>
-                                </MenuFlyout>
-                            </Button.Flyout>
+                            <Button Grid.Column="2"
+                                     Name="GroupHeaderMenuButton"
+                                     AutomationProperties.AutomationId="GroupHeaderMenuButton"
+                                     AutomationProperties.Name="{Binding Name, StringFormat='Actions for group {0}'}"
+                                     Classes="iconGhost"
+                                     Margin="0,0,15,0"
+                                     IsVisible="{Binding IsUserGroup}"
+                                     ToolTip.Tip="Add a repository to this group, or move, color, rename or remove the group">
+                                <materialIcons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
+                                <Button.Flyout>
+                                    <MenuFlyout>
+                                        <MenuItem Name="GroupAddRepoMenuItem"
+                                                   AutomationProperties.AutomationId="GroupAddRepoMenuItem"
+                                                   Header="Add repository..."
+                                                   ToolTip.Tip="Choose one or more repository folders and add them to this group"
+                                                   Command="{Binding AddRepoCommand}">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="FolderPlus" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <Separator />
+                                        <!-- Move up / Move down: disabled (with the reason as the tooltip) at
+                                             the ends of the groups and while the filter has text -->
+                                        <MenuItem Name="MoveGroupUpMenuItem"
+                                                   AutomationProperties.AutomationId="MoveGroupUpMenuItem"
+                                                   Header="Move up"
+                                                   ToolTip.Tip="{Binding MoveUpTooltip}"
+                                                   ToolTip.ShowOnDisabled="True"
+                                                   Command="{Binding MoveUpCommand}">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="ArrowUp" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Name="MoveGroupDownMenuItem"
+                                                   AutomationProperties.AutomationId="MoveGroupDownMenuItem"
+                                                   Header="Move down"
+                                                   ToolTip.Tip="{Binding MoveDownTooltip}"
+                                                   ToolTip.ShowOnDisabled="True"
+                                                   Command="{Binding MoveDownCommand}">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="ArrowDown" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Name="GroupColorMenuItem"
+                                                   AutomationProperties.AutomationId="GroupColorMenuItem"
+                                                   Header="Group color..."
+                                                   ToolTip.Tip="Choose a color for this group's header and for the tiles of its repos that have no card color (stored only in your AgentControl settings)"
+                                                   Click="GroupColorMenuItem_Click">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="Palette" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <Separator />
+                                        <MenuItem Name="RenameGroupMenuItem"
+                                                   AutomationProperties.AutomationId="RenameGroupMenuItem"
+                                                   Header="Rename group..."
+                                                   ToolTip.Tip="Give this group a different name"
+                                                   Command="{Binding RenameCommand}">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="Pencil" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Name="RemoveGroupMenuItem"
+                                                   AutomationProperties.AutomationId="RemoveGroupMenuItem"
+                                                   Header="Remove group"
+                                                   ToolTip.Tip="Remove this group; its repos stay in the list, ungrouped"
+                                                   Command="{Binding RemoveGroupCommand}">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="FolderRemove" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                    </MenuFlyout>
+                                </Button.Flyout>
 
-                            <!-- Group color palette: a small pop-up under the "..." button, opened by the
-                                 menu's "Group color..." item (see GroupColorMenuItem_Click). The same
-                                 palette as a card's; "None" takes the group's color away. -->
-                            <FlyoutBase.AttachedFlyout>
-                                <Flyout Placement="BottomEdgeAlignedRight">
-                                    <vm:ColorPalettePanel Name="GroupColorPalette"
-                                                           AutomationProperties.AutomationId="GroupColorPalette"
-                                                           AutomationProperties.AccessibilityView="Content"
-                                                           AutomationProperties.Name="Group color palette"
-                                                           IdPrefix="GroupColor"
-                                                           ClearText="None"
-                                                           ClearIcon="Cancel"
-                                                           ClearTooltip="Give this group no color; its repos' tiles use their own or automatic colors"
-                                                           Heading="{Binding ColorHeading}"
-                                                           SelectedColorName="{Binding ColorName}"
-                                                           ColorChosen="GroupColorPalette_ColorChosen" />
-                                </Flyout>
-                            </FlyoutBase.AttachedFlyout>
-                        </Button>
-                    </Grid>
-                    <Border Name="GroupDropIndicatorAbove" Classes="DropIndicator above" />
-                    <Border Name="GroupDropIndicatorBelow" Classes="DropIndicator below" />
+                                <!-- Group color palette: a small pop-up under the "..." button, opened by the
+                                     menu's "Group color..." item (see GroupColorMenuItem_Click). The same
+                                     palette as a card's; "None" takes the group's color away. -->
+                                <FlyoutBase.AttachedFlyout>
+                                    <Flyout Placement="BottomEdgeAlignedRight">
+                                        <vm:ColorPalettePanel Name="GroupColorPalette"
+                                                               AutomationProperties.AutomationId="GroupColorPalette"
+                                                               AutomationProperties.AccessibilityView="Content"
+                                                               AutomationProperties.Name="Group color palette"
+                                                               IdPrefix="GroupColor"
+                                                               ClearText="None"
+                                                               ClearIcon="Cancel"
+                                                               ClearTooltip="Give this group no color; its repos' tiles use their own or automatic colors"
+                                                               Heading="{Binding ColorHeading}"
+                                                               SelectedColorName="{Binding ColorName}"
+                                                               ColorChosen="GroupColorPalette_ColorChosen" />
+                                    </Flyout>
+                                </FlyoutBase.AttachedFlyout>
+                            </Button>
+                        </Grid>
+                        <Border Name="GroupDropIndicatorAbove" Classes="DropIndicator above" />
+                        <Border Name="GroupDropIndicatorBelow" Classes="DropIndicator below" />
                     </Panel>
                 </DataTemplate>
                 <DataTemplate DataType="vm:RepoCardViewModel" x:DataType="vm:RepoCardViewModel">
