@@ -345,6 +345,12 @@ reported as `PackageSourceAccessException` (derived from
   turns into "Package not found", and a download that fails is reported as `Unreachable` with a message that
   says the package may no longer exist there.
 
+Every failure a sign-in can fix - `AuthenticationFailed` (no credential, or a rejected one) and `SignInCanceled` -
+also carries, as `SignInNeededMessage`, the words *Source '{alias}' ({origin}) needs a sign-in.*, which are the
+message of a failure that could not ask the user. A caller that shows the state of the source rather than what
+happened during one operation (a repo card's "Sign-in needed" chip) uses them, so a canceled or rejected sign-in reads
+the same as one nobody was asked for (`AgentControl-NuGetSourceProvider-SignInNeededWords`). The other kinds carry
+none.
 Other `InvalidOperationException`s come from this unit for the private-cache and layout checks (messages are
 safe to show to the user); `ArgumentException`/`ArgumentNullException` for invalid arguments. A 401 on a
 non-index resource after a credential was supplied makes the NuGet client retry with its own back-off

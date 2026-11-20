@@ -573,7 +573,8 @@ name the start and end of a pinned fingerprint only. This scenario is tested by
 `AgentControl-LauncherUI-SignatureIndicator`.
 
 **LauncherUI_BackgroundChecksDoNotPrompt_UserStartedChecksMay**: A background upgrade check against a
-server that needs a sign-in never opens the dialog and puts the instruction on the card; a check the user
+server that needs a sign-in never opens the dialog and puts the instruction on the card - click the "Sign-in
+needed" chip or use Refresh; a check the user
 starts opens it once, finds the upgrade, and a later background check - even for another card - reuses the
 remembered credential without asking. This scenario is tested by
 `RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains` and
@@ -1166,6 +1167,34 @@ disposed. This scenario is tested by
 `AgentControl-LauncherUI-PeriodicUpgradeRecheck`,
 children `AgentControl-MainWindowViewModel-PeriodicUpgradeRecheck` and
 `AgentControl-MainWindowViewModel-PeriodicRecheckLifecycle`.
+
+**LauncherUI_SignInNeededChipSignsIn_ClickingTheChipRefreshesTheCard**: In a headless main window, a card whose
+background check found that its source needs a sign-in shows the clickable "Sign-in needed" chip - visible, enabled,
+named "Sign-in needed" for assistive technology, with a tooltip that says to click it or use Refresh - and not the
+plain problem chip; a real mouse click on it refreshes the card (the source is read again), and once the source
+answers the chip is gone and the upgrade is offered. A card with any other source problem (no configured source)
+shows the plain chip with the problem in its tooltip and no sign-in chip. This scenario is tested by
+`MainWindow_SignInNeededChipClicked_RefreshesTheCardAndClearsTheChip` and
+`MainWindow_SourceProblemOtherThanSignIn_ShowsTheTooltipChipNotTheButton`, covering
+`AgentControl-LauncherUI-SignInNeededChipSignsIn`, child `AgentControl-RepoCardViewModel-SignInNeededChip`.
+
+**LauncherUI_SignInNotGivenKeepsChip_CancelOrRejectKeepsTheChip**: In a headless main window whose only card's
+background check found that its source needs a sign-in, the chip's tooltip is noted; the source then answers as if
+the user canceled the sign-in dialog (one case) or the server rejected the sign-in typed (the other case), giving the
+sign-in-needed words with the failure, and a real mouse click on the chip refreshes the card. The source is read
+again, and the clickable chip is still visible and enabled, named "Sign-in needed", with exactly the same tooltip,
+the plain problem chip stays hidden, and the card's status is "Needs attention" rather than "Update check failed".
+This scenario is tested by `MainWindow_SignInNeededChipClicked_SignInNotGiven_KeepsTheChip`, covering
+`AgentControl-LauncherUI-SignInNotGivenKeepsChip`, child `AgentControl-RepoCardViewModel-SignInNotGivenStillNeeded`.
+
+**LauncherUI_SettingsClosedRechecksProblems_CardsWithAProblemAreCheckedAgain**: In a headless main window whose only
+card needs a sign-in, the Settings window is opened from the main window; while it is open the source starts to
+answer, and closing Settings without saving checks the card again, so the sign-in chip is gone and the upgrade is
+offered. Saving the settings instead checks the card once (the save's own check) and closing the window after the
+save reads the source no further time. This scenario is tested by
+`MainWindow_SettingsClosedWithoutSaving_RechecksTheCardThatNeedsSignIn` and
+`MainWindow_SettingsSaved_ChecksEachCardOnce`, covering `AgentControl-LauncherUI-SettingsClosedRechecksProblems`,
+child `AgentControl-MainWindowViewModel-RecheckAfterSettingsClosed`.
 
 **LauncherUI_ChangePackage_PinnedRepoChoosesAgainOnTheCurrentChoice**: For a repo that has a pin the select-package
 command can execute and raises the request ("Change package..."); the main window opens the Select Package dialog on the

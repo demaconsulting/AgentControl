@@ -303,6 +303,13 @@ inner exception. This scenario is tested by
 `NuGetSourceProvider_ListVersions_AddressIsNotANuGetFeed_ThrowsUnreachable` and
 `PackageSourceAccessException_Constructor_CarriesKindMessageAndInnerException`, covering
 `AgentControl-NuGetSourceProvider-ServerFailures`; by
+`NuGetSourceProvider_ListVersions_UserCancelsSignIn_ThrowsSignInCanceledAfterOnePrompt`,
+`NuGetSourceProvider_ListVersions_WrongCredentials_ThrowsAuthenticationFailedAfterOnePrompt`,
+`NuGetSourceProvider_ListVersions_ServerNeedsSignInAndNoPrompt_ThrowsAuthenticationFailedWithoutAsking` and
+`PackageSourceAccessException_Constructor_CarriesSignInNeededMessage`, which show that a canceled sign-in, a rejected
+sign-in and a sign-in that could not be asked for all carry the same sign-in-needed words - *Source 'Feed' (origin)
+needs a sign-in.*, the message of the last case - and that the exception keeps them beside its own message, covering
+`AgentControl-NuGetSourceProvider-SignInNeededWords`; by
 `NuGetSourceProvider_ListVersions_SessionCredentialRejected_ForgetsItAndPromptsAgain`, covering
 `AgentControl-NuGetSourceProvider-RejectedCredentialForgotten`; by
 `NuGetSourceProvider_ListVersions_SignInTakesTooLong_ThrowsTimedOut`, covering

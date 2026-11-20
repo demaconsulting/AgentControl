@@ -44,15 +44,30 @@ internal sealed record UpgradeCheck(bool IsNewerAvailable, DiscoveredPackage? La
 ///     cards that pin the same package would retry an unreachable (or sign-in-requiring) source for
 ///     every card. A caller creates one instance per round, passes it to the cache's read methods
 ///     and drops it when the round ends: nothing recorded here outlives the round, so the next round
-///     (and every action the user starts, which passes none) reads the source again. The recorded
-///     exception is rethrown to every later reader, so each card ends in the same state as the first
-///     one. Safe for concurrent use.
+///     reads the source again. The background rounds (the periodic round and the launch-time check)
+///     each pass one; <see cref="Clear"/> empties those that are running when the Settings window
+///     closes without saving, so a sign-in made there is not overridden by an older failure. A
+///     single repo card's check that is given no round's memo - one the user started, such as
+///     Refresh or the "Sign-in needed" chip - uses one of its own for the length of that check, so
+///     within it a source that failed (a sign-in the user canceled included) is read, and the user
+///     asked, at most once. Other reads (Upgrade, Select Package, restoring pinned files at
+///     launch) pass none and always read the source. The recorded exception is rethrown to every
+///     later reader, so each card ends in the same state as the first one.
+///     </para>
+///     <para>
+///     Safe for concurrent use: the cards of a round read their sources concurrently, so every
+///     access to the recorded failures and to the <see cref="Generation"/> is made under one lock.
+///     A read takes the <see cref="Generation"/> when it starts and hands it back to
+///     <see cref="Record"/>; <see cref="Clear"/> moves to a new generation under the same lock, so
+///     a read that was already in flight when the memo was cleared - one that used the state from
+///     before a sign-in - cannot record its failure afterwards and give it to the cards that follow.
 ///     </para>
 /// </remarks>
 internal sealed class SourceFailureMemo
 {
     /// <summary>
-    ///     Guards <see cref="_failures"/>.
+    ///     Guards <see cref="_failures"/> and <see cref="_generation"/>, so a failure is recorded
+    ///     only while the generation it was read in is still the current one.
     /// </summary>
     private readonly Lock _lock = new();
 
@@ -60,6 +75,30 @@ internal sealed class SourceFailureMemo
     ///     The first failure recorded per source alias (case-insensitive) and package ID.
     /// </summary>
     private readonly Dictionary<(string Alias, string PackageId), Exception> _failures = new(KeyComparer.Instance);
+
+    /// <summary>
+    ///     The number of times the memo was cleared; see <see cref="Generation"/>.
+    /// </summary>
+    private long _generation;
+
+    /// <summary>
+    ///     Gets the memo's current generation, which a read takes when it starts and passes to
+    ///     <see cref="Record"/> if it fails.
+    /// </summary>
+    /// <remarks>
+    ///     <see cref="Clear"/> moves to the next generation, so a failure read in an earlier one is
+    ///     known to come from before the clear and is not recorded.
+    /// </remarks>
+    public long Generation
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _generation;
+            }
+        }
+    }
 
     /// <summary>
     ///     Gets the failure recorded for a source's read of a package.
@@ -77,17 +116,55 @@ internal sealed class SourceFailureMemo
     }
 
     /// <summary>
-    ///     Records the failure of a source's read of a package; the first failure recorded for a key
-    ///     is kept.
+    ///     Records the failure of a source's read of a package, unless the memo was cleared since the
+    ///     read started; the first failure recorded for a key is kept.
     /// </summary>
     /// <param name="sourceAlias">The source alias.</param>
     /// <param name="packageId">The package name or ID.</param>
     /// <param name="failure">The failure.</param>
-    public void Record(string sourceAlias, string packageId, Exception failure)
+    /// <param name="readGeneration">The <see cref="Generation"/> taken when the read started.</param>
+    /// <remarks>
+    ///     The generation is compared under the lock that <see cref="Clear"/> takes, so a read
+    ///     either finished before the clear (and its failure is dropped by it) or started after it
+    ///     (and its failure is recorded): a failure read with the state from before the clear never
+    ///     outlives it.
+    /// </remarks>
+    public void Record(string sourceAlias, string packageId, Exception failure, long readGeneration)
     {
         lock (_lock)
         {
+            // A read that started before the memo was cleared used what was true then (before a
+            // sign-in, say): its failure says nothing about the source now
+            if (readGeneration != _generation)
+            {
+                return;
+            }
+
             _failures.TryAdd((sourceAlias, packageId), failure);
+        }
+    }
+
+    /// <summary>
+    ///     Forgets every failure recorded so far, and every failure of a read that is still in flight,
+    ///     so the next read of each source in the round reaches it again; the failure of a read
+    ///     started afterwards is remembered as usual.
+    /// </summary>
+    /// <remarks>
+    ///     For when something that may have fixed the failures happened while the round was
+    ///     running - the user signed in, or the connection came back: without this the cards the
+    ///     round checks after that moment would be given the failure that no longer holds. Every
+    ///     entry is dropped rather than those of some sources, because the cards of a round share
+    ///     the same configured sources and a forgotten failure only costs one more read. Emptying
+    ///     the entries alone is not enough: a read already in flight would record its failure when it
+    ///     finishes, so the memo also moves to a new <see cref="Generation"/> (under the same lock)
+    ///     and <see cref="Record"/> drops a failure read in an earlier one.
+    /// </remarks>
+    public void Clear()
+    {
+        lock (_lock)
+        {
+            _failures.Clear();
+            _generation++;
         }
     }
 
@@ -134,8 +211,9 @@ internal sealed class SourceFailureMemo
 ///     </para>
 ///     <para>
 ///     A cached empty result (no versions found) is a valid, distinct entry from "not yet queried",
-///     and a failed fetch is never cached (a background check round may pass a
-///     <see cref="SourceFailureMemo"/> so that a failure is remembered for that round only). An
+///     and a failed fetch is never cached (a background check round, or a single repo card's check,
+///     may pass a <see cref="SourceFailureMemo"/> so that a failure is remembered for that round or
+///     check only). An
 ///     expired entry is treated as not yet queried.
 ///     <see cref="Invalidate()"/> clears everything, while
 ///     <see cref="Invalidate(string)"/> clears one source so editing or removing a source does not
@@ -235,10 +313,15 @@ internal sealed class PackageVersionCache
     /// <param name="sourceAlias">The source alias.</param>
     /// <param name="packageId">The package name or ID.</param>
     /// <param name="cancellationToken">Token to abandon a cache-miss fetch.</param>
-    /// <param name="failureMemo">The failures of the current background check round, or
-    ///     <see langword="null"/> (a user action, or any call outside a round). When given, a cache
-    ///     miss whose read already failed in the round rethrows that failure without reading the
-    ///     source again, and a new failure is recorded in it; the cache itself still never keeps a
+    /// <param name="failureMemo">The failures recorded so far by the current background check
+    ///     round (the periodic round or the launch-time check), or by a single repo card's check the
+    ///     user started (Refresh, the "Sign-in needed" chip), which keeps a memo of its own for its
+    ///     length; or <see langword="null"/> for a read outside any such check (Upgrade, Select
+    ///     Package, restoring pinned files at launch). When given, a cache miss whose read already
+    ///     failed in the round or check rethrows that failure without reading the source again, and
+    ///     a new failure is recorded in it; the cache itself still never keeps a failure. A round's
+    ///     memo may be emptied (<see cref="SourceFailureMemo.Clear"/>) while the round runs, after
+    ///     which the source is read again, and a read that was in flight then does not record its
     ///     failure.</param>
     /// <returns>The discovered packages ordered from highest to lowest version.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="registry"/> is
@@ -276,8 +359,11 @@ internal sealed class PackageVersionCache
             ExceptionDispatchInfo.Capture(memoized!).Throw();
         }
 
-        // The entry is dated when the read starts: the listing is no fresher than that moment
+        // The entry is dated when the read starts: the listing is no fresher than that moment. The
+        // memo's generation is taken then too, so a failure is not recorded if the memo is cleared
+        // while the read is in flight
         var fetchedAt = _timeProvider.GetUtcNow();
+        var memoGeneration = failureMemo?.Generation ?? 0;
         List<DiscoveredPackage> versions;
         try
         {
@@ -288,7 +374,7 @@ internal sealed class PackageVersionCache
         catch (Exception ex) when (failureMemo is not null
             && ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            failureMemo.Record(sourceAlias, packageId, ex);
+            failureMemo.Record(sourceAlias, packageId, ex, memoGeneration);
             throw;
         }
 
@@ -349,9 +435,9 @@ internal sealed class PackageVersionCache
     /// <param name="onSourceFailure">Called with the failure of each source that could not be read
     ///     (and was skipped), or <see langword="null"/>. Lets a caller tell "no source offers the
     ///     package" from "a source that might have could not be read".</param>
-    /// <param name="failureMemo">The failures of the current background check round, or
-    ///     <see langword="null"/> outside a round; see
-    ///     <see cref="GetVersionsDescendingAsync"/>. A source that failed in the round is skipped
+    /// <param name="failureMemo">The failures of the current background check round or repo card
+    ///     check, or <see langword="null"/> outside one; see
+    ///     <see cref="GetVersionsDescendingAsync"/>. A source that already failed in it is skipped
     ///     (and reported to <paramref name="onSourceFailure"/>) without being read again.</param>
     /// <returns>The discovered packages source by source in configuration order (the order of
     ///     Settings), each source's versions from highest to lowest; empty when no source offers
@@ -435,9 +521,9 @@ internal sealed class PackageVersionCache
     /// <param name="packageId">The package name or ID.</param>
     /// <param name="pinnedVersion">The repo's current pinned version text.</param>
     /// <param name="cancellationToken">Token to abandon a cache-miss fetch.</param>
-    /// <param name="failureMemo">The failures of the current background check round, or
-    ///     <see langword="null"/> outside a round; see
-    ///     <see cref="GetVersionsAcrossSourcesAsync"/>.</param>
+    /// <param name="failureMemo">The failures of the current background check round or repo card
+    ///     check, or <see langword="null"/> outside one; see
+    ///     <see cref="GetVersionsDescendingAsync"/>.</param>
     /// <returns>The upgrade check result; see <see cref="UpgradeCheck"/>. The newest version
     ///     across the sources wins, and a version offered by several sources is attributed to the
     ///     first of them in configuration order.</returns>

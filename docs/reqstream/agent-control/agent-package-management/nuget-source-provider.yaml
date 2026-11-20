@@ -404,6 +404,22 @@ sections:
           - NuGetSourceProvider_ListVersions_AddressIsNotANuGetFeed_ThrowsUnreachable
           - PackageSourceAccessException_Constructor_CarriesKindMessageAndInnerException
 
+      - id: AgentControl-NuGetSourceProvider-SignInNeededWords
+        title: >-
+          The NuGetSourceProvider class shall give every failure that a sign-in can fix - the
+          server needs a sign-in, rejected the credential supplied, or the user canceled the
+          sign-in - besides its own message, the words saying that the source needs a sign-in,
+          which are the message of a failed operation that could not ask the user.
+        justification: |
+          After a canceled or rejected sign-in the source still needs one. A caller that shows the
+          state of the source, such as a repo card's sign-in-needed chip, must be able to say so in
+          the same words whether or not the user was asked, without parsing a message.
+        tests:
+          - NuGetSourceProvider_ListVersions_UserCancelsSignIn_ThrowsSignInCanceledAfterOnePrompt
+          - NuGetSourceProvider_ListVersions_WrongCredentials_ThrowsAuthenticationFailedAfterOnePrompt
+          - NuGetSourceProvider_ListVersions_ServerNeedsSignInAndNoPrompt_ThrowsAuthenticationFailedWithoutAsking
+          - PackageSourceAccessException_Constructor_CarriesSignInNeededMessage
+
       - id: AgentControl-NuGetSourceProvider-AccessDenied
         title: >-
           The NuGetSourceProvider class shall, when a server answers HTTP 403 (it knows the user

@@ -951,19 +951,23 @@ internal sealed class NuGetSourceProvider : IPackageSourceProvider
         _nugetLogger.LogWarning(
             "Source {FeedOrigin} refused access (credential supplied: {CredentialSupplied}).", _feed, credentialRejected);
 
+        // However the sign-in was not given, the source still needs one: every one of these
+        // failures says so in the same words, for a caller that shows the state of the source
+        var signInNeeded = $"Source '{Alias}' ({_feed}) needs a sign-in.";
         if (userDeclined)
         {
             return new PackageSourceAccessException(
                 PackageSourceFailureKind.SignInCanceled,
                 $"Sign-in to source '{Alias}' ({_feed}) was canceled.",
-                inner);
+                inner,
+                signInNeeded);
         }
 
         var message = credentialRejected
             ? $"Source '{Alias}' ({_feed}) rejected the credentials (the server answered 401). " +
               "Check the user name and password or token, and that the account may read this feed."
-            : $"Source '{Alias}' ({_feed}) needs a sign-in.";
-        return new PackageSourceAccessException(PackageSourceFailureKind.AuthenticationFailed, message, inner);
+            : signInNeeded;
+        return new PackageSourceAccessException(PackageSourceFailureKind.AuthenticationFailed, message, inner, signInNeeded);
     }
 
     /// <summary>

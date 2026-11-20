@@ -2051,6 +2051,61 @@ sections:
           - MainWindowViewModel_Dispose_StopsThePeriodicRecheck
           - MainWindow_ViewModelAttachedThenWindowClosed_StartsPeriodicRecheckAndDisposesViewModel
 
+      - id: AgentControl-LauncherUI-SignInNeededChipSignsIn
+        title: >-
+          The LauncherUI subsystem shall show a repo card's sign-in-needed problem as a chip the user
+          can click to start the same check as the card's Refresh - which may ask the user to sign in -
+          unavailable while another operation of the card runs, and shall remove the chip once that
+          check succeeds; other package source problems stay a chip that explains the problem in its
+          tooltip.
+        justification: |
+          A red "Sign-in needed" chip looks like the place to act, and a user who clicks it and sees
+          nothing happen is left stuck with no clear way forward. The chip is where the user's
+          attention already is, so clicking it should start the sign-in. Problems that no sign-in can
+          fix (no source offers the package, access refused, Git too old) need a change elsewhere, so
+          their chip only explains.
+        children:
+          - AgentControl-RepoCardViewModel-SignInNeededChip
+        tests:
+          - MainWindow_SignInNeededChipClicked_RefreshesTheCardAndClearsTheChip
+          - MainWindow_SourceProblemOtherThanSignIn_ShowsTheTooltipChipNotTheButton
+
+      - id: AgentControl-LauncherUI-SignInNotGivenKeepsChip
+        title: >-
+          The LauncherUI subsystem shall keep showing a repo card's clickable sign-in-needed chip,
+          with the same tooltip, and not a failed upgrade check, when the user cancels or closes the
+          sign-in dialog that a check they started opened, or the server rejects the sign-in given,
+          so that the user can click the chip to try again; the other failures of that check are
+          reported as before.
+        justification: |
+          A user who needed a sign-in and did not give one still needs one. Showing "update check
+          failed" instead hides the one action that fixes it, and makes the user hunt for a way to
+          sign in again.
+        children:
+          - AgentControl-RepoCardViewModel-SignInNotGivenStillNeeded
+        tests:
+          - MainWindow_SignInNeededChipClicked_SignInNotGiven_KeepsTheChip
+
+      - id: AgentControl-LauncherUI-SettingsClosedRechecksProblems
+        title: >-
+          The LauncherUI subsystem shall, when the Settings window closes without saving, check again
+          in the background - without asking the user to sign in - the repo cards that show a package
+          source problem or a failed upgrade check, so that a sign-in or connection confirmed with
+          Test connection shows on the cards; when the settings were saved, the check of every card
+          that saving starts is not repeated.
+        justification: |
+          A user who sees "Sign-in needed" after working offline naturally opens Settings, tests the
+          source's connection (signing in) and closes Settings. The sign-in made by the test is kept
+          for the session, so the cards can use it; without a re-check they would keep reporting a
+          problem that no longer exists until the next periodic check. Checking only the cards with a
+          problem, and nothing more after a save, keeps the extra source reads to those that can
+          change what the cards show.
+        children:
+          - AgentControl-MainWindowViewModel-RecheckAfterSettingsClosed
+        tests:
+          - MainWindow_SettingsClosedWithoutSaving_RechecksTheCardThatNeedsSignIn
+          - MainWindow_SettingsSaved_ChecksEachCardOnce
+
       - id: AgentControl-LauncherUI-ChangePackage
         title: >-
           The LauncherUI subsystem shall let the user, for a repo that already has a pin, open the

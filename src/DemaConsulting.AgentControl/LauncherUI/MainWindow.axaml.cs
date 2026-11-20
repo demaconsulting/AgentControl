@@ -1500,8 +1500,16 @@ internal sealed partial class MainWindow : Window
 
     /// <summary>
     ///     Opens the modal <see cref="SettingsWindow"/>, applying any saved changes back to the
-    ///     view model (and thereby refreshing every repo card).
+    ///     view model (and thereby refreshing every repo card), and once it closes re-checks the
+    ///     cards that still show a package source problem or a failed upgrade check.
     /// </summary>
+    /// <remarks>
+    ///     The re-check after closing is what makes a sign-in typed during <b>Test connection</b>
+    ///     (or a connection that came back) show on the cards even when the user closes Settings
+    ///     without saving; it is started in the background and not awaited, so the window stays
+    ///     usable. Whether the settings were saved is passed along so a save, which already
+    ///     re-checks every card, is not followed by a second check.
+    /// </remarks>
     /// <param name="sender">The clicked "Settings" button.</param>
     /// <param name="e">Routed event arguments (unused).</param>
     private async void OpenSettingsButton_Click(object? sender, RoutedEventArgs e)
@@ -1516,8 +1524,16 @@ internal sealed partial class MainWindow : Window
             viewModel.ApplySettings,
             providerFactory: viewModel.CreateConnectionTestProvider,
             credentials: viewModel.Credentials);
+
+        // Saved is raised only when the settings were applied successfully
+        var settingsSaved = false;
+        settingsViewModel.Saved += (_, _) => settingsSaved = true;
         var settingsWindow = new SettingsWindow(settingsViewModel);
         await settingsWindow.ShowDialog(this);
+
+        // A Test connection may have signed in, or the network may be back: check the cards that
+        // show a problem again in the background (nothing more after a save, which checked them all)
+        _ = viewModel.RecheckAfterSettingsClosed(settingsSaved);
     }
 
     /// <summary>

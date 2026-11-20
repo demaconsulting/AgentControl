@@ -156,6 +156,8 @@ public class ThemeResourceTests
         CheckText("ChipAmber hover", Opaque(palette, "ChipAmberForeground"), Over(Brush(palette, "ChipAmberBackgroundHover"), card));
         CheckText("ChipAmber pressed", Opaque(palette, "ChipAmberForeground"), Over(Brush(palette, "ChipAmberBackgroundPressed"), card));
         CheckText("ChipGrey hover", Opaque(palette, "ChipGreyForeground"), Over(Brush(palette, "ChipGreyBackgroundHover"), card));
+        CheckText("ChipRed hover", Opaque(palette, "ChipRedForeground"), Over(Brush(palette, "ChipRedBackgroundHover"), card));
+        CheckText("ChipRed pressed", Opaque(palette, "ChipRedForeground"), Over(Brush(palette, "ChipRedBackgroundPressed"), card));
 
         // Secondary button, every state
         foreach (var state in new[] { string.Empty, "Hover", "Pressed", "Disabled" })

@@ -516,7 +516,10 @@ sections:
           - AgentControl-LauncherUI-SignInSessionOnlyNote
           - AgentControl-LauncherUI-SignInPlacement
           - AgentControl-LauncherUI-SignInCancelsWithOperation
+          - AgentControl-LauncherUI-SignInNeededChipSignsIn
+          - AgentControl-LauncherUI-SignInNotGivenKeepsChip
           - AgentControl-AgentPackageManagement-NuGetServerSignIn
+          - AgentControl-AgentPackageManagement-NuGetServerFailures
           - AgentControl-PackageCredentials-AskOncePerOperation
           - AgentControl-PackageCredentials-AskWhenNoCredentialKnown
           - AgentControl-PackageCredentials-DeclinedAnswerShared
@@ -529,6 +532,8 @@ sections:
           - AgentControl-OTS-NuGetCaching-NonInteractive
         tests:
           - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
+          - windows@RepoCard_PinnedToServerNeedingSignIn_ClickingSignInNeededChipSignsIn
+          - windows@RepoCard_PinnedToServerNeedingSignIn_CancelingSignInKeepsSignInNeededChip
 
       - id: AgentControl-System-Upgrade
         title: >-
@@ -1134,6 +1139,7 @@ sections:
           - AgentControl-AgentPackageManagement-GitSourceSignIn
           - AgentControl-LauncherUI-GitSourcePrompts
           - AgentControl-LauncherUI-GitSignInGuidance
+          - AgentControl-LauncherUI-SignInNeededChipSignsIn
         tests:
           # Against a private Git server of the test (TLS, 401 without credentials) with the user's
           # own sign-in replaced by a helper that behaves like Git Credential Manager: work the
@@ -1217,6 +1223,7 @@ sections:
           if they can try them before relying on them.
         children:
           - AgentControl-LauncherUI-TestConnection
+          - AgentControl-LauncherUI-SettingsClosedRechecksProblems
           - AgentControl-AgentPackageManagement-NuGetServerFailures
         tests:
           - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword

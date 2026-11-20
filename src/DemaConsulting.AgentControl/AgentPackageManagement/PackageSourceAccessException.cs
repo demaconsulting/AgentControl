@@ -92,14 +92,36 @@ internal sealed class PackageSourceAccessException : InvalidOperationException
     ///     secret-free description of it (its redacted type name, message chain and stack trace, as
     ///     a <see cref="SanitizedException"/>) is kept: the original object could carry headers,
     ///     URLs or credentials. Its text is never part of <paramref name="message"/>.</param>
-    public PackageSourceAccessException(PackageSourceFailureKind kind, string message, Exception? innerException = null)
+    /// <param name="signInNeededMessage">For a failure a sign-in can fix, a user-readable,
+    ///     secret-free message that says the source needs a sign-in - see
+    ///     <see cref="SignInNeededMessage"/> - or <see langword="null"/>.</param>
+    public PackageSourceAccessException(
+        PackageSourceFailureKind kind,
+        string message,
+        Exception? innerException = null,
+        string? signInNeededMessage = null)
         : base(SecretRedactor.Redact(message), innerException is null ? null : SecretRedactor.Sanitize(innerException))
     {
         Kind = kind;
+        SignInNeededMessage = signInNeededMessage is null ? null : SecretRedactor.Redact(signInNeededMessage);
     }
 
     /// <summary>
     ///     Gets why the source could not be used.
     /// </summary>
     public PackageSourceFailureKind Kind { get; }
+
+    /// <summary>
+    ///     Gets, for a failure a sign-in can fix, the message that says the source needs a sign-in -
+    ///     the same words a read that could not ask the user reports - or <see langword="null"/> when
+    ///     the provider gave none (its <see cref="Exception.Message"/> then says what to do).
+    /// </summary>
+    /// <remarks>
+    ///     <see cref="Exception.Message"/> says what happened during this operation (the user
+    ///     canceled the sign-in, the server rejected the credentials typed); this says what is
+    ///     true of the source afterwards. A caller that shows the state of the source rather than
+    ///     the outcome of one operation - a repo card's "Sign-in needed" chip - uses it, so the
+    ///     source reads the same whether or not the user was asked.
+    /// </remarks>
+    public string? SignInNeededMessage { get; }
 }

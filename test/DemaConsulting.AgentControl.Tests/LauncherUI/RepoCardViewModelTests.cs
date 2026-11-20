@@ -1977,6 +1977,59 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a source problem other than a missing sign-in shows the plain (tooltip-only)
+    ///     source-problem chip and not the clickable sign-in-needed chip.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_ShowSourceProblemChip_ProblemOtherThanSignIn_ShowsThePlainChipOnly()
+    {
+        // Arrange: a pinned repo and no configured source
+        var repoRoot = CreateTempDirectory();
+        RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings { Sources = [] };
+        var card = new RepoCardViewModel(new RecentRepo { Path = repoRoot }, () => settings, new PackageVersionCache());
+
+        // Act
+        card.RefreshCheap();
+
+        // Assert: exactly one chip, the plain one
+        Assert.True(card.HasSourceProblem);
+        Assert.True(card.ShowSourceProblemChip);
+        Assert.False(card.SourceNeedsSignIn);
+    }
+
+    /// <summary>
+    ///     Test that when the kind of source problem changes from one the user cannot fix by signing in
+    ///     to a missing sign-in, the card tells its view to swap the plain chip for the sign-in-needed chip.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_ShowSourceProblemChip_PropertyChanged_RaisedWithSourceProblem()
+    {
+        // Arrange: a source that first refuses the account, then asks for a sign-in
+        var repoRoot = CreateTempDirectory();
+        var provider = new DelegatePackageSourceProvider((call, _) =>
+            Task.FromException<IReadOnlyList<DiscoveredPackage>>(call == 1
+                ? new PackageSourceAccessException(PackageSourceFailureKind.AccessDenied, "Access to 'Default' is denied.")
+                : new PackageSourceAccessException(PackageSourceFailureKind.AuthenticationFailed, "Source 'Default' needs a sign-in.")));
+        var card = CreateCardWithProvider(repoRoot, "contoso-agents", "1.0.0", provider);
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        var plainChipShown = card.ShowSourceProblemChip;
+        var raised = new List<string?>();
+        card.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        // Act: the next background check finds that a sign-in is needed
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+
+        // Assert: the plain chip was shown first, then the view was told to show the sign-in chip instead
+        Assert.True(plainChipShown);
+        Assert.False(card.ShowSourceProblemChip);
+        Assert.True(card.SourceNeedsSignIn);
+        Assert.Contains(nameof(RepoCardViewModel.ShowSourceProblemChip), raised);
+        Assert.Contains(nameof(RepoCardViewModel.SourceNeedsSignIn), raised);
+        Assert.Contains(nameof(RepoCardViewModel.SourceProblemChipText), raised);
+    }
+
+    /// <summary>
     ///     Test that a repo whose folder is gone offers no upgrade, even when an upgrade check runs
     ///     (the package chip is hidden for a missing repo, so an upgrade chip alone would mean
     ///     nothing).
@@ -2621,6 +2674,74 @@ public sealed class RepoCardViewModelTests : IDisposable
         Assert.DoesNotContain("sign in", card.SourceProblem, StringComparison.OrdinalIgnoreCase);
         Assert.False(card.SourceNeedsSignIn);
         Assert.True(card.IsUpgradeStatusUnknown);
+    }
+
+    /// <summary>
+    ///     Test that a check the user started whose source could not be read for a reason a sign-in
+    ///     cannot fix (unreachable, timed out, not found, any other error) still shows "Update check
+    ///     failed" and offers no sign-in: only a missing sign-in becomes the sign-in-needed chip.
+    /// </summary>
+    /// <param name="kind">The failure the source reports.</param>
+    [Theory]
+    [InlineData((int)PackageSourceFailureKind.Unreachable)]
+    [InlineData((int)PackageSourceFailureKind.TimedOut)]
+    [InlineData((int)PackageSourceFailureKind.NotFound)]
+    public async Task RepoCardViewModel_RefreshUpgradeStatusAsync_UserCheckSourceFailsOtherwise_ShowsCheckFailedWithoutSignInChip(
+        int kind)
+    {
+        // Arrange: a source that fails for a reason other than a sign-in
+        var provider = new FakePackageSourceProvider("Default", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new PackageSourceAccessException((PackageSourceFailureKind)kind, "The server is down.")
+        };
+        var card = CreateCardOverFakeProvider(provider);
+
+        // Act: a check the user asked for
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken, allowPrompt: true);
+
+        // Assert: a failed check, no source problem and no sign-in chip
+        Assert.True(card.IsUpgradeStatusUnknown);
+        Assert.False(card.HasSourceProblem);
+        Assert.False(card.SourceNeedsSignIn);
+        Assert.Equal(RepoCardStatus.Unknown, card.Status);
+        Assert.Equal("Update check failed", card.StatusText);
+    }
+
+    /// <summary>
+    ///     Test that a check the user started whose sign-in was canceled, or rejected by the server,
+    ///     shows the sign-in-needed chip in the source's sign-in-needed words - the same as the
+    ///     background check - rather than what happened to the sign-in, and falls back to the
+    ///     failure's own message when the source gives no such words.
+    /// </summary>
+    /// <param name="kind">The failure the source reports.</param>
+    /// <param name="signInNeededMessage">The source's sign-in-needed words, or <see langword="null"/>.</param>
+    /// <param name="expectedStart">The words the chip's tooltip starts with.</param>
+    [Theory]
+    [InlineData((int)PackageSourceFailureKind.SignInCanceled, "Source 'Default' needs a sign-in.", "Source 'Default' needs a sign-in.")]
+    [InlineData((int)PackageSourceFailureKind.AuthenticationFailed, "Source 'Default' needs a sign-in.", "Source 'Default' needs a sign-in.")]
+    [InlineData((int)PackageSourceFailureKind.AuthenticationFailed, null, "Sign-in to 'Default' was not given.")]
+    public async Task RepoCardViewModel_RefreshUpgradeStatusAsync_UserCheckSignInNotGiven_ShowsSignInNeededChip(
+        int kind, string? signInNeededMessage, string expectedStart)
+    {
+        // Arrange: a source whose sign-in was not given during the check
+        var provider = new FakePackageSourceProvider("Default", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new PackageSourceAccessException(
+                (PackageSourceFailureKind)kind, "Sign-in to 'Default' was not given.", signInNeededMessage: signInNeededMessage)
+        };
+        var card = CreateCardOverFakeProvider(provider);
+
+        // Act: a check the user asked for
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken, allowPrompt: true);
+
+        // Assert: the sign-in-needed chip, saying what to do, and not a failed check
+        Assert.True(card.SourceNeedsSignIn);
+        Assert.False(card.ShowSourceProblemChip);
+        Assert.Equal(
+            $"{expectedStart} Click \"Sign-in needed\" (or use the card's \"...\" menu > Refresh) to sign in.",
+            card.SourceProblem);
+        Assert.Equal(RepoCardStatus.Problem, card.Status);
+        Assert.Equal("Needs attention", card.StatusText);
     }
 
     /// <summary>
@@ -3407,6 +3528,26 @@ public sealed class RepoCardViewModelTests : IDisposable
             recentRepo, () => settings, new PackageVersionCache(), null, _ => registry,
             processStarter: starter ?? new FakeAgentToolProcessStarter(),
             shellDetector: FakeAgentToolProcessStarter.CreateShellDetector());
+    }
+
+    /// <summary>
+    ///     Creates a card for a repo pinned to <c>contoso-agents 1.0.0</c> from the source
+    ///     <c>Default</c>, which is served by the given fake provider.
+    /// </summary>
+    /// <param name="provider">The provider of the source <c>Default</c>.</param>
+    /// <returns>The card, after its cheap refresh.</returns>
+    private RepoCardViewModel CreateCardOverFakeProvider(FakePackageSourceProvider provider)
+    {
+        var registry = new PackageSourceRegistry([ZipSource("Default", CreateTempDirectory())], _ => provider);
+        var repoRoot = CreateTempDirectory();
+        RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repoRoot, PinnedSource = "Default", PinnedPackageName = "contoso-agents", PinnedPackageVersion = "1.0.0" },
+            () => new AppSettings(),
+            new PackageVersionCache(),
+            registryFactory: _ => registry);
+        card.RefreshCheap();
+        return card;
     }
 
     /// <summary>

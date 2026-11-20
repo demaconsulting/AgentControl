@@ -656,6 +656,44 @@ sections:
           - RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains
           - RepoCardViewModel_RefreshUpgradeStatusAsync_UserRequestedCheck_PromptsOnceThenBackgroundChecksReuseCredential
 
+      - id: AgentControl-RepoCardViewModel-SignInNeededChip
+        title: >-
+          The RepoCardViewModel class shall tell its view whether to show the sign-in-needed chip or
+          the plain package-source-problem chip - never both - shall say in the sign-in-needed problem
+          that clicking Sign-in needed or choosing Refresh in the card's menu signs in, and shall clear
+          the sign-in-needed state when a refresh the user started signs in.
+        justification: |
+          Only a missing sign-in can be fixed from the card itself, so only that problem gets a chip
+          the user can click; the problem text tells the user what clicking it does, and the chip must
+          go away once the sign-in worked so the card does not keep asking for one.
+        tests:
+          - RepoCardViewModel_RefreshAsync_AfterBackgroundCheckNeedsSignIn_AsksOnceAndClearsSignInNeeded
+          - RepoCardViewModel_ShowSourceProblemChip_ProblemOtherThanSignIn_ShowsThePlainChipOnly
+          - RepoCardViewModel_ShowSourceProblemChip_PropertyChanged_RaisedWithSourceProblem
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_BackgroundCheckNeedsSignIn_DoesNotPromptAndExplains
+
+      - id: AgentControl-RepoCardViewModel-SignInNotGivenStillNeeded
+        title: >-
+          The RepoCardViewModel class shall, when a check the user started cannot read a source
+          because the user canceled or closed the sign-in dialog or the server rejected the sign-in
+          given, show the same sign-in-needed problem, in the same words, as the background check
+          instead of a failed upgrade check, shall ask the user to sign in at most once during that
+          check, and shall keep reporting the other read failures of that check as a failed upgrade
+          check.
+        justification: |
+          A source whose sign-in was not given still needs one, and "update check failed" would hide
+          the one action that fixes it: the user must be able to click Sign-in needed again straight
+          away. A user who canceled has said no for that check, so a second dialog in the same check
+          would be a nuisance. Real failures (an unreachable server, a time-out) must not be disguised
+          as a missing sign-in.
+        tests:
+          - RepoCardViewModel_RefreshAsync_SignInCanceled_KeepsSignInNeeded
+          - RepoCardViewModel_RefreshAsync_SignInCanceledThenRetried_AsksAgainAndSignsIn
+          - RepoCardViewModel_RefreshAsync_CredentialsRejected_KeepsSignInNeeded
+          - RepoCardViewModel_RefreshAsync_SignInCanceledWhileAnotherSourceOffersThePin_AsksOnce
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_UserCheckSignInNotGiven_ShowsSignInNeededChip
+          - RepoCardViewModel_RefreshUpgradeStatusAsync_UserCheckSourceFailsOtherwise_ShowsCheckFailedWithoutSignInChip
+
       - id: AgentControl-RepoCardViewModel-SignatureIndicator
         title: >-
           The RepoCardViewModel class shall indicate that the source supplying the pinned package

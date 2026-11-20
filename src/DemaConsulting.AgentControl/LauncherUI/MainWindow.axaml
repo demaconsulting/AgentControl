@@ -768,9 +768,30 @@
                                                     Text="Folder missing" />
                                     </StackPanel>
                                 </Border>
+                                <!-- A missing sign-in: clicking the chip does what the card menu's Refresh
+                                     does, which may ask for the sign-in the background check could not.
+                                     Its text keeps the SourceProblemBadge id of the plain chip below; only
+                                     one of the two chips is ever shown. -->
+                                <Button Name="SignInNeededChip"
+                                         AutomationProperties.AutomationId="SignInNeededChip"
+                                         AutomationProperties.Name="Sign-in needed"
+                                         Classes="chipButton"
+                                         IsVisible="{Binding SourceNeedsSignIn}"
+                                         Command="{Binding RefreshCommand}"
+                                         ToolTip.Tip="{Binding SourceProblem}">
+                                    <Border Classes="Chip red">
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <materialIcons:MaterialIcon Kind="AlertCircleOutline" />
+                                            <TextBlock Name="SignInNeededBadge"
+                                                        AutomationProperties.AutomationId="SourceProblemBadge"
+                                                        Text="{Binding SourceProblemChipText}" />
+                                        </StackPanel>
+                                    </Border>
+                                </Button>
+                                <!-- Any other package source problem: the tooltip explains it -->
                                 <Border Name="SourceProblemChip"
                                          Classes="Chip red"
-                                         IsVisible="{Binding HasSourceProblem}"
+                                         IsVisible="{Binding ShowSourceProblemChip}"
                                          ToolTip.Tip="{Binding SourceProblem}">
                                     <StackPanel Orientation="Horizontal" Spacing="4">
                                         <materialIcons:MaterialIcon Kind="AlertCircleOutline" />

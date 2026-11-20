@@ -213,6 +213,21 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     start while this is above zero.
     /// </summary>
     private int _launchChecksInFlight;
+
+    /// <summary>
+    ///     The failure memos of the background checks that are running (periodic rounds and
+    ///     launch-style checks, superseded ones included until they have unwound), so that
+    ///     <see cref="RecheckAfterSettingsClosed"/> can make them forget the failures they recorded
+    ///     before a sign-in or a returned connection. Guarded by <see cref="_activeFailureMemosLock"/>.
+    /// </summary>
+    private readonly List<SourceFailureMemo> _activeFailureMemos = [];
+
+    /// <summary>
+    ///     Guards <see cref="_activeFailureMemos"/>: a check may register or drop its memo from a
+    ///     thread-pool continuation when no UI thread runner is in use (tests).
+    /// </summary>
+    private readonly Lock _activeFailureMemosLock = new();
+
     /// <summary>
     ///     The configuration directory settings are persisted to/from, or <see langword="null"/>
     ///     to use <see cref="SettingsStore.GetDefaultConfigDirectory"/>.
@@ -741,7 +756,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     Called by the main window once it is shown, and after settings change. Each card reads
     ///     only the source its pin names; at most a few cards read sources at the same time so a
     ///     long recent-repos list cannot flood a slow source. A failing source only affects the
-    ///     cards pinned to it.
+    ///     cards pinned to it. A card busy with an action of its own when its turn comes is skipped
+    ///     (see <see cref="CheckUpgradesAsync"/>).
     /// </remarks>
     /// <returns>A task that completes when every card's check has finished (also available as
     ///     <see cref="PendingRefresh"/>).</returns>
@@ -763,6 +779,96 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var token = _refreshCancellation?.Token ?? CancellationToken.None;
         var previous = PendingRefresh;
         PendingRefresh = Task.WhenAll(previous, CheckUpgradesAsync([card], token));
+    }
+
+    /// <summary>
+    ///     Checks again, in the background, the repo cards that show a package source problem or a
+    ///     failed upgrade check, once the Settings window has closed.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///     While the Settings window is open the user may sign in to a source with
+    ///     <b>Test connection</b>, or the network may have come back; without this the cards would
+    ///     keep showing "Sign-in needed" (or a failed check) until the next periodic round. When the
+    ///     settings were saved, <see cref="ApplySettings"/> has already started the check of every
+    ///     card, so nothing more is started and the pending check is returned - the cards are never
+    ///     checked twice for one Settings session.
+    ///     </para>
+    ///     <para>
+    ///     Otherwise only the cards that a periodic round would check (not busy, folder present, a
+    ///     pin) and that show a source problem or a failed check, or whose background check is
+    ///     reading a source at this moment, are checked; a card whose state is already known reads
+    ///     no source. A card in the middle of a background check is included because its read began
+    ///     before the sign-in: if that read fails it would put "Sign-in needed" on the card when it
+    ///     finishes, so a newer check of the card is started and, the newest check of a card being
+    ///     the one whose result is shown, the older one's result is ignored. A card that becomes busy
+    ///     with an action of its own while it waits for its turn is skipped when the turn comes (see
+    ///     <see cref="CheckUpgradesAsync"/>). The check is the
+    ///     background one: it never asks the user to sign in, and it uses the credentials of this
+    ///     session's <see cref="PackageCredentialContext"/> - the same store the connection test
+    ///     signs in to - so a sign-in typed during the test is used. Failures are never cached, so
+    ///     each of these cards reads its source again. Like the check of an added repo it does not
+    ///     cancel a check that is running, it is canceled by a later full check or by
+    ///     <see cref="Dispose"/>, and it holds off the periodic round while it runs. Must be called
+    ///     on the UI thread.
+    ///     </para>
+    ///     <para>
+    ///     A check that is running (a periodic round, or a launch-style check) may have recorded a
+    ///     source failure in its <see cref="SourceFailureMemo"/> before the sign-in; it is made to
+    ///     forget it (see <see cref="ForgetRecordedSourceFailures"/>), even when no card needs this
+    ///     re-check, so the cards it checks from now on read the source again instead of being given
+    ///     the old failure - which, as the newer check of the card, would replace what this re-check
+    ///     shows. A read that is still in flight cannot record its failure afterwards either (the
+    ///     memo moves to a new generation when it is cleared). The package-version cache is not
+    ///     cleared: it never holds a failure, so the source behind a problem has no listing to
+    ///     serve, and the listings it holds for sources that answered are within their five
+    ///     minutes, as for any background check.
+    ///     </para>
+    /// </remarks>
+    /// <param name="settingsSaved"><see langword="true"/> when the Settings window saved the
+    ///     settings (its <see cref="SettingsWindowViewModel.Saved"/> event was raised) before it
+    ///     closed; <see langword="false"/> when it was canceled or closed without saving.</param>
+    /// <returns>A task that completes when the checks it started (or, after a save, the check the
+    ///     save started) have finished; already completed when this view model was disposed or no
+    ///     card needs checking. Cancellation is not an error. The check is also merged into
+    ///     <see cref="PendingRefresh"/>.</returns>
+    public Task RecheckAfterSettingsClosed(bool settingsSaved)
+    {
+        // A disposed view model (the window closed) starts no check
+        if (_disposed)
+        {
+            return Task.CompletedTask;
+        }
+
+        // Saving already re-checked every card against the saved settings: do not do it twice
+        if (settingsSaved)
+        {
+            return PendingRefresh;
+        }
+
+        // A check still running may have recorded a failure before the sign-in (or before the
+        // connection came back): it must read those sources again rather than put that failure
+        // back on a card this re-check clears
+        ForgetRecordedSourceFailures();
+
+        // Only the cards whose shown state a sign-in or a returned connection could change: those
+        // showing a problem or a failed check, and those a running background check is reading
+        // for - such a read began before the sign-in and its failure must not land on the card, so
+        // a newer check of the card is started and the older one's result is ignored
+        var cards = RepoCards
+            .Where(card => CanRecheckUpgrade(card)
+                && (card.HasSourceProblem || card.IsUpgradeStatusUnknown || card.IsCheckingUpgrade))
+            .ToList();
+        if (cards.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        // Run alongside any check that is running, as the check of an added repo does
+        var token = _refreshCancellation?.Token ?? CancellationToken.None;
+        var check = CheckUpgradesAsync(cards, token);
+        PendingRefresh = Task.WhenAll(PendingRefresh, check);
+        return check;
     }
 
     /// <summary>
@@ -898,6 +1004,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task RecheckUpgradesAsync(CancellationTokenSource cancellation)
     {
         var token = cancellation.Token;
+
+        // The round's failures; registered so that closing Settings can make it forget them
+        var failures = RegisterFailureMemo();
         try
         {
             var cards = RepoCards.Where(CanRecheckUpgrade).ToList();
@@ -915,7 +1024,6 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // a few at a time. A source that cannot be read is not cached (a later round, and the
             // user's own actions, try it again), so the round remembers its failures: the cards after
             // the first get the same failure without reading that source again.
-            var failures = new SourceFailureMemo();
             using var throttle = new SemaphoreSlim(MaxConcurrentUpgradeChecks);
             var groups = cards
                 .GroupBy(card => card.PinnedPackageName, StringComparer.OrdinalIgnoreCase)
@@ -947,6 +1055,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         finally
         {
+            UnregisterFailureMemo(failures);
             if (ReferenceEquals(_recheckCancellation, cancellation))
             {
                 _recheckCancellation = null;
@@ -1001,30 +1110,53 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <returns>A task that completes when every check has finished or been cancelled; a
     ///     cancelled check is not an error.</returns>
     /// <remarks>
+    ///     <para>
+    ///     A card that is busy with an action of its own (<see cref="RepoCardViewModel.IsBusy"/>)
+    ///     when its turn comes is skipped, as a periodic round skips it: a background check beside
+    ///     the action would break the card's one-action-at-a-time rule and could replace the
+    ///     action's result with its own (the newest check of a card is the one shown). Refresh,
+    ///     Upgrade, Select Package and Pull check the card themselves; any card is checked again by
+    ///     the next periodic round. Whether the card is busy is read once the card holds its slot,
+    ///     right before its check starts, so an action started while it waited for a slot is seen.
+    ///     A card whose own background check is running is not busy and is checked: the newer
+    ///     check's result replaces the older one's.
+    ///     </para>
+    ///     <para>
     ///     Counted in <see cref="_launchChecksInFlight"/> from the call until it has unwound, so a
     ///     check that was superseded (and canceled) but is still inside a provider call that ignores
     ///     cancellation keeps holding off the periodic round, even though
     ///     <see cref="PendingRefresh"/> no longer refers to it.
+    ///     </para>
     /// </remarks>
     private async Task CheckUpgradesAsync(
         IReadOnlyList<RepoCardViewModel> cards, CancellationToken cancellationToken)
     {
         // Counted before the first await, so the caller observes it as soon as this returns
         Interlocked.Increment(ref _launchChecksInFlight);
+
+        // The failures of this check: once a source could not be read for a package, the cards that
+        // follow get that failure instead of reading it again (cards that are already reading it
+        // at the same moment still do, as they do for a listing that succeeds). Registered so that
+        // closing Settings can make it forget them.
+        var failures = RegisterFailureMemo();
         try
         {
             using var throttle = new SemaphoreSlim(MaxConcurrentUpgradeChecks);
-
-            // The failures of this check: once a source could not be read for a package, the cards that
-            // follow get that failure instead of reading it again (cards that are already reading it
-            // at the same moment still do, as they do for a listing that succeeds)
-            var failures = new SourceFailureMemo();
             var checks = cards.Select(async card =>
             {
                 await throttle.WaitAsync(cancellationToken);
                 try
                 {
-                    await card.RefreshUpgradeStatusAsync(cancellationToken, failureMemo: failures);
+                    // Decided when the card's turn comes, not when it was queued: the user may have
+                    // started an action on it (Refresh, Upgrade, Select Package, Launch, Pull) while it
+                    // waited, and a check started now would run beside that action and could replace
+                    // its result. The check and the start of the card's check run in one go, with no
+                    // await between them, on the thread the action's busy flag is set on (the UI
+                    // thread), so no action can start in between.
+                    if (!card.IsBusy)
+                    {
+                        await card.RefreshUpgradeStatusAsync(cancellationToken, failureMemo: failures);
+                    }
                 }
                 finally
                 {
@@ -1043,7 +1175,59 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         finally
         {
+            UnregisterFailureMemo(failures);
             Interlocked.Decrement(ref _launchChecksInFlight);
+        }
+    }
+
+    /// <summary>
+    ///     Creates the failure memo of a background check that is starting and registers it as
+    ///     running, so <see cref="ForgetRecordedSourceFailures"/> reaches it.
+    /// </summary>
+    /// <returns>The new, empty memo; the check passes it to <see cref="UnregisterFailureMemo"/>
+    ///     when it has unwound.</returns>
+    private SourceFailureMemo RegisterFailureMemo()
+    {
+        var memo = new SourceFailureMemo();
+        lock (_activeFailureMemosLock)
+        {
+            _activeFailureMemos.Add(memo);
+        }
+
+        return memo;
+    }
+
+    /// <summary>
+    ///     Drops the failure memo of a background check that has unwound from the running ones.
+    /// </summary>
+    /// <param name="memo">The memo <see cref="RegisterFailureMemo"/> returned to the check.</param>
+    private void UnregisterFailureMemo(SourceFailureMemo memo)
+    {
+        lock (_activeFailureMemosLock)
+        {
+            _activeFailureMemos.Remove(memo);
+        }
+    }
+
+    /// <summary>
+    ///     Makes every background check that is running forget the source failures it has recorded,
+    ///     so the cards it checks from now on read those sources again.
+    /// </summary>
+    /// <remarks>
+    ///     A failure recorded before the user signed in (or before the connection came back) no
+    ///     longer holds; a round that kept replaying it would put "Sign-in needed" back on a card
+    ///     after a newer check had cleared it, because the newest check of a card is the one whose
+    ///     result is shown. The memos are cleared whole: every card reads the same configured
+    ///     sources, and a forgotten failure only costs the round one more read of that source.
+    /// </remarks>
+    private void ForgetRecordedSourceFailures()
+    {
+        lock (_activeFailureMemosLock)
+        {
+            foreach (var memo in _activeFailureMemos)
+            {
+                memo.Clear();
+            }
         }
     }
 

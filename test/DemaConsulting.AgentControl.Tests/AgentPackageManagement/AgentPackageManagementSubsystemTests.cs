@@ -657,6 +657,13 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
         Assert.All(
             new[] { needsSignIn, signInCanceled, timedOut, unreachable },
             failure => Assert.DoesNotContain(SentinelPassword, failure.ToString(), StringComparison.Ordinal));
+
+        // A sign-in that is needed or was canceled says, in the same words, that the source still
+        // needs one; failures a sign-in cannot fix carry no such words
+        Assert.Equal(needsSignIn.Message, needsSignIn.SignInNeededMessage);
+        Assert.Contains("needs a sign-in", signInCanceled.SignInNeededMessage, StringComparison.Ordinal);
+        Assert.Null(timedOut.SignInNeededMessage);
+        Assert.Null(unreachable.SignInNeededMessage);
     }
 
     /// <summary>

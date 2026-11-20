@@ -105,6 +105,29 @@ public class PackageSourceServerLocationTests
         Assert.NotSame(inner, cause);
         Assert.Contains("inner detail", cause.Message, StringComparison.Ordinal);
         Assert.IsAssignableFrom<InvalidOperationException>(exception);
+
+        // A failure that says nothing about a sign-in carries no sign-in-needed words
+        Assert.Null(exception.SignInNeededMessage);
+    }
+
+    /// <summary>
+    ///     Test that the access exception carries, for a failure a sign-in can fix, the words that
+    ///     say the source needs a sign-in, alongside its own message.
+    /// </summary>
+    [Fact]
+    public void PackageSourceAccessException_Constructor_CarriesSignInNeededMessage()
+    {
+        // Act
+        var exception = new PackageSourceAccessException(
+            PackageSourceFailureKind.SignInCanceled,
+            "Sign-in to source 'Feed' was canceled.",
+            signInNeededMessage: "Source 'Feed' needs a sign-in.");
+
+        // Assert
+        Assert.Equal(PackageSourceFailureKind.SignInCanceled, exception.Kind);
+        Assert.Equal("Sign-in to source 'Feed' was canceled.", exception.Message);
+        Assert.Equal("Source 'Feed' needs a sign-in.", exception.SignInNeededMessage);
+        Assert.Null(exception.InnerException);
     }
 
     /// <summary>

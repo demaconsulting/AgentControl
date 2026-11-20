@@ -222,6 +222,114 @@ public sealed class NuGetServerSourceTests
     }
 
     /// <summary>
+    ///     Clicking the card's "Sign-in needed" chip does what the card menu's Refresh does: it asks for
+    ///     the sign-in the background check could not, and once signed in the chip goes away and the
+    ///     newer version is offered.
+    /// </summary>
+    [Fact]
+    public async Task RepoCard_PinnedToServerNeedingSignIn_ClickingSignInNeededChipSignsIn()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: the background check has already reported that a sign-in is needed
+        const string packageName = "contoso-agents";
+        await using var feed = await MockNuGetFeed.StartAsync();
+        feed.AddPackage(packageName, "2.0.0");
+        feed.RequiredUser = FeedUser;
+        feed.RequiredPassword = FeedPassword;
+        using var context = new AgentControlTestContext(
+            pinnedPackageName: packageName,
+            pinnedPackageVersion: "1.0.0",
+            nuGetPackageIds: [packageName],
+            pinnedSource: "Server",
+            nuGetServerIndexUrl: feed.IndexUrl);
+        var mainWindow = context.Launch();
+        Assert.True(WaitForText(mainWindow, "SourceProblemBadge", "Sign-in needed"));
+
+        // Act: click the chip; the sign-in dialog appears, and the user signs in
+        Find(mainWindow, "SignInNeededChip").AsButton().Invoke();
+        var signIn = context.WaitForWindowWithDescendant("CredentialPromptUserNameTextBox", TimeSpan.FromSeconds(30));
+        Assert.NotNull(signIn);
+        Find(signIn, "CredentialPromptUserNameTextBox").AsTextBox().Text = FeedUser;
+        Find(signIn, "CredentialPromptPasswordTextBox").AsTextBox().Text = FeedPassword;
+        var signInButton = Find(signIn, "CredentialPromptSignInButton").AsButton();
+        Assert.True(Retry.WhileFalse(() => signInButton.IsEnabled, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(200)).Result);
+        signInButton.Invoke();
+
+        // Assert: the chip goes away and the newer version is offered
+        Assert.True(Retry.WhileNotNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("SignInNeededChip")),
+            TimeSpan.FromSeconds(30),
+            TimeSpan.FromMilliseconds(200)).Success);
+        Assert.True(WaitForText(mainWindow, "UpgradeChipText", "2.0.0"));
+    }
+
+    /// <summary>
+    ///     Canceling the sign-in dialog that the card's "Sign-in needed" chip opened leaves the card
+    ///     showing the same clickable chip - not "Update check failed" - and clicking it again opens
+    ///     the dialog again, so the user can retry straight away.
+    /// </summary>
+    [Fact]
+    public async Task RepoCard_PinnedToServerNeedingSignIn_CancelingSignInKeepsSignInNeededChip()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: the background check has already reported that a sign-in is needed
+        const string packageName = "contoso-agents";
+        await using var feed = await MockNuGetFeed.StartAsync();
+        feed.AddPackage(packageName, "2.0.0");
+        feed.RequiredUser = FeedUser;
+        feed.RequiredPassword = FeedPassword;
+        using var context = new AgentControlTestContext(
+            pinnedPackageName: packageName,
+            pinnedPackageVersion: "1.0.0",
+            nuGetPackageIds: [packageName],
+            pinnedSource: "Server",
+            nuGetServerIndexUrl: feed.IndexUrl);
+        var mainWindow = context.Launch();
+        Assert.True(WaitForText(mainWindow, "SourceProblemBadge", "Sign-in needed"));
+
+        // Act: click the chip, cancel the sign-in dialog it opens, and wait for the card's re-check to
+        // end - the chip was already showing, so only the chip being enabled again (it is disabled
+        // while the card is busy) tells that the card shows the re-check's result
+        Find(mainWindow, "SignInNeededChip").AsButton().Invoke();
+        var signIn = context.WaitForWindowWithDescendant("CredentialPromptUserNameTextBox", TimeSpan.FromSeconds(30));
+        Assert.NotNull(signIn);
+        Find(signIn, "CredentialPromptCancelButton").AsButton().Invoke();
+        Assert.True(Retry.WhileFalse(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("SignInNeededChip"))?.IsEnabled == true,
+            TimeSpan.FromSeconds(30),
+            TimeSpan.FromMilliseconds(200)).Result);
+
+        // Assert: the dialog closed, and the card needs attention with the clickable chip, not a failed check
+        Assert.True(Retry.WhileNotNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("CredentialPromptUserNameTextBox")),
+            TimeSpan.FromSeconds(30),
+            TimeSpan.FromMilliseconds(200)).Success);
+        Assert.True(WaitForText(mainWindow, "RepoStatusAccent", "Needs attention"));
+        Assert.True(WaitForText(mainWindow, "SourceProblemBadge", "Sign-in needed"));
+        Assert.DoesNotContain(
+            mainWindow.FindAllDescendants(cf => cf.ByAutomationId("RepoStatusAccent")),
+            element => string.Equals(element.Name, "Update check failed", StringComparison.Ordinal));
+
+        // Act: click the chip again
+        Find(mainWindow, "SignInNeededChip").AsButton().Invoke();
+
+        // Assert: the dialog opens again (then canceled to leave the application idle)
+        var again = context.WaitForWindowWithDescendant("CredentialPromptUserNameTextBox", TimeSpan.FromSeconds(30));
+        Assert.NotNull(again);
+        Find(again, "CredentialPromptCancelButton").AsButton().Invoke();
+    }
+
+    /// <summary>
     ///     Opens the Settings window from the main window.
     /// </summary>
     /// <param name="context">The running test context.</param>

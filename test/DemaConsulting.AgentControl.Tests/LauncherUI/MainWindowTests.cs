@@ -18,7 +18,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Headless;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -445,6 +449,287 @@ public sealed class MainWindowTests : IDisposable
         {
             Directory.Delete(path, recursive: true);
         }
+    }
+
+    /// <summary>
+    ///     Test that a card whose source needs a sign-in shows a clickable "Sign-in needed" chip (not the
+    ///     plain problem chip) that says to click it, and that clicking it refreshes the card - reading the
+    ///     source again - so the chip goes away once the source answers.
+    /// </summary>
+    [Fact]
+    public void MainWindow_SignInNeededChipClicked_RefreshesTheCardAndClearsTheChip() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a window whose only card's background check found that its source needs a sign-in
+        var feed = CreateSignInNeededFeed();
+        var viewModel = CreateViewModelOver(feed, CreateTempDirectory());
+        var window = new MainWindow { DataContext = viewModel };
+        window.Show();
+        try
+        {
+            await WaitUntilAsync(() => viewModel.PendingRefresh.IsCompleted);
+            var card = Assert.Single(viewModel.RepoCards);
+            Assert.True(card.SourceNeedsSignIn);
+            Dispatcher.UIThread.RunJobs();
+            var chip = Assert.Single(window.GetVisualDescendantsOf<Button>("SignInNeededChip"));
+            var plainChip = Assert.Single(window.GetVisualDescendantsOf<Border>("SourceProblemChip"));
+            Assert.True(chip.IsEffectivelyVisible);
+            Assert.True(chip.IsEffectivelyEnabled);
+            Assert.False(plainChip.IsVisible);
+            Assert.Equal("Sign-in needed", AutomationProperties.GetName(chip));
+            Assert.Contains("Click \"Sign-in needed\"", Assert.IsType<string>(ToolTip.GetTip(chip)), StringComparison.Ordinal);
+            Assert.Contains("Refresh", Assert.IsType<string>(ToolTip.GetTip(chip)), StringComparison.Ordinal);
+            var callsBefore = feed.ListVersionsCalls;
+
+            // Act: the source answers again, and the user clicks the chip
+            feed.ListVersionsException = null;
+            feed.Publish("contoso-agents", "1.1.0");
+            ClickWithMouse(window, chip);
+            await WaitUntilAsync(() => !card.IsBusy);
+
+            // Assert: the card was refreshed (its source read again) and the chip is gone
+            Assert.True(feed.ListVersionsCalls > callsBefore);
+            Assert.False(card.SourceNeedsSignIn);
+            Assert.True(card.IsUpgradeAvailable);
+            Assert.False(chip.IsVisible);
+            Assert.False(plainChip.IsVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that clicking the "Sign-in needed" chip and then not signing in - canceling or closing the
+    ///     sign-in dialog, or typing a sign-in the server rejects - leaves the same clickable chip with the
+    ///     same tooltip, and the card says it needs attention rather than that its update check failed.
+    /// </summary>
+    /// <param name="userCanceled"><see langword="true"/> when the user canceled the sign-in;
+    ///     <see langword="false"/> when the server rejected the sign-in typed.</param>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void MainWindow_SignInNeededChipClicked_SignInNotGiven_KeepsTheChip(bool userCanceled) => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a window whose only card's background check found that its source needs a sign-in
+        var feed = CreateSignInNeededFeed();
+        var viewModel = CreateViewModelOver(feed, CreateTempDirectory());
+        var window = new MainWindow { DataContext = viewModel };
+        window.Show();
+        try
+        {
+            await WaitUntilAsync(() => viewModel.PendingRefresh.IsCompleted);
+            var card = Assert.Single(viewModel.RepoCards);
+            Assert.True(card.SourceNeedsSignIn);
+            Dispatcher.UIThread.RunJobs();
+            var chip = Assert.Single(window.GetVisualDescendantsOf<Button>("SignInNeededChip"));
+            var plainChip = Assert.Single(window.GetVisualDescendantsOf<Border>("SourceProblemChip"));
+            var tooltipBefore = Assert.IsType<string>(ToolTip.GetTip(chip));
+            var callsBefore = feed.ListVersionsCalls;
+
+            // Act: the user clicks the chip and does not sign in
+            feed.ListVersionsException = userCanceled
+                ? new PackageSourceAccessException(
+                    PackageSourceFailureKind.SignInCanceled,
+                    "Sign-in to source 'Feed' was canceled.",
+                    signInNeededMessage: "Source 'Feed' needs a sign-in.")
+                : new PackageSourceAccessException(
+                    PackageSourceFailureKind.AuthenticationFailed,
+                    "Source 'Feed' rejected the credentials (the server answered 401).",
+                    signInNeededMessage: "Source 'Feed' needs a sign-in.");
+            ClickWithMouse(window, chip);
+            await WaitUntilAsync(() => !card.IsBusy && !card.IsCheckingUpgrade);
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the source was read again, and the same clickable chip and tooltip remain
+            Assert.True(feed.ListVersionsCalls > callsBefore);
+            Assert.True(card.SourceNeedsSignIn);
+            Assert.True(chip.IsEffectivelyVisible);
+            Assert.True(chip.IsEffectivelyEnabled);
+            Assert.False(plainChip.IsVisible);
+            Assert.Equal("Sign-in needed", AutomationProperties.GetName(chip));
+            Assert.Equal(tooltipBefore, Assert.IsType<string>(ToolTip.GetTip(chip)));
+            Assert.Equal("Needs attention", card.StatusText);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that a package source problem other than a missing sign-in is shown as the plain chip, which
+    ///     explains the problem in its tooltip, and not as the clickable sign-in chip.
+    /// </summary>
+    [Fact]
+    public void MainWindow_SourceProblemOtherThanSignIn_ShowsTheTooltipChipNotTheButton() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: a pinned repo and no package source configured
+        var repo = CreateTempDirectory();
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings { Sources = [], RecentRepos = [new RecentRepo { Path = repo }] };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+
+        // Act
+        var window = new MainWindow { DataContext = viewModel };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        // Assert: the plain chip with its explanation, and no sign-in chip
+        try
+        {
+            var chip = Assert.Single(window.GetVisualDescendantsOf<Button>("SignInNeededChip"));
+            var plainChip = Assert.Single(window.GetVisualDescendantsOf<Border>("SourceProblemChip"));
+            Assert.True(plainChip.IsEffectivelyVisible);
+            Assert.False(chip.IsVisible);
+            Assert.Contains("No configured source offers", Assert.IsType<string>(ToolTip.GetTip(plainChip)), StringComparison.Ordinal);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that closing the Settings window without saving checks again the card that needs a sign-in,
+    ///     so the chip goes away once the source answers (for example after a sign-in made by Test connection).
+    /// </summary>
+    [Fact]
+    public void MainWindow_SettingsClosedWithoutSaving_RechecksTheCardThatNeedsSignIn() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a window whose only card needs a sign-in, and the Settings window open
+        var feed = CreateSignInNeededFeed();
+        var viewModel = CreateViewModelOver(feed, CreateTempDirectory());
+        var window = new MainWindow { DataContext = viewModel };
+        window.Show();
+        try
+        {
+            await WaitUntilAsync(() => viewModel.PendingRefresh.IsCompleted);
+            var card = Assert.Single(viewModel.RepoCards);
+            Assert.True(card.SourceNeedsSignIn);
+            DialogWindowTests.Click(window, "OpenSettingsButton");
+            Dispatcher.UIThread.RunJobs();
+            var settingsWindow = Assert.Single(window.OwnedWindows.OfType<SettingsWindow>());
+
+            // Act: the source answers now, and Settings is closed without saving
+            feed.ListVersionsException = null;
+            feed.Publish("contoso-agents", "1.1.0");
+            settingsWindow.Close();
+            await WaitUntilAsync(() => !card.SourceNeedsSignIn && viewModel.PendingRefresh.IsCompleted);
+
+            // Assert: the card was checked again and shows the upgrade instead of the sign-in chip
+            Assert.Empty(window.OwnedWindows.OfType<SettingsWindow>());
+            Assert.False(card.HasSourceProblem);
+            Assert.True(card.IsUpgradeAvailable);
+            Assert.False(Assert.Single(window.GetVisualDescendantsOf<Button>("SignInNeededChip")).IsVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that saving the settings checks each card once: closing the Settings window after the save
+    ///     (which already checks every card) does not check the card again.
+    /// </summary>
+    [Fact]
+    public void MainWindow_SettingsSaved_ChecksEachCardOnce() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a card that needs a sign-in (a failure is never cached, so every check reads the source)
+        var feed = CreateSignInNeededFeed();
+        var viewModel = CreateViewModelOver(feed, CreateTempDirectory());
+        var window = new MainWindow { DataContext = viewModel };
+        window.Show();
+        try
+        {
+            await WaitUntilAsync(() => viewModel.PendingRefresh.IsCompleted);
+            var card = Assert.Single(viewModel.RepoCards);
+            Assert.True(card.SourceNeedsSignIn);
+            DialogWindowTests.Click(window, "OpenSettingsButton");
+            Dispatcher.UIThread.RunJobs();
+            var settingsWindow = Assert.Single(window.OwnedWindows.OfType<SettingsWindow>());
+            var settingsViewModel = Assert.IsType<SettingsWindowViewModel>(settingsWindow.DataContext);
+            var callsBefore = feed.ListVersionsCalls;
+
+            // Act: save (which closes the window)
+            settingsViewModel.SaveCommand.Execute(null);
+            await WaitUntilAsync(() => window.OwnedWindows.Count == 0 && viewModel.PendingRefresh.IsCompleted);
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the source was read once for the card - by the save's check - and not again on closing
+            Assert.Equal(callsBefore + 1, feed.ListVersionsCalls);
+            Assert.True(card.SourceNeedsSignIn);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Creates an in-memory source serving <c>contoso-agents 1.0.0</c> that answers every version listing
+    ///     with "needs a sign-in" until the test clears <see cref="Tests.AgentPackageManagement.FakePackageSourceProvider.ListVersionsException"/>.
+    /// </summary>
+    /// <returns>The source.</returns>
+    private static Tests.AgentPackageManagement.FakePackageSourceProvider CreateSignInNeededFeed() =>
+        new("Feed", ("contoso-agents", "1.0.0"))
+        {
+            ListVersionsException = new PackageSourceAccessException(
+                PackageSourceFailureKind.AuthenticationFailed, "Source 'Feed' needs a sign-in.")
+        };
+
+    /// <summary>
+    ///     Creates a main-window view model over one repo pinned to <c>contoso-agents 1.0.0</c> whose only
+    ///     source (<c>Feed</c>) is served by the given in-memory source, whatever the settings are changed to.
+    /// </summary>
+    /// <param name="feed">The in-memory source.</param>
+    /// <param name="sourceFolder">An existing folder used as the zip source's location.</param>
+    /// <returns>The view model.</returns>
+    private MainWindowViewModel CreateViewModelOver(Tests.AgentPackageManagement.FakePackageSourceProvider feed, string sourceFolder)
+    {
+        var repo = CreateTempDirectory();
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings
+        {
+            Sources = [new PackageSourceDefinition { Alias = "Feed", Type = PackageSourceType.Zip, Location = sourceFolder }],
+            RecentRepos = [new RecentRepo { Path = repo }]
+        };
+        return new MainWindowViewModel(
+            settings,
+            configDirectory: CreateTempDirectory(),
+            registryFactory: current => new PackageSourceRegistry(current.Sources, _ => feed));
+    }
+
+    /// <summary>
+    ///     Runs the UI thread's jobs until the condition holds (or about thirty seconds passed), then asserts it.
+    /// </summary>
+    /// <param name="condition">The condition to wait for.</param>
+    /// <returns>A task that completes when the condition holds.</returns>
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        for (var attempt = 0; attempt < 1200 && !condition(); attempt++)
+        {
+            Dispatcher.UIThread.RunJobs();
+            await Task.Delay(25, TestContext.Current.CancellationToken);
+        }
+
+        Assert.True(condition());
+    }
+
+    /// <summary>
+    ///     Clicks a control with the real pointer: a mouse button press and release at its center, as a
+    ///     user's click arrives (so the button's own command logic runs).
+    /// </summary>
+    /// <param name="window">The window containing the control.</param>
+    /// <param name="control">The control to click.</param>
+    private static void ClickWithMouse(Window window, Control control)
+    {
+        var center = control.TranslatePoint(new Point(control.Bounds.Width / 2, control.Bounds.Height / 2), window)
+                     ?? throw new InvalidOperationException("The control is not in the window.");
+        window.MouseDown(center, MouseButton.Left);
+        window.MouseUp(center, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
     }
 
     private MainWindow CreateWindow(out MainWindowViewModel viewModel)

@@ -27,14 +27,27 @@ guarantees a result fetched from one source is never returned for another.
 the time they were fetched, and a `Dictionary<string, VersionListing>` of descending version lists by
 package ID, each with the time it was fetched. A present key with an empty list means "queried, none
 found", which is distinct from "not yet queried"; a failed query is never cached (a background check
-round may remember a failure for the length of the round only; see `SourceFailureMemo` below).
+round, or a single repo card's check, may remember a failure for the length of that round or check only; see
+`SourceFailureMemo` below).
 
-**SourceFailureMemo** (class, same file): `Dictionary<(string Alias, string PackageId), Exception>`
-(alias case-insensitive, package ID exact, like the cache keys) behind its own lock — the failures of
-source reads within one background check round. A caller (`MainWindowViewModel`'s periodic round and
-launch-time check) creates one per round and drops it when the round ends; the cache never holds one,
-so nothing recorded in it can outlive the round, and a caller that passes none (a user action) is
-unaffected.
+**SourceFailureMemo** (class, same file): `Dictionary<(string Alias, string PackageId), Exception>` (alias
+case-insensitive, package ID exact, like the cache keys) behind its own lock — the failures of source reads within one
+background check round. A caller (`MainWindowViewModel`'s periodic round and launch-time check) creates one per round
+and drops it when the round ends; the cache never holds one, so nothing recorded in it can outlive the round. A single
+repo card's check that is given no round's memo (one the user started - Refresh or the "Sign-in needed" chip) creates
+one of its own for the length of that check, so within it a source that failed - a sign-in the user canceled included -
+is read, and the user asked, at most once. Only reads outside any such check (Upgrade, Select Package, restoring the
+pinned files at launch) pass none, and every cache miss of theirs reads the source. `Clear()` forgets every recorded
+failure (under the same lock), so the round's next read of each source reaches it again; `MainWindowViewModel` calls it
+on the memos of the checks that are running when the Settings window closes without saving, because a sign-in made there
+(or a connection that came back) may have fixed the failures recorded before. Emptying the entries alone would leave a
+race: a read already in flight when the memo is cleared - one that used the state from before the sign-in - would record
+its failure when it finishes, and the cards that follow in the round would be given the old "Sign-in needed" again. So
+the memo also keeps a generation counter: `GetVersionsDescendingAsync` takes the memo's `Generation` when its read
+starts and passes it to `Record`, `Clear()` increments the generation, and `Record` keeps a failure only while the
+generation it was given is still the current one. The comparison and the increment are made under the memo's lock, so a
+read either finished before the clear (its failure is dropped by it) or started after it (its failure is recorded); a
+failure read with the state from before the clear never outlives it.
 
 **\_timeProvider**: `TimeProvider` — the clock that dates fetches and judges expiry; the system
 clock unless a test supplies another through the constructor, so tests move time without waiting.
@@ -69,10 +82,10 @@ consulting/populating the cache (`AgentControl-PackageVersionCache-CacheVersions
   `CancellationToken`, and an optional `SourceFailureMemo? failureMemo`.
 - *Returns*: `Task<IReadOnlyList<DiscoveredPackage>>`.
 - *Postconditions*: Expiry works as for `GetPackageIdsAsync`, per package. With a memo, a cache miss first checks
-  whether this round already recorded a failure for `(sourceAlias, packageId)` and, if so, rethrows it (original stack
-  preserved) without reading the source; a read that fails with an I/O, permission or `InvalidOperationException`
-  error is recorded in the memo (and rethrown). Cancellation is never recorded. Without a memo nothing is
-  remembered: every miss reads the source.
+  whether this round or check already recorded a failure for `(sourceAlias, packageId)` and, if so, rethrows it
+  (original stack preserved) without reading the source; a read that fails with an I/O, permission or
+  `InvalidOperationException` error is recorded in the memo (and rethrown). Cancellation is never recorded. Without a
+  memo nothing is remembered: every miss reads the source.
 
 **IsNewerVersionAvailableAsync**: Determines whether a newer version exists than a pinned one,
 using the cached descending list; the highest entry is the latest
@@ -99,7 +112,7 @@ using the cached descending list; the highest entry is the latest
 - *Parameters*: `PackageSourceRegistry registry`, `string packageId`, `string? excludeAlias`, `CancellationToken`,
   and an
   optional `Action<Exception>? onSourceFailure` and an optional `SourceFailureMemo? failureMemo` (passed to every
-  `GetVersionsDescendingAsync` call, so a source that failed earlier in the round is skipped - and reported to
+  `GetVersionsDescendingAsync` call, so a source that failed earlier in the round or check is skipped - and reported to
   `onSourceFailure` - without being read again).
 - *Returns*: `Task<IReadOnlyList<DiscoveredPackage>>` - the offers source by source in the order of
   `registry.Definitions` (the order the user configured), each source's versions highest first.
@@ -152,11 +165,13 @@ every consulted source failed.
 - **MainWindowViewModel** — constructs the single shared instance (with its own `TimeProvider`),
   calls `Invalidate(sourceAlias)` for each source that is edited or removed when settings are
   applied, `Invalidate()` at the start of each periodic upgrade re-check round, and creates the
-  per-round `SourceFailureMemo` of a periodic round and of the launch-time check.
+  per-round `SourceFailureMemo` of a periodic round and of the launch-time check, calling `Clear()` on those still
+  running when the Settings window closes without saving (`RecheckAfterSettingsClosed`).
 - **RepoCardViewModel** — calls `GetVersionsAcrossSourcesAsync` (which configured sources offer the pinned package and
   version) and `IsNewerVersionAvailableAcrossSourcesAsync` (the upgrade check and Upgrade) over all configured
   sources, and `Invalidate(sourceAlias)` for every configured source when the card is refreshed (or upgraded), so that
-  newly published versions show up at once.
+  newly published versions show up at once. A check the user started passes both listings the check's own
+  `SourceFailureMemo`, so a source is read at most once within it.
 - **SelectPackageWindowViewModel** — calls `Invalidate(sourceAlias)` for every source when the dialog loads (and for a
   source being retried), then `GetPackageIdsAsync`/`GetVersionsDescendingAsync` to populate its picker lists, which
   the open dialog then reuses.
