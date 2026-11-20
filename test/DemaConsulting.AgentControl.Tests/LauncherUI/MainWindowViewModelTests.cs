@@ -355,11 +355,15 @@ public sealed class MainWindowViewModelTests : IDisposable
     [Fact]
     public void MainWindowViewModel_DescribeAddOutcomes_SeveralMixed_OneSummaryByOutcomeWithAtMostFiveNames()
     {
-        // Arrange: one added, seven not repositories, one missing, one already listed
-        var outcomes = new List<AddRepoOutcome> { new(@"C:\repos\added", AddRepoResult.Added) };
-        outcomes.AddRange(Enumerable.Range(1, 7).Select(i => new AddRepoOutcome($@"C:\docs\plain{i}\", AddRepoResult.NotAGitRepository)));
-        outcomes.Add(new AddRepoOutcome(@"C:\repos\gone", AddRepoResult.Missing));
-        outcomes.Add(new AddRepoOutcome(@"C:\repos\known", AddRepoResult.AlreadyListed));
+        // Arrange: one added, seven not repositories (given with a trailing separator), one missing,
+        // one already listed; the paths are native to the platform so their last segment is the name
+        var repos = Path.Combine(Path.GetTempPath(), "repos");
+        var docs = Path.Combine(Path.GetTempPath(), "docs");
+        var outcomes = new List<AddRepoOutcome> { new(Path.Combine(repos, "added"), AddRepoResult.Added) };
+        outcomes.AddRange(Enumerable.Range(1, 7).Select(
+            i => new AddRepoOutcome(Path.Combine(docs, $"plain{i}") + Path.DirectorySeparatorChar, AddRepoResult.NotAGitRepository)));
+        outcomes.Add(new AddRepoOutcome(Path.Combine(repos, "gone"), AddRepoResult.Missing));
+        outcomes.Add(new AddRepoOutcome(Path.Combine(repos, "known"), AddRepoResult.AlreadyListed));
 
         // Act
         var message = MainWindowViewModel.DescribeAddOutcomes(outcomes, null);
