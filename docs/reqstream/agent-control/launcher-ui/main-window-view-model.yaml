@@ -84,9 +84,11 @@ sections:
         title: >-
           The MainWindowViewModel class shall check the folders of an add without making its caller
           wait for the file system or git, add nothing until every folder was checked, check each
-          folder again against the list when it adds (so a repo listed meanwhile is not added
-          twice), and not check the working tree of a repo it adds (its Git status stays not checked
-          until the card asks for it).
+          folder again against the list when it adds - so a repo listed meanwhile is not added
+          twice, a repo removed meanwhile is added again (its card's pin and branch read in the
+          background), a target group removed meanwhile is created again and a target group
+          collapsed meanwhile is opened - and not check the working tree of a repo it adds (its Git
+          status stays not checked until the card asks for it).
         justification: |
           The window's thread must stay free while many folders are read; the list may change
           meanwhile; and the working-tree check is deferred to when a card is shown, so an add does
@@ -94,6 +96,8 @@ sections:
         tests:
           - MainWindowViewModel_AddReposAsync_WhileFoldersAreChecked_ReturnsAndAddsNothingYet
           - MainWindowViewModel_AddReposAsync_RepoListedMeanwhile_IsAlreadyListed
+          - MainWindowViewModel_AddReposAsync_ListedRepoAndTargetGroupRemovedMeanwhile_AddsBothToRecreatedGroupWithOneSave
+          - MainWindowViewModel_AddReposAsync_TargetGroupCollapsedMeanwhile_OpensItWithTheNewRepo
           - MainWindowViewModel_AddReposAsync_NewRepo_GitStatusNotCheckedAndNoStatusRun
 
       - id: AgentControl-MainWindowViewModel-AddReposProgress

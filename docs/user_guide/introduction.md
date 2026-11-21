@@ -114,10 +114,12 @@ were added; otherwise one message says, for example, "Added 3 of 5 folders.", fo
 Each line names at most five folders and then says how many more there are.
 
 **Adding many folders at once.** The folders are checked in the background, so the window stays usable - you can
-filter, collapse, reorder or remove repos meanwhile. The progress strip under the app bar shows how far the check has
-got, for example "Adding 7 of 20 repositories...", and the new cards appear together once every folder has been
-checked. A repo that you add in another way while the check runs is not added twice. If you remove a group while
-repositories are being added to it, the add creates the group again, because that is where you asked to put them.
+filter, collapse sections, or remove repos and groups meanwhile. The progress strip under the app bar shows how far
+the check has got, for example "Adding 7 of 20 repositories...", and the new cards appear together once every folder
+has been checked. A repo that you add in another way while the check runs is not added twice. If you remove a group
+while repositories are being added to it, the add creates the group again, because that is where you asked to put
+them. Likewise, a repository you remove while it is being added is added again, and a group you collapse while
+repositories are being added to it is opened so you can see them.
 
 - **Cancel.** Click **Cancel** in the progress strip to stop the add: nothing of it is added, and no message is shown.
   Once the add has started saving ("Saving..."), Cancel is no longer offered and the add completes.

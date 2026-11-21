@@ -426,10 +426,12 @@ never been synced (no pin) and a pin file that cannot be read (no pin).
    with `ApplyAddSteps`, a deterministic change that, in request order, appends each new entry and, for a moved repo,
    sets the group on its entry and moves the entry to the bottom of its section (`MoveToSectionEnd`: after the
    section's last other entry, or the end of the list; marks `HasUserRepoOrder` when the order changed), and removes
-   the target group from the collapsed sections when anything joined it. A failed save throws
+   the target group from the collapsed sections when anything joined it (so a target group collapsed while the add ran
+   is opened). A failed save throws
    `InvalidOperationException` with nothing changed. Only after the save: the new cards are created
    (`CreateCard` + `ApplyCheapFacts`, or a background `RefreshCheapInBackgroundAsync` for a card whose facts were not
-   read), their events attached, `RepoCards` put in the stored order (`SyncCollection`), the moved cards told their
+   read - a repo that was listed when the add was planned but removed before the commit), their events attached,
+   `RepoCards` put in the stored order (`SyncCollection`), the moved cards told their
    group
    changed, the list rebuilt **once** (`UpdateDisplayedRepoCards`), and the new cards' upgrade checks started in the
    background (`BeginCardsUpgradeRefresh`).
@@ -503,8 +505,10 @@ the background after any add that is already running or queued, with progress in
   "Saving..." with Cancel no longer allowed just before it commits. The last add of a session to end disposes the
   progress operation, so the strip goes idle (or shows an operation that is still running).
 - *Postconditions*: the list reflects the batch, committed once; a repo listed while the folders were read is
-  `AlreadyListed`, never added twice, including a folder named by two queued requests; a target group removed while
-  the add ran is created again by the commit (the user asked for that group).
+  `AlreadyListed`, never added twice, including a folder named by two queued requests; a repo listed when the add was
+  planned but removed before the commit is added again, its card's pin and branch read in the background; a target
+  group removed while the add ran is created again by the commit (the user asked for that group), and a target group
+  collapsed while it ran is opened.
 
 **CancelAddRepos**: Cancels the running add and every add queued after it (the strip's Cancel)
 (`AgentControl-MainWindowViewModel-AddReposCancel`). An add that is already saving completes; nothing else is saved or

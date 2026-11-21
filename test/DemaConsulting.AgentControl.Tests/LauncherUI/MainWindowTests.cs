@@ -806,6 +806,95 @@ public sealed class MainWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that while dropped folders are being checked (held at a gate) collapsing a section
+    ///     and typing a filter take effect at once, and that the new cards then follow the filter in
+    ///     force and the collapse made meanwhile is kept.
+    /// </summary>
+    [Fact]
+    public void MainWindow_DropFolders_FilterAndCollapseWhileChecked_TakeEffectAtOnceAndApplyToTheNewCards() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: kiwi and pear in Work, plum in Home, every background read held at a gate
+        var gate = new GatedBackgroundWorkRunner();
+        var kiwi = CreateNamedRepoDirectory("kiwi");
+        var pear = CreateNamedRepoDirectory("pear");
+        var plum = CreateNamedRepoDirectory("plum");
+        var fig = CreateNamedRepoDirectory("fig");
+        var kiwiNew = CreateNamedRepoDirectory("kiwi-new");
+        var viewModel = new MainWindowViewModel(
+            new AppSettings
+            {
+                RecentRepos =
+                [
+                    new RecentRepo { Path = kiwi, GroupName = "Work" },
+                    new RecentRepo { Path = pear, GroupName = "Work" },
+                    new RecentRepo { Path = plum, GroupName = "Home" }
+                ]
+            },
+            configDirectory: CreateTempDirectory(),
+            backgroundWork: gate);
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 1000 };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        var strip = window.FindControl<Border>("GlobalProgressStrip")!;
+        var filter = window.GetVisualDescendantsOf<TextBox>("FilterTextBox").Single();
+
+        try
+        {
+            // Act: drop two folders on the Work header; the add starts and its checks are held
+            RepoReorderWindowTests.DropExternal(window, RepoReorderWindowTests.OnHeader(window, "Work"), fig, kiwiNew);
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the add is held (the cards' own checks share the gate, so its first call is
+            // not necessarily the add's)
+            Assert.False(viewModel.PendingAddRepos.IsCompleted);
+            Assert.True(strip.IsVisible);
+
+            // Act: collapse Home with the pointer
+            ClickWithMouse(window, HeaderToggle(window, "Home"));
+
+            // Assert: collapsed at once, while the add is still held
+            Assert.True(viewModel.IsGroupCollapsed("Home"));
+            Assert.Equal(["kiwi", "pear"], RepoReorderWindowTests.RowNames(window));
+            Assert.False(viewModel.PendingAddRepos.IsCompleted);
+
+            // Act: type a filter
+            filter.Text = "kiwi";
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: filtered at once, while the add is still held
+            Assert.Equal(["kiwi"], RepoReorderWindowTests.RowNames(window));
+            Assert.False(viewModel.PendingAddRepos.IsCompleted);
+
+            // Act: the checks run
+            gate.Release();
+            await RepoReorderWindowTests.SettleAddsAsync(viewModel);
+
+            // Assert: both added into Work, silently; the shown cards follow the filter in force
+            Assert.Equal(["kiwi", "kiwi-new"], RepoReorderWindowTests.RowNames(window));
+            Assert.Equal("Work", viewModel.RepoCards.Single(card => card.RepoPath == fig).GroupName);
+            Assert.Equal("Work", viewModel.RepoCards.Single(card => card.RepoPath == kiwiNew).GroupName);
+            Assert.Empty(window.OwnedWindows);
+            Assert.False(strip.IsVisible);
+
+            // Act: clear the filter
+            filter.Text = string.Empty;
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the collapse made during the add is kept, and the new repos follow Work's
+            // stored repos in drop order
+            Assert.True(viewModel.IsGroupCollapsed("Home"));
+            Assert.Equal(["kiwi", "pear", "fig", "kiwi-new"], RepoReorderWindowTests.RowNames(window));
+        }
+        finally
+        {
+            // Release the gate whatever happened, and let the cards' checks end before the folders go
+            gate.Release();
+            await Task.WhenAll(viewModel.RepoCards.Select(card => card.GitStatusRefreshTask));
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that when an add cannot be saved the window asks Retry or Discard, and Retry (once saving
     ///     works) adds the folders.
     /// </summary>
@@ -1094,6 +1183,30 @@ public sealed class MainWindowTests : IDisposable
         File.WriteAllText(Path.Combine(path, ".git", "HEAD"), "ref: refs/heads/main\n");
         return path;
     }
+
+    /// <summary>
+    ///     Creates a repo folder with the given name (the card's name) under a unique temporary parent,
+    ///     the top folder of a Git repository as far as the add is concerned, removed on disposal.
+    /// </summary>
+    /// <param name="name">The folder name.</param>
+    /// <returns>The folder's path.</returns>
+    private string CreateNamedRepoDirectory(string name)
+    {
+        var path = Path.Combine(CreateTempDirectory(), name);
+        Directory.CreateDirectory(Path.Combine(path, ".git"));
+        File.WriteAllText(Path.Combine(path, ".git", "HEAD"), "ref: refs/heads/main\n");
+        return path;
+    }
+
+    /// <summary>
+    ///     Finds the collapse/expand toggle of a section's header.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <param name="sectionName">The section's name.</param>
+    /// <returns>The header's toggle button.</returns>
+    private static Button HeaderToggle(MainWindow window, string sectionName) =>
+        window.GetVisualDescendantsOf<Button>("GroupHeaderToggleButton")
+            .Single(button => button.DataContext is RepoGroupHeaderViewModel header && header.Name == sectionName);
 
     /// <summary>
     ///     Clicks an item of the only card's "..." menu the way a user does: opens the menu from its

@@ -6,7 +6,7 @@ package AgentControl {
 
         metadata info : SoftwareInfo {
             sourceFiles = ("src/DemaConsulting.AgentControl/LauncherUI/MainWindowViewModel.cs");
-            testFiles = ("test/DemaConsulting.AgentControl.Tests/LauncherUI/MainWindowViewModelTests.cs", "test/DemaConsulting.AgentControl.Tests/LauncherUI/RepoGroupingTests.cs", "test/DemaConsulting.AgentControl.Tests/LauncherUI/RepoOrderingTests.cs", "test/DemaConsulting.AgentControl.Tests/LauncherUI/MainWindowViewModelRecheckTests.cs");
+            testFiles = ("test/DemaConsulting.AgentControl.Tests/LauncherUI/MainWindowViewModelTests.cs", "test/DemaConsulting.AgentControl.Tests/LauncherUI/RepoGroupingTests.cs", "test/DemaConsulting.AgentControl.Tests/LauncherUI/RepoOrderingTests.cs", "test/DemaConsulting.AgentControl.Tests/LauncherUI/MainWindowViewModelRecheckTests.cs", "test/DemaConsulting.AgentControl.Tests/LauncherUI/MainWindowViewModelPersistenceTests.cs");
             designFiles = ("docs/design/agent-control/launcher-ui/main-window-view-model.md");
             verificationFiles = ("docs/verification/agent-control/launcher-ui/main-window-view-model.md");
             requirementFiles = ("docs/reqstream/agent-control/launcher-ui/main-window-view-model.yaml");

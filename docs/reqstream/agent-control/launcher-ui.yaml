@@ -858,8 +858,8 @@ sections:
       - id: AgentControl-LauncherUI-AddReposResponsive
         title: >-
           The LauncherUI subsystem shall keep the window usable - its UI thread free, the filter,
-          collapsing, renaming and removing working - while the folders of an add are being checked,
-          and shall add them only once every folder was checked.
+          collapsing, and the removal of repos and groups working - while the folders of an add are
+          being checked, and shall add them only once every folder was checked.
         justification: |
           Checking a folder reads the disk and runs git; done for many folders on the window's own
           thread it froze the window for a long time after a large drop. Adding the repos together
@@ -868,6 +868,7 @@ sections:
           - AgentControl-MainWindowViewModel-AddReposInBackground
         tests:
           - MainWindow_DropFolders_WhileChecked_WindowStaysResponsiveAndShowsProgress
+          - MainWindow_DropFolders_FilterAndCollapseWhileChecked_TakeEffectAtOnceAndApplyToTheNewCards
 
       - id: AgentControl-LauncherUI-GlobalProgress
         title: >-

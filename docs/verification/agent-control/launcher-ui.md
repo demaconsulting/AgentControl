@@ -260,7 +260,14 @@ folder keeps its single-add message. These cover `AgentControl-LauncherUI-AddRep
 runner is a gate, two folders are dropped on the empty-state panel; while their checks are held the UI thread runs
 other work, no card is added yet, and the strip shows "Adding 0 of 2 repositories..." (also the progress bar's
 accessible name) with its Cancel button. Once the checks are released both folders are added, silently, and the strip
-is gone (`MainWindow_DropFolders_WhileChecked_WindowStaysResponsiveAndShowsProgress`). This covers
+is gone (`MainWindow_DropFolders_WhileChecked_WindowStaysResponsiveAndShowsProgress`). With two repos in the group
+`Work` and one in `Home`, two folders are dropped on the `Work` header; while their checks are held (the add is still
+pending and the strip shown) clicking the `Home` header toggle collapses it at once and typing a filter narrows the
+shown cards at once. Once released both folders are added into `Work`, silently, the shown cards follow the filter in
+force (only the new folder that matches it appears) and the strip is gone; with the filter cleared `Home` stays
+collapsed and the new repos follow `Work`'s stored repos in drop order
+(`MainWindow_DropFolders_FilterAndCollapseWhileChecked_TakeEffectAtOnceAndApplyToTheNewCards`). The removal of repos
+and groups during an add is verified through the child. This covers
 `AgentControl-LauncherUI-AddReposResponsive` (child `AgentControl-MainWindowViewModel-AddReposInBackground`).
 
 **LauncherUI_GlobalProgress_StripShownOnlyWhileBulkWorkRuns**: The strip is collapsed in an idle window, shows the add's

@@ -1786,7 +1786,7 @@ public sealed class RepoReorderWindowTests : IDisposable
     /// </summary>
     /// <param name="window">The main window.</param>
     /// <returns>The repo names.</returns>
-    private static List<string> RowNames(MainWindow window) =>
+    internal static List<string> RowNames(MainWindow window) =>
         [.. window.FindControl<ListBox>("RepoListBox")!.GetVisualDescendants().OfType<ListBoxItem>()
             .Where(row => row.DataContext is RepoCardViewModel)
             .OrderBy(row => row.TranslatePoint(new Point(0, 0), window)!.Value.Y)
@@ -1823,7 +1823,7 @@ public sealed class RepoReorderWindowTests : IDisposable
     /// <param name="window">The main window.</param>
     /// <param name="sectionName">The section's name.</param>
     /// <returns>The point, in window coordinates.</returns>
-    private static Point OnHeader(MainWindow window, string sectionName) => PointIn(window, FindHeaderRow(window, sectionName), 0.5);
+    internal static Point OnHeader(MainWindow window, string sectionName) => PointIn(window, FindHeaderRow(window, sectionName), 0.5);
 
     /// <summary>
     ///     Gets a point at a fraction of a row's height, in window coordinates.

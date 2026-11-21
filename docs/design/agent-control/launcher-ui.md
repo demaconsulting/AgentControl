@@ -395,7 +395,8 @@ thread touches, the per-card `CommittedAgentFilesCache`, is lock-guarded
   at a time (`InspectFolder`: exists, a file, the top folder of a Git repository and, for a Git root not yet listed,
   `RepoCardViewModel.ReadCheapFacts` - its pin, branch, `HEAD` and committed agent folders), the strip counting the
   folders checked; (3) **commit** on the UI thread (`PrepareAddCommit` then `ApplyAddCommit`): every folder is checked
-  again against the list as it is now - a repo listed meanwhile is not added twice, a target group removed meanwhile
+  again against the list as it is now - a repo listed meanwhile is not added twice, a repo removed meanwhile is added
+  again (its card's facts read in the background), a target group removed meanwhile
   is created again by the add, because the user asked for that group - and one deterministic settings change appends
   the new entries, moves listed repos into the group at the bottom of their section and opens a collapsed target
   group; it is saved once through the transactional change, and only then are the new cards created from the facts

@@ -1369,6 +1369,126 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a repo listed when a background add was planned but removed (together with the
+    ///     add's target group) while its folders were checked is added again: both folders go into
+    ///     the target group, which is created again, with one save, and the re-added card reads its
+    ///     pin in the background.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_AddReposAsync_ListedRepoAndTargetGroupRemovedMeanwhile_AddsBothToRecreatedGroupWithOneSave()
+    {
+        // Arrange: an anchor repo that makes "Work" exist, a listed ungrouped repo with a pin, a new
+        // repo, a counting save seam and a runner that holds every check
+        var gate = new GatedBackgroundWorkRunner();
+        var configDir = CreateTempDirectory();
+        var anchor = CreateRepoDirectory();
+        var listed = CreateRepoDirectory();
+        RepoPinStore.Save(listed, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var fresh = CreateRepoDirectory();
+        var saves = 0;
+        var viewModel = new MainWindowViewModel(
+            new AppSettings
+            {
+                RecentRepos =
+                [
+                    new RecentRepo { Path = anchor, GroupName = "Work" },
+                    new RecentRepo { Path = listed }
+                ]
+            },
+            configDirectory: configDir,
+            saveSettings: settings =>
+            {
+                Interlocked.Increment(ref saves);
+                SettingsStore.Save(settings, configDir);
+            },
+            backgroundWork: gate);
+        var add = viewModel.EnqueueAddReposAsync([listed, fresh], "Work");
+        await gate.FirstCall;
+
+        // Act: while the folders are checked, the listed repo and the target group are removed
+        viewModel.RemoveRepo(viewModel.RepoCards.Single(card => card.RepoPath == listed));
+        Assert.True(viewModel.RemoveGroup("Work"));
+
+        // Assert: both removals took effect at once, and the add is still held
+        Assert.DoesNotContain("Work", viewModel.GroupNames);
+        Assert.DoesNotContain(viewModel.RepoCards, card => card.RepoPath == listed);
+        Assert.False(add.IsCompleted);
+        var savesBefore = saves;
+
+        // Act: let the checks run, then wait for the re-added card's background read
+        gate.Release();
+        var result = await add;
+        await viewModel.PendingAddRepos;
+        var reAdded = viewModel.RepoCards.Single(card => card.RepoPath == listed);
+        await reAdded.CheapRefreshTask;
+
+        // Assert: both added into the re-created, expanded group with one save; the anchor stays
+        // ungrouped; the re-added card shows its pin; the file holds both in the group
+        Assert.False(result.Canceled);
+        Assert.Equal([AddRepoResult.Added, AddRepoResult.Added], result.Outcomes.Select(outcome => outcome.Result));
+        Assert.Equal(savesBefore + 1, saves);
+        Assert.Equal("Work", reAdded.GroupName);
+        Assert.Equal("Work", viewModel.RepoCards.Single(card => card.RepoPath == fresh).GroupName);
+        Assert.Contains("Work", viewModel.GroupNames);
+        Assert.False(viewModel.IsGroupCollapsed("Work"));
+        Assert.Null(viewModel.RepoCards.Single(card => card.RepoPath == anchor).GroupName);
+        Assert.Equal("1.0.0", reAdded.PinnedPackageVersion);
+        var saved = SettingsStore.Load(configDir).RecentRepos;
+        Assert.Equal("Work", saved.Single(repo => repo.Path == listed).GroupName);
+        Assert.Equal("Work", saved.Single(repo => repo.Path == fresh).GroupName);
+        Assert.False(viewModel.GlobalProgress.IsActive);
+    }
+
+    /// <summary>
+    ///     Test that a target group collapsed while a background add was checking its folders is
+    ///     opened by the add, so the new repo is shown, and is saved as expanded.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_AddReposAsync_TargetGroupCollapsedMeanwhile_OpensItWithTheNewRepo()
+    {
+        // Arrange: an expanded "Work" group, a counting save seam and an add into it held at a gate
+        var gate = new GatedBackgroundWorkRunner();
+        var configDir = CreateTempDirectory();
+        var anchor = CreateRepoDirectory();
+        var fresh = CreateRepoDirectory();
+        var saves = 0;
+        var viewModel = new MainWindowViewModel(
+            new AppSettings { RecentRepos = [new RecentRepo { Path = anchor, GroupName = "Work" }] },
+            configDirectory: configDir,
+            saveSettings: settings =>
+            {
+                Interlocked.Increment(ref saves);
+                SettingsStore.Save(settings, configDir);
+            },
+            backgroundWork: gate);
+        var add = viewModel.EnqueueAddReposAsync([fresh], "Work");
+        await gate.FirstCall;
+
+        // Act: the user collapses the target group while the folder is checked
+        viewModel.ToggleGroupCollapsed("Work");
+
+        // Assert: the collapse took effect at once
+        Assert.True(viewModel.IsGroupCollapsed("Work"));
+        Assert.DoesNotContain(viewModel.DisplayedRepoCards, card => card.RepoPath == anchor);
+        Assert.False(add.IsCompleted);
+        var savesBefore = saves;
+
+        // Act: let the check run
+        gate.Release();
+        var result = await add;
+
+        // Assert: added with one save, and the group is opened (and saved so) showing both repos
+        Assert.Equal(AddRepoResult.Added, Assert.Single(result.Outcomes).Result);
+        Assert.Equal(savesBefore + 1, saves);
+        Assert.False(viewModel.IsGroupCollapsed("Work"));
+        var anchorCard = Assert.Single(viewModel.DisplayedRepoCards, card => card.RepoPath == anchor);
+        var newCard = Assert.Single(viewModel.DisplayedRepoCards, card => card.RepoPath == fresh);
+        Assert.Equal("Work", anchorCard.GroupName);
+        Assert.Equal("Work", newCard.GroupName);
+        Assert.DoesNotContain("Work", SettingsStore.Load(configDir).CollapsedGroups ?? [], StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     ///     Test that adding a repo does not check its working tree: the card shows its Git status as not
     ///     checked yet and no <c>git status</c> ran (the check is deferred until the card is shown).
     /// </summary>

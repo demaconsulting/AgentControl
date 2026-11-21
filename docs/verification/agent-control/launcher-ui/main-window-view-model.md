@@ -165,7 +165,16 @@ gate, a background add of two repos has not completed, no card is added and the 
 once released both are added in request order and the progress is cleared
 (`MainWindowViewModel_AddReposAsync_WhileFoldersAreChecked_ReturnsAndAddsNothingYet`). A repo added another way while
 the background add checks it is reported `AlreadyListed` and listed once
-(`MainWindowViewModel_AddReposAsync_RepoListedMeanwhile_IsAlreadyListed`). A new repo's card has its branch read but
+(`MainWindowViewModel_AddReposAsync_RepoListedMeanwhile_IsAlreadyListed`). A listed ungrouped repo (with a pin) and a
+new folder are added to the group `Work`, and while their checks are held the listed repo and the group `Work` are
+removed; once released both are `Added` into `Work`, which exists again and is expanded, with exactly one more save,
+the repo that made `Work` exist stays ungrouped, the re-added card shows its pinned version once its background read
+has run, and the saved file holds both in `Work`
+(`MainWindowViewModel_AddReposAsync_ListedRepoAndTargetGroupRemovedMeanwhile_AddsBothToRecreatedGroupWithOneSave`). The
+target group collapsed while the add is held hides its repo at once; once released the folder is `Added` with exactly
+one more save, the group is open again, both its repos are displayed and the saved collapsed sections do not hold it
+(`MainWindowViewModel_AddReposAsync_TargetGroupCollapsedMeanwhile_OpensItWithTheNewRepo`). A new repo's card has its
+branch read but
 its Git status not checked, is not shown as dirty, and the stub git's invocation log holds no `status` call
 (`MainWindowViewModel_AddReposAsync_NewRepo_GitStatusNotCheckedAndNoStatusRun`). These cover
 `AgentControl-MainWindowViewModel-AddReposInBackground`.
