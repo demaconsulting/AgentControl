@@ -257,6 +257,65 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that coloring a group whose save fails changes nothing - not the header, the tiles or
+    ///     the settings - and reports the failure.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_SetGroupColor_SaveFails_ChangesNothingAndReports()
+    {
+        // Arrange
+        var fixture = CreateFixture(("alpha", "Work"), ("beta", null));
+        var alpha = fixture.Card("alpha");
+        var tileBefore = alpha.AvatarStyleClass;
+        fixture.BreakSaving();
+
+        // Act
+        var colored = fixture.ViewModel.SetGroupColor("Work", "Teal");
+
+        // Assert
+        Assert.False(colored);
+        Assert.Empty(fixture.ViewModel.Settings.GroupColors);
+        Assert.Equal(tileBefore, alpha.AvatarStyleClass);
+        Assert.All(fixture.ViewModel.DisplayedItems.OfType<RepoGroupHeaderViewModel>(), header => Assert.False(header.HasColor));
+        Assert.Single(fixture.Failures);
+    }
+
+    /// <summary>
+    ///     Test that when the save of one folder of a multi-folder add fails, that folder is reported as
+    ///     not saved (with the reason) and the add goes on with the next folders once saving works.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_AddRepos_SaveFailsForOne_ContinuesWithTheRest()
+    {
+        // Arrange: saving fails until the first folder has been tried
+        var fixture = CreateFixture("alpha");
+        var first = CreateDirectory("gamma");
+        var second = CreateDirectory("delta");
+        fixture.BreakSaving();
+        var paths = new List<string> { first };
+        IEnumerable<string> Folders()
+        {
+            foreach (var path in paths)
+            {
+                yield return path;
+            }
+
+            // The next folder is reached only after the first one was tried
+            fixture.RestoreSaving();
+            yield return second;
+        }
+
+        // Act
+        var outcomes = fixture.ViewModel.AddRepos(Folders(), null);
+
+        // Assert: the first was not saved (and says why), the second was added
+        Assert.Equal([AddRepoResult.SaveFailed, AddRepoResult.Added], outcomes.Select(outcome => outcome.Result));
+        Assert.False(string.IsNullOrWhiteSpace(outcomes[0].Problem));
+        Assert.Equal(["alpha", "delta"], fixture.ViewModel.RepoCards.Select(card => card.RepoName));
+        Assert.Equal(2, SettingsStore.Load(fixture.ConfigDirectory).RecentRepos.Count);
+    }
+
+    /// <summary>
     ///     Test that removing a repo whose save fails keeps it in the list, still working (it is not
     ///     retired), and that a successful removal retires the card so that it can no longer report
     ///     anything.
@@ -405,6 +464,8 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
         var parent = Path.Combine(Path.GetTempPath(), "agentcontrol_persistence_" + Guid.NewGuid().ToString("N"));
         var path = Path.Combine(parent, name);
         Directory.CreateDirectory(path);
+        Directory.CreateDirectory(Path.Combine(path, ".git"));
+        File.WriteAllText(Path.Combine(path, ".git", "HEAD"), "ref: refs/heads/main\n");
         _tempPaths.Add(parent);
         return path;
     }

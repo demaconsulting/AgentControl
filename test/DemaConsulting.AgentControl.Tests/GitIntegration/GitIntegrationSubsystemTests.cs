@@ -121,6 +121,30 @@ public class GitIntegrationSubsystemTests
     }
 
     /// <summary>
+    ///     Test, with the real git, the capability of telling the top folder of a Git repository: a
+    ///     repository's working folder and a linked worktree of it (whose <c>.git</c> is a file) are
+    ///     repository roots, while a subfolder of the repository and a plain folder are not.
+    /// </summary>
+    [Fact]
+    public void GitIntegrationSubsystem_RepositoryRoot_RepositoryWorktreeAndSubfolder()
+    {
+        // Arrange: a real repository with one commit, a linked worktree, a subfolder and a plain folder
+        using var fixture = AgentPackageManagement.GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(new Dictionary<string, string> { ["src/app.cs"] = "class App {}" }, "Initial");
+        var worktree = Path.Combine(fixture.Root, "feature-worktree");
+        fixture.Git(fixture.WorkPath, "worktree", "add", "-b", "feature", worktree);
+        var subfolder = Path.Combine(fixture.WorkPath, "src");
+        var plain = Directory.CreateDirectory(Path.Combine(fixture.Root, "plain")).FullName;
+
+        // Act / Assert
+        Assert.True(GitClient.IsRepositoryRoot(fixture.WorkPath));
+        Assert.True(File.Exists(Path.Combine(worktree, ".git")));
+        Assert.True(GitClient.IsRepositoryRoot(worktree));
+        Assert.False(GitClient.IsRepositoryRoot(subfolder));
+        Assert.False(GitClient.IsRepositoryRoot(plain));
+    }
+
+    /// <summary>
     ///     Test, with the real git, that the raw content of a listed blob is read from the fetched commit
     ///     exactly as the commit holds it - carriage returns, a NUL byte and an identifier that an
     ///     attribute asks to expand - even though the user's configuration asks for line-ending conversion

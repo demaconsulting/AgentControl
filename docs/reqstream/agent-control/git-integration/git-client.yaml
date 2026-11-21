@@ -4,7 +4,8 @@
 # GitClient invokes the configured git executable to query working-tree cleanliness, pull
 # commits, read the HEAD commit hash, detect committed agent files, list which managed agent
 # folders are tracked and stop tracking them, and resolve the current
-# branch (using a fast path that reads .git/HEAD directly before falling back to a subprocess).
+# branch (using a fast path that reads .git/HEAD directly before falling back to a subprocess),
+# and tells whether a folder is the top folder of a Git repository.
 
 sections:
   - title: GitClient Unit Requirements
@@ -124,3 +125,19 @@ sections:
           - GitClient_GetHeadCommitHash_Succeeds_ReturnsTrimmedHash
           - GitClient_GetHeadCommitHash_Fails_ThrowsInvalidOperationException
           - GitClient_Constructor_EmptyExecutablePath_ThrowsArgumentException
+
+      - id: AgentControl-GitClient-RepositoryRoot
+        title: >-
+          The GitClient class shall report a folder as the top folder of a Git repository when a
+          .git folder or a .git file is directly in it, and not for a folder without one, a subfolder
+          of a repository or a missing folder, and shall refuse a blank path.
+        justification: |
+          A worktree or submodule has a .git file instead of a folder and is a repository root too;
+          a subfolder is not, and a blank path is a programming error.
+        tests:
+          - GitClient_IsRepositoryRoot_GitDirectory_ReturnsTrue
+          - GitClient_IsRepositoryRoot_GitFile_ReturnsTrue
+          - GitClient_IsRepositoryRoot_NoGit_ReturnsFalse
+          - GitClient_IsRepositoryRoot_SubfolderOfRepository_ReturnsFalse
+          - GitClient_IsRepositoryRoot_MissingFolder_ReturnsFalse
+          - GitClient_IsRepositoryRoot_BlankPath_ThrowsArgumentException

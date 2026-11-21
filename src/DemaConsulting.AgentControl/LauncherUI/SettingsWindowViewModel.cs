@@ -521,12 +521,13 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     ///     the <c>onSave</c> callback supplied at construction.
     /// </summary>
     /// <remarks>
-    ///     The returned settings' <see cref="AppSettings.RecentRepos"/> and
-    ///     <see cref="AppSettings.CollapsedGroups"/> are left as fresh empty
-    ///     lists; callers (specifically <see cref="MainWindowViewModel.ApplySettings"/>) are
+    ///     The returned settings' <see cref="AppSettings.RecentRepos"/>,
+    ///     <see cref="AppSettings.CollapsedGroups"/>, <see cref="AppSettings.GroupColors"/> and
+    ///     <see cref="AppSettings.GroupOrder"/> are left as fresh empty collections; callers
+    ///     (specifically <see cref="MainWindowViewModel.ApplySettings"/>) are
     ///     responsible for preserving the authoritative repo list (and its order, including
-    ///     <see cref="AppSettings.HasUserRepoOrder"/>) and collapsed-group state, since this view model
-    ///     never owns or edits them. The configured sources are written to
+    ///     <see cref="AppSettings.HasUserRepoOrder"/>), the collapsed-group state and the group colors
+    ///     and order, since this view model never owns or edits them. The configured sources are written to
     ///     <see cref="AppSettings.Sources"/> (never the legacy single path) in the order listed.
     ///     A source whose location embeds a credential is refused here, keeping the window open
     ///     with the reason shown, rather than being allowed to reach the settings file. When the

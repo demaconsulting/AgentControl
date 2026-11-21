@@ -22,8 +22,10 @@ sections:
       - id: AgentControl-MainWindowViewModel-AddRepo
         title: >-
           The MainWindowViewModel class shall add a new repo card and persist it to settings
-          when given an existing, not-already-tracked folder path, and shall reject
-          nonexistent or duplicate paths.
+          when given an existing, not-already-tracked folder that is the top folder of a Git
+          repository, and shall reject nonexistent or duplicate paths (the same folder ignoring
+          letter case and a trailing directory separator) and folders that are not Git repository
+          roots.
         justification: |
           Prevents the recent-repos list from accumulating invalid or duplicate entries while
           still letting the developer register new repos.
@@ -31,23 +33,76 @@ sections:
           - MainWindowViewModel_AddRepo_ValidNewPath_InsertsCardAndPersistsSettings
           - MainWindowViewModel_AddRepo_PathDoesNotExist_ReturnsFalse
           - MainWindowViewModel_AddRepo_DuplicatePath_ReturnsFalse
+          - MainWindowViewModel_AddRepos_ListedFolderWithTrailingSeparator_IsAlreadyListed
+          - MainWindowViewModel_AddRepo_StoredWithTrailingSeparator_IsAlreadyListed
+          - MainWindowViewModel_NormalizeRepoPath_TrailingSeparatorAndRoot_TrimsOnlyTheSeparator
+          - MainWindowViewModel_AddRepo_FolderWithoutGit_IsRefusedAsNotAGitRepository
+          - MainWindowViewModel_AddRepo_SubfolderOfARepository_IsRefused
 
       - id: AgentControl-MainWindowViewModel-AddRepoToGroup
         title: >-
           The MainWindowViewModel class shall add a repo straight into one of the user's groups,
           moving the existing entry into that group instead when the repo is already tracked,
-          shall reject a nonexistent folder and an invalid group name, shall open a collapsed
-          target group so the repo is visible, and shall keep the group only in the user's
-          settings.
+          shall reject a nonexistent folder, a folder that is not a Git repository root and an
+          invalid group name, shall open a collapsed target group so the repo is visible, and shall
+          keep the group only in the user's settings.
         justification: |
           Adding a repo to a group in one step saves the developer the add-then-move round trip,
-          while the duplicate and nonexistent-path protections of the plain add still apply.
+          while the duplicate, nonexistent-path and repository protections of the plain add still
+          apply.
         tests:
           - MainWindowViewModel_AddRepoToGroup_NewRepo_AddsCardInTheGroupAndPersistsIt
           - MainWindowViewModel_AddRepoToGroup_RepoAlreadyListed_MovesItIntoTheGroup
           - MainWindowViewModel_AddRepoToGroup_FolderMissing_AddsNothing
           - MainWindowViewModel_AddRepoToGroup_CollapsedGroup_ExpandsIt
           - MainWindowViewModel_AddRepoToGroup_InvalidGroupName_ThrowsAndAddsNothing
+          - MainWindowViewModel_AddRepo_SubfolderOfARepository_IsRefused
+
+      - id: AgentControl-MainWindowViewModel-AddRepos
+        title: >-
+          The MainWindowViewModel class shall add several folders in one request, with or without a
+          group, handling each folder as a single add would, reporting what became of each (added,
+          moved into the group, already listed, missing, not a Git repository, not saved) in the
+          order given, going on with the next folder when one cannot be saved, handling a folder
+          given twice (in another letter case or with a trailing directory separator) once, and
+          opening a collapsed target group once.
+        justification: |
+          A multi-folder pick or a drop of many folders must not stop at the first folder that
+          cannot be added, and the caller needs every outcome to tell the user what happened.
+        tests:
+          - MainWindowViewModel_AddRepos_MixedPaths_ReportsAnOutcomePerPath
+          - MainWindowViewModel_AddRepos_SameFolderWithAndWithoutTrailingSeparator_AddsOneCard
+          - MainWindowViewModel_AddRepos_SaveFailsForOne_ContinuesWithTheRest
+          - MainWindowViewModel_AddRepos_IntoCollapsedGroup_OpensItOnce
+
+      - id: AgentControl-MainWindowViewModel-AddGitReposOnly
+        title: >-
+          The MainWindowViewModel class shall refuse to add a folder that has no .git folder or file
+          directly in it (including a subfolder of a repository) and a file, shall accept a folder
+          with a .git file (a worktree or submodule), and shall keep the repos already listed even
+          when they are not Git repository roots.
+        justification: |
+          Only a repository's top folder can be synced, pulled and launched in; the repos a user
+          already tracks must not disappear because of a check introduced later.
+        tests:
+          - MainWindowViewModel_AddRepo_FolderWithoutGit_IsRefusedAsNotAGitRepository
+          - MainWindowViewModel_AddRepo_SubfolderOfARepository_IsRefused
+          - MainWindowViewModel_AddRepo_FolderWithGitFile_IsAdded
+          - MainWindowViewModel_AddRepos_ExistingFile_IsNotAGitRepository
+          - MainWindowViewModel_Constructor_ListedFolderWithoutGit_IsKept
+
+      - id: AgentControl-MainWindowViewModel-AddReposSummary
+        title: >-
+          The MainWindowViewModel class shall describe the outcome of an add as no message when
+          every folder was added, the single-add message for one folder, and otherwise one summary
+          giving how many folders were added and one line per kind of outcome naming at most five
+          folders followed by how many more.
+        justification: |
+          The user needs to know what was not added and why without a message per folder.
+        tests:
+          - MainWindowViewModel_DescribeAddOutcomes_AllAdded_ReturnsNull
+          - MainWindowViewModel_DescribeAddOutcomes_Single_KeepsTheSingleAddMessages
+          - MainWindowViewModel_DescribeAddOutcomes_SeveralMixed_OneSummaryByOutcomeWithAtMostFiveNames
 
       - id: AgentControl-MainWindowViewModel-RemoveRepo
         title: >-
@@ -379,14 +434,115 @@ sections:
       - id: AgentControl-MainWindowViewModel-GroupSections
         title: >-
           The MainWindowViewModel class shall, while at least one repo is in a group, order the
-          displayed items as sections - a Favorites section first, then one section per group
-          alphabetically ignoring letter case, then an Ungrouped section last.
+          displayed items as sections - a Favorites section first, then one section per group in
+          the user's group order (groups without a stored place alphabetically ignoring letter case,
+          after the ordered ones), then an Ungrouped section last.
         justification: |
           Sections let a long list be read by topic, with the repos the user cares about most
           first and the repos that belong to no group last.
         tests:
           - MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered
           - MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection
+          - MainWindowViewModel_DisplayedItems_GroupsInStoredOrderThenAlphabetically
+
+      - id: AgentControl-MainWindowViewModel-GroupOrder
+        title: >-
+          The MainWindowViewModel class shall show the groups in the order stored in the settings,
+          the groups without a stored place after them alphabetically, and shall keep in the stored
+          order only groups that exist, spelled as the groups are.
+        justification: |
+          The stored order is the user's; a stale or differently spelled entry must neither show a
+          group that is gone nor duplicate one that exists.
+        tests:
+          - MainWindowViewModel_DisplayedItems_GroupsInStoredOrderThenAlphabetically
+
+      - id: AgentControl-MainWindowViewModel-MoveGroup
+        title: >-
+          The MainWindowViewModel class shall move a group one place up or down by swapping it with
+          the group before or after it, and store and save the whole order of the groups as shown.
+        justification: |
+          Storing the whole order keeps the place of every group the user can see, including those
+          that had no stored place yet.
+        tests:
+          - MainWindowViewModel_MoveGroup_UpAndDown_SwapsWithNeighborAndStoresTheFullOrder
+          - MainWindowViewModel_MoveGroup_SaveFails_ChangesNothingAndReports
+
+      - id: AgentControl-MainWindowViewModel-MoveGroupAvailability
+        title: >-
+          The MainWindowViewModel class shall refuse, with a reason, to move the first group up, the
+          last group down, Favorites, Ungrouped, a group without a section and any group while the
+          filter has text, and shall give the group headers that availability.
+        justification: |
+          The reason is what the disabled menu item shows, so the user knows why the move is not
+          offered and how to get it back.
+        tests:
+          - MainWindowViewModel_GetGroupMoveDisabledReason_EndsBuiltInSectionsAndFilter
+
+      - id: AgentControl-MainWindowViewModel-DropGroup
+        title: >-
+          The MainWindowViewModel class shall put a dragged group before or after another group and
+          save the order, keeping a collapsed group collapsed, and shall refuse a drop on the group
+          itself, on Favorites or Ungrouped, on or of a group that is not listed, and while the
+          filter has text.
+        justification: |
+          The drag is decided by the same rules as the menu, so both ways of reordering agree.
+        tests:
+          - MainWindowViewModel_DropGroup_BeforeOrAfterAnotherGroup_Reorders
+          - MainWindowViewModel_CanDropGroup_SelfBuiltInUnknownOrFiltering_Refused
+
+      - id: AgentControl-MainWindowViewModel-GroupOrderPersisted
+        title: >-
+          The MainWindowViewModel class shall keep the order of the groups in the settings file, so
+          a view model created from the saved settings shows the groups in the same order.
+        justification: |
+          The order must survive a restart to be the user's order.
+        tests:
+          - MainWindowViewModel_MoveGroup_PersistsOrderForANewViewModel
+
+      - id: AgentControl-MainWindowViewModel-GroupColor
+        title: >-
+          The MainWindowViewModel class shall store a color from the card color palette, or none,
+          for one of the user's groups under the group's own spelling, saving it only in the user's
+          settings, and shall refuse an unknown color, an unknown group and the built-in sections,
+          changing nothing when the choice cannot be saved and reporting that.
+        justification: |
+          The group color is a personal choice that must be kept like the other organizing choices,
+          and only a known color for an existing group of the user's own makes sense.
+        tests:
+          - MainWindowViewModel_SetGroupColor_StoresColorAndNoneClears
+          - MainWindowViewModel_SetGroupColor_UnknownColorGroupOrBuiltInSection_ChangesNothing
+          - MainWindowViewModel_SetGroupColor_SaveFails_ChangesNothingAndReports
+
+      - id: AgentControl-MainWindowViewModel-GroupColorShown
+        title: >-
+          The MainWindowViewModel class shall give a group's color to the group's header and tell the
+          cards of the group that their tile color may have changed when the color is chosen or
+          cleared.
+        justification: |
+          The header and the tiles must show the new color at once, without a restart.
+        tests:
+          - MainWindowViewModel_SetGroupColor_UpdatesHeaderAndCardsOfTheGroup
+
+      - id: AgentControl-MainWindowViewModel-GroupSettingsFollowRenameAndRemove
+        title: >-
+          The MainWindowViewModel class shall move a group's color and its place in the group order
+          to the new name when the group is renamed, and forget them when the group is removed or
+          its last repo leaves it.
+        justification: |
+          The color and place belong to the group, not to a name that no longer has repos.
+        tests:
+          - MainWindowViewModel_RenameGroup_KeepsColorAndPosition
+          - MainWindowViewModel_RemoveGroup_ForgetsColorAndPosition
+          - MainWindowViewModel_LastRepoLeavesGroup_ForgetsColorAndPosition
+
+      - id: AgentControl-MainWindowViewModel-GroupSettingsKeptOnApplySettings
+        title: >-
+          The MainWindowViewModel class shall keep the group colors and the group order when settings
+          are applied from the Settings window.
+        justification: |
+          The Settings window does not edit them, so applying its changes must not lose them.
+        tests:
+          - MainWindowViewModel_ApplySettings_KeepsGroupColorsAndOrder
 
       - id: AgentControl-MainWindowViewModel-GroupSectionHeaders
         title: >-

@@ -84,7 +84,8 @@ internal sealed class AppSettings
     /// <summary>
     ///     Replaces every collection (and source text field) that an explicit JSON <c>null</c> may
     ///     have left <see langword="null"/> with an empty value, drops null list entries, and
-    ///     repairs the repos' organizing values (group names and unknown card colors).
+    ///     repairs the organizing values (group names, unknown card colors, and the group colors and
+    ///     group order - see <see cref="RepairGroupSettings"/>).
     /// </summary>
     /// <remarks>
     ///     <see cref="System.Text.Json.JsonSerializer"/> bypasses a property's initializer when the
@@ -119,13 +120,15 @@ internal sealed class AppSettings
 
     /// <summary>
     ///     Repairs the organizing values the user may have edited by hand or an older/newer version
-    ///     may have written: group names are cleaned up and unified, and the collapsed list is made
-    ///     a list of distinct clean names.
+    ///     may have written: group names are cleaned up and unified, the collapsed list is made
+    ///     a list of distinct clean names, and the group colors and group order are repaired.
     /// </summary>
     /// <remarks>
     ///     Each repo's group name is sanitized (see <see cref="RepoGroupName.Sanitize"/>), and
     ///     repos whose names differ only in letter case are given the spelling of the first of them
-    ///     in the list, so a group has exactly one display name. Idempotent.
+    ///     in the list, so a group has exactly one display name. The group colors and order are
+    ///     repaired last (see <see cref="RepairGroupSettings"/>), against the repaired group names.
+    ///     Idempotent.
     /// </remarks>
     private void NormalizeGroups()
     {
@@ -149,6 +152,95 @@ internal sealed class AppSettings
                 .Select(RepoGroupName.Normalize)
                 .OfType<string>()
                 .Distinct(RepoGroupName.Comparer)];
+
+        // The group colors and order only for groups that exist, spelled like them
+        RepairGroupSettings();
+    }
+
+    /// <summary>
+    ///     Brings <see cref="GroupColors"/> and <see cref="GroupOrder"/> in line with the groups that
+    ///     exist: only entries for groups some repo is in, with known colors, one per group, spelled the
+    ///     way the group is spelled on its repos.
+    /// </summary>
+    /// <remarks>
+    ///     A group exists only while a repo names it, so its color and position are forgotten once
+    ///     its last repo leaves it (or it is removed); a later group of the same name starts afresh
+    ///     instead of inheriting a stale choice. Called when the settings are loaded (so hand-edited
+    ///     or damaged entries never reach the window) and by the main window's view model after every
+    ///     change it saves (so the stored values follow renames, removals and repos leaving groups).
+    ///     The rules: each key or name is <see cref="RepoGroupName.Sanitize"/>d and dropped when
+    ///     nothing usable (or a built-in section's name) is left; a color is read through
+    ///     <see cref="RecentRepo.NormalizeCardColor"/> and dropped when the palette does not know it;
+    ///     entries naming a group no repo is in (favorites count as members) are dropped; entries
+    ///     that differ only in letter case are merged, the first one winning. Deterministic and
+    ///     idempotent, as <c>MainWindowViewModel.CommitSettingsChange</c> requires; replaces both
+    ///     collections with new instances. Not thread-safe, like the rest of this type.
+    /// </remarks>
+    internal void RepairGroupSettings()
+    {
+        // The groups that exist, each spelled the way its first repo spells it
+        var spellings = new Dictionary<string, string>(RepoGroupName.Comparer);
+        foreach (var repo in RecentRepos ?? [])
+        {
+            if (RepoGroupName.Sanitize(repo?.GroupName) is { } name)
+            {
+                spellings.TryAdd(name, name);
+            }
+        }
+
+        // Colors: a known color for an existing group, the first entry of a group winning
+        var colors = new Dictionary<string, string>(RepoGroupName.Comparer);
+        foreach (var (key, value) in GroupColors ?? new Dictionary<string, string>())
+        {
+            var name = RepoGroupName.Sanitize(key);
+            var color = RecentRepo.NormalizeCardColor(value);
+            if (name is not null && color is not null && spellings.TryGetValue(name, out var spelled))
+            {
+                colors.TryAdd(spelled, color);
+            }
+        }
+
+        GroupColors = colors;
+
+        // Order: existing groups only, each once, in the stored order
+        GroupOrder =
+        [
+            .. (GroupOrder ?? [])
+                .Select(RepoGroupName.Sanitize)
+                .OfType<string>()
+                .Where(spellings.ContainsKey)
+                .Select(name => spellings[name])
+                .Distinct(RepoGroupName.Comparer)
+        ];
+    }
+
+    /// <summary>
+    ///     Finds the color the user chose for one of their groups.
+    /// </summary>
+    /// <remarks>
+    ///     Looks the group up ignoring letter case even when <see cref="GroupColors"/> was built in
+    ///     memory with a case-sensitive comparer (as a test may do), and reads the stored value
+    ///     through the palette so an unknown name means no color. Pure; reads only.
+    /// </remarks>
+    /// <param name="groupName">The group's name; <see langword="null"/>, blank or a built-in
+    ///     section's name has no color.</param>
+    /// <returns>The palette color's canonical name, or <see langword="null"/> when the group has
+    ///     none.</returns>
+    internal string? FindGroupColor(string? groupName)
+    {
+        var name = RepoGroupName.Sanitize(groupName);
+        if (name is null || GroupColors is null)
+        {
+            return null;
+        }
+
+        if (GroupColors.TryGetValue(name, out var direct))
+        {
+            return RecentRepo.NormalizeCardColor(direct);
+        }
+
+        var match = GroupColors.FirstOrDefault(pair => RepoGroupName.Comparer.Equals(pair.Key, name));
+        return RecentRepo.NormalizeCardColor(match.Value);
     }
 
     /// <summary>
@@ -474,6 +566,114 @@ internal sealed class AppSettings
     /// </remarks>
     [JsonConverter(typeof(StringListJsonConverter))]
     public List<string> CollapsedGroups { get; set; } = [];
+
+    /// <summary>
+    ///     Gets or sets the color the user chose for each of their own groups: the group's name
+    ///     mapped to the name of a palette color (one of <see cref="RecentRepo.CardColorNames"/>).
+    /// </summary>
+    /// <remarks>
+    ///     A per-user appearance choice stored only in the settings file, never in a repository.
+    ///     Keyed by group name ignoring letter case (see <see cref="RepoGroupName.Comparer"/>); a group
+    ///     without an entry has no color. The main window shows the color on the group's header and
+    ///     uses it for the tiles of the group's repos that have no card color of their own. Anything in
+    ///     the file that is not an object of strings reads as empty or loses the offending entries,
+    ///     and <see cref="RepairGroupSettings"/> drops unknown colors and entries of groups no repo is
+    ///     in, so the value can never keep the application from starting. Always written.
+    /// </remarks>
+    [JsonConverter(typeof(StringMapJsonConverter))]
+    public Dictionary<string, string> GroupColors { get; set; } = new(RepoGroupName.Comparer);
+
+    /// <summary>
+    ///     Gets or sets the order the user gave their own groups: group names, first to last.
+    /// </summary>
+    /// <remarks>
+    ///     A per-user view choice stored only in the settings file. The main window lists Favorites
+    ///     first, then the groups named here in this order, then the groups that have no position
+    ///     yet alphabetically, then Ungrouped. Compared ignoring letter case. Anything in the file that
+    ///     is not a list of strings reads as empty or loses the offending entries, and
+    ///     <see cref="RepairGroupSettings"/> drops duplicates and names of groups no repo is in. Always
+    ///     written.
+    /// </remarks>
+    [JsonConverter(typeof(StringListJsonConverter))]
+    public List<string> GroupOrder { get; set; } = [];
+
+    /// <summary>
+    ///     Reads a JSON object of strings into a dictionary keyed ignoring letter case, skipping the
+    ///     members whose values are not strings and treating a value that is not an object as empty,
+    ///     instead of failing.
+    /// </summary>
+    /// <remarks>
+    ///     A custom converter is needed because the built-in dictionary handling throws when a value
+    ///     has the wrong type, which <see cref="SettingsStore.Load"/> would report as a corrupt settings
+    ///     file. A member whose name repeats another ignoring letter case is skipped (the first wins).
+    ///     Stateless and thread-safe.
+    /// </remarks>
+    private sealed class StringMapJsonConverter : JsonConverter<Dictionary<string, string>>
+    {
+        /// <inheritdoc />
+        public override bool HandleNull => true;
+
+        /// <summary>
+        ///     Reads the dictionary.
+        /// </summary>
+        /// <param name="reader">The reader positioned on the value.</param>
+        /// <param name="typeToConvert">The target type (unused).</param>
+        /// <param name="options">The serializer options (unused).</param>
+        /// <returns>The string members of a JSON object, keyed ignoring letter case; an empty
+        ///     dictionary for any other value.</returns>
+        public override Dictionary<string, string> Read(
+            ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            var result = new Dictionary<string, string>(RepoGroupName.Comparer);
+
+            // A scalar is a damaged value: ignore it. An array is skipped as a whole.
+            if (reader.TokenType != JsonTokenType.StartObject)
+            {
+                if (reader.TokenType == JsonTokenType.StartArray)
+                {
+                    reader.Skip();
+                }
+
+                return result;
+            }
+
+            while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+            {
+                var key = reader.GetString() ?? string.Empty;
+                reader.Read();
+                switch (reader.TokenType)
+                {
+                    case JsonTokenType.String:
+                        result.TryAdd(key, reader.GetString() ?? string.Empty);
+                        break;
+
+                    case JsonTokenType.StartObject or JsonTokenType.StartArray:
+                        // Consume the whole nested value so the reader stays positioned correctly
+                        reader.Skip();
+                        break;
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        ///     Writes the dictionary as a JSON object of strings.
+        /// </summary>
+        /// <param name="writer">The writer.</param>
+        /// <param name="value">The dictionary to write.</param>
+        /// <param name="options">The serializer options (unused).</param>
+        public override void Write(Utf8JsonWriter writer, Dictionary<string, string> value, JsonSerializerOptions options)
+        {
+            writer.WriteStartObject();
+            foreach (var (key, entry) in value ?? new Dictionary<string, string>())
+            {
+                writer.WriteString(key, entry);
+            }
+
+            writer.WriteEndObject();
+        }
+    }
 
     /// <summary>
     ///     Reads a list of strings and skips the entries that are not strings, treating a value that

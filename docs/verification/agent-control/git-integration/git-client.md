@@ -24,6 +24,7 @@ Approach).
 - A missing executable or a failed underlying git command raises a clear
   `InvalidOperationException` rather than propagating a raw process failure.
 - The current-branch fast path avoids invoking git whenever `.git/HEAD` can be read directly.
+- The repository-root check reports a root only for a folder with its own `.git` folder or file.
 
 #### Test Scenarios
 
@@ -105,3 +106,13 @@ throws `ArgumentException`. This scenario is tested by
 `GitClient_GetHeadCommitHash_Fails_ThrowsInvalidOperationException`, and
 `GitClient_Constructor_EmptyExecutablePath_ThrowsArgumentException`, covering
 `AgentControl-GitClient-HeadHash`.
+
+**GitClient_RepositoryRoot_OnlyAFolderWithItsOwnGitIsARoot**: A folder with a `.git` folder directly in it is a
+repository root, and so is a folder with a `.git` file (as a linked worktree or a submodule has); a folder without
+either, a subfolder of a repository (the parents are not searched) and a folder that does not exist are not, and the
+check does not fail for the missing folder; an empty or whitespace path is refused with `ArgumentException`. These
+tests build plain temporary folders and need neither git nor the stub, because the check starts no process. This
+scenario is tested by `GitClient_IsRepositoryRoot_GitDirectory_ReturnsTrue`,
+`GitClient_IsRepositoryRoot_GitFile_ReturnsTrue`, `GitClient_IsRepositoryRoot_NoGit_ReturnsFalse`,
+`GitClient_IsRepositoryRoot_SubfolderOfRepository_ReturnsFalse`, `GitClient_IsRepositoryRoot_MissingFolder_ReturnsFalse`
+and `GitClient_IsRepositoryRoot_BlankPath_ThrowsArgumentException`, covering `AgentControl-GitClient-RepositoryRoot`.

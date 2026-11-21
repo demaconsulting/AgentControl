@@ -125,6 +125,39 @@
                     <SolidColorBrush x:Key="AvatarForeground8" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="AvatarBackground9" Color="#8DBE2F" />
                     <SolidColorBrush x:Key="AvatarForeground9" Color="#111114" />
+
+                    <!-- Group color accent bar on a group header, one per palette color (same order
+                         as the avatar palette). Lighter than the tiles so the bar reaches 3:1 on the
+                         page and on the drop tint a header gets while something is dragged over it. -->
+                    <SolidColorBrush x:Key="GroupAccent0" Color="#60A5FA" />
+                    <SolidColorBrush x:Key="GroupAccent1" Color="#A78BFA" />
+                    <SolidColorBrush x:Key="GroupAccent2" Color="#E879C9" />
+                    <SolidColorBrush x:Key="GroupAccent3" Color="#34D399" />
+                    <SolidColorBrush x:Key="GroupAccent4" Color="#FBBF24" />
+                    <SolidColorBrush x:Key="GroupAccent5" Color="#2DD4BF" />
+                    <SolidColorBrush x:Key="GroupAccent6" Color="#FB923C" />
+                    <SolidColorBrush x:Key="GroupAccent7" Color="#818CF8" />
+                    <SolidColorBrush x:Key="GroupAccent8" Color="#F87171" />
+                    <SolidColorBrush x:Key="GroupAccent9" Color="#A3E635" />
+
+                    <!-- About window banner: a deep indigo band with soft violet and cyan glows and
+                         the brand gradient line (cyan, violet, pink) along its bottom edge -->
+                    <SolidColorBrush x:Key="AboutBannerBackground" Color="#0F1430" />
+                    <SolidColorBrush x:Key="AboutBannerForeground" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="AboutBannerTaglineForeground" Color="#C7D2FE" />
+                    <RadialGradientBrush x:Key="AboutBannerGlowPrimary">
+                        <GradientStop Offset="0" Color="#998B5CF6" />
+                        <GradientStop Offset="1" Color="#008B5CF6" />
+                    </RadialGradientBrush>
+                    <RadialGradientBrush x:Key="AboutBannerGlowSecondary">
+                        <GradientStop Offset="0" Color="#4D22D3EE" />
+                        <GradientStop Offset="1" Color="#0022D3EE" />
+                    </RadialGradientBrush>
+                    <LinearGradientBrush x:Key="AboutBannerAccent" StartPoint="0%,50%" EndPoint="100%,50%">
+                        <GradientStop Offset="0" Color="#22D3EE" />
+                        <GradientStop Offset="0.5" Color="#A78BFA" />
+                        <GradientStop Offset="1" Color="#F472B6" />
+                    </LinearGradientBrush>
                 </ResourceDictionary>
 
                 <ResourceDictionary x:Key="Light">
@@ -229,6 +262,34 @@
                     <SolidColorBrush x:Key="AvatarForeground8" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="AvatarBackground9" Color="#4D7C0F" />
                     <SolidColorBrush x:Key="AvatarForeground9" Color="#FFFFFF" />
+
+                    <SolidColorBrush x:Key="GroupAccent0" Color="#2563EB" />
+                    <SolidColorBrush x:Key="GroupAccent1" Color="#7C3AED" />
+                    <SolidColorBrush x:Key="GroupAccent2" Color="#C026D3" />
+                    <SolidColorBrush x:Key="GroupAccent3" Color="#047857" />
+                    <SolidColorBrush x:Key="GroupAccent4" Color="#B45309" />
+                    <SolidColorBrush x:Key="GroupAccent5" Color="#0E7490" />
+                    <SolidColorBrush x:Key="GroupAccent6" Color="#C2410C" />
+                    <SolidColorBrush x:Key="GroupAccent7" Color="#4F46E5" />
+                    <SolidColorBrush x:Key="GroupAccent8" Color="#BE123C" />
+                    <SolidColorBrush x:Key="GroupAccent9" Color="#4D7C0F" />
+
+                    <SolidColorBrush x:Key="AboutBannerBackground" Color="#EEF2FF" />
+                    <SolidColorBrush x:Key="AboutBannerForeground" Color="#1E1B4B" />
+                    <SolidColorBrush x:Key="AboutBannerTaglineForeground" Color="#3730A3" />
+                    <RadialGradientBrush x:Key="AboutBannerGlowPrimary">
+                        <GradientStop Offset="0" Color="#4D8B5CF6" />
+                        <GradientStop Offset="1" Color="#008B5CF6" />
+                    </RadialGradientBrush>
+                    <RadialGradientBrush x:Key="AboutBannerGlowSecondary">
+                        <GradientStop Offset="0" Color="#4022D3EE" />
+                        <GradientStop Offset="1" Color="#0022D3EE" />
+                    </RadialGradientBrush>
+                    <LinearGradientBrush x:Key="AboutBannerAccent" StartPoint="0%,50%" EndPoint="100%,50%">
+                        <GradientStop Offset="0" Color="#0891B2" />
+                        <GradientStop Offset="0.5" Color="#7C3AED" />
+                        <GradientStop Offset="1" Color="#DB2777" />
+                    </LinearGradientBrush>
                 </ResourceDictionary>
 
             </ResourceDictionary.ThemeDictionaries>
@@ -336,6 +397,65 @@
     </Style>
     <Style Selector="ListBoxItem.dropHeader Grid#GroupHeader">
         <Setter Property="Background" Value="{DynamicResource RepoDropTargetBackground}" />
+    </Style>
+    <!-- A group header that is being dragged is dimmed like a dragged card -->
+    <Style Selector="ListBoxItem.dragging Grid#GroupHeader">
+        <Setter Property="Opacity" Value="0.5" />
+    </Style>
+
+    <!-- ===== Folders dragged from the file manager over the list area: an outline and a tint over
+         the whole area when they would be added ungrouped (a group header that would take them is
+         tinted like a card drop instead). Set by MainWindow on the list area grid. ===== -->
+    <Style Selector="Border.ExternalDropOverlay">
+        <Setter Property="IsVisible" Value="False" />
+        <Setter Property="IsHitTestVisible" Value="False" />
+        <Setter Property="BorderThickness" Value="2" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="BorderBrush" Value="{DynamicResource RepoDropIndicator}" />
+        <Setter Property="Background" Value="{DynamicResource RepoDropTargetBackground}" />
+    </Style>
+    <Style Selector="Grid.externalDrop Border.ExternalDropOverlay">
+        <Setter Property="IsVisible" Value="True" />
+    </Style>
+
+    <!-- ===== Group color accent: a short rounded bar at the start of a colored group's header.
+         The class groupAccent0..9 selects the theme-aware brush; the bar has a tooltip and an
+         accessible name that name the color, so it is never conveyed by color alone. ===== -->
+    <Style Selector="Border.GroupColorAccent">
+        <Setter Property="Width" Value="4" />
+        <Setter Property="Height" Value="20" />
+        <Setter Property="CornerRadius" Value="2" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.GroupColorAccent.groupAccent0">
+        <Setter Property="Background" Value="{DynamicResource GroupAccent0}" />
+    </Style>
+    <Style Selector="Border.GroupColorAccent.groupAccent1">
+        <Setter Property="Background" Value="{DynamicResource GroupAccent1}" />
+    </Style>
+    <Style Selector="Border.GroupColorAccent.groupAccent2">
+        <Setter Property="Background" Value="{DynamicResource GroupAccent2}" />
+    </Style>
+    <Style Selector="Border.GroupColorAccent.groupAccent3">
+        <Setter Property="Background" Value="{DynamicResource GroupAccent3}" />
+    </Style>
+    <Style Selector="Border.GroupColorAccent.groupAccent4">
+        <Setter Property="Background" Value="{DynamicResource GroupAccent4}" />
+    </Style>
+    <Style Selector="Border.GroupColorAccent.groupAccent5">
+        <Setter Property="Background" Value="{DynamicResource GroupAccent5}" />
+    </Style>
+    <Style Selector="Border.GroupColorAccent.groupAccent6">
+        <Setter Property="Background" Value="{DynamicResource GroupAccent6}" />
+    </Style>
+    <Style Selector="Border.GroupColorAccent.groupAccent7">
+        <Setter Property="Background" Value="{DynamicResource GroupAccent7}" />
+    </Style>
+    <Style Selector="Border.GroupColorAccent.groupAccent8">
+        <Setter Property="Background" Value="{DynamicResource GroupAccent8}" />
+    </Style>
+    <Style Selector="Border.GroupColorAccent.groupAccent9">
+        <Setter Property="Background" Value="{DynamicResource GroupAccent9}" />
     </Style>
 
     <!-- ===== Status accent bar on the card's left edge (grey unless a status class is set) ===== -->

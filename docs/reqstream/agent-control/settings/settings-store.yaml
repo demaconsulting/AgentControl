@@ -303,3 +303,44 @@ sections:
           The settings file must never become a place where an address with a secret is stored.
         tests:
           - SettingsStore_Save_GitSourceAddressWithCredential_IsRefusedWithoutChangingTheFile
+
+      - id: AgentControl-SettingsStore-GroupColorsAndOrder
+        title: >-
+          The SettingsStore class shall save and load the color of each of the user's groups and the
+          order of the groups, the colors found by group name ignoring letter case.
+        justification: |
+          Both are personal choices that must survive restarts.
+        tests:
+          - SettingsStore_SaveThenLoad_GroupColorsAndOrder_RoundTrip
+
+      - id: AgentControl-SettingsStore-GroupColorsAndOrderDefaults
+        title: >-
+          The SettingsStore class shall read a settings file without group colors or a group order
+          as no group colors and no stored order.
+        justification: |
+          A file written by an older version must load with the groups uncolored and alphabetical,
+          as they were.
+        tests:
+          - SettingsStore_Load_FileWithoutGroupColorsOrOrder_ReadsAsNone
+
+      - id: AgentControl-SettingsStore-InvalidGroupColorsAndOrderRepaired
+        title: >-
+          The SettingsStore class shall read group colors and a group order of the wrong kind as
+          none, keep only their usable entries, drop a color the palette does not know (and not
+          write it back), and keep one entry per group spelled as the group is.
+        justification: |
+          A damaged, hand-edited or newer file must never fail the load nor carry a value the
+          application cannot use.
+        tests:
+          - SettingsStore_Load_DamagedGroupColorsAndOrder_KeepsOnlyUsableEntries
+          - SettingsStore_Load_UnknownGroupColor_IsDroppedAndNotSavedBack
+
+      - id: AgentControl-SettingsStore-StaleGroupSettingsDropped
+        title: >-
+          The SettingsStore class shall drop, on load, the color and the place in the order of a
+          group that no repo is in and of a built-in section's name.
+        justification: |
+          A group exists only while a repo is in it; a choice left behind for a group that is gone
+          must not come back on a new group of the same name.
+        tests:
+          - SettingsStore_Load_ColorAndOrderOfGroupWithoutRepos_AreDropped

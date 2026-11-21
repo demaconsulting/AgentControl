@@ -2,7 +2,7 @@ package AgentControl {
     private import SoftwareItemMetadata::*;
 
     part def GitClient {
-        doc /* Invokes the configured git executable for status, pull, branch, and committed-files queries, and stops git tracking managed agent folders (index only). */
+        doc /* Invokes the configured git executable for status, pull, branch, and committed-files queries, and stops git tracking managed agent folders (index only); tells whether a folder is the top folder of a Git repository (a .git folder or file directly in it) without running git. */
 
         metadata info : SoftwareInfo {
             sourceFiles = ("src/DemaConsulting.AgentControl/GitIntegration/GitClient.cs");

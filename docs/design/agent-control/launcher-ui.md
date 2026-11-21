@@ -14,7 +14,7 @@ window, the settings window, the package-source editor window and the sign-in di
 `SourceEditorWindow`, `CredentialPromptWindow`, `GroupNameWindow`) and shared MVVM support types (`RelayCommand`,
 `AsyncRelayCommand`, `ViewModelBase`, `PackageSourceIcons`, `PackageSourceItemViewModel`,
 `SelectPackageSourceViewModel`, `AvaloniaCredentialPrompt`, `ConnectionTestResultKind`, `RepoCardStatus`,
-`CardColorPalette`, `ThirdPartyDependencies`), the shared theme resources and styles
+`CardColorPalette`, `ThirdPartyDependencies`, `ColorPalettePanel`), the shared theme resources and styles
 (`AppStyles.axaml`, included by `App.axaml`). The subsystem contains ten units: the six
 view-model units `MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`,
 `SettingsWindowViewModel`, `SourceEditorViewModel` and `CredentialPromptViewModel`, and four further
@@ -34,7 +34,11 @@ and the pure display helpers - the value converters `FavoriteIconConverter`, `Ag
 test files) and the `PathEllipsisText` control (a presentational control that only shortens text to the width it is
 given, with its own `PathEllipsisTextTests.cs`) - are exercised through the subsystem requirements that name their
 tests (`AgentControl-LauncherUI-UpToDateCue`, `AgentControl-LauncherUI-Appearance`,
-`AgentControl-LauncherUI-FavoriteStar`) and are reviewed with the subsystem. `PathEllipsisText` and
+`AgentControl-LauncherUI-FavoriteStar`) and are reviewed with the subsystem. The `ColorPalettePanel` control (the
+content of the card and group color pop-ups, built in code like `PathEllipsisText`, with no `.axaml` file; it only
+shows the palette and reports the color chosen) is likewise a supporting type, exercised through
+`AgentControl-LauncherUI-GroupColor` and `AgentControl-LauncherUI-CardColor`, whose headless tests drive it.
+`PathEllipsisText` and
 `ThemePreferenceDisplayNameConverter` are thus deliberately documented supporting types, not units: the SysML2
 model points their design, verification and requirements at this subsystem's documents (the convention for units
 without a dedicated companion document) and the subsystem requirements link their tests. `RepoGroupName` is
@@ -58,15 +62,16 @@ collapsed sections.)
 - *Type*: In-process .NET observable collection (data-bound to `MainWindow`'s `ListBox`, which picks the
   header or the card template by row type).
 - *Role*: Provider.
-- *Contract*: Reflects `AddRepo`/`RemoveRepo` mutations, `FilterText` changes, grouping changes and repo
+- *Contract*: Reflects `AddRepos`/`RemoveRepo` mutations, `FilterText` changes, grouping changes and repo
   order. The order is the user's own, never the launch time: with no repo in a group it is flat - favorites
   first, then the other repos in the order the user keeps them in (a new repo at the end, Move and drag reorder it).
   Once a repo is in a group it is sectioned - Favorites (a favorite only
-  there), the user's groups alphabetically, Ungrouped - with collapsible sections that a filter shows in
+  there), the user's groups in the user's own order (alphabetically until the user orders them), Ungrouped - with
+  collapsible sections that a filter shows in
   full, each section showing its repos in that same relative order
   (`AgentControl-LauncherUI-RecentReposDisplay`, `AgentControl-LauncherUI-SearchFilter`,
   `AgentControl-LauncherUI-SortOrder`, `AgentControl-LauncherUI-StableRepoOrder`,
-  `AgentControl-LauncherUI-RepoGroups`).
+  `AgentControl-LauncherUI-RepoGroups`, `AgentControl-LauncherUI-GroupOrder`).
 - *Constraints*: Recomputed synchronously on the UI thread whenever a dependency changes, updating the
   collection in place so unchanged rows keep their controls.
 
@@ -180,11 +185,13 @@ a NuGet source's editor and the "Forget saved sign-in" action of a server source
 
 `MainWindowViewModel` owns the `ObservableCollection<RepoCardViewModel>` backing the
 recent-repos list; on construction it creates one `RepoCardViewModel` per `RecentRepo` in the
-loaded `AppSettings`. It exposes `AddRepo`/`RemoveRepo` (each saved through `SettingsStore` before it takes effect, see
+loaded `AppSettings`. It exposes `AddRepos` (and the single-folder `AddRepo`/`AddRepoToGroup`) and `RemoveRepo` (each
+saved through `SettingsStore` before it takes effect, see
 *Transactional persistence* below), a `FilterText` property driving `DisplayedRepoCards`/`DisplayedItems`, and
 `ApplySettings`
 (invoked when `SettingsWindowViewModel` reports `Saved`), which persists the new settings
-while preserving the existing recent-repos list (and its order) and invalidates the shared
+while preserving the existing recent-repos list (and its order), the collapsed sections and the group colors and order,
+and invalidates the shared
 `PackageVersionCache` for each package source that was edited or removed.
 
 Each `RepoCardViewModel` is independently responsible for one repo's status and actions: it reads
@@ -235,24 +242,32 @@ the events that need a dialog.
   disposes the `Bitmap` it publishes in `RepoImage`, and `Retire` clears it. The locator knows nothing of cards;
   any failure reaches the card as "no picture".
 - *`MainWindowViewModel` and `RepoGroupHeaderViewModel`*: the main view-model creates, and keeps one instance per
-  section (Favorites, each group, Ungrouped), and updates its `Count`, collapsed state and toggle availability in place
-  so the header keeps keyboard focus. It subscribes to the header's four request events: `ToggleRequested` it handles
-  itself (`ToggleGroupCollapsed`, saved before applied); `RenameRequested`, `RemoveGroupRequested` and
+  section (Favorites, each group, Ungrouped), and updates its `Count`, collapsed state, toggle availability, group
+  color (`UpdateColor`) and move availability (`UpdateOrder`) in place
+  so the header keeps keyboard focus. It subscribes to the header's five request events: `ToggleRequested` it handles
+  itself (`ToggleGroupCollapsed`, saved before applied), and `MoveRequested` too (`MoveGroup`, which reports a failed
+  save through `SettingsSaveFailed`); `RenameRequested`, `RemoveGroupRequested` and
   `AddRepoRequested` it forwards, with the group's name, as its own `GroupRenameRequested`, `GroupRemoveRequested` and
   `GroupAddRepoRequested` events, to which `MainWindow` responds with a prompt, a confirmation or the folder picker and
-  then calls `RenameGroup`/`RemoveGroup`/`AddRepoToGroup`. The header holds no settings
-  and no reference to the main view-model.
-- *Add repository to a group*: `MainWindow.AddRepoAsync(viewModel, groupName)` is the one add-repo flow, shared by the
+  then calls `RenameGroup`/`RemoveGroup`/`AddRepos`. The header's **Group color...** item needs no request: the window
+  opens the group palette and calls `MainWindowViewModel.SetGroupColor` with the color chosen. The header holds no
+  settings and no reference to the main view-model.
+- *Add repositories*: `MainWindow.AddRepoAsync(viewModel, groupName)` is the one add-repo flow, shared by the
   top-bar `AddRepoButton` (no group) and the group header menu's **Add repository...** (the header's group): it asks
-  for a folder through the native folder picker (a replaceable seam, `RepoFolderPicker`, so tests answer with a path
-  or a cancel), does nothing at all when the picker is cancelled, and calls `MainWindowViewModel.AddRepo` or
-  `AddRepoToGroup`. Both go through the same private add (`AddRepoCore`: folder must exist, a repo already listed is
-  not added twice, pin loaded, saved once, then listed), which, given a group, stores the group on the new entry before
-  it is saved. For a repo that is already listed `AddRepoToGroup` instead moves the existing entry with
-  `RepoCardViewModel.MoveToGroup` and the window says so in a message box (`AddRepoResult.MovedExisting`); the plain
-  add keeps refusing it. A collapsed target group is expanded so the new card is visible. The favorites and ungrouped
-  headers have no "..." menu, so the item is offered on the user's own groups only
-  (`AgentControl-LauncherUI-GroupAddRepository`).
+  for folders through the native folder picker with several folders allowed (`AllowMultiple`; a replaceable seam,
+  `RepoFolderPicker`, a `Func<Task<IReadOnlyList<string>>>` that tests answer with paths, or with an empty list for a
+  cancel), does nothing at all when the picker is cancelled, calls `MainWindowViewModel.AddRepos` with the paths and
+  the group, and shows the text of `MainWindowViewModel.DescribeAddOutcomes`, if any, in a message box
+  (`AgentControl-LauncherUI-AddSeveralRepos`, `-AddRepoSummary`). Every folder goes through the same private add
+  (`AddRepoCore`: the path must be a folder, a repo already listed is not added twice, the folder must be the top
+  folder of a Git repository - `GitClient.IsRepositoryRoot`, a `.git` folder or file directly in it - pin loaded, saved
+  once, then listed), which, given a group, stores the group on the new entry before it is saved
+  (`AgentControl-LauncherUI-AddRepoGitRootOnly`). For a repo that is already listed the add into a group instead moves
+  the existing entry with `RepoCardViewModel.MoveToGroup` and the message says so (`AddRepoResult.MovedExisting`); the
+  plain add keeps refusing it. A collapsed target group is expanded once so the new cards are visible. The favorites
+  and ungrouped headers have no "..." menu, so the item is offered on the user's own groups only
+  (`AgentControl-LauncherUI-GroupAddRepository`). Folders dropped from the file manager use the same view-model calls
+  (see *Adding repos by dropping folders*).
 - *`GroupNameViewModel` and `GroupNameWindow`*: neither the card nor the main view-model creates the prompt; the
   window's code-behind does, when `RepoCardViewModel` raises `NewGroupRequested` (with the card's existing group
   names) or the header's rename is forwarded (with the group's name as the name being renamed), and shows
@@ -279,8 +294,9 @@ the events that need a dialog.
   executable, assembly, namespaces, settings folder and AutomationIds keep the name `AgentControl`. The UI tests that
   look a window up by title use the same strings.
 - *Supporting types*: `CardColorPalette` is a static table built from `RecentRepo.CardColorNames` (the single list of
-  valid names, owned by `Settings`); the card uses it to accept a color name and to find the tile's palette index, and
-  the main window's palette pop-up draws one swatch per entry. `PathEllipsisText` is a control in the card's template
+  valid names, owned by `Settings`); the card uses it to accept a color name and to find the tile's palette index, the
+  group header to find its accent's index, and `ColorPalettePanel` draws one swatch per entry. `PathEllipsisText` is a
+  control in the card's template
   that draws the card's `RepoPathParent` and `RepoPathLeaf` and collaborates with no other unit.
   `ThemePreferenceDisplayNameConverter` is used by the Settings window's theme picker to show a `ThemePreference`
   under a friendly name; the persisted value stays the enum member.
@@ -288,16 +304,21 @@ the events that need a dialog.
 **Transactional persistence.** Every change the user makes in the main window is saved before it takes effect, so
 memory, the list and the settings file never disagree. `MainWindowViewModel.CommitSettingsChange` tries the change on
 a candidate copy of the settings (`CreatePersistedCopy`, with the repos cloned by `RecentRepo.Clone` and the collapsed
-list copied), saves the candidate with `SettingsStore.Save`, and only when that succeeded applies the same change to
-the live settings; then the list is refreshed (candidate copy, save, commit, refresh). A change made on a card -
+list, the group colors and the group order copied), saves the candidate with `SettingsStore.Save`, and only when that
+succeeded applies the same change to
+the live settings; then the list is refreshed (candidate copy, save, commit, refresh). After the change, on the
+candidate and on the live settings alike, `AppSettings.RepairGroupSettings` drops the color and position of a group
+that no repo is in any more (`AgentControl-LauncherUI-GroupSettingsKeptInStep`). A change made on a card -
 `IsFavorite`, `MoveToGroup`, `SetCardColor`, and the launch timestamp - reaches this through the card's
 `commitChange` callback (`MainWindowViewModel.CommitRepoChange`), which returns whether the change was saved: when it
 was not, the card property keeps its value (the two-way bound star is told to read it again),
 `MoveToGroup`/`SetCardColor` return `false`, and the main view-model raises `SettingsSaveFailed` with the message
-for the user, which `MainWindow` shows in a message box. A collapse toggle from a header is reported the same way.
-`AddRepo`, `RemoveRepo`, `ToggleGroupCollapsed`, `RenameGroup` and `RemoveGroup` instead throw
+for the user, which `MainWindow` shows in a message box. A collapse toggle from a header is reported the same way, and
+so are `SetGroupColor`, `MoveGroup` and `DropGroup`, which return `false`.
+`RemoveRepo`, `ToggleGroupCollapsed`, `RenameGroup` and `RemoveGroup` instead throw
 `InvalidOperationException` when the save fails, having changed nothing, and the window's code-behind shows it in a
-message box. A failed save therefore leaves the live settings, the cards, the displayed list and the file as they
+message box; `AddRepos` reports a folder that could not be saved in its outcome and goes on with the next one. A
+failed save therefore leaves the live settings, the cards, the displayed list and the file as they
 were, and a later unrelated save can never write the failed change. `ApplySettings` follows the same rule for the
 Settings window's values: it saves them and adopts them only after that. When a repo is removed, `RemoveRepo` saves
 the removal and then calls `RepoCardViewModel.Retire`: the card cancels its running operation, ignores the results of
@@ -551,8 +572,10 @@ again whenever `MainWindowViewModel.ApplySettings` has saved new settings (throu
 `Action<ThemePreference>`, so the view model stays free of the UI framework), so every open window changes
 at once without a restart (`AgentControl-LauncherUI-Appearance`). Every color the application's own XAML uses
 lives in `AppStyles.axaml` as a resource in a `Light` and a `Dark` theme dictionary (surfaces, borders,
-shadows, the status accent colors, chip fills and text, button states, the avatar palette, the drag-and-drop
-indicator `RepoDropIndicator` and header highlight `RepoDropTargetBackground`, validation,
+shadows, the status accent colors, chip fills and text, button states, the avatar palette, the group accent palette
+(`GroupAccent0` ... `GroupAccent9`), the drag-and-drop
+indicator `RepoDropIndicator` and header highlight `RepoDropTargetBackground`, the About banner (`AboutBanner*`),
+validation,
 caution and success text, the page background) consumed with `DynamicResource`; no template or setter holds a
 hard-coded color. Text colors were chosen for at least 4.5:1 contrast against the fill and surface they are
 drawn on, status accents and icons for 3:1, and `ThemeResourceTests` checks both dictionaries define the same
@@ -586,13 +609,20 @@ chip is a button that runs the same `UpgradeCommand` as the menu's Upgrade item
 (`AgentControl-RepoCardViewModel-UpgradeFromChip`).
 
 **Repo groups and card colors (user-specific).** Both are personal organizing choices stored only in the user's
-own settings file (on the repo's `RecentRepo`, and the collapsed section names in `AppSettings`), never in the
-repository or its `.agentcontrol.json` (`AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`).
+own settings file (on the repo's `RecentRepo`, and the collapsed section names, the group colors and the group order in
+`AppSettings`), never in the
+repository or its `.agentcontrol.json` (`AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
+`AgentControl-System-GroupColor`, `AgentControl-LauncherUI-RepoGroupsSettingsOnly`).
 *Sections.* The list is a single `ListBox` over `MainWindowViewModel.DisplayedItems` with two row templates: a
-repo card, and a section header - one flat button (chevron, icon, name, count chip) that collapses or expands the
-section, plus, for the user's own groups, a "..." menu with **Add repository...** (first, then a separator) and
-**Rename group...** and **Remove group**. The header
-button's accessible name says the section, its count and its state (`Work, 2 repos, collapsed`). A decision
+repo card, and a section header - a fixed 8-pixel slot for the group's color accent, one flat button (chevron, icon,
+name, count chip) that collapses or expands the
+section, plus, for the user's own groups, a "..." menu (`GroupHeaderMenuButton`, tooltip "Add a repository to this
+group, or move, color, rename or remove the group") with **Add repository...** (`GroupAddRepoMenuItem`), a separator,
+**Move up** (`MoveGroupUpMenuItem`), **Move down** (`MoveGroupDownMenuItem`), **Group color...**
+(`GroupColorMenuItem`), a separator, **Rename group...** and **Remove group**. The header
+button's accessible name says the section, its count and its state (`Work, 2 repos, collapsed`); the group's color does
+not change it. The header template is wrapped in a `Panel` with two drop indicator borders
+(`GroupDropIndicatorAbove`, `GroupDropIndicatorBelow`) for dragging groups. A decision
 made here: a favorite repo is listed **only** under *Favorites* (not a second time under its group), so every
 repo appears once and the counts add up; its card shows its group as a chip so the user can still see where it
 belongs, and it returns to its group when it stops being a favorite. When no repo is in a group the list has no
@@ -608,16 +638,48 @@ small `GroupNameWindow`, whose `GroupNameViewModel` validates while the user typ
 characters, and the built-in names *Favorites* and *Ungrouped* are refused; a duplicate is refused when renaming and
 joins the existing group, with a note, when creating); **Remove group** asks for a confirmation that says
 nothing on disk or in any repository changes.
-*Card color.* **Card color...** opens a small palette pop-up (an attached `Flyout` on the "..." button) with one
+*Card color.* **Card color...** opens a small palette pop-up (an attached `Flyout` on the "..." button, whose content is
+a `ColorPalettePanel` with AutomationId `CardColorPalette`) with one
 round swatch per `CardColorPalette` entry - the same ten theme-aware avatar colors the automatic color is drawn
 from - plus **Automatic**. Each swatch has an AutomationId (`CardColorSwatch_<Name>`), its name as tooltip and
 accessible name,
 and the chosen one shows a check mark and a ring, so the choice is not carried by color alone. The color goes only to
 the avatar tile (palette style classes `avatar0` ... `avatar9`, driven by bindings on the card's `AvatarStyleClass`);
 the status accent bar and chips are unaffected. A repo that shows its own picture keeps the tile's light backing
-so a logo drawn for a white page stays legible, and the chosen color is drawn as a ring around the picture. The
+so a logo drawn for a white page stays legible, and the chosen color - the card's own or its group's
+(`RepoCardViewModel.IsTileColorChosen`) - is drawn as a ring around the picture. The
 letters on every palette color use whichever of white and near-black reads better on that fill in each theme,
 at least 4.5:1 (`ThemeResourceTests` checks every entry in both themes).
+*Group color.* **Group color...** in a user group's header menu opens the same palette for the group (a
+`ColorPalettePanel` with AutomationId `GroupColorPalette` in a `Flyout` attached to `GroupHeaderMenuButton`, opened by
+the window's `GroupColorMenuItem_Click`, which posts the opening to the dispatcher like the card's), with **None**
+instead of
+**Automatic** (`GroupColorSwatch_<Name>`, `GroupColorHeadingText`, `GroupColorNoneButton`); its heading names the
+group's color (`Group color: Teal`, or `Group color: None`) and the chosen swatch is marked. The window's
+`GroupColorPalette_ColorChosen` calls `MainWindowViewModel.SetGroupColor`, which saves the choice first
+(`AgentControl-LauncherUI-GroupColor`). A colored group's header shows a 4 by 20 pixel rounded bar
+(`GroupColorAccent`) in its fixed-width slot, so headers stay aligned whether or not they are colored; the bar's
+tooltip and accessible name name the color (`Group color: Teal`), so it is never conveyed by color alone, and
+*Favorites* and *Ungrouped* are never colored (they have no menu). The bar is drawn with its own brushes
+`GroupAccent0` ... `GroupAccent9` (style classes `groupAccent0` ... `groupAccent9`, from the header's
+`ColorStyleClass`) rather than the avatar fills, because a header accent is a graphic on the page and must reach 3:1
+on `PageBackground` and on the drop tint `RepoDropTargetBackground` over the page in both themes: the dark theme uses
+lighter tones, the light theme the avatar fills except Amber, which is darker there (`ThemeResourceTests`,
+`AgentControl-LauncherUI-GroupColorLegible`). The tiles of the group's repos that have no card color of their own take
+the group's color, a card's own color wins, a favorite keeps its group's color (its chip says which group), and the
+card palette's heading says `Card color: Automatic (group color Teal)` when a tile follows its group
+(`AgentControl-LauncherUI-GroupColorOnCards`). A group's color and its position in the group order follow a rename,
+are forgotten when the group is removed or its last repo leaves it, and are kept when settings are applied
+(`AgentControl-LauncherUI-GroupSettingsKeptInStep`).
+*The palette control.* `ColorPalettePanel` (built in code, no `.axaml`) has the styled properties `IdPrefix` (default
+`CardColor`), `Heading`, `SelectedColorName`, `ClearText` (default `Automatic`), `ClearTooltip` and `ClearIcon`, and
+the event `ColorChosen` (`ColorChosenEventArgs.ColorName`, `null` for the clear button). It builds a heading
+`TextBlock` named `{IdPrefix}HeadingText`, one swatch `Button` per `CardColorPalette.All` entry (classes `swatch` and
+`avatar{index}`, tag, accessible name and tooltip the color's name, AutomationId `{IdPrefix}Swatch_{Name}`, the
+`selected` class on the chosen one) and a clear `Button` (AutomationId and name `{IdPrefix}{ClearText}Button`, with a
+check mark while no color is chosen); the parts are rebuilt when `IdPrefix`, `ClearText`, `ClearIcon` or
+`ClearTooltip` change. The card's palette therefore keeps every identifier it had, and one control guarantees that the
+two palettes look and behave the same. The window finds the palette of an item with `FindControlOfItem(item, name)`.
 
 **Reordering repos (user-controlled order).** The order of the repo cards belongs to the user and nothing else
 changes it: the list is kept in `AppSettings.RecentRepos` order (see the `Settings` design), a new repo goes to the
@@ -642,7 +704,8 @@ live in `MainWindowViewModel` and the window only translates input and shows fee
 - *Drag and drop.* **Drag source**: the window observes the pointer on the `RepoListBox` on the way down (also for
   events a row already handled). A press with the left button on a card is remembered as a possible drag, unless it is
   on a `Button`, `TextBox`, `MenuItem` or `ScrollBar` in the card (the star, the chips, the menu keep their own
-  behavior), on a section header, or while reordering is off; the drag starts once the pointer has moved 6
+  behavior), on a section header (a user group's header starts a group drag instead, see *Ordering groups*), or while
+  reordering is off; the drag starts once the pointer has moved 6
   device-independent pixels in either direction with the button held, which keeps a plain or slightly unsteady click a
   click. The dragged data is one item of the application data format `DemaConsulting.AgentControl.RepoCard` carrying the
   card's repo path, and the dragged card's row gets the `dragging` style class (dimmed) until the drag ends however it
@@ -681,6 +744,32 @@ live in `MainWindowViewModel` and the window only translates input and shows fee
   `false`: no drag starts, the **Reorder** submenu and its four Move items are disabled with the tooltip
   `ReorderDisabledWhileFilteringMessage`, and `MoveCard`, `CanDrop` and `DropCard` refuse as well. Filtering never
   changes the stored order.
+- *Ordering groups* (`AgentControl-System-GroupReorder`, `AgentControl-LauncherUI-GroupOrder`): *Favorites* stays
+  first and *Ungrouped* last; between them the groups are listed in the user's order (`AppSettings.GroupOrder`), and the
+  groups without a stored position - every group until the user first orders them, and a new group - follow
+  alphabetically. Two ways change it, both ending in `MainWindowViewModel`: the header menu's **Move up** and **Move
+  down** (`MoveGroupUpMenuItem`, `MoveGroupDownMenuItem`, bound to the header's `MoveUpCommand`/`MoveDownCommand`,
+  disabled with the reason as tooltip - shown even while disabled - at the first or last group and while the filter has
+  text, `AgentControl-LauncherUI-GroupMoveMenu`) call `MoveGroup`, which swaps the group with its neighbor; and dragging
+  a header (`AgentControl-LauncherUI-GroupDragReorder`). **Group drag source**: a left-button press anywhere on a user
+  group's header (also on its toggle) while `IsReorderEnabled` is a possible drag, except on `GroupHeaderMenuButton`,
+  its menu items, a text box or a scroll bar; past the same 6-pixel threshold `StartGroupDragAsync` releases the pointer
+  capture the header's toggle button took (`press.Pointer.Capture(null)`), so the button loses its pressed state and
+  the release at the end of the drag does not collapse or expand the section, puts the `dragging` class on the header
+  row and starts the drag (`DragStarter`, else `DragDrop.DoDragDropAsync`, effect `Move`) with one item of the
+  application data format `DemaConsulting.AgentControl.RepoGroup` (`RepoGroupDataFormat`) carrying the group's name.
+  **Group drop target**: only the header of another user group accepts it, the upper half meaning before that group
+  and the lower half after it (a `GroupDropTarget`), shown with the same `dropAbove` / `dropBelow` line through the
+  header's own indicators; `MainWindowViewModel.CanDropGroup` decides and `DropGroup` does it. Over the *Favorites* or
+  *Ungrouped* header, a card or empty space the effect is `None` and no line shows. A collapsed group stays collapsed.
+  No group drag starts while the filter has text, and the Move items are then disabled with
+  `GroupReorderDisabledWhileFilteringMessage`. The whole order of the groups as shown is stored on every change, so the
+  next start shows the same order (`AgentControl-LauncherUI-GroupOrderRemembered`).
+- *Telling drags apart*: `RepoList_DragOver` and `RepoList_Drop` dispatch by the data of the drag, always in this
+  order - the card format first (the unchanged card paths `CardDragOver`/`CardDrop`), then the group format
+  (`GroupDragOver`/`GroupDrop`), then `DataFormat.File` (folders from the file manager, see *Adding repos by dropping
+  folders*) - so a drag is never taken for another kind. `ShowDropFeedback` takes the feedback class to show, so the
+  card, group and folder feedback share one implementation; the card feedback is unchanged.
 - *Collection moves.* A reorder moves cards inside `MainWindowViewModel.RepoCards` (`Move` notifications). The window's
   `OnRepoCardsChanged` ignores a `Move`, because the cards stay attached and the per-card state the window keeps
   (pending prompts, shown dialogs) must survive the reorder.
@@ -689,6 +778,32 @@ The order is stored in the user's own settings only, never in a repository or it
 restart, and for a settings file written before this existed is seeded once from what the user used to see (favorites
 first, then most recently launched), so nothing jumps on upgrade (`AgentControl-LauncherUI-RepoOrderRemembered`;
 system level `AgentControl-System-RepoOrderRemembered`, subsystem `AgentControl-Settings-RepoOrder`).
+
+**Adding repos by dropping folders.** Folders dragged from the file manager onto the main window are added as repos
+(`AgentControl-System-AddSeveralRepos`, `AgentControl-LauncherUI-AddRepoDropFolders`). The list area is a `Grid`
+(`RepoListArea`, `DragDrop.AllowDrop`, transparent background so it is hit-testable everywhere) holding the list, the
+empty-state panel and an overlay `Border` (`ExternalDropOverlay`, not hit-testable), hidden by default and shown while
+the grid has the `externalDrop` class: a 2-pixel `RepoDropIndicator` outline over a `RepoDropTargetBackground` fill
+with a corner radius of 8 (no new brushes). Where a drop goes:
+
+- over the header of one of the user's groups, or over a card listed in such a group's section, the folders join that
+  group, and that group's header row (when it is realized) gets the `dropHeader` tint;
+- over *Favorites* (a favorite is a per-repo mark, not a place to add to - refusing would confuse in the flat list,
+  where favorites have no header, and starring silently would surprise), *Ungrouped*, the flat list, empty list space,
+  the empty-state panel or the margins, the folders are added ungrouped and the overlay outlines the list area.
+
+The drag effect is `e.DragEffects & DragDropEffects.Copy` (nothing on disk moves), and the feedback is removed on
+drag-leave and on drop. Dropping folders is allowed while the filter has text, because adding is not reordering. The
+list's handlers answer every drag over the list; the `RepoListArea` handlers answer only what the list did not handle
+(files are added ungrouped there; any other data is refused with `None`). The platform raises a drag-leave and a
+drag-enter whenever the element under the pointer changes, so the handlers treat drag-enter like drag-over. The paths
+come from `IDataTransfer.TryGetFiles()` and `IStorageItem.TryGetLocalPath()` (falling back to `Path.LocalPath` of a
+`file` URI); items without a local path are left out. The drop calls `MainWindowViewModel.AddRepos` at once (so a
+dropped file is reported as not a Git repository, and every folder is checked like a picked one,
+`AgentControl-LauncherUI-AddRepoGitRootOnly`) and posts the message of `DescribeAddOutcomes`, if any, with
+`Dispatcher.UIThread.Post`, so no modal dialog opens inside the operating system's drag-and-drop loop
+(`AgentControl-LauncherUI-AddRepoSummary`). A drag of a card or a group header is never taken for folders, and folders
+are never taken for a card move (see *Telling drags apart*).
 
 **Settings window package-source actions.** One **Add** button opens a menu with the source types that can be added
 (zip-package folder, NuGet-package folder, NuGet-package server, Git repository), each with its type's icon (the one the
@@ -705,15 +820,30 @@ it owns dialog-orchestration, view-layer plumbing that requires a live Avalonia 
 `AgentFilesChoiceRequested`, `ErrorOccurred`) and deciding which dialog/window to show and how to route the user's
 response back into the view model (e.g. calling `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the
 `ConfirmationWindow` shown for the AGENTS.md template offer). `AboutWindow` (opened via a toolbar command with no
-dedicated view model, as a modal dialog over the main window) shows the application logo (reused from
-`Assets/AppIcon.ico`, the same icon already used for the main window/taskbar - no new binary image asset was added), a
-short mission tagline, a labeled "Version" row with the running version (`Program.Version` without its `+` build
-metadata, via `AboutWindow.DisplayVersion`; the full build version is the row's tooltip) and the copyright, and a
-scrollable list of this application's direct runtime third-party dependencies and their SPDX license identifiers
-(package versions are intentionally omitted so dependency updates do not require edits here), sourced from a static
+dedicated view model, as a modal dialog over the main window) is 600 wide, sizes its height to its content up to a
+`MaxHeight` of 640 and cannot be resized. Its root `Grid` has three rows. Row 0 is a banner across the top
+(`AboutBanner`, exposed to assistive technology as one content element named "AgentControl: A Desktop Launcher for
+Distributing Proprietary Agent Packages") composed in XAML: a band with two decorative `Ellipse` glows filled
+with the theme `RadialGradientBrush`es `AboutBannerGlowPrimary` and `AboutBannerGlowSecondary`, the application logo
+(reused from `Assets/AppIcon.ico`, the same icon already used for the main window/taskbar) on the 56 by 56
+`LogoBackingBackground` tile, the name (`AboutBannerTitleText`, "AgentControl", `AboutBannerForeground`) and the project
+tagline (`AboutBannerTaglineText`, from `AboutWindow.BannerTagline`, `AboutBannerTaglineForeground`), and a 3-pixel
+gradient line along its bottom (`AboutBannerAccent`, a `LinearGradientBrush`). Every `AboutBanner*` brush is defined in
+both theme dictionaries, the title and tagline are checked for 4.5:1 on the band and on the band under each glow's
+strongest stop (`ThemeResourceTests`), and no new binary image asset or package was added
+(`AgentControl-LauncherUI-AboutBanner`). Row 1 is the one scrolling region (`AboutContentScroller`, a `ScrollViewer`
+with a `MaxHeight` of 440) holding a short mission tagline, a labeled "Version" row with the running version
+(`Program.Version` without its `+` build
+metadata, via `AboutWindow.DisplayVersion`; the full build version is the row's tooltip), the copyright, the license
+summary, the "Third-Party Dependencies" heading and the list of this application's direct runtime third-party
+dependencies and their SPDX license identifiers (`AboutDependenciesList`, no longer in a scroll region of its own;
+package versions are intentionally omitted so dependency updates do not require edits here), sourced from a static
 `ThirdPartyDependencies` list rather than parsed at runtime from the project file (`AgentControl-LauncherUI-About`).
+Row 2 is a footer with a `SurfaceDivider` line above the `AboutCloseButton`; the banner and Close stay in view however
+long the details grow (`AgentControl-LauncherUI-AboutScrollableDetails`).
 Adding a repo (`AgentControl-LauncherUI-AddRepo`) is likewise driven directly by `MainWindowViewModel` rather than a
-dedicated unit, since its logic (path-existence and duplicate-path validation) is simple enough not to warrant a
+dedicated unit, since its logic (path-existence, duplicate-path and Git-repository-root checks, the last delegated to
+`GitClient`) is simple enough not to warrant a
 separate class.
 
 **Dialog keyboard behavior.** Every dialog (Settings, the source editors, the sign-in prompt, the package

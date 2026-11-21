@@ -4,7 +4,8 @@
 # PURPOSE:
 # - Define requirements for the AgentControl GitIntegration subsystem
 # - GitIntegration spans GitClient.cs (invokes the configured git executable for status,
-#   pull, branch, and committed-files queries and for stopping git tracking managed agent folders),
+#   pull, branch, and committed-files queries and for stopping git tracking managed agent folders,
+#   and tells whether a folder is the top folder of a Git repository),
 #   CommittedAgentFilesCache.cs (caches the
 #   committed-agent-files-changed check keyed by HEAD commit hash), GitCredentialClient.cs
 #   (keeps, finds and removes a package feed's sign-in in the user's own Git credential helper)
@@ -251,3 +252,16 @@ sections:
           - AgentControl-GitRemoteClient-MinimumGitVersionCheckedOnce
         tests:
           - GitIntegrationSubsystem_RemoteClient_OldGitIsRefusedAndHungGitIsStoppedAtTheTimeLimit
+
+      - id: AgentControl-GitIntegration-RepositoryRoot
+        title: >-
+          The GitIntegration subsystem shall tell whether a folder is the top folder of a Git
+          repository - a .git folder or a .git file (a linked worktree or a submodule) directly in
+          it - without running git and without looking at the parent folders.
+        justification: |
+          The launcher accepts only repository roots as repos; the check must be cheap enough for
+          every folder of a large drop and must not take a subfolder of a repository for its root.
+        children:
+          - AgentControl-GitClient-RepositoryRoot
+        tests:
+          - GitIntegrationSubsystem_RepositoryRoot_RepositoryWorktreeAndSubfolder

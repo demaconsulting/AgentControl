@@ -85,6 +85,7 @@ flowchart TD
     MainWindowViewModel --> SettingsStore
     MainWindowViewModel --> RepoGroupHeaderViewModel
     MainWindowViewModel --> RepoGroupName
+    MainWindowViewModel -->|repository-root check| GitClient
     MainWindowViewModel -.->|MainWindow view shows| GroupNameViewModel
     RepoCardViewModel --> RepoImageLocator
     RepoCardViewModel --> RepoGroupName
@@ -218,11 +219,32 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   group..." raises `NewGroupRequested`, which the main window answers by showing the group-name prompt, a modal dialog
   backed by `GroupNameViewModel` that validates while the user types. `MainWindowViewModel` builds
   `DisplayedItems`, the one list the window shows: the cards interleaved with one `RepoGroupHeaderViewModel` per
-  section - Favorites, the user's groups alphabetically, then Ungrouped - or no headers at all while no repo is in a
-  group. A header's collapse toggle, rename and remove requests are events the main view-model handles or forwards to
+  section - Favorites, the user's groups in the user's own order (alphabetically until the user orders them), then
+  Ungrouped - or no headers at all while no repo is in a
+  group. A header's collapse toggle, move, rename and remove requests are events the main view-model handles or
+  forwards to
   the window (which shows the prompt or a confirmation and then calls `RenameGroup`/`RemoveGroup`). Which sections
   are collapsed is kept in the user's settings; while the filter has text every section is shown expanded so a
   match is never hidden, without changing the remembered state.
+- *Group colors* (`AgentControl-System-GroupColor`): a user group's header menu has **Group color...**, which opens
+  the card palette (the shared `ColorPalettePanel`) with None instead of Automatic;
+  `MainWindowViewModel.SetGroupColor` saves the color in `AppSettings.GroupColors`, the header shows it as an accent bar
+  whose tooltip and accessible name name the color, and the tiles of the group's repos that have no card color of their
+  own take it (`RepoCardViewModel` reads it through `AppSettings.FindGroupColor`; a card's own color wins). The accent
+  uses its own theme brushes so it is legible on the page in both themes.
+- *Group order* (`AgentControl-System-GroupReorder`): the order of the groups is the user's own
+  (`AppSettings.GroupOrder`; groups without a stored position follow alphabetically) and is changed with **Move up** /
+  **Move down** in a header's menu or by dragging a header above or below another group's header;
+  `MainWindowViewModel.MoveGroup`, `CanDropGroup` and `DropGroup` hold the rules, and every change stores the full
+  order. Favorites stays first and Ungrouped last, nothing is reordered while the filter has text, and a group's color
+  and position follow a rename and are forgotten when the group is removed or loses its last repo.
+- *Adding repos* (`AgentControl-System-AddRemoveRepo`, `AgentControl-System-AddSeveralRepos`,
+  `AgentControl-System-AddGitReposOnly`): the folder picker of the app bar's Add button and of a header's "Add
+  repository..." allows several folders, and folders dragged from the file manager onto the list are added too - into
+  the group whose header or card they are dropped on, otherwise ungrouped. Every folder goes through
+  `MainWindowViewModel.AddRepos`, which adds only the top folder of a Git repository (`GitClient.IsRepositoryRoot`: a
+  `.git` folder or file directly in it, no git process) and leaves the repos already in the list as they are;
+  `DescribeAddOutcomes` turns the outcomes into one message (nothing when all were added).
 - *Repo order* (`AgentControl-System-RepoOrder`, `AgentControl-System-RepoReorder`,
   `AgentControl-System-RepoOrderRemembered`): the order of the cards is the user's own and is the order of
   `AppSettings.RecentRepos` itself, so a removed repo leaves the order with no extra bookkeeping. Favorites stay
@@ -269,10 +291,13 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   (Settings, the source editors, the sign-in prompt, the package picker, confirmations, message boxes, the
   group-name prompt and About) is shown with its owner window, so the operating system disables the window behind it,
   and applies the shared `DialogBehavior` from its code-behind: Tab and Shift+Tab stay inside the dialog, the first
-  sensible control takes the focus when it opens, and Escape cancels a dialog that can be cancelled.
+  sensible control takes the focus when it opens, and Escape cancels a dialog that can be cancelled. The About dialog
+  shows the logo, name and tagline in a banner composed in XAML from theme brushes, and the version, copyright, license
+  and dependency list below it in one scrolling region, with the banner and Close always in view.
 
 **Where the user's choices live, and what a failed save does.** Favorites, last-launch times, the order of the repos,
-groups, card colors, which sections are collapsed and the theme are the user's own: they are stored only in the per-user
+groups, card colors, group colors, the order of the groups, which sections are collapsed and the theme are the user's
+own: they are stored only in the per-user
 settings file (`Settings`), never in a repo and not in its `.agentcontrol.json`, which holds nothing but the package
 pin. A change the user makes in the main window is made as one transaction by `MainWindowViewModel`: it is tried on a
 candidate copy of the settings, the candidate is saved, and only when the save succeeded is the same change applied to
@@ -280,8 +305,9 @@ the live settings and the list refreshed (candidate copy, save, commit, refresh)
 through a callback the owner supplies to `RepoCardViewModel`. When the save fails nothing changes: the live settings,
 the cards, the displayed list and the file stay as they were, so a later unrelated save can never write the failed
 change, and the user is told. Card and header changes (including collapsing a section) are reported through the
-view-model's `SettingsSaveFailed` event, which the main window shows in a message box; adding or removing a repo and
-renaming or removing a group fail with an `InvalidOperationException` that the window reports. Settings edited in the
+view-model's `SettingsSaveFailed` event, which the main window shows in a message box; removing a repo and
+renaming or removing a group fail with an `InvalidOperationException` that the window reports, and adding several
+folders reports a folder that could not be saved in the summary and goes on with the next. Settings edited in the
 Settings window are likewise saved before they are adopted, and the theme is applied only after that. A repo removed
 from the list is saved first and then its card is retired (`RepoCardViewModel.Retire`): its running operation is
 cancelled, its in-flight checks and picture loads are ignored, and its events are cleared, so a removed repo can no
@@ -299,12 +325,17 @@ longer raise an error box, release notes or a prompt, and the window releases it
   folder is missing), Select Package/Change package/Upgrade, Move to group, Reorder (Move to top/up/down/bottom),
   Card color and
   Remove, plus the favorite star and
-  the upgrade chip; the list is flat, or sectioned (Favorites, the user's groups, Ungrouped) once a repo is in a
-  group, in the user's own order (a card can also be dragged to reorder it); the toolbar-level app bar holds the
-  filter, Add, Settings and About
+  the upgrade chip; the list is flat, or sectioned (Favorites, the user's groups in the user's order, Ungrouped) once a
+  repo is in a
+  group, in the user's own order (a card can also be dragged to reorder it, and a group header to reorder the groups);
+  a user group's header menu adds repositories, moves the group up or down, colors it, renames or removes it; the
+  toolbar-level app bar holds the
+  filter, Add (one or several folders), Settings and About; folders can also be dropped onto the list
   (`AgentControl-System-RecentRepos`, `AgentControl-System-AddRemoveRepo`, `AgentControl-System-SearchFilter`,
   `AgentControl-System-RepoOrder`, `AgentControl-System-RepoReorder`, `AgentControl-System-RepoOrderRemembered`,
   `AgentControl-System-Favorites`, `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
+  `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`, `AgentControl-System-AddSeveralRepos`,
+  `AgentControl-System-AddGitReposOnly`,
   `AgentControl-System-MissingRepoRecheck`, `AgentControl-System-UpgradeFromChip`,
   `AgentControl-System-About`). Settings offers the color theme (`AgentControl-System-Appearance`). Every dialog is
   modal and operable from the keyboard (`AgentControl-System-DialogKeyboard`). Every interactive control exposes an
@@ -313,6 +344,20 @@ longer raise an error box, release notes or a prompt, and the window releases it
   `AgentControl-System-UiFramework`).
 - *Constraints*: v1 ships a Windows MSI only; the Avalonia codebase remains cross-platform
   capable (see architecture.md's Open Concerns #2).
+
+**Drag and drop from the file manager**: Folders dragged from File Explorer (or another file manager) onto the main
+window's repo list.
+
+- *Type*: Operating-system drag and drop, received through Avalonia (`DataFormat.File`; each item an `IStorageItem`
+  whose local path is read with `TryGetLocalPath`).
+- *Role*: Consumer (the application is the drop target).
+- *Contract*: Each dropped item with a local path is offered to `MainWindowViewModel.AddRepos`, into the user group
+  whose header or card it is dropped on, otherwise ungrouped; the drag effect is Copy (nothing on disk is moved), and
+  one message afterwards says what was not added and why (`AgentControl-System-AddSeveralRepos`).
+- *Constraints*: Only the top folder of a Git repository is added (a dropped file or a plain folder is reported, not
+  added: `AgentControl-System-AddGitReposOnly`); the message is posted after the drop, never shown inside the
+  operating system's drag loop; the application's own card and group drags use private data formats and are never
+  taken for dropped folders.
 
 **Package Sources**: Any number of user-configured sources, each a folder of agent package zip
 files, a NuGet package folder (a local, mapped-drive or UNC folder feed), a NuGet package server
@@ -454,17 +499,20 @@ override for hermetic testing).
   preference, whether the shell stays open after the agent tool exits (on when absent), the color theme, and the
   recent-repos list, kept in the user's own display order (with a marker that the order is already the user's), with,
   per repo, its favorite flag, last-launch time and the
-  user's own organizing choices (its group and its card color), plus the names of the collapsed list sections
+  user's own organizing choices (its group and its card color), plus the names of the collapsed list sections, the color
+  of each of the user's groups and the order of the groups
   (`AgentControl-System-Settings`, `AgentControl-System-KeepShellOpen`, `AgentControl-System-MultipleSources`,
   `AgentControl-System-Appearance`,
-  `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`, `AgentControl-System-RepoOrderRemembered`);
+  `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`, `AgentControl-System-RepoOrderRemembered`,
+  `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`);
   a legacy single package-folder path is carried forward
   as the source named `Default`. Contains no password, token or other secret. Returns default
   settings when no file exists yet (first-ever run); a value that is unusable is repaired as the file is read and
   never keeps the application from starting: an unknown theme reads as the system default, an unusable
   keep-shell-open value as on, an unusable repo-order marker as "not yet the user's order" (so the legacy arrangement
   is seeded once), an unknown card color as
-  automatic, an unusable group name as no group. The choices in it exist only here, never in a repo, and a change
+  automatic, an unusable group name as no group, and an unusable, unknown or stale group color or group position (a
+  group no repo is in) is dropped. The choices in it exist only here, never in a repo, and a change
   is written before it is applied (see *Architecture*).
 - *Constraints*: Location can be overridden by a startup argument to isolate FlaUI end-to-end
   tests (see `docs/design/agent-control/startup.md`).
@@ -635,14 +683,20 @@ an unwanted or repeated file write.
    not found, time out, an unverified ssh host key) is reported with a fixed message that names the source alias and
    never repeats git's text or the address. A tag that was moved to other files after the pin was made is caught by
    the identity check: the files are not applied, and only Change package accepts them after a confirmation.
-6. The user's own choices - favorite, group, card color, collapsed section, renaming or removing a group, adding or
+6. The user's own choices - favorite, group, card color, group color, the order of the groups, collapsed section,
+   renaming or removing a group, adding or
    removing a repo, and a launch being recorded - flow from the card or the group header through
    `MainWindowViewModel`'s transactional change: a candidate copy of the settings is changed and
    `SettingsStore.Save` writes it; only when that succeeded is the live state changed and `DisplayedItems` rebuilt
-   (sections built from the repos' groups with `RepoGroupName`, the collapsed ones leaving out their cards). A failed
+   (sections built from the repos' groups with `RepoGroupName` and arranged in the stored group order, the collapsed
+   ones leaving out their cards; the color and position of a group that no repo is in any more are dropped). A failed
    save changes nothing and is reported to the user; a removed repo's card is retired after its removal was saved
    (`AgentControl-System-Favorites`, `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
-   `AgentControl-System-AddRemoveRepo`). A saved theme is applied to the running application after the save
+   `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`,
+   `AgentControl-System-AddRemoveRepo`). Folders to add - picked several at once or dropped from the file manager - are
+   checked one by one (a folder that is not the top folder of a Git repository is not added), each added folder is
+   saved, and one summary of what was not added is shown (`AgentControl-System-AddSeveralRepos`,
+   `AgentControl-System-AddGitReposOnly`). A saved theme is applied to the running application after the save
    (`AgentControl-System-Appearance`).
 7. Throughout, `Utilities.PathHelpers.SafePathCombine` validates any caller-supplied path
    component before file-system use, and `Logging` records process-launch and
@@ -670,9 +724,14 @@ an unwanted or repeated file write.
 - Package authenticity: a source that requires signed packages never supplies one that fails the check, never
   skips the check, and decides trusted signers from its own description alone
   (`AgentControl-System-PackageAuthenticity`). Signature verification is supported on Windows, Linux and macOS.
-- Personal choices stay personal: favorites, groups, card colors, collapsed sections and the theme are written only
+- Personal choices stay personal: favorites, groups, card colors, group colors, the order of the groups, collapsed
+  sections and the theme are written only
   to the per-user settings file, never to a repo; a change is saved before it is applied, so memory, the list and the
-  file never disagree (`AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`).
+  file never disagree (`AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
+  `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`).
+- Only Git repositories are tracked: a folder is added as a repo only when it is the top folder of a Git repository
+  (a `.git` folder or file directly in it), because a tracked repo is synced, pulled and launched as a Git working tree
+  and the agent folders must go to its top (`AgentControl-System-AddGitReposOnly`).
 - Untrusted repo content: a repo's picture is shown only when it can be verified to be a small, genuine PNG that is a
   plain file of the repo's root; otherwise there is no picture (`AgentControl-System-RecentRepos`).
 - Modal dialogs: every dialog is modal and keyboard-operable through one shared behavior, so the window behind a

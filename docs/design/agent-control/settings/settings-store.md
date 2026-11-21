@@ -76,7 +76,16 @@ path.
   round-trips (`AgentControl-SettingsStore-RepoOrder`, `-RepoOrderLegacySeed`). A marker that is null or not a boolean
   reads as not set, without failing the load, so the one-time arrangement runs
   (`AgentControl-SettingsStore-RepoOrderMarkerRepaired`). A first run, which has no file, returns a default
-  `AppSettings` with an empty list and no marker; the main window's view model seeds it.
+  `AppSettings` with an empty list and no marker; the main window's view model seeds it. `AppSettings.GroupColors`
+  (group name to palette color name) and `AppSettings.GroupOrder` (group names, first to last) are always written and
+  read back (`AgentControl-SettingsStore-GroupColorsAndOrder`); a file without them loads with no group colors and no
+  stored order (`AgentControl-SettingsStore-GroupColorsAndOrderDefaults`). They are read tolerantly - a value of the
+  wrong type reads as empty and an entry that is not a string is skipped - and `AppSettings.RepairGroupSettings` (run at
+  the end of the group-name repair of `NormalizeNulls`) drops unusable or reserved names, colors the palette does not
+  know and case duplicates (the first wins, respelled as the group is spelled on its repos), so a later `Save` does not
+  write them back (`AgentControl-SettingsStore-InvalidGroupColorsAndOrderRepaired`), and drops the color and position
+  of a group that no repo is in (`AgentControl-SettingsStore-StaleGroupSettingsDropped`). The rules are described in
+  the *Settings* subsystem design.
 
 **Save**: Saves `AppSettings` to a configuration directory, creating the directory if needed.
 
@@ -129,7 +138,7 @@ settings file outlasts the retries; the temporary file is removed in every failu
 #### Dependencies
 
 - **AppSettings** (data type, same subsystem) — the data type read/written, including its
-  legacy-migration and persisted-copy members.
+  legacy-migration and persisted-copy members and the repair of the group colors and group order.
 - **RecentRepo** (same subsystem) — the per-repo group and card-color values, and the list of known card colors.
 - **RepoGroupName** (same subsystem, its own unit) — the rules that repair stored group names.
 - **PackageSourceDefinition** (`AgentPackageManagement` subsystem) — the source data type held in

@@ -179,4 +179,126 @@ public class RepoGroupHeaderViewModelTests
         Assert.Throws<ArgumentException>(() => new RepoGroupHeaderViewModel(RepoGroupKind.Group, "  "));
         Assert.Throws<ArgumentNullException>(() => new RepoGroupHeaderViewModel(RepoGroupKind.Group, null!));
     }
+
+    /// <summary>
+    ///     Test that a user group's color is exposed by name, as the accent's style class, as the
+    ///     palette heading and as the accent's description (so it is never conveyed by color alone),
+    ///     with change notifications, and that clearing it leaves no color.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHeaderViewModel_UpdateColor_ExposesNameClassHeadingAndDescription()
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Work");
+        var changed = new List<string?>();
+        header.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        // Assert: no color at first
+        Assert.False(header.HasColor);
+        Assert.Equal("Group color: None", header.ColorHeading);
+
+        // Act: a color, in any letter case
+        header.UpdateColor("teal");
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal("Teal", header.ColorName),
+            () => Assert.True(header.HasColor),
+            () => Assert.Equal("groupAccent5", header.ColorStyleClass),
+            () => Assert.Equal("Group color: Teal", header.ColorHeading),
+            () => Assert.Equal("Group color: Teal", header.ColorDescription),
+            () => Assert.Contains(nameof(RepoGroupHeaderViewModel.ColorStyleClass), changed),
+            () => Assert.Contains(nameof(RepoGroupHeaderViewModel.HasColor), changed));
+
+        // Act: an unknown color, then none
+        header.UpdateColor("Plaid");
+        Assert.Null(header.ColorName);
+        header.UpdateColor("Red");
+        header.UpdateColor(null);
+
+        // Assert
+        Assert.False(header.HasColor);
+        Assert.Equal(string.Empty, header.ColorStyleClass);
+    }
+
+    /// <summary>
+    ///     Test that Favorites and Ungrouped never show a color, whatever they are given.
+    /// </summary>
+    /// <param name="kindName">The name of the built-in kind of section.</param>
+    [Theory]
+    [InlineData(nameof(RepoGroupKind.Favorites))]
+    [InlineData(nameof(RepoGroupKind.Ungrouped))]
+    public void RepoGroupHeaderViewModel_UpdateColor_BuiltInSection_StaysUncolored(string kindName)
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(Enum.Parse<RepoGroupKind>(kindName), kindName);
+
+        // Act
+        header.UpdateColor("Teal");
+
+        // Assert
+        Assert.False(header.HasColor);
+        Assert.Null(header.ColorName);
+    }
+
+    /// <summary>
+    ///     Test that the Move up and Move down commands raise move requests only while they are
+    ///     available, and follow what the owner says about availability.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHeaderViewModel_MoveCommands_RaiseRequestsAndFollowAvailability()
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Work");
+        var requests = new List<RepoGroupMove>();
+        header.MoveRequested += (_, move) => requests.Add(move);
+        var notified = 0;
+        header.MoveUpCommand.CanExecuteChanged += (_, _) => notified++;
+
+        // Assert: unavailable until the owner says where the group stands
+        Assert.False(header.MoveUpCommand.CanExecute(null));
+        Assert.False(header.MoveDownCommand.CanExecute(null));
+
+        // Act: both available
+        header.UpdateOrder(null, null);
+        header.MoveUpCommand.Execute(null);
+        header.MoveDownCommand.Execute(null);
+
+        // Assert
+        Assert.Equal([RepoGroupMove.Up, RepoGroupMove.Down], requests);
+        Assert.True(notified > 0);
+
+        // Act: only down
+        header.UpdateOrder("first", null);
+
+        // Assert
+        Assert.False(header.MoveUpCommand.CanExecute(null));
+        Assert.True(header.MoveDownCommand.CanExecute(null));
+    }
+
+    /// <summary>
+    ///     Test that a move that is unavailable explains why in its tooltip, an available one says
+    ///     what it does, and that Favorites and Ungrouped never offer a move.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHeaderViewModel_UpdateOrder_DisabledMoveExplainsWhy()
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Work");
+        var favorites = new RepoGroupHeaderViewModel(RepoGroupKind.Favorites, "Favorites");
+        var changed = new List<string?>();
+        header.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        // Act
+        header.UpdateOrder("This group is already the first group.", null);
+        favorites.UpdateOrder(null, null);
+
+        // Assert
+        Assert.Equal("This group is already the first group.", header.MoveUpTooltip);
+        Assert.Equal("Move this group one place down in the list", header.MoveDownTooltip);
+        Assert.Contains(nameof(RepoGroupHeaderViewModel.MoveUpTooltip), changed);
+        Assert.False(favorites.MoveUpCommand.CanExecute(null));
+        Assert.False(favorites.MoveDownCommand.CanExecute(null));
+        Assert.False(string.IsNullOrWhiteSpace(favorites.MoveUpTooltip));
+    }
 }

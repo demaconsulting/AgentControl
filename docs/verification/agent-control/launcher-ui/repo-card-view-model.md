@@ -103,6 +103,8 @@ on, and the tests that reach no launch assert that the starter was not called.
   packages, and follow a change of that requirement.
 - A repo moves into, between and out of groups under the group-name rules, an unknown stored color reads as
   the automatic color, and a chosen color never changes the card's status.
+- A card without a color of its own takes its group's color (also as a favorite), its own color wins, and the palette
+  heading names the color in effect.
 - A change to the favorite status, group, card color or launch time is applied only after the owner saved it, and a
   refusal leaves the card as it was.
 - An upgrade check that was overtaken by a changed pin or a missing repo publishes nothing and leaves no "checking"
@@ -752,6 +754,19 @@ and `RepoCardViewModel_CardColor_UnknownStoredValue_FallsBackToAutomatic`); and 
 status tooltip are the same before and after a color is chosen
 (`AgentControl-RepoCardViewModel-CardColorKeepsStatus`, tested by
 `RepoCardViewModel_SetCardColor_DoesNotChangeStatus`).
+
+**RepoCardViewModel_GroupColorFallback_TileFollowsTheGroupUnlessItHasItsOwnColor**: Tested by `RepoCardColorTests.cs`
+with settings built in memory that hold a group color. A card without a color of its own, in a group whose color is
+stored under another letter case, names the group's color, takes its palette index and style class, still counts as
+Automatic (no color of its own) and counts its tile color as chosen
+(`RepoCardViewModel_AvatarColorIndex_NoOwnColor_UsesGroupColor`); a card's own color wins over the group's, and going
+back to Automatic shows the group's color again (`RepoCardViewModel_AvatarColorIndex_OwnColor_WinsOverGroupColor`); a
+repo starred as a favorite keeps its group's color
+(`RepoCardViewModel_AvatarColorIndex_FavoriteInColoredGroup_KeepsGroupColor`);
+and the palette heading reads `Card color: Automatic (group color Teal)` for a card that follows its group, `Card
+color: Automatic` for one without a group and `Card color: Violet` once a color of its own is chosen
+(`RepoCardViewModel_CardColorHeading_NoOwnColorInColoredGroup_NamesTheGroupColor`). These cover
+`AgentControl-RepoCardViewModel-GroupColorFallback`.
 
 **RepoCardViewModel_Retire_RemovedCardStopsAndReportsNothing**: An upgrade check held at its source is overtaken by
 retiring the card; when the source then answers, the card shows no upgrade and no "checking", and neither an error

@@ -2,7 +2,7 @@ package AgentControl {
     private import SoftwareItemMetadata::*;
 
     part def RepoGroupHeaderViewModel {
-        doc /* Collapsible header row that starts a section of the main window's repo list (Favorites, a user group or Ungrouped): describes the section and its count and state, and reports toggle, rename and remove requests; RepoGroupKind identifies the kind of section. */
+        doc /* Collapsible header row that starts a section of the main window's repo list (Favorites, a user group or Ungrouped): describes the section and its count and state, shows the group's color (never for Favorites or Ungrouped), offers Move up/Move down as its owner allows, and reports toggle, add, move, rename and remove requests; RepoGroupKind identifies the kind of section. */
 
         metadata info : SoftwareInfo {
             sourceFiles = ("src/DemaConsulting.AgentControl/LauncherUI/RepoGroupHeaderViewModel.cs");

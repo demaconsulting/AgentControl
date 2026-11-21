@@ -466,6 +466,36 @@ internal sealed class GitClient
         value.Length is >= 4 and <= 64 && value.All(Uri.IsHexDigit);
 
     /// <summary>
+    ///     Determines whether a folder is the top folder of a Git repository: it has a <c>.git</c>
+    ///     folder, or a <c>.git</c> file, directly in it.
+    /// </summary>
+    /// <remarks>
+    ///     Exists so the launcher can refuse to track a folder that is not a repository (a
+    ///     tracked repo is synced, pulled and launched as a Git working tree). A <c>.git</c> file
+    ///     counts because a linked worktree and a submodule have one (it names the real git
+    ///     directory); its content is not read. Deliberately does not walk up to the parent
+    ///     folders as <c>git</c> itself would: a subfolder of a repository is not its top folder,
+    ///     and tracking it would put the agent folders in the wrong place. Starts no git process,
+    ///     so it is cheap enough to call for every folder of a multi-folder add. Static, stateless
+    ///     and thread-safe; it only reads the file system.
+    /// </remarks>
+    /// <param name="folderPath">Absolute path of the folder to check. A folder that does not exist
+    ///     (or cannot be read) is not a repository root.</param>
+    /// <returns><see langword="true"/> when <c>&lt;folderPath&gt;/.git</c> exists as a folder or a
+    ///     file; otherwise <see langword="false"/>.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="folderPath"/> is null,
+    ///     empty, or whitespace.</exception>
+    public static bool IsRepositoryRoot(string folderPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(folderPath);
+
+        // Only the folder itself is looked at: the parents are not walked, so a subfolder of a
+        // repository is not a root. Directory/File.Exists never throw; an unreadable path is false.
+        var gitPath = Path.Combine(folderPath, ".git");
+        return Directory.Exists(gitPath) || File.Exists(gitPath);
+    }
+
+    /// <summary>
     ///     The four known agent folders whose committed-tracking status the "committed agent
     ///     files" badge checks, per architecture.md.
     /// </summary>

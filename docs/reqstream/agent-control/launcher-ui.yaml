@@ -11,7 +11,7 @@
 #   RepoGroupHeaderViewModel, GroupNameViewModel, DialogBehavior), plus their
 #   Avalonia .axaml Views (including CredentialPromptWindow and the AvaloniaCredentialPrompt
 #   that shows it) and shared MVVM support types (RelayCommand, ViewModelBase,
-#   the display-name and favorite converters, PathEllipsisText, AppStyles.axaml,
+#   the display-name and favorite converters, PathEllipsisText, ColorPalettePanel, AppStyles.axaml,
 #   ThirdPartyDependencies), which are documented as supporting types of this subsystem
 #   rather than given separate unit files (their dedicated test files, where they have one, are
 #   named in the design and verification documents)
@@ -288,7 +288,7 @@ sections:
         title: >-
           The LauncherUI subsystem shall list the repos in sections once at least one repo is in a
           group of the user's own - the favorites first (a favorite is listed only there, with its
-          group shown on its card), then the groups alphabetically, then the repos in no group -
+          group shown on its card), then the groups in the user's order, then the repos in no group -
           each section introduced by a header showing the section's name and its number of repos.
         justification: |
           Grouping is how a developer with many repos keeps related ones together; the sections
@@ -308,13 +308,14 @@ sections:
         tests:
           - MainWindow_GroupedRepos_ShowHeadersWithNameCountAndState
           - MainWindow_FavoriteInGroup_ShowsGroupChip
+          - MainWindow_GroupOrder_StoredOrderThenAlphabeticalBetweenFavoritesAndUngrouped
 
       - id: AgentControl-LauncherUI-GroupAddRepository
         title: >-
           The LauncherUI subsystem shall offer "Add repository..." as the first item of the menu of
-          each of the user's group headers, which asks for a repository folder like the top-bar
-          add does and puts the repo in that group - moving the existing entry into the group
-          and saying so when the repo is already listed - and shall change nothing when the
+          each of the user's group headers, which asks for one or more repository folders like the
+          top-bar add does and puts the repos in that group - moving an existing entry into the
+          group and saying so when a repo is already listed - and shall change nothing when the
           folder choice is cancelled.
         justification: |
           Adding a repo to a group otherwise takes two steps (add, then move to the group); the
@@ -327,6 +328,7 @@ sections:
           - MainWindow_HeaderMenuAddRepository_PickedFolderJoinsGroup_CancelChangesNothing
           - MainWindow_HeaderMenuAddRepository_AlreadyListedRepo_MovesIntoGroupAndSaysSo
           - MainWindow_AddRepoButton_UsesSamePickerAndAddsUngrouped
+          - MainWindow_HeaderMenuAddRepository_SeveralFolders_JoinTheGroup
 
       - id: AgentControl-LauncherUI-RepoGroupsFlatList
         title: >-
@@ -445,15 +447,16 @@ sections:
 
       - id: AgentControl-LauncherUI-RepoGroupsSettingsOnly
         title: >-
-          The LauncherUI subsystem shall keep the user's groups, card colors and collapsed sections
-          in the user's own settings only, and write nothing about them into a repository.
+          The LauncherUI subsystem shall keep the user's groups, card colors, group colors, group
+          order and collapsed sections in the user's own settings only, and write nothing about them
+          into a repository.
         justification: |
           These are personal ways of organizing the list; written into a repository they would be
           committed and shared with other people.
         children:
           - AgentControl-MainWindowViewModel-GroupSettingsOnly
         tests:
-          - RepoCardViewModel_GroupAndColor_NeverWriteToTheRepository
+          - MainWindow_GroupsColorsAndOrder_WriteNothingIntoTheRepository
 
       - id: AgentControl-LauncherUI-CardColor
         title: >-
@@ -470,6 +473,70 @@ sections:
         tests:
           - MainWindow_CardColorPalette_ChoosingSwatchColorsTileAndAutomaticClears
           - MainWindow_CardColorPalette_HeadingNamesTheChosenColor
+
+      - id: AgentControl-LauncherUI-GroupColor
+        title: >-
+          The LauncherUI subsystem shall offer, in the menu of each of the user's group headers, a
+          "Group color..." pop-up with the card color palette and a None choice, mark the chosen
+          color, and show it on the group's header as an accent whose tooltip and accessible name
+          name the color, while the Favorites and Ungrouped headers have no color.
+        justification: |
+          A color per group lets a developer tell their groups apart at a glance; the color must be
+          named in words as well, so it is never conveyed by color alone, and the built-in sections
+          are not the user's to color.
+        children:
+          - AgentControl-MainWindowViewModel-GroupColor
+          - AgentControl-MainWindowViewModel-GroupColorShown
+          - AgentControl-RepoGroupHeaderViewModel-ShowsGroupColor
+        tests:
+          - MainWindow_GroupColorPalette_ChoosingSwatchColorsHeaderAndNoneClears
+          - ColorPalettePanel_Swatches_OnePerPaletteColorWithPrefixedIdsNamesAndTooltips
+          - ColorPalettePanel_SelectedColorName_MarksOnlyThatSwatch
+          - ColorPalettePanel_SwatchOrClearClicked_RaisesColorChosen
+
+      - id: AgentControl-LauncherUI-GroupColorOnCards
+        title: >-
+          The LauncherUI subsystem shall show a group's color on the tiles of the group's repos that
+          have no card color of their own (favorites in the group included), let a card color of a
+          repo's own win over it, and name the group color in the card palette's heading when the
+          tile follows it.
+        justification: |
+          The group color is meant to mark the group's repos; a color the user chose for one repo is
+          the more specific choice and must not be overridden, and starring a repo must not repaint
+          it.
+        children:
+          - AgentControl-RepoCardViewModel-GroupColorFallback
+        tests:
+          - MainWindow_GroupColor_TilesWithoutOwnColorFollowAndOwnColorWins
+
+      - id: AgentControl-LauncherUI-GroupColorLegible
+        title: >-
+          The LauncherUI subsystem shall draw every group color accent at least 3:1 against the page
+          a header is drawn on and against the tint a header gets during a drag, in both the light
+          and the dark theme.
+        justification: |
+          An accent that cannot be seen in one of the themes cannot be told apart; the tile colors
+          are tuned for letters on them, not for a thin bar on the page, so the accent is checked on
+          its own.
+        tests:
+          - ThemeResources_GroupAccent_MeetsGraphicsContrastInLightAndDark
+
+      - id: AgentControl-LauncherUI-GroupSettingsKeptInStep
+        title: >-
+          The LauncherUI subsystem shall keep a group's color and its place in the user's group
+          order when the group is renamed, forget them when the group is removed or its last repo
+          leaves it, and keep them when settings are applied from the Settings window.
+        justification: |
+          A group exists only while a repo is in it; a color or a place left behind for a group
+          that is gone would come back unexpectedly on a new group of the same name, and a rename or
+          a change in the Settings window must not lose what the user chose.
+        children:
+          - AgentControl-MainWindowViewModel-GroupSettingsFollowRenameAndRemove
+          - AgentControl-MainWindowViewModel-GroupSettingsKeptOnApplySettings
+        tests:
+          - MainWindow_RenameGroup_KeepsItsColorAccentAndItsPlace
+          - MainWindow_RemoveGroupOrItsLastRepo_ForgetsItsColorAccentAndItsPlace
+          - MainWindow_SettingsSaved_KeepsGroupColorAccentsAndOrder
 
       - id: AgentControl-LauncherUI-CardColorKeepsStatus
         title: >-
@@ -736,17 +803,87 @@ sections:
           - MainWindowViewModel_RemoveRepo_RetiresTheCard
 
       - id: AgentControl-LauncherUI-AddRepo
-        title: The LauncherUI subsystem shall let the user add an existing folder as a tracked repo.
+        title: >-
+          The LauncherUI subsystem shall let the user add an existing folder that is the top folder
+          of a Git repository as a tracked repo.
         justification: |
           Adding a repo is the only entry point for AgentControl to begin tracking a folder,
-          and must reject paths that do not exist or are already tracked to avoid duplicate
-          or invalid entries.
+          and must reject paths that do not exist, are already tracked or are not repositories to
+          avoid duplicate or invalid entries.
         children:
           - AgentControl-MainWindowViewModel-AddRepo
         tests:
-          - MainWindowViewModel_AddRepo_ValidNewPath_InsertsCardAndPersistsSettings
-          - MainWindowViewModel_AddRepo_PathDoesNotExist_ReturnsFalse
-          - MainWindowViewModel_AddRepo_DuplicatePath_ReturnsFalse
+          - MainWindow_AddRepoButton_UsesSamePickerAndAddsUngrouped
+          - MainWindow_AddRepoButton_FolderThatIsNotAGitRepository_IsRefusedWithAMessage
+          - MainWindow_AddRepoButton_FolderThatDoesNotExist_IsRefusedWithAMessage
+
+      - id: AgentControl-LauncherUI-AddSeveralRepos
+        title: >-
+          The LauncherUI subsystem shall let the user choose several folders at once in the folder
+          picker of the app bar's add and of a group header's "Add repository...", and handle each
+          chosen folder as a single add of that kind would.
+        justification: |
+          Setting up the list for many repos one folder at a time is slow; each folder must still
+          get exactly the checks and the placement a single add gives it.
+        children:
+          - AgentControl-MainWindowViewModel-AddRepos
+        tests:
+          - MainWindow_AddRepoButton_SeveralFoldersPicked_AddsEachAndSummarizesTheRest
+          - MainWindow_HeaderMenuAddRepository_SeveralFolders_JoinTheGroup
+
+      - id: AgentControl-LauncherUI-AddRepoDropFolders
+        title: >-
+          The LauncherUI subsystem shall add the folders dropped from the file manager onto the repo
+          list - into the group whose header or section they are dropped on, otherwise (Favorites,
+          Ungrouped, the list without sections, empty space or the empty-state panel) without a
+          group - answering the drag as a copy, showing where they would go and clearing that when
+          the drag leaves or ends, not adding dropped files but reporting each one in the message as
+          not a repository (never ignoring it silently), and never taking a drop from the file
+          manager for a move of a card or a group.
+        justification: |
+          Dragging folders from the file manager is the quickest way to add many repos, and the
+          drop target is the natural way to say where they belong; a favorite is a mark on a repo,
+          not a place to add to. The drag must not be confused with the list's own drag and drop,
+          which moves cards and groups. A dropped file is reported rather than ignored so that a
+          drop that adds nothing never looks as if nothing happened.
+        children:
+          - AgentControl-MainWindowViewModel-AddRepos
+        tests:
+          - MainWindow_DropFolders_OnGroupHeader_AddsThemToTheGroup
+          - MainWindow_DropFolders_OnUngroupedFavoritesOrEmptySpace_AddsThemUngrouped
+          - MainWindow_DropFolders_OnEmptyStatePanel_AddsThem
+          - MainWindow_DropFolders_ShowsCopyFeedbackAndClearsIt
+          - MainWindow_DropFile_IsSkippedAsNotARepository
+
+      - id: AgentControl-LauncherUI-AddRepoGitRootOnly
+        title: >-
+          The LauncherUI subsystem shall add, by every way of adding, only a folder that is the top
+          folder of a Git repository (a .git folder or file directly in it), say so when a folder is
+          refused for that reason, and leave the repos already in the list as they are.
+        justification: |
+          A tracked repo is synced, pulled and launched as a Git working folder; a plain folder or a
+          subfolder of a repository would put the agent folders in the wrong place. Repos added
+          before the check existed must keep working.
+        children:
+          - AgentControl-MainWindowViewModel-AddGitReposOnly
+        tests:
+          - MainWindow_AddRepoButton_FolderThatIsNotAGitRepository_IsRefusedWithAMessage
+          - MainWindow_DropFile_IsSkippedAsNotARepository
+
+      - id: AgentControl-LauncherUI-AddRepoSummary
+        title: >-
+          The LauncherUI subsystem shall tell the user, in one message for an add of several
+          folders, how many were added and which were not and why (already listed, moved into the
+          group, not a Git repository, not found, not saved), and keep the single-add messages for
+          one folder.
+        justification: |
+          A message per folder would bury the user in dialogs after a large drop; one summary says
+          what needs attention, and the single add must stay as clear as it was.
+        children:
+          - AgentControl-MainWindowViewModel-AddReposSummary
+        tests:
+          - MainWindow_AddRepoButton_SeveralFoldersPicked_AddsEachAndSummarizesTheRest
+          - MainWindow_DropFile_IsSkippedAsNotARepository
 
       - id: AgentControl-LauncherUI-RemoveRepo
         title: The LauncherUI subsystem shall remove a repo card only after the user confirms the removal request.
@@ -905,6 +1042,63 @@ sections:
           - AgentControl-MainWindowViewModel-OrderKeptOnApplySettings
         tests:
           - MainWindow_ReorderedList_OrderSurvivesAWindowRestart
+
+      - id: AgentControl-LauncherUI-GroupOrder
+        title: >-
+          The LauncherUI subsystem shall list the user's groups in the user's stored order, the
+          groups without a stored place after them alphabetically, always after Favorites and before
+          Ungrouped.
+        justification: |
+          The user decides which groups matter most; a new group must still appear somewhere
+          predictable, and the built-in sections keep their fixed places.
+        children:
+          - AgentControl-MainWindowViewModel-GroupOrder
+        tests:
+          - MainWindow_GroupOrder_StoredOrderThenAlphabeticalBetweenFavoritesAndUngrouped
+
+      - id: AgentControl-LauncherUI-GroupMoveMenu
+        title: >-
+          The LauncherUI subsystem shall offer Move up and Move down in the menu of each of the
+          user's group headers, disabled with a tooltip that says why for the first group (up), the
+          last group (down) and while the filter has text.
+        justification: |
+          The menu is the way to reorder groups that also works from the keyboard; a move that leads
+          nowhere must say so instead of silently doing nothing.
+        children:
+          - AgentControl-MainWindowViewModel-MoveGroup
+          - AgentControl-MainWindowViewModel-MoveGroupAvailability
+          - AgentControl-RepoGroupHeaderViewModel-MoveRequests
+        tests:
+          - MainWindow_HeaderMenu_MoveUpDown_ReorderGroupsAndDisableAtTheEnds
+          - MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator
+
+      - id: AgentControl-LauncherUI-GroupDragReorder
+        title: >-
+          The LauncherUI subsystem shall let the user drag a group's header above or below another of
+          the user's group headers, showing a line where it will land, refuse a drop on Favorites,
+          Ungrouped or a card, keep a collapsed group collapsed, start no group drag while the filter
+          has text, and leave the dragging of cards as it was.
+        justification: |
+          Dragging is the direct way to reorder; the built-in sections have fixed places, and the
+          group drag must not change how cards are dragged or toggle the section it was grabbed by.
+        children:
+          - AgentControl-MainWindowViewModel-DropGroup
+        tests:
+          - MainWindow_DragGroupHeader_BelowAnotherGroup_ReordersGroupsWithLineFeedback
+          - MainWindow_DragGroupHeader_OntoBuiltInSectionOrCard_IsRefused
+          - MainWindow_FilterActive_GroupHeaderDragStartsNothing
+          - MainWindow_DragCard_WithinSection_ReordersAtDropPosition
+
+      - id: AgentControl-LauncherUI-GroupOrderRemembered
+        title: >-
+          The LauncherUI subsystem shall save the order of the user's groups in the settings when it
+          changes and show the saved order when the window is created again.
+        justification: |
+          An order that is lost at the next start is not the user's order.
+        children:
+          - AgentControl-MainWindowViewModel-GroupOrderPersisted
+        tests:
+          - MainWindow_ReorderedGroups_OrderSurvivesAWindowRestart
 
       - id: AgentControl-LauncherUI-Launch
         title: >-
@@ -1674,6 +1868,29 @@ sections:
           version is still there for whoever needs it.
         tests:
           - AboutWindow_VersionRow_IsLabeledAndShortWithFullVersionInTooltip
+
+      - id: AgentControl-LauncherUI-AboutBanner
+        title: >-
+          The LauncherUI subsystem shall show, across the top of the About dialog, a banner with the
+          application logo, its name and the project's tagline, legible (at least AA, 4.5:1) in both
+          the light and the dark theme.
+        justification: |
+          The About dialog is where the product introduces itself; the banner says what it is at a
+          glance and must be readable in either theme.
+        tests:
+          - AboutWindow_Banner_ShowsLogoNameAndTaglineAboveTheDetails
+          - ThemeResources_AboutBanner_TextIsLegibleInLightAndDark
+
+      - id: AgentControl-LauncherUI-AboutScrollableDetails
+        title: >-
+          The LauncherUI subsystem shall keep the About dialog's banner and its Close button in view
+          and scroll the version, copyright, license and dependency list together in one region, in
+          a dialog 600 wide whose height is limited.
+        justification: |
+          A long dependency list (or a longer license text) must neither push the Close button off
+          the screen nor make a second, nested scroll area that is hard to use.
+        tests:
+          - AboutWindow_Layout_BannerAndCloseStayOutsideTheOneScrollingRegion
 
       - id: AgentControl-LauncherUI-SourceAwareActions
         title: >-

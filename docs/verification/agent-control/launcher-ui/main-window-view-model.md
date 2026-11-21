@@ -2,16 +2,22 @@
 
 #### Verification Approach
 
-`MainWindowViewModel` is verified with unit tests defined in `MainWindowViewModelTests.cs`, `RepoGroupingTests.cs`
-(sections, collapse, filter, rename and removal of groups), `RepoOrderingTests.cs` (the user's own order: stability, new
-repos, the legacy seed, Move, drag and drop, filtering, persistence), `MainWindowViewModelPersistenceTests.cs` (every
+`MainWindowViewModel` is verified with unit tests defined in `MainWindowViewModelTests.cs` (including adding one folder
+or several and the Git-repository check), `RepoGroupingTests.cs`
+(sections, collapse, filter, rename and removal of groups, group colors), `RepoOrderingTests.cs` (the user's own order:
+stability, new
+repos, the legacy seed, Move, drag and drop, filtering, persistence, and the order of the groups),
+`MainWindowViewModelPersistenceTests.cs` (every
 change the user makes when the settings file cannot be written) and `MainWindowViewModelRecheckTests.cs` (the periodic
 upgrade re-check, on a fake clock). Each test constructs a real `MainWindowViewModel` against a unique temporary
 configuration directory (via `SettingsStore`) and unique temporary repo directories, so tests are hermetic and can run
 in parallel with each other, subject to the `RealProcess` xUnit collection (which disables parallelization) since
 constructing a view model with recent repos spawns real git subprocesses via `GitStub` or the system git executable as
-part of each card's eager `RefreshCheap()`. No Avalonia `Window` is constructed; only the view-model class itself is
-under test.
+part of each card's eager `RefreshCheap()`. The temporary repo folders that tests add are made the top folder of a Git
+repository as far as the add is concerned by a `.git` folder whose `HEAD` names a branch (`ref: refs/heads/main`), so
+the real `GitClient.IsRepositoryRoot` accepts them and the branch is read without starting git; the tests of the Git
+check create folders without `.git`, with a `.git` file, and subfolders. No Avalonia `Window` is constructed; only the
+view-model class itself is under test.
 
 #### Test Environment
 
@@ -22,6 +28,13 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 - All unit tests pass with zero failures.
 - Repo cards are created for every recent repo recorded in settings on construction.
 - Add/remove operations correctly mutate both in-memory collections and persisted settings.
+- Only the top folder of a Git repository (a `.git` folder or file directly in it) is added, by every add path; a
+  subfolder, a plain folder and a file are refused as not a Git repository, a missing path as missing, and repos already
+  in the list are kept whatever their folders hold.
+- Adding several folders reports one outcome per distinct folder, in order, goes on past a folder that is refused or
+  cannot be saved, and opens a collapsed target group once; the message for the user is nothing when everything was
+  added, the single-add message for one folder, and one summary by kind of outcome (at most five names per line) for
+  several.
 - Search filtering and the user's own ordering (favorites first, then the stored order, never launch time) produce the
   documented result for every tested input.
 - A launch, a refresh and applying settings never reorder the cards; a new repo goes to the end; settings without a
@@ -41,11 +54,19 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 - The connection-test provider shares the application's session credentials with the cards, and for a Git source is a
   Git provider that is interactive and runs the configured git after its version check.
 - With no repo in a group the list is flat and has no header; with groups it is sectioned
-  (Favorites, groups alphabetically, Ungrouped), a favorite is listed once, collapsed sections hide their
+  (Favorites, the groups in the user's order - alphabetically until the user orders them - then Ungrouped), a favorite
+  is listed once, collapsed sections hide their
   cards but keep their headers, a filter shows every match (even in a collapsed group) and leaves the
   remembered state alone, and group changes are stored in the settings file only.
+- A group's color is stored in the settings only, shown on its header and on the tiles of its repos without a color of
+  their own, refused for an unknown color, an unknown group or a built-in section, follows a rename, and is forgotten
+  with the group's position when the group is removed or loses its last repo; applying settings keeps both.
+- Groups move up and down and are dropped before or after another group, the full order of the groups is stored and
+  read by the next start, and a move or drop that does not apply (an end, a built-in section, a group without a
+  section, the group itself, while the filter has text) is refused with its reason, changing nothing.
 - The group-name prompt validates as the user types and completes exactly once.
-- Every change the user makes (favorite, group, card color, recorded launch, collapse, group rename and removal,
+- Every change the user makes (favorite, group, card color, group color, group order, recorded launch, collapse, group
+  rename and removal,
   adding and removing a repo) is applied and written when the settings can be saved; when they cannot, nothing changes
   (settings, cards, displayed list, file), a later unrelated save does not write the failed change, the user is told
   (changes from a card or a header button) or the operation fails to its caller (the others).
@@ -61,25 +82,71 @@ launch). This scenario is tested by
 `MainWindowViewModel_Constructor_DoesNotInvokeWorkingTreeDirtyCheckSubprocess`, covering
 `AgentControl-MainWindowViewModel-PopulateRecentRepos`.
 
-**MainWindowViewModel_AddRepo_ValidatesExistenceAndDuplication**: `AddRepo` is called with a
+**MainWindowViewModel_AddRepo_ValidatesExistenceDuplicationAndGitRoot**: `AddRepo` is called with a
 valid new existing path (inserted and persisted), a nonexistent path (rejected, returns
-false), and an already-tracked path (rejected, returns false). This scenario is tested by
+false), an already-tracked path (rejected, returns false), and a folder without a `.git` folder or file and a
+subfolder of a repository (rejected as not a Git repository). A listed folder added again with a trailing directory
+separator is reported as already listed, an entry saved in the old form with a trailing separator is kept as it was and
+still recognized, and the repo-path identity trims only the trailing separator, keeps a root valid and ignores letter
+case. This scenario is tested by
 `MainWindowViewModel_AddRepo_ValidNewPath_InsertsCardAndPersistsSettings`,
-`MainWindowViewModel_AddRepo_PathDoesNotExist_ReturnsFalse`, and
-`MainWindowViewModel_AddRepo_DuplicatePath_ReturnsFalse`, covering
+`MainWindowViewModel_AddRepo_PathDoesNotExist_ReturnsFalse`,
+`MainWindowViewModel_AddRepo_DuplicatePath_ReturnsFalse`,
+`MainWindowViewModel_AddRepos_ListedFolderWithTrailingSeparator_IsAlreadyListed`,
+`MainWindowViewModel_AddRepo_StoredWithTrailingSeparator_IsAlreadyListed`,
+`MainWindowViewModel_NormalizeRepoPath_TrailingSeparatorAndRoot_TrimsOnlyTheSeparator`,
+`MainWindowViewModel_AddRepo_FolderWithoutGit_IsRefusedAsNotAGitRepository` and
+`MainWindowViewModel_AddRepo_SubfolderOfARepository_IsRefused`, covering
 `AgentControl-MainWindowViewModel-AddRepo`.
 
 **MainWindowViewModel_AddRepoToGroup_AddsOrMovesRepoIntoTheGroup**: `AddRepoToGroup` (tested in
 `RepoGroupingTests.cs`) puts a new repo in the requested group - spelled as the existing group when only the letter case
 differs - saves once and lists it in that group's section; moves the existing entry into the group when the repo is
-already listed (still two cards, not three); returns "not added" for a folder that does not exist; opens a collapsed
-target group; and refuses a blank or built-in section name with `ArgumentException`, adding nothing. This scenario is
-tested by `MainWindowViewModel_AddRepoToGroup_NewRepo_AddsCardInTheGroupAndPersistsIt`,
+already listed (still two cards, not three); returns `Missing` for a folder that does not exist; refuses a subfolder
+of a repository as `NotAGitRepository` (`MainWindowViewModel_AddRepo_SubfolderOfARepository_IsRefused`); opens a
+collapsed target group; and refuses a blank or built-in section name with `ArgumentException`, adding nothing. This
+scenario is tested by `MainWindowViewModel_AddRepoToGroup_NewRepo_AddsCardInTheGroupAndPersistsIt`,
 `MainWindowViewModel_AddRepoToGroup_RepoAlreadyListed_MovesItIntoTheGroup`,
 `MainWindowViewModel_AddRepoToGroup_FolderMissing_AddsNothing`,
-`MainWindowViewModel_AddRepoToGroup_CollapsedGroup_ExpandsIt` and
-`MainWindowViewModel_AddRepoToGroup_InvalidGroupName_ThrowsAndAddsNothing`, covering
+`MainWindowViewModel_AddRepoToGroup_CollapsedGroup_ExpandsIt`,
+`MainWindowViewModel_AddRepoToGroup_InvalidGroupName_ThrowsAndAddsNothing` and
+`MainWindowViewModel_AddRepo_SubfolderOfARepository_IsRefused`, covering
 `AgentControl-MainWindowViewModel-AddRepoToGroup`.
+
+**MainWindowViewModel_AddGitReposOnly_OnlyTopFoldersOfGitRepositoriesAreAdded**: A folder without a `.git` folder or
+file is refused as `NotAGitRepository` and nothing is added or saved
+(`MainWindowViewModel_AddRepo_FolderWithoutGit_IsRefusedAsNotAGitRepository`); a subfolder of a repository is refused
+by the plain add and by the add into a group alike (`MainWindowViewModel_AddRepo_SubfolderOfARepository_IsRefused`);
+a folder with a `.git` file, as a linked worktree or a submodule has, is added
+(`MainWindowViewModel_AddRepo_FolderWithGitFile_IsAdded`); a file (as dropped from the file manager) is reported as
+`NotAGitRepository` and a path that does not exist as `Missing`
+(`MainWindowViewModel_AddRepos_ExistingFile_IsNotAGitRepository`); and a repo already in the list whose folder has no
+`.git` is still listed after the view model is built from the settings - the check applies only to folders being
+added (`MainWindowViewModel_Constructor_ListedFolderWithoutGit_IsKept`). These cover
+`AgentControl-MainWindowViewModel-AddGitReposOnly`.
+
+**MainWindowViewModel_AddRepos_SeveralFoldersEachHandledOnTheirOwn**: Several folders - repositories, a folder that is
+not a repository, a missing one, one already listed and one given twice - give one outcome per distinct folder, in
+order: the repositories are added and saved and the others are skipped with their reasons
+(`MainWindowViewModel_AddRepos_MixedPaths_ReportsAnOutcomePerPath`); the same folder given with and without a trailing
+directory separator is handled once and gives one card, saved without the separator
+(`MainWindowViewModel_AddRepos_SameFolderWithAndWithoutTrailingSeparator_AddsOneCard`); several folders added into a
+collapsed group all
+join it, a listed repo is moved into it, and the group is opened once
+(`MainWindowViewModel_AddRepos_IntoCollapsedGroup_OpensItOnce`); and when the save of one folder fails that folder is
+reported as not saved with the reason and the folders after it are added once saving works
+(`MainWindowViewModel_AddRepos_SaveFailsForOne_ContinuesWithTheRest`, in `MainWindowViewModelPersistenceTests.cs`).
+These cover `AgentControl-MainWindowViewModel-AddRepos`.
+
+**MainWindowViewModel_AddReposSummary_NothingOneMessageOrOneSummary**: `DescribeAddOutcomes` returns nothing when every
+folder was added (`MainWindowViewModel_DescribeAddOutcomes_AllAdded_ReturnsNull`); for one folder it gives the
+single-add message naming the folder and the reason - already in the list, moved into the group, does not exist, not
+the top folder of a Git repository, could not be saved with the problem - and nothing for an added folder or a failed
+move (`MainWindowViewModel_DescribeAddOutcomes_Single_KeepsTheSingleAddMessages`); for several it gives one summary
+that starts with how many were added, has one line per kind of outcome naming the folders by their last segment, at
+most five per line followed by how many more, and ends with the save problem
+(`MainWindowViewModel_DescribeAddOutcomes_SeveralMixed_OneSummaryByOutcomeWithAtMostFiveNames`). These cover
+`AgentControl-MainWindowViewModel-AddReposSummary`.
 
 **MainWindowViewModel_RemoveRepo_RemovesAndPersistsOnlyOnExplicitCall**: `RemoveRepo` is
 called directly, removing the card from both collections and persisting the update; a card's
@@ -193,6 +260,33 @@ window's Save builds it) keeps the order, the marker and the saved file's order
 (`MainWindowViewModel_ApplySettings_KeepsTheRepoOrder`), covering
 `AgentControl-MainWindowViewModel-OrderKeptOnApplySettings`.
 
+**MainWindowViewModel_GroupOrder_StoredOrderThenAlphabetically**: Tested by `RepoOrderingTests.cs`. The groups are
+listed in the user's stored order, the groups without a stored position after them alphabetically, between Favorites
+first and Ungrouped last, and the stored order is repaired to the groups that exist, spelled like them
+(`MainWindowViewModel_DisplayedItems_GroupsInStoredOrderThenAlphabetically`, covering
+`AgentControl-MainWindowViewModel-GroupOrder`).
+
+**MainWindowViewModel_MoveGroup_SwapsWithItsNeighborAndExplainsWhatIsUnavailable**: Moving a group up or down swaps it
+with the group before or after it, and the whole order of the groups as shown is stored and saved
+(`MainWindowViewModel_MoveGroup_UpAndDown_SwapsWithNeighborAndStoresTheFullOrder`); when the order cannot be saved
+nothing changes and the failure is reported (`MainWindowViewModel_MoveGroup_SaveFails_ChangesNothingAndReports`).
+These cover `AgentControl-MainWindowViewModel-MoveGroup`. The first group cannot move up and the last cannot move
+down, *Favorites*, *Ungrouped*, unknown groups and groups without a section of their own never move, nothing moves
+while the filter has text, each with its reason, and the headers offer the moves accordingly
+(`MainWindowViewModel_GetGroupMoveDisabledReason_EndsBuiltInSectionsAndFilter`, covering
+`AgentControl-MainWindowViewModel-MoveGroupAvailability`).
+
+**MainWindowViewModel_DropGroup_BeforeOrAfterAnotherGroup**: Dropping a group header before or after another group's
+header puts the group there, a collapsed group stays collapsed and the order is saved
+(`MainWindowViewModel_DropGroup_BeforeOrAfterAnotherGroup_Reorders`); a drop on the group's own header, on *Favorites*
+or *Ungrouped*, on a group that is not listed, or while the filter has text is refused and changes nothing
+(`MainWindowViewModel_CanDropGroup_SelfBuiltInUnknownOrFiltering_Refused`). These cover
+`AgentControl-MainWindowViewModel-DropGroup`.
+
+**MainWindowViewModel_GroupOrder_IsPersisted**: After a group is moved, a view model created from the saved settings
+(the next start) shows the groups in the same order (`MainWindowViewModel_MoveGroup_PersistsOrderForANewViewModel`,
+covering `AgentControl-MainWindowViewModel-GroupOrderPersisted`).
+
 **MainWindowViewModel_ApplySettings_PreservesReposAndInvalidatesPackageCache**: `ApplySettings`
 is called with an updated `AppSettings`; the existing recent-repos list survives, the new
 field values are adopted and persisted, and the shared `PackageVersionCache` is invalidated so
@@ -291,11 +385,16 @@ fake starter.
 `RealProcess` collection and temporary-directory approach, with repos created under a unique parent so the card name is
 the folder name). Settings with no group give a flat list without any header, favorites first
 (`AgentControl-MainWindowViewModel-FlatListWithoutGroups`, tested by
-`MainWindowViewModel_DisplayedItems_NoGroups_FlatListWithoutHeaders`). Settings with groups give Favorites first, the
-groups alphabetically ignoring letter case, then Ungrouped; names that differ only in letter case form one section
-(`AgentControl-MainWindowViewModel-GroupSections`, tested by
-`MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered` and
-`MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection`). Each section has a header with its count and a
+`MainWindowViewModel_DisplayedItems_NoGroups_FlatListWithoutHeaders`). Settings with groups and no stored group order
+give Favorites first, the
+groups alphabetically ignoring letter case, then Ungrouped; with a stored group order the groups follow it and the
+groups without a stored place come after them alphabetically
+(`MainWindowViewModel_DisplayedItems_GroupsInStoredOrderThenAlphabetically`); names that differ only in letter case
+form one section (`AgentControl-MainWindowViewModel-GroupSections`, tested by
+`MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered`,
+`MainWindowViewModel_Constructor_NamesDifferingInCase_FormOneSection` and
+`MainWindowViewModel_DisplayedItems_GroupsInStoredOrderThenAlphabetically`). Each section has a header with its
+count and a
 section without a repo has none (`AgentControl-MainWindowViewModel-GroupSectionHeaders`, tested by
 `MainWindowViewModel_DisplayedItems_Groups_AreSectionedAndOrdered` and
 `MainWindowViewModel_DisplayedItems_EmptySections_HaveNoHeader`); repos within a section are in the user's own order,
@@ -344,11 +443,37 @@ forgets its collapsed entry (`MainWindowViewModel_RemoveGroup_LeavesMembersUngro
 `AgentControl-MainWindowViewModel-GroupRemove`). A header's rename and remove commands raise the view model's requests
 with the group's name and change nothing by themselves
 (`MainWindowViewModel_HeaderCommands_RaiseGroupRequestsWithTheGroupName`, covering
-`AgentControl-MainWindowViewModel-GroupHeaderRequests`); and after moving, coloring, collapsing and renaming
-the repository folder is still empty while the settings file holds the choices
+`AgentControl-MainWindowViewModel-GroupHeaderRequests`); and after moving, coloring a card, coloring a group,
+collapsing and renaming
+the repository folder keeps exactly the entries it had (its `.git` folder and nothing else) while the settings file
+holds the choices
 (`RepoCardViewModel_GroupAndColor_NeverWriteToTheRepository`, covering
 `AgentControl-MainWindowViewModel-GroupSettingsOnly`). The prompt that asks for a group's name is verified by the
 `GroupNameViewModel` unit.
+
+**MainWindowViewModel_GroupColor_StoredInSettingsShownAndRefusedWhenUnusable**: Tested by `RepoGroupingTests.cs`. A
+group color given in another letter case is stored under the group's own spelling in the palette's spelling, saved in
+the settings file only, and choosing no color clears it
+(`MainWindowViewModel_SetGroupColor_StoresColorAndNoneClears`); a color the palette does not know, a group that does
+not exist and the *Favorites* and *Ungrouped* sections are refused and nothing changes
+(`MainWindowViewModel_SetGroupColor_UnknownColorGroupOrBuiltInSection_ChangesNothing`); and when the color cannot be
+saved nothing changes - not the header, the tiles or the settings - and the failure is reported once
+(`MainWindowViewModel_SetGroupColor_SaveFails_ChangesNothingAndReports`, in `MainWindowViewModelPersistenceTests.cs`).
+These cover `AgentControl-MainWindowViewModel-GroupColor`. The color shows on the group's header (not on *Favorites* or
+*Ungrouped*) and on the tiles of the group's repos without a card color of their own, a favorite in the group
+included, while a card's own color wins and other repos keep their colors
+(`MainWindowViewModel_SetGroupColor_UpdatesHeaderAndCardsOfTheGroup`, covering
+`AgentControl-MainWindowViewModel-GroupColorShown`).
+
+**MainWindowViewModel_GroupSettings_FollowRenameAndRemoveAndAreKeptOnApplySettings**: Renaming a group keeps its color
+and its place in the group order under the new name, in memory and in the saved settings
+(`MainWindowViewModel_RenameGroup_KeepsColorAndPosition`); removing a group forgets both, so a new group of the same
+name starts without them (`MainWindowViewModel_RemoveGroup_ForgetsColorAndPosition`); and a group whose last repo
+leaves it forgets both like a removed group (`MainWindowViewModel_LastRepoLeavesGroup_ForgetsColorAndPosition`). These
+cover `AgentControl-MainWindowViewModel-GroupSettingsFollowRenameAndRemove`. Applying new settings as the Settings
+window builds them keeps the group colors and the group order
+(`MainWindowViewModel_ApplySettings_KeepsGroupColorsAndOrder`, covering
+`AgentControl-MainWindowViewModel-GroupSettingsKeptOnApplySettings`).
 
 **MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten**: A favorite, a group and a card color chosen on a card
 are applied and read back from the settings file in the stored (canonical) spelling, and no failure is reported. This

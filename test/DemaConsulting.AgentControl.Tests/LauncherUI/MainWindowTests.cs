@@ -125,7 +125,7 @@ public sealed class MainWindowTests : IDisposable
         window.Show();
 
         // Act: add a repo after the data context was set (exercises collection-changed wiring)
-        Assert.True(viewModel.AddRepo(CreateTempDirectory()));
+        Assert.True(viewModel.AddRepo(CreateRepoDirectory()));
         var card = Assert.Single(viewModel.RepoCards);
 
         // Act: request removal and decline the confirmation dialog
@@ -158,7 +158,7 @@ public sealed class MainWindowTests : IDisposable
         // Arrange
         var window = CreateWindow(out var viewModel);
         window.Show();
-        viewModel.AddRepo(CreateTempDirectory());
+        viewModel.AddRepo(CreateRepoDirectory());
 
         // Act
         viewModel.RepoCards[0].SelectPackageCommand.Execute(null);
@@ -200,8 +200,8 @@ public sealed class MainWindowTests : IDisposable
         // Arrange: a window with two cards
         var window = CreateWindow(out var viewModel);
         window.Show();
-        Assert.True(viewModel.AddRepo(CreateTempDirectory()));
-        Assert.True(viewModel.AddRepo(CreateTempDirectory()));
+        Assert.True(viewModel.AddRepo(CreateRepoDirectory()));
+        Assert.True(viewModel.AddRepo(CreateRepoDirectory()));
         Assert.Equal(2, window.TrackedCardCount);
         var removed = viewModel.RepoCards[0];
 
@@ -267,7 +267,7 @@ public sealed class MainWindowTests : IDisposable
         // Arrange: a window with one card and no package source configured
         var window = CreateWindow(out var viewModel);
         window.Show();
-        viewModel.AddRepo(CreateTempDirectory());
+        viewModel.AddRepo(CreateRepoDirectory());
         Dispatcher.UIThread.RunJobs();
 
         // Act: choose "Select Package..." from the card's menu
@@ -743,6 +743,19 @@ public sealed class MainWindowTests : IDisposable
         var path = Path.Combine(Path.GetTempPath(), "AgentControlHeadless-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
         _tempPaths.Add(path);
+        return path;
+    }
+
+    /// <summary>
+    ///     Creates a unique temporary folder that is the top folder of a Git repository as far as the
+    ///     add is concerned (a <c>.git</c> folder whose <c>HEAD</c> names a branch), removed on disposal.
+    /// </summary>
+    /// <returns>The folder's path.</returns>
+    private string CreateRepoDirectory()
+    {
+        var path = CreateTempDirectory();
+        Directory.CreateDirectory(Path.Combine(path, ".git"));
+        File.WriteAllText(Path.Combine(path, ".git", "HEAD"), "ref: refs/heads/main\n");
         return path;
     }
 

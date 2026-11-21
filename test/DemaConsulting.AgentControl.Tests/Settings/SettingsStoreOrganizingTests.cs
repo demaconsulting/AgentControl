@@ -252,6 +252,178 @@ public class SettingsStoreOrganizingTests
     }
 
     /// <summary>
+    ///     Test that the group colors and the group order survive a save and a load, and that a
+    ///     color is found under its group ignoring letter case.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_SaveThenLoad_GroupColorsAndOrder_RoundTrip()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            var settings = new AppSettings
+            {
+                RecentRepos =
+                [
+                    new RecentRepo { Path = @"C:\repos\a", GroupName = "Work" },
+                    new RecentRepo { Path = @"C:\repos\b", GroupName = "Home" }
+                ],
+                GroupColors = new() { ["Work"] = "Teal", ["Home"] = "Amber" },
+                GroupOrder = ["Work", "Home"]
+            };
+
+            // Act
+            SettingsStore.Save(settings, configDir);
+            var loaded = SettingsStore.Load(configDir);
+
+            // Assert
+            Assert.Multiple(
+                () => Assert.Equal("Teal", loaded.GroupColors["Work"]),
+                () => Assert.Equal("Amber", loaded.GroupColors["home"]),
+                () => Assert.Equal("Teal", loaded.FindGroupColor("WORK")),
+                () => Assert.Equal(["Work", "Home"], loaded.GroupOrder));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a settings file written before group colors and group order existed loads with
+    ///     no group colors and no stored group order.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Load_FileWithoutGroupColorsOrOrder_ReadsAsNone()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                "{ \"RecentRepos\": [ { \"Path\": \"a\", \"GroupName\": \"Work\" } ] }");
+
+            // Act
+            var loaded = SettingsStore.Load(configDir);
+
+            // Assert
+            Assert.Empty(loaded.GroupColors);
+            Assert.Empty(loaded.GroupOrder);
+            Assert.Null(loaded.FindGroupColor("Work"));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that group colors and a group order of the wrong JSON type read as none (or keep just
+    ///     their usable entries) and do not disturb the values after them.
+    /// </summary>
+    /// <param name="colorsJson">The JSON text of the group colors.</param>
+    /// <param name="orderJson">The JSON text of the group order.</param>
+    /// <param name="expectedColor">The color expected for the Work group, or empty for none.</param>
+    /// <param name="expectedOrder">The expected group order, separated by <c>|</c>.</param>
+    [Theory]
+    [InlineData("null", "null", "", "")]
+    [InlineData("7", "\"Work\"", "", "")]
+    [InlineData("[ \"Teal\" ]", "{ \"a\": 1 }", "", "")]
+    [InlineData("{ \"Work\": 3, \"Home\": [ \"x\" ] }", "[ 3, null, { \"x\": 1 } ]", "", "")]
+    [InlineData("{ \"Work\": { \"x\": 1 }, \"work\": \"lime\" }", "[ \"home\", 3, \"Work\", \"WORK\" ]", "Lime", "Home|Work")]
+    public void SettingsStore_Load_DamagedGroupColorsAndOrder_KeepsOnlyUsableEntries(
+        string colorsJson, string orderJson, string expectedColor, string expectedOrder)
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                "{ \"RecentRepos\": [ { \"Path\": \"a\", \"GroupName\": \"Work\" }, { \"Path\": \"b\", \"GroupName\": \"Home\" } ]," +
+                " \"GroupColors\": " + colorsJson + ", \"GroupOrder\": " + orderJson + ", \"GitExecutablePath\": \"git-after\" }");
+
+            // Act
+            var loaded = SettingsStore.Load(configDir);
+
+            // Assert
+            Assert.Equal(expectedColor.Length == 0 ? null : expectedColor, loaded.FindGroupColor("Work"));
+            Assert.Equal(expectedOrder.Length == 0 ? [] : expectedOrder.Split('|'), loaded.GroupOrder);
+            Assert.Equal("git-after", loaded.GitExecutablePath);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a group color this version does not know (a typo, or a color from a newer
+    ///     version) is dropped on load and not written back, while a known one in any letter case is
+    ///     kept under its canonical spelling and under the group's own spelling.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Load_UnknownGroupColor_IsDroppedAndNotSavedBack()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                "{ \"RecentRepos\": [ { \"Path\": \"a\", \"GroupName\": \"Work\" }, { \"Path\": \"b\", \"GroupName\": \"Home\" } ]," +
+                " \"GroupColors\": { \"Work\": \"Chartreuse\", \"  home \": \" tEAL \" } }");
+
+            // Act
+            var loaded = SettingsStore.Load(configDir);
+            SettingsStore.Save(loaded, configDir);
+            var json = File.ReadAllText(Path.Combine(configDir, "settings.json"));
+
+            // Assert
+            Assert.Equal(["Home"], loaded.GroupColors.Keys);
+            Assert.Equal("Teal", loaded.GroupColors["Home"]);
+            Assert.DoesNotContain("Chartreuse", json, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that the color and the position of a group that no repo is in (a stale entry), and of
+    ///     a built-in section's name, are dropped on load.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Load_ColorAndOrderOfGroupWithoutRepos_AreDropped()
+    {
+        // Arrange: Gone has no repo; Starred's only repo is a favorite, which still makes it a group
+        var configDir = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                "{ \"RecentRepos\": [ { \"Path\": \"a\", \"GroupName\": \"Work\" }," +
+                " { \"Path\": \"b\", \"GroupName\": \"Starred\", \"IsFavorite\": true } ]," +
+                " \"GroupColors\": { \"Gone\": \"Teal\", \"Favorites\": \"Red\", \"Starred\": \"Lime\" }," +
+                " \"GroupOrder\": [ \"Gone\", \"Ungrouped\", \"Starred\", \"Work\" ] }");
+
+            // Act
+            var loaded = SettingsStore.Load(configDir);
+
+            // Assert
+            Assert.Equal(["Starred"], loaded.GroupColors.Keys);
+            Assert.Equal(["Starred", "Work"], loaded.GroupOrder);
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Counts how often a text occurs in another.
     /// </summary>
     /// <param name="text">The text to search.</param>

@@ -64,7 +64,8 @@ the units, `GitCredentialClient` (in `GitIntegration`) and `SignatureVerificatio
 belong to the Git repository source feature. `RepoGroupName` (in
 `Settings`) is the unit holding the rules for the names of the user's repo groups, and `RepoImageLocator`,
 `RepoGroupHeaderViewModel`, `GroupNameViewModel` and `DialogBehavior` (in `LauncherUI`) belong to the repo-picture,
-repo-group and dialog features; `PathEllipsisText` and `ThemePreferenceDisplayNameConverter` are documented
+repo-group and dialog features; `PathEllipsisText`, `ColorPalettePanel` (the shared content of the card and group
+color pop-ups) and `ThemePreferenceDisplayNameConverter` are documented
 supporting types of `LauncherUI`, not units.
 
 ![Software Structure](SoftwareStructureView.svg)
@@ -84,7 +85,9 @@ Settings, Logging, Startup and Utilities](architecture.svg)
 - **src/** - source files and projects
   - **DemaConsulting.AgentControl/** - main Avalonia desktop application source
     - **LauncherUI/** - main window, repo cards, package-selection, settings, package-source editor
-      (including the signature options and "Forget saved sign-in") and sign-in windows
+      (including the signature options and "Forget saved sign-in") and sign-in windows; the user's group colors and
+      group order (header menu, drag and drop), adding several repos at once (multi-select picker and folders dropped
+      from the file manager) and the About window with its banner
     - **AgentPackageManagement/** - package source model, source providers (zip folder, NuGet
       folder and server, Git repository) and registry, package discovery, version comparison, the content identity of a
       delivered package, and the platform
@@ -97,11 +100,12 @@ Settings, Logging, Startup and Utilities](architecture.svg)
     - **RepoConfig/** - per-repo pin file persistence (package, version and the content identity of the files; no
       package source and no Git commit)
     - **AgentToolLauncher/** - shell detection and agent-tool process launching
-    - **GitIntegration/** - git status/pull/branch queries, the user's Git credential helper
+    - **GitIntegration/** - git status/pull/branch queries, the repository-root check, the user's Git credential helper
       (saved package-feed sign-ins) and hardened git against remote repositories (the Git package source)
     - **Settings/** - application-wide settings persistence (including the package sources and the user's repo
-      groups, card colors and theme; `SettingsStore`, which repairs unusable stored values on load - an unknown card
-      color reads as automatic) and the `RepoGroupName` unit, the rules for the names of the
+      groups, card colors, group colors, group order and theme; `SettingsStore`, which repairs unusable stored values on
+      load - an unknown card color reads as automatic, and unknown or stale group colors and positions are dropped) and
+      the `RepoGroupName` unit, the rules for the names of the
       user's repo groups
     - **Logging/** - diagnostic file logging setup
     - **Startup/** - startup-argument parsing

@@ -15,10 +15,12 @@ repaired, how look-alike names are given one spelling) are logic of their own, w
 observable behavior of persisting application-wide preferences (package sources, git/agent
 tool overrides, recent repos, shell preference, keep-shell-open choice, color theme) and the user's own organizing
 choices (repo groups,
-card colors, collapsed sections, the order of the repo list) (`AgentControl-Settings-Persistence`,
+card colors, collapsed sections, the order of the repo list, and the color and order of the groups)
+(`AgentControl-Settings-Persistence`,
 `AgentControl-Settings-PackageSources`, `AgentControl-Settings-GitSourcePersistence`,
 `AgentControl-Settings-Appearance`, `AgentControl-Settings-KeepShellOpen`,
-`AgentControl-Settings-RepoOrganization`, `AgentControl-Settings-RepoOrder`). The subsystem contains two units:
+`AgentControl-Settings-RepoOrganization`, `AgentControl-Settings-RepoOrder`, `AgentControl-Settings-GroupOrganization`).
+The subsystem contains two units:
 `SettingsStore` and `RepoGroupName`.
 
 ### Interfaces
@@ -35,6 +37,8 @@ card colors, collapsed sections, the order of the repo list) (`AgentControl-Sett
   launched - and marked as the user's order, with the arrangement and marker written back to the file at once so it
   happens only once (`AgentControl-Settings-RepoOrder`, `AgentControl-SettingsStore-RepoOrderLegacySeed`); a file that
   already has the marker keeps its repo sequence as it is. A failed write-back is logged and never fails the load.
+  The group colors and the group order are read back as saved; a file without them loads with none, and damaged,
+  unknown or stale entries (a group no repo is in) are dropped (`AgentControl-Settings-GroupOrganization`).
 - *Constraints*: None beyond standard JSON deserialization failure modes.
 
 **SettingsStore.Save**: Saves settings to the configuration directory.
@@ -123,6 +127,31 @@ then. Reading the marker is tolerant like the others: `AppSettings` declares a p
 as `false`, which only causes the one-time seed to run again, and never fails the load
 (`AgentControl-Settings-RepoOrder`, `AgentControl-SettingsStore-RepoOrder`, `-RepoOrderLegacySeed`,
 `-RepoOrderMarkerRepaired`). The order is stored only in the user's settings file, never in a repository.
+
+**Group colors and group order.** Two more per-user choices belong to the user's own groups and, like the rest of the
+organizing values, are stored only in the settings file and are always written. `AppSettings.GroupColors`
+(`Dictionary<string, string>`, created with `RepoGroupName.Comparer` so it is keyed by group name ignoring letter case)
+maps a group's name to the name of a palette color - one of `RecentRepo.CardColorNames`, so a group and a card are
+colored from one palette; a group without an entry has no color. `AppSettings.GroupOrder` (`List<string>`) holds group
+names first to last; the main window lists Favorites, then the groups named there in that order, then the groups with
+no position yet alphabetically, then Ungrouped (the `LauncherUI` design describes how the order is changed). Reading is
+tolerant: `GroupColors` has a private converter (`StringMapJsonConverter`) that reads the string members of a JSON
+object, skips members whose values are not strings (a nested object or array is skipped whole), skips a member whose
+name repeats an earlier one ignoring letter case (the first wins) and reads anything that is not an object as empty;
+`GroupOrder` reuses the converter of `CollapsedGroups`. `AppSettings.RepairGroupSettings` (internal, deterministic and
+idempotent; it replaces both collections with new instances) then brings both in line with the groups that exist:
+each key or name is passed through `RepoGroupName.Sanitize` and dropped when nothing usable or a built-in section's
+name is left; a color is passed through `RecentRepo.NormalizeCardColor` and dropped when the palette does not know it;
+entries of a group that no repo names are dropped (a favorite still counts as a member of its group); entries that
+differ only in letter case are merged, the first winning, and respelled the way the group is spelled on its repos; the
+order keeps each group once. Because a group exists only while a repo names it, its color and position are forgotten
+once its last repo leaves it or it is removed, and a later group of the same name starts afresh. It runs at the end of
+the group-name repair of `NormalizeNulls` (so damaged, unknown or stale entries never reach the window and are not
+written back) and after every change the main window's view model saves. `AppSettings.FindGroupColor` looks a group's
+color up for the window: it sanitizes the name, matches ignoring letter case even when the dictionary was built in
+memory with another comparer, and reads the value through the palette, so a built-in section or an unknown color has
+none (`AgentControl-Settings-GroupOrganization`, `AgentControl-SettingsStore-GroupColorsAndOrder`,
+`-GroupColorsAndOrderDefaults`, `-InvalidGroupColorsAndOrderRepaired`, `-StaleGroupSettingsDropped`).
 
 `AgentToolKind` enumerates the well-known agent
 tools (`CopilotCli`, `Cursor`, `ClaudeCode`) plus `Custom`, per architecture.md's

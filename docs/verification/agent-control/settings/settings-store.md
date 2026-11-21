@@ -3,7 +3,8 @@
 #### Verification Approach
 
 `SettingsStore` is verified with unit tests defined in `SettingsStoreTests.cs` and, for the user's own organizing
-choices (a repo's group and card color, the collapsed sections), `SettingsStoreOrganizingTests.cs`, and for the user's
+choices (a repo's group and card color, the collapsed sections, the group colors and the group order),
+`SettingsStoreOrganizingTests.cs`, and for the user's
 own repo order (the stored sequence, the one-time arrangement of a file without it, a damaged marker),
 `SettingsStoreRepoOrderTests.cs`, and for tolerance of a briefly locked settings file `SettingsStoreLockTests.cs` (the
 file replace and the wait are replaced by test doubles, so no test depends on real timing; one test holds the real
@@ -32,6 +33,9 @@ N/A - standard test environment.
   damaged or wrongly typed values read as "none" without failing the load, and the values after them are still read.
 - Stored group names are repaired on load by the repo group name rules (the rules themselves are verified by the
   `RepoGroupName` unit), and a card color name that is not a known color reads as the automatic color and is not
+  saved back.
+- The group colors and the group order round-trip; a file without them loads with none; damaged entries, unknown
+  colors, built-in section names and entries of groups no repo is in are dropped without failing the load and are not
   saved back.
 - The theme round-trips by name, a settings file without a theme loads as the system default, and an unknown or
   invalid theme value reads as the system default without failing the load.
@@ -180,6 +184,34 @@ built-in names as no group, and the overlong name cut to 40 characters. The rule
 and no color; after the loaded settings are saved the file does not contain `Chartreuse` and holds exactly one color
 entry. This scenario is tested by `SettingsStore_Load_UnknownCardColorName_ReadsAsAutomaticAndIsNotSavedBack`,
 covering `AgentControl-SettingsStore-UnknownCardColorIsAutomatic`.
+
+**SettingsStore_GroupColorsAndOrder_RoundTrip**: Tested by `SettingsStoreOrganizingTests.cs` (temporary configuration
+directories, no UI). A color for each of two groups and the order of the two groups survive a save and a load; a color
+is found under its group in another letter case, both through the dictionary and through `FindGroupColor`. This
+scenario is tested by `SettingsStore_SaveThenLoad_GroupColorsAndOrder_RoundTrip`, covering
+`AgentControl-SettingsStore-GroupColorsAndOrder`.
+
+**SettingsStore_GroupColorsAndOrder_FileFromBeforeLoadsAsNone**: A settings file from before group colors and group
+order existed loads with no group colors, no stored group order and no color for its group. This scenario is tested by
+`SettingsStore_Load_FileWithoutGroupColorsOrOrder_ReadsAsNone`, covering
+`AgentControl-SettingsStore-GroupColorsAndOrderDefaults`.
+
+**SettingsStore_GroupColorsAndOrder_DamagedValuesKeepOnlyUsableEntries**: Group colors and a group order that are null,
+a number, a string, an array where an object belongs, an object where an array belongs, members that are numbers,
+arrays, objects or null, and case duplicates load without failing: only the usable entries are kept (the first of the
+case duplicates winning, the color spelled canonically and the names spelled as the groups are), and the setting after
+them is still read, proving the readers stay positioned. A known color in odd letter case and spacing under a padded
+group name is kept as `Teal` under the group's spelling, while an unknown color (`Chartreuse`) is dropped and is not
+in the file after the loaded settings are saved. This scenario is tested by
+`SettingsStore_Load_DamagedGroupColorsAndOrder_KeepsOnlyUsableEntries` and
+`SettingsStore_Load_UnknownGroupColor_IsDroppedAndNotSavedBack`, covering
+`AgentControl-SettingsStore-InvalidGroupColorsAndOrderRepaired`.
+
+**SettingsStore_GroupColorsAndOrder_StaleEntriesAreDropped**: The color and the position of a group no repo is in, and
+of a built-in section's name, are dropped on load, while those of a group whose only repo is a favorite are kept (a
+favorite still counts as a member of its group). This scenario is tested by
+`SettingsStore_Load_ColorAndOrderOfGroupWithoutRepos_AreDropped`, covering
+`AgentControl-SettingsStore-StaleGroupSettingsDropped`.
 
 **SettingsStore_RepoOrder_RoundTripsInTheStoredSequence**: Tested by `SettingsStoreRepoOrderTests.cs` (temporary
 configuration directories, no UI). Three repos whose sequence differs from favorites-first and from the launch order
