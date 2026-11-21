@@ -447,7 +447,15 @@ public sealed class MainWindowTests : IDisposable
     {
         foreach (var path in _tempPaths.Where(Directory.Exists))
         {
-            Directory.Delete(path, recursive: true);
+            try
+            {
+                Directory.Delete(path, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A card's background git check may still have the folder as its working directory
+                // when the window closes; leaving a temporary folder behind is harmless
+            }
         }
     }
 
@@ -666,6 +674,334 @@ public sealed class MainWindowTests : IDisposable
             window.Close();
         }
     });
+
+    /// <summary>
+    ///     Test that while dropped folders are being checked (held at a gate) the window stays
+    ///     responsive - the UI thread runs other work - and the progress strip under the app bar shows
+    ///     the count and a Cancel button; once the checks run the folders are added and the strip goes.
+    /// </summary>
+    [Fact]
+    public void MainWindow_DropFolders_WhileChecked_WindowStaysResponsiveAndShowsProgress() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: an empty list whose adds are held at a gate
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory(), backgroundWork: gate);
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 700 };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        var strip = window.FindControl<Border>("GlobalProgressStrip")!;
+        Assert.False(strip.IsVisible);
+
+        try
+        {
+            // Act: drop two folders on the list area; the add starts and its checks are held
+            RepoReorderWindowTests.DropExternal(window, EmptyStateCenter(window), CreateRepoDirectory(), CreateRepoDirectory());
+            Dispatcher.UIThread.RunJobs();
+            await gate.FirstCall;
+            var ran = false;
+            await Dispatcher.UIThread.InvokeAsync(() => ran = true);
+
+            // Assert: the UI thread is free, nothing is added yet, and the strip shows the add
+            Assert.True(ran);
+            Assert.Empty(viewModel.RepoCards);
+            Assert.True(strip.IsVisible);
+            Assert.Equal("Adding 0 of 2 repositories...", window.FindControl<TextBlock>("GlobalProgressText")!.Text);
+            Assert.True(window.FindControl<Button>("GlobalProgressCancelButton")!.IsVisible);
+            var bar = window.FindControl<ProgressBar>("GlobalProgressBar")!;
+            Assert.Equal("Adding 0 of 2 repositories...", AutomationProperties.GetName(bar));
+
+            // Act: the checks run
+            gate.Release();
+            await RepoReorderWindowTests.SettleAddsAsync(viewModel);
+
+            // Assert: both added, silently, and the strip is gone
+            Assert.Equal(2, viewModel.RepoCards.Count);
+            Assert.False(strip.IsVisible);
+            Assert.Empty(window.OwnedWindows);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that the progress strip's Cancel stops an add before anything is added, without a
+    ///     message afterwards.
+    /// </summary>
+    [Fact]
+    public void MainWindow_GlobalProgressCancel_WhileAddingFolders_AddsNothing() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: an add held while its folders are checked
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory(), backgroundWork: gate);
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 700 };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            RepoReorderWindowTests.DropExternal(window, EmptyStateCenter(window), CreateRepoDirectory(), CreateRepoDirectory());
+            Dispatcher.UIThread.RunJobs();
+            await gate.FirstCall;
+
+            // Act: Cancel on the strip, then the held checks finish
+            DialogWindowTests.Click(window, "GlobalProgressCancelButton");
+            gate.Release();
+            await RepoReorderWindowTests.SettleAddsAsync(viewModel);
+
+            // Assert: nothing added, nothing said, the strip is gone
+            Assert.Empty(viewModel.RepoCards);
+            Assert.Empty(viewModel.Settings.RecentRepos);
+            Assert.Empty(window.OwnedWindows);
+            Assert.False(window.FindControl<Border>("GlobalProgressStrip")!.IsVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that folders dropped while an add is still running wait for it (their folders are not
+    ///     checked meanwhile) and are added after it.
+    /// </summary>
+    [Fact]
+    public void MainWindow_DropFolders_WhileAnAddRuns_AddsThemAfterwards() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: the first drop's checks are held
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory(), backgroundWork: gate);
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 700 };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        var first = CreateRepoDirectory();
+        var second = CreateRepoDirectory();
+
+        try
+        {
+            RepoReorderWindowTests.DropExternal(window, EmptyStateCenter(window), first);
+            Dispatcher.UIThread.RunJobs();
+            await gate.FirstCall;
+
+            // Act: a second drop while the first add runs
+            RepoReorderWindowTests.DropExternal(window, EmptyStateCenter(window), second);
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the second add waits - only the first folder is being checked
+            Assert.Equal(1, gate.Calls);
+
+            // Act
+            gate.Release();
+            await RepoReorderWindowTests.SettleAddsAsync(viewModel);
+
+            // Assert: both added, in drop order
+            Assert.Equal([first, second], viewModel.RepoCards.Select(card => card.RepoPath));
+            Assert.False(window.FindControl<Border>("GlobalProgressStrip")!.IsVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that when an add cannot be saved the window asks Retry or Discard, and Retry (once saving
+    ///     works) adds the folders.
+    /// </summary>
+    [Fact]
+    public void MainWindow_AddSaveFails_RetryAddsThem() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: saving fails until the user retries
+        var failSaving = true;
+        var configDir = CreateTempDirectory();
+        var viewModel = new MainWindowViewModel(
+            new AppSettings(),
+            configDirectory: configDir,
+            saveSettings: settings =>
+            {
+                if (failSaving)
+                {
+                    throw new InvalidOperationException("The disk is full.");
+                }
+
+                SettingsStore.Save(settings, configDir);
+            });
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 700 };
+        window.Show();
+        var repo = CreateRepoDirectory();
+        window.RepoFolderPicker = () => Task.FromResult<IReadOnlyList<string>>([repo]);
+
+        try
+        {
+            // Act: add a folder; the save fails and the question appears
+            DialogWindowTests.Click(window, "AddRepoButton");
+            await WaitUntilAsync(() => window.OwnedWindows.OfType<ConfirmationWindow>().Any());
+            var question = window.OwnedWindows.OfType<ConfirmationWindow>().Single();
+            Assert.Contains("The disk is full.", question.FindControl<TextBlock>("ConfirmationMessageText")!.Text, StringComparison.Ordinal);
+            Assert.Equal("Retry", question.FindControl<Button>("ConfirmationYesButton")!.Content);
+            Assert.Equal("Discard", question.FindControl<Button>("ConfirmationNoButton")!.Content);
+            Assert.Empty(viewModel.RepoCards);
+
+            // Act: saving works again; Retry
+            failSaving = false;
+            DialogWindowTests.Click(question, "ConfirmationYesButton");
+            await RepoReorderWindowTests.SettleAddsAsync(viewModel);
+
+            // Assert: added and saved, nothing more to say
+            Assert.Equal(repo, Assert.Single(viewModel.RepoCards).RepoPath);
+            Assert.Single(SettingsStore.Load(configDir).RecentRepos);
+            Assert.Empty(window.OwnedWindows);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that Discard after a failed save leaves the list as saved (nothing added) and tells the
+    ///     user the folder was not added and why.
+    /// </summary>
+    [Fact]
+    public void MainWindow_AddSaveFails_DiscardLeavesListAsSaved() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: every save fails
+        var viewModel = new MainWindowViewModel(
+            new AppSettings(),
+            configDirectory: CreateTempDirectory(),
+            saveSettings: _ => throw new InvalidOperationException("The disk is full."));
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 700 };
+        window.Show();
+        var repo = CreateRepoDirectory();
+        window.RepoFolderPicker = () => Task.FromResult<IReadOnlyList<string>>([repo]);
+
+        try
+        {
+            // Act: add a folder, then Discard
+            DialogWindowTests.Click(window, "AddRepoButton");
+            await WaitUntilAsync(() => window.OwnedWindows.OfType<ConfirmationWindow>().Any());
+            DialogWindowTests.Click(window.OwnedWindows.OfType<ConfirmationWindow>().Single(), "ConfirmationNoButton");
+            await RepoReorderWindowTests.SettleAddsAsync(viewModel);
+            await WaitUntilAsync(() => window.OwnedWindows.OfType<MessageBoxWindow>().Any());
+
+            // Assert: nothing added, and the user is told why
+            Assert.Empty(viewModel.RepoCards);
+            Assert.Empty(viewModel.Settings.RecentRepos);
+            var message = window.OwnedWindows.OfType<MessageBoxWindow>().Single();
+            Assert.Contains("The disk is full.", message.FindControl<TextBlock>("MessageText")!.Text, StringComparison.Ordinal);
+            message.Close();
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that saving the settings refreshes the cards in the background: while their reads are
+    ///     held the UI thread stays free and the strip shows "Refreshing repositories..." without Cancel;
+    ///     once they run the strip goes.
+    /// </summary>
+    [Fact]
+    public void MainWindow_SettingsApplied_RefreshesCardsInBackgroundShowingProgress() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: one repo, every background read held
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = new MainWindowViewModel(
+            new AppSettings { RecentRepos = [new RecentRepo { Path = CreateTempDirectory() }] },
+            configDirectory: CreateTempDirectory(),
+            backgroundWork: gate);
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 700 };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        var strip = window.FindControl<Border>("GlobalProgressStrip")!;
+
+        try
+        {
+            // Act: save the settings
+            DialogWindowTests.Click(window, "OpenSettingsButton");
+            Dispatcher.UIThread.RunJobs();
+            var settingsWindow = Assert.Single(window.OwnedWindows.OfType<SettingsWindow>());
+            Assert.IsType<SettingsWindowViewModel>(settingsWindow.DataContext).SaveCommand.Execute(null);
+            Dispatcher.UIThread.RunJobs();
+            var ran = false;
+            await Dispatcher.UIThread.InvokeAsync(() => ran = true);
+
+            // Assert: the window is free and the strip shows the refresh, without Cancel
+            Assert.True(ran);
+            Assert.True(strip.IsVisible);
+            Assert.Equal("Refreshing repositories...", window.FindControl<TextBlock>("GlobalProgressText")!.Text);
+            Assert.False(window.FindControl<Button>("GlobalProgressCancelButton")!.IsVisible);
+
+            // Act: the reads run
+            gate.Release();
+            await WaitUntilAsync(() => viewModel.PendingRefresh.IsCompleted);
+
+            // Assert
+            Assert.False(strip.IsVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that a card shown in the window gets its working-tree check in the background: "not
+    ///     checked yet" while git is held, git's answer once it runs.
+    /// </summary>
+    [Fact]
+    public void MainWindow_CardShown_ChecksGitStatusInBackground() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a repo with a clean working tree (stub git), every background read held
+        var stub = Tests.GitIntegration.GitStub.Create(statusOutput: "", statusExitCode: 0);
+        _tempPaths.Add(stub.Path);
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = new MainWindowViewModel(
+            new AppSettings { GitExecutablePath = stub.Path, RecentRepos = [new RecentRepo { Path = CreateTempDirectory() }] },
+            configDirectory: CreateTempDirectory(),
+            backgroundWork: gate);
+        var card = Assert.Single(viewModel.RepoCards);
+
+        // Act: show the window; the card's check starts and is held
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 700 };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            await gate.FirstCall;
+
+            // Assert: not checked yet
+            Assert.False(card.GitStatusChecked);
+            Assert.False(card.IsWorkingTreeDirty);
+
+            // Act
+            gate.Release();
+            await card.GitStatusRefreshTask;
+
+            // Assert: git's answer is shown
+            Assert.True(card.GitStatusChecked);
+            Assert.True(card.CanPull);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Gets the center of the empty-state panel (shown while no repo is listed), in window coordinates.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <returns>The point.</returns>
+    private static Point EmptyStateCenter(MainWindow window)
+    {
+        var panel = window.FindControl<Border>("EmptyStatePanel")!;
+        return panel.TranslatePoint(new Point(panel.Bounds.Width / 2, panel.Bounds.Height / 2), window)
+               ?? throw new InvalidOperationException("The empty-state panel is not in the window.");
+    }
 
     /// <summary>
     ///     Creates an in-memory source serving <c>contoso-agents 1.0.0</c> that answers every version listing

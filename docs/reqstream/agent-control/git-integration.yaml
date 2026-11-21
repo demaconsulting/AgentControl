@@ -18,6 +18,21 @@
 sections:
   - title: GitIntegration Subsystem Requirements
     requirements:
+      - id: AgentControl-GitIntegration-QueriesFromAnyThread
+        title: >-
+          The GitIntegration subsystem shall answer its repository queries (branch, HEAD commit,
+          committed agent folders, repository root and working-tree state) correctly when they are
+          made from several threads at the same time, including through one shared committed-files
+          cache.
+        justification: |
+          The window reads git for many repos off its own thread so that it stays usable; the
+          answers must be the same as one at a time, and the shared cache must never lose or mix up
+          a stored answer.
+        children:
+          - AgentControl-CommittedAgentFilesCache-ConcurrentUse
+        tests:
+          - GitIntegrationSubsystem_RepositoryQueries_OnSeveralWorkerThreadsAtOnce_GiveTheSameAnswers
+
       - id: AgentControl-GitIntegration-PullGating
         title: >-
           The GitIntegration subsystem shall report whether a repo's working tree is clean, so

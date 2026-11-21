@@ -8,6 +8,32 @@
 sections:
   - title: RepoCardViewModel Unit Requirements
     requirements:
+      - id: AgentControl-RepoCardViewModel-CheapRefreshInBackground
+        title: >-
+          The RepoCardViewModel class shall offer a refresh of its pin, branch and committed agent
+          folders that does not make its caller wait for the disk or git, keeps showing the previous
+          state until the new one is known, and applies nothing when the card was removed meanwhile
+          or a newer refresh has started.
+        justification: |
+          Many cards are refreshed at once after a settings save; the window must stay usable, and
+          an older, slower read must never overwrite what a newer one found.
+        tests:
+          - RepoCardViewModel_RefreshCheapInBackgroundAsync_ReadHeld_ReturnsAndAppliesWhenReleased
+          - RepoCardViewModel_RefreshCheapInBackgroundAsync_NewerRefreshStarted_OlderResultDropped
+          - RepoCardViewModel_RefreshCheapInBackgroundAsync_Retired_AppliesNothing
+
+      - id: AgentControl-RepoCardViewModel-GitStatusInBackground
+        title: >-
+          The RepoCardViewModel class shall check its repo's working tree without making its caller
+          wait for git, show its Git status as not checked yet (never as having uncommitted changes)
+          until git has answered, and apply nothing when the card was removed meanwhile.
+        justification: |
+          git status is the slowest per-repo check; the window shows many cards at once and must not
+          wait for each, and a card must not claim uncommitted changes it has not seen.
+        tests:
+          - RepoCardViewModel_RefreshDirtyStatusInBackgroundAsync_StatusHeld_StaysNotYetCheckedUntilDone
+          - RepoCardViewModel_RefreshDirtyStatusInBackgroundAsync_Retired_AppliesNothing
+
       - id: AgentControl-RepoCardViewModel-DisplayInfo
         title: >-
           The RepoCardViewModel class shall expose the repo's leaf folder name as its display

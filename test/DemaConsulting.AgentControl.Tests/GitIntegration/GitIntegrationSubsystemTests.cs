@@ -145,6 +145,51 @@ public class GitIntegrationSubsystemTests
     }
 
     /// <summary>
+    ///     Test, with the real git, that the repository queries a card's background refresh makes
+    ///     (branch, <c>HEAD</c>, committed agent folders - through a shared committed-files cache -
+    ///     repository root and working-tree state) give the same answers when they run on several
+    ///     worker threads at once as when they run one at a time.
+    /// </summary>
+    [Fact]
+    public async Task GitIntegrationSubsystem_RepositoryQueries_OnSeveralWorkerThreadsAtOnce_GiveTheSameAnswers()
+    {
+        // Arrange: a real repository that tracks a managed agent folder, and its answers one at a time
+        using var fixture = AgentPackageManagement.GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(new Dictionary<string, string> { [".github/agents/a.md"] = "agent" }, "Track agent files");
+        var client = new GitClient();
+        var cache = new CommittedAgentFilesCache();
+        var expected = (
+            Branch: client.GetCurrentBranch(fixture.WorkPath),
+            Head: client.GetHeadCommitHash(fixture.WorkPath),
+            Committed: client.HasCommittedAgentFiles(fixture.WorkPath),
+            Root: GitClient.IsRepositoryRoot(fixture.WorkPath),
+            Clean: client.IsWorkingTreeClean(fixture.WorkPath));
+
+        // Act: the same queries on eight worker threads at once, sharing the cache
+        var answers = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+        {
+            var head = client.GetHeadCommitHash(fixture.WorkPath);
+            if (!cache.TryGetCached(fixture.WorkPath, head, out var committed))
+            {
+                committed = client.HasCommittedAgentFiles(fixture.WorkPath);
+                cache.Set(fixture.WorkPath, head, committed);
+            }
+
+            return (
+                Branch: client.GetCurrentBranch(fixture.WorkPath),
+                Head: head,
+                Committed: committed,
+                Root: GitClient.IsRepositoryRoot(fixture.WorkPath),
+                Clean: client.IsWorkingTreeClean(fixture.WorkPath));
+        }, TestContext.Current.CancellationToken)));
+
+        // Assert: every thread got the one-at-a-time answers, and the cache holds the answer
+        Assert.All(answers, answer => Assert.Equal(expected, answer));
+        Assert.True(cache.TryGetCached(fixture.WorkPath, expected.Head, out var cached));
+        Assert.True(cached);
+    }
+
+    /// <summary>
     ///     Test, with the real git, that the raw content of a listed blob is read from the fetched commit
     ///     exactly as the commit holds it - carriage returns, a NUL byte and an identifier that an
     ///     attribute asks to expand - even though the user's configuration asks for line-ending conversion

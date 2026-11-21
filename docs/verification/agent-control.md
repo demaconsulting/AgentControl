@@ -60,6 +60,13 @@ corresponding `LauncherUI` and `Settings` requirements say is verified one level
   process, so it can't be driven dependably and is verified in the headless window tests of the `LauncherUI`
   subsystem. That a linked worktree (whose `.git` is a file) counts as a repository root is verified with the real git
   in the `GitIntegration` subsystem tests.
+- Responsive repo-list work (`AgentControl-System-ResponsiveRepoListWork`): end to end, several repositories chosen in
+  the folder picker are added and the progress strip is gone afterwards (`AddRepoTests.cs`). That the window stays
+  usable while the folders are checked, the strip's text and Cancel, the queue, the Retry/Discard question, the
+  background refresh after Settings are saved and the background working-tree check need the background reads held at
+  a gate and a save that fails on demand, which the published application cannot be made to do; they are verified in
+  the headless window tests and unit tests of the `LauncherUI` subsystem, and concurrent git queries in the
+  `GitIntegration` subsystem tests.
 
 `AgentControl-System-AgentsMdOfferBeforeReleaseNotes` is verified end to end by
 `MainWindow_UpgradeWithAgentsMdOfferInRealUi_ShowsQuestionFirstThenReleaseNotes` in `AgentsMdTemplateOfferTests.cs`; the
@@ -234,6 +241,18 @@ folder. This scenario is tested by
 `AgentControl-System-AddSeveralRepos`. Folders dropped from the file manager, the other drop targets and the summary's
 other lines are verified in the `LauncherUI` subsystem (see the Verification Approach).
 
+**AgentControl_ResponsiveRepoListWork_SeveralReposAddedInTheBackground**: In the published application, started over
+one listed repo, the app bar's Add opens the operating system's folder picker, a folder holding three Git
+repositories is opened and all three are selected. All three are added as cards (alongside the listed repo) and
+stored in the settings file; the progress strip's bar (`GlobalProgressBar`) is gone once they are listed (the strip is
+shown only while work runs); no message is shown, because every folder was added; and the main window accepts input
+again. This scenario is tested by
+`windows@AddRepoButton_FolderPickerWithSeveralRepos_AddsThemAndRemovesTheProgressStrip`, covering
+`AgentControl-System-ResponsiveRepoListWork`. The window staying usable while the folders are checked, the progress
+counts, Cancel, the queued add, the Retry/Discard question, the background card refresh after a settings save and the
+background working-tree check are verified at the `LauncherUI` subsystem and unit levels, and concurrent git queries
+at the `GitIntegration` subsystem level (see the Verification Approach).
+
 **AgentControl_AddGitReposOnly_OnlyTheTopFolderOfAGitRepositoryIsAdded**: The repo seeded in the settings has no
 `.git` and is listed when the application starts. A subfolder of a Git repository chosen in the folder picker is not
 added; a message says it is not the top folder of a Git repository, and the seeded repo is still listed and stored. In
@@ -267,7 +286,8 @@ puts it in
 that group. This scenario is tested by `windows@CardMenu_MoveDown_ReordersCardAndStoresOrderInSettings`,
 `windows@RepoList_DragCardBelowAnother_ReordersAndKeepsOrderAfterRestart` and
 `windows@RepoList_DragCardOntoGroupHeader_MovesItIntoTheGroup`, covering `AgentControl-System-RepoReorder`. The drop
-cases, the insertion line, the contrast of its colors and the filter turning reordering off are verified at the
+cases, the insertion line, the contrast of its colors, the filter turning reordering off and the auto-scroll while a
+drag is held near the list's edges (`AgentControl-LauncherUI-DragAutoScroll`) are verified at the
 `LauncherUI` subsystem and unit levels, where the drop events are raised on a headless window.
 
 **AgentControl_RepoOrderRemembered_RestartKeepsTheOrder**: After a real mouse drag has reordered the cards, the

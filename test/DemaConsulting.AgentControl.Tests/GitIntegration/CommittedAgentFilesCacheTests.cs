@@ -122,4 +122,32 @@ public sealed class CommittedAgentFilesCacheTests
         Assert.True(cache.TryGetCached(@"C:\repos\example", "abc123", out var value));
         Assert.True(value);
     }
+
+    /// <summary>
+    ///     Test that the cache can be used from several threads at once: stores, lookups and
+    ///     invalidations of other repos running side by side never lose or corrupt a stored value.
+    /// </summary>
+    [Fact]
+    public async Task CommittedAgentFilesCache_ConcurrentSetAndGet_ReturnsEveryStoredValue()
+    {
+        // Arrange
+        var cache = new CommittedAgentFilesCache();
+        var repos = Enumerable.Range(0, 64).Select(index => Path.Combine(Path.GetTempPath(), $"repo{index}")).ToList();
+
+        // Act: every repo is stored, read back and an unrelated repo invalidated, all at once
+        var results = await Task.WhenAll(repos.Select((repo, index) => Task.Run(() =>
+        {
+            cache.Set(repo, "head" + index, index % 2 == 0);
+            cache.Invalidate(Path.Combine(Path.GetTempPath(), "unrelated" + index));
+            return cache.TryGetCached(repo, "head" + index, out var value) && value == (index % 2 == 0);
+        }, TestContext.Current.CancellationToken)));
+
+        // Assert: every value was found as stored, and still is
+        Assert.All(results, Assert.True);
+        for (var index = 0; index < repos.Count; index++)
+        {
+            Assert.True(cache.TryGetCached(repos[index], "head" + index, out var value));
+            Assert.Equal(index % 2 == 0, value);
+        }
+    }
 }

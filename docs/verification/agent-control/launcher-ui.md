@@ -2,7 +2,7 @@
 
 ### Verification Approach
 
-The `LauncherUI` subsystem is verified by the combined unit tests of its ten units
+The `LauncherUI` subsystem is verified by the combined unit tests of its eleven units
 (`MainWindowViewModelTests.cs` and `RepoGroupingTests.cs`, `RepoCardViewModelTests.cs`,
 `RepoCardLaunchVerificationTests.cs` (the checks of a repo's agent files before launch),
 `RepoCardServerSourceTests.cs`
@@ -15,7 +15,8 @@ and `RepoCardImageTests.cs`,
 `PackageSourceStatusPresentationTests.cs` (the "Online source" status, the folder statuses and the "Signed only"
 badge of a source row, with the Settings window showing it),
 `CredentialPromptViewModelTests.cs`, `RepoImageLocatorTests.cs`, `RepoGroupHeaderViewModelTests.cs`,
-`GroupNameViewModelTests.cs` and `DialogBehaviorTests.cs`, the last four units each with its own verification
+`GroupNameViewModelTests.cs`, `DialogBehaviorTests.cs` and `GlobalProgressViewModelTests.cs`, the last five units each
+with its own verification
 document), plus
 `AsyncRelayCommandTests.cs` for the shared asynchronous
 command, which together
@@ -102,6 +103,29 @@ the headless application now uses the real Skia drawing backend (so pictures are
 measured, which the earlier stub backend could not do), and the `DialogWindowTests.Click` helper also executes a
 button's bound `Command` (raising the click event alone does not run a view-model command).
 
+**Background work, without timing.** The responsiveness requirements (`AgentControl-LauncherUI-AddReposResponsive`,
+`-GlobalProgress`, `-AddCancel`, `-AddQueued`, `-AddSaveFailureChoice`, `-SettingsApplyResponsive`,
+`-GitStatusInBackground`) are verified through two constructor seams instead of timing assertions. The background
+runner seam takes `GatedBackgroundWorkRunner` (a test helper in `GatedBackgroundWorkRunner.cs`, a supporting type of
+the tests): it counts every piece of work handed to it (`Calls`, with `FirstCall` completing at the first one) and holds
+it at a gate until the test calls `Release`, then runs it on the thread pool; while the work is held the tests assert
+what the user would see - nothing added yet, the strip and its text, the Cancel button - and, in the headless window
+tests (`HeadlessTestApp.RunAsync`), that the UI thread is free: `Dispatcher.UIThread.InvokeAsync` of a trivial action
+completes while the add or the refresh is still held. No test asserts on thread identity or elapsed time. The save seam
+of `MainWindowViewModel` takes a delegate that counts saves and throws `InvalidOperationException` on demand, so "one
+save per batch", Retry and Discard are deterministic (the earlier way of breaking a save, turning `settings.json` into
+a folder, still works for the older tests). The window tests that pick or drop folders run asynchronously and let the
+queued add settle before asserting (`RepoReorderWindowTests.SettleAddsAsync`: run the posted add, await
+`PendingAddRepos`, run what it posted afterwards).
+
+**Drag auto-scroll.** The scroll step is a pure function (`MainWindow.ComputeAutoScrollStep`) verified with exact
+values and a monotonicity check; the timer behavior is verified in headless windows short enough that the list
+scrolls, by raising the platform's drag events (card and group drags through the `DragStarter` seam, folders as a
+`DataTransfer` of storage items) at a point held in a scroll zone and calling the timer's handler
+(`MainWindow.AutoScrollTick`) directly, since the headless platform does not advance real time; `IsAutoScrolling`
+tells whether the timer runs. Whether Avalonia's `DispatcherTimer` ticks while the operating system's own drag loop
+runs on Windows (OLE `DoDragDrop`) cannot be shown headlessly and must be confirmed by a UI run.
+
 ### Test Environment
 
 Unit tests run under xUnit v3 using unique temporary configuration and repo directories per
@@ -164,6 +188,14 @@ executable.
 - The picker accepts several folders and folders dropped from the file manager are added (into the group dropped on,
   otherwise ungrouped, with copy feedback that is cleared); only top folders of Git repositories are added, and one
   message says which folders were not added and why.
+- While the folders of an add are checked or the cards refresh after a settings save, the UI thread stays free, the
+  progress strip under the app bar shows the operation (with the count, and Cancel for an add only) and is gone
+  afterwards; Cancel adds nothing and says nothing; a further add waits for the running one; a failed save asks Retry
+  or Discard, Retry adds the folders and Discard leaves the list as saved; a shown card's working tree is checked in
+  the background and shows "not checked yet" until git answers; and the strip is legible in both themes.
+- A drag held near the list's top or bottom edge, over the app bar or below the list keeps the list scrolling, faster
+  the deeper the pointer is, redraws the drop feedback as the list moves and stops when the drag leaves, drops or
+  ends.
 
 ### Test Scenarios
 
@@ -223,6 +255,74 @@ shows one summary message (`MainWindow_AddRepoButton_SeveralFoldersPicked_AddsEa
 a drop of a repository with a file and a plain folder (`MainWindow_DropFile_IsSkippedAsNotARepository`); a single
 folder keeps its single-add message. These cover `AgentControl-LauncherUI-AddRepoSummary` (child
 `AgentControl-MainWindowViewModel-AddReposSummary`, whose unit tests check every wording and the five-name limit).
+
+**LauncherUI_AddReposResponsive_WindowStaysUsableWhileFoldersAreChecked**: In a headless main window whose background
+runner is a gate, two folders are dropped on the empty-state panel; while their checks are held the UI thread runs
+other work, no card is added yet, and the strip shows "Adding 0 of 2 repositories..." (also the progress bar's
+accessible name) with its Cancel button. Once the checks are released both folders are added, silently, and the strip
+is gone (`MainWindow_DropFolders_WhileChecked_WindowStaysResponsiveAndShowsProgress`). This covers
+`AgentControl-LauncherUI-AddReposResponsive` (child `AgentControl-MainWindowViewModel-AddReposInBackground`).
+
+**LauncherUI_GlobalProgress_StripShownOnlyWhileBulkWorkRuns**: The strip is collapsed in an idle window, shows the add's
+count and Cancel while dropped folders are checked and goes when they are added
+(`MainWindow_DropFolders_WhileChecked_WindowStaysResponsiveAndShowsProgress`); it shows "Refreshing repositories..."
+without Cancel while the cards refresh after Settings are saved and goes when they are done
+(`MainWindow_SettingsApplied_RefreshesCardsInBackgroundShowingProgress`); and in the light and the dark theme the bar
+reaches 3:1 against its track and the strip and the status text 4.5:1 on the strip
+(`ThemeResources_GlobalProgress_IsLegibleInLightAndDark`). These cover `AgentControl-LauncherUI-GlobalProgress`
+(children `AgentControl-MainWindowViewModel-AddReposProgress` and the `GlobalProgressViewModel` unit requirements).
+
+**LauncherUI_AddCancel_CancelStopsTheAddSilently**: While dropped folders are held at the gate the strip's Cancel button
+is clicked; after the checks are released nothing is added or saved, no message is shown and the strip is gone
+(`MainWindow_GlobalProgressCancel_WhileAddingFolders_AddsNothing`). This covers `AgentControl-LauncherUI-AddCancel`
+(children `AgentControl-MainWindowViewModel-AddReposCancel`, `AgentControl-GlobalProgressViewModel-CancelOnce` and
+`-NoCancelWhenNotCancelable`).
+
+**LauncherUI_AddQueued_FurtherDropWaitsForTheRunningAdd**: While the first dropped folder is held at the gate a second
+folder is dropped; only the first folder has been handed to the runner (the second add waits), and once released both
+are added in drop order and the strip is gone (`MainWindow_DropFolders_WhileAnAddRuns_AddsThemAfterwards`). This covers
+`AgentControl-LauncherUI-AddQueued` (child `AgentControl-MainWindowViewModel-AddReposQueued`, whose unit test also
+shows a folder named by both adds is added once).
+
+**LauncherUI_AddSaveFailureChoice_RetryOrDiscard**: With a save that fails ("The disk is full."), a folder picked from
+the app bar's Add brings up the confirmation window with the reason and the buttons Retry and Discard, and nothing is
+added meanwhile; after saving works again Retry adds and saves the folder and nothing more is shown
+(`MainWindow_AddSaveFails_RetryAddsThem`); with every save failing, Discard adds nothing and a message says the folder
+was not added and why (`MainWindow_AddSaveFails_DiscardLeavesListAsSaved`). These cover
+`AgentControl-LauncherUI-AddSaveFailureChoice` (child `AgentControl-MainWindowViewModel-AddReposSaveFailure`, whose unit
+tests show that moved repos keep their group, place and collapsed state on Discard and that no subscriber means
+Discard).
+
+**LauncherUI_SettingsApplyResponsive_CardsRefreshInTheBackground**: In a headless main window over one repo whose
+background reads are held, Settings is opened and saved; the UI thread is free and the strip shows "Refreshing
+repositories..." without Cancel; once the reads are released the refresh ends and the strip is gone
+(`MainWindow_SettingsApplied_RefreshesCardsInBackgroundShowingProgress`). This covers
+`AgentControl-LauncherUI-SettingsApplyResponsive` (children `AgentControl-MainWindowViewModel-ApplySettingsInBackground`
+and `AgentControl-RepoCardViewModel-CheapRefreshInBackground`).
+
+**LauncherUI_GitStatusInBackground_ShownCardIsCheckedWithoutBlocking**: A headless main window is shown over one repo
+whose stub git reports a clean working tree, with the background reads held; the shown card's working-tree check has
+started but the card is not checked yet and is not shown as dirty; once released the card is checked and can pull
+(`MainWindow_CardShown_ChecksGitStatusInBackground`). This covers `AgentControl-LauncherUI-GitStatusInBackground`
+(child `AgentControl-RepoCardViewModel-GitStatusInBackground`).
+
+**LauncherUI_DragAutoScroll_ListKeepsScrollingWhileADragIsHeldNearItsEdges**: The step function gives no scroll in
+the middle of the list and at a zone's inner boundary, 4.25 DIP per tick one pixel inside a 32-DIP zone, 12 at the
+edge, the 36-DIP cap 96 DIP beyond the edge (over the app bar) or below the list and further out, zones that split a
+viewport shorter than two zones in halves, and nothing for a zero, negative or unknown height or an unknown position
+(`MainWindow_ComputeAutoScrollStep_ZonesAndDepth_GiveExpectedSteps`); the speed never drops as the pointer goes deeper
+and never exceeds the cap (`MainWindow_ComputeAutoScrollStep_DeeperIsNeverSlower`). In a short headless window over
+many repos: a card held still near the bottom edge keeps the list scrolling on every tick without a new drag event,
+and the scroll stops when the drag leaves the list
+(`MainWindow_DragCardNearListEdge_KeepsScrollingWhileHeldAndStopsOnLeave`);
+a group header held over the app bar scrolls the list up, a drop there is refused (the groups keep their order) and the
+drop stops the scroll (`MainWindow_DragGroupHeaderOverAppBar_ScrollsUpAndDropIsRefused`); folders held near the bottom
+edge scroll the list and dropping them stops the scroll and adds them
+(`MainWindow_DropFoldersNearBottomEdge_AutoScrollsAndDropStopsIt`); after a tick the insertion line is shown on
+exactly one row, the card now under the unmoved pointer (`MainWindow_AutoScrollTick_UpdatesDropIndicatorForThePointer`);
+and a card drag that ends without a drop stops the scroll (`MainWindow_CardDragEnds_StopsAutoScroll`). These cover
+`AgentControl-LauncherUI-DragAutoScroll`. That the timer ticks during a real Windows drag is left to a UI run (see the
+Verification Approach).
 
 **LauncherUI_RemoveRepo_RequiresConfirmationBeforeMutatingState**: A card's `RemoveCommand` is
 executed (raising `RemoveRequested` without removing the card), and `MainWindowViewModel`'s

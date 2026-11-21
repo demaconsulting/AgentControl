@@ -139,6 +139,75 @@ public sealed class AddRepoTests
     }
 
     /// <summary>
+    ///     Choosing several Git repositories at once in the folder picker adds them all - checked in the
+    ///     background with the progress strip under the app bar while they are - without a message, and
+    ///     the progress strip is gone once they are listed.
+    /// </summary>
+    [Fact]
+    public void AddRepoButton_FolderPickerWithSeveralRepos_AddsThemAndRemovesTheProgressStrip()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: a folder holding three Git repositories
+        using var context = new AgentControlTestContext();
+        var picked = Path.Combine(context.RootDirectory, "picked");
+        CreateGitRepo(Path.Combine(picked, "alpha-repo"));
+        CreateGitRepo(Path.Combine(picked, "beta-repo"));
+        CreateGitRepo(Path.Combine(picked, "gamma-repo"));
+
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+        mainWindow.Patterns.Window.Pattern.SetWindowVisualState(WindowVisualState.Maximized);
+        Assert.Equal(["repo"], RepoNames(mainWindow));
+
+        // Act: Add opens the folder picker; select the three repositories, as a user does
+        var picker = NativeFolderPicker.Open(context, mainWindow, Find(mainWindow, "AddRepoButton"), FolderPickerTitle);
+        NavigatePicker(context, picker, picked);
+        FindListItem(picker, "alpha-repo").Patterns.SelectionItem.Pattern.Select();
+        FindListItem(picker, "beta-repo").Patterns.SelectionItem.Pattern.AddToSelection();
+        FindListItem(picker, "gamma-repo").Patterns.SelectionItem.Pattern.AddToSelection();
+        var folderBox = FindFolderBox(picker).AsTextBox();
+        var echoed = Retry.WhileFalse(
+            () =>
+            {
+                var text = folderBox.Text ?? string.Empty;
+                return text.Contains("alpha-repo", StringComparison.Ordinal) &&
+                       text.Contains("beta-repo", StringComparison.Ordinal) &&
+                       text.Contains("gamma-repo", StringComparison.Ordinal);
+            },
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(200)).Result;
+        if (!echoed)
+        {
+            folderBox.Text = "\"alpha-repo\" \"beta-repo\" \"gamma-repo\"";
+        }
+
+        FindSelectFolderButton(picker).AsButton().Invoke();
+
+        // Assert: all three are listed, the progress strip has gone, no message was needed, and the
+        // main window can be used
+        Assert.True(Retry.WhileFalse(
+            () => RepoNames(mainWindow).Order(StringComparer.Ordinal)
+                .SequenceEqual(["alpha-repo", "beta-repo", "gamma-repo", "repo"]),
+            TimeSpan.FromSeconds(15),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.True(Retry.WhileFalse(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("GlobalProgressBar")) is not { IsOffscreen: false },
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.Null(context.WaitForDialog("MessageText", TimeSpan.FromMilliseconds(500)));
+        Assert.True(DialogInputProbe.WaitForEnabled(mainWindow, expected: true));
+        var stored = StoredRepoNames(context);
+        Assert.Contains("alpha-repo", stored);
+        Assert.Contains("beta-repo", stored);
+        Assert.Contains("gamma-repo", stored);
+    }
+
+    /// <summary>
     ///     A subfolder of a Git repository chosen in the folder picker is not added: a message says it
     ///     is not the top folder of a Git repository, and the repo already listed (whose folder has no
     ///     <c>.git</c>) is still listed and stored.

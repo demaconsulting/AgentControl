@@ -281,38 +281,135 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that when the save of one folder of a multi-folder add fails, that folder is reported as
-    ///     not saved (with the reason) and the add goes on with the next folders once saving works.
+    ///     Test that when the save of a multi-folder add fails, nothing at all is added (the whole batch
+    ///     is saved once, all or nothing) and every folder that would have been added is reported as not
+    ///     saved, with the reason.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_AddRepos_SaveFailsForOne_ContinuesWithTheRest()
+    public void MainWindowViewModel_AddRepos_SaveFails_NothingAddedAndEveryFolderReportedNotSaved()
     {
-        // Arrange: saving fails until the first folder has been tried
+        // Arrange: two new folders and a settings file that cannot be replaced
         var fixture = CreateFixture("alpha");
         var first = CreateDirectory("gamma");
         var second = CreateDirectory("delta");
+        var shownBefore = Describe(fixture.ViewModel);
         fixture.BreakSaving();
-        var paths = new List<string> { first };
-        IEnumerable<string> Folders()
-        {
-            foreach (var path in paths)
-            {
-                yield return path;
-            }
-
-            // The next folder is reached only after the first one was tried
-            fixture.RestoreSaving();
-            yield return second;
-        }
 
         // Act
-        var outcomes = fixture.ViewModel.AddRepos(Folders(), null);
+        var outcomes = fixture.ViewModel.AddRepos([first, second], null);
 
-        // Assert: the first was not saved (and says why), the second was added
-        Assert.Equal([AddRepoResult.SaveFailed, AddRepoResult.Added], outcomes.Select(outcome => outcome.Result));
-        Assert.False(string.IsNullOrWhiteSpace(outcomes[0].Problem));
-        Assert.Equal(["alpha", "delta"], fixture.ViewModel.RepoCards.Select(card => card.RepoName));
-        Assert.Equal(2, SettingsStore.Load(fixture.ConfigDirectory).RecentRepos.Count);
+        // Assert: both reported as not saved (and why), nothing added anywhere
+        Assert.Equal([AddRepoResult.SaveFailed, AddRepoResult.SaveFailed], outcomes.Select(outcome => outcome.Result));
+        Assert.All(outcomes, outcome => Assert.False(string.IsNullOrWhiteSpace(outcome.Problem)));
+        Assert.Equal(["alpha"], fixture.ViewModel.RepoCards.Select(card => card.RepoName));
+        Assert.Single(fixture.Settings.RecentRepos);
+        Assert.Equal(shownBefore, Describe(fixture.ViewModel));
+
+        // Act: saving works again, so the same folders can be added
+        fixture.RestoreSaving();
+        outcomes = fixture.ViewModel.AddRepos([first, second], null);
+
+        // Assert
+        Assert.Equal([AddRepoResult.Added, AddRepoResult.Added], outcomes.Select(outcome => outcome.Result));
+        Assert.Equal(3, SettingsStore.Load(fixture.ConfigDirectory).RecentRepos.Count);
+    }
+
+    /// <summary>
+    ///     Test that when the save at the end of a background add fails, the user is asked, and Retry
+    ///     (once saving works again) adds the whole batch with one more save.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_EnqueueAddRepos_SaveFailsThenRetry_AddsTheBatch()
+    {
+        // Arrange: saving fails until the user answers Retry
+        var fixture = CreateFixture("alpha");
+        var first = CreateDirectory("gamma");
+        var second = CreateDirectory("delta");
+        var questions = new List<string>();
+        fixture.ViewModel.AddSaveFailed += (_, request) =>
+        {
+            questions.Add(request.Message);
+            fixture.Saving.Fail = false;
+            request.Respond(true);
+        };
+        fixture.Saving.Fail = true;
+
+        // Act
+        var result = await fixture.ViewModel.EnqueueAddReposAsync([first, second], null);
+
+        // Assert: asked once (saying why), then both added and saved
+        Assert.False(result.Canceled);
+        var question = Assert.Single(questions);
+        Assert.Contains("could not be saved", question, StringComparison.Ordinal);
+        Assert.Contains("The disk is full.", question, StringComparison.Ordinal);
+        Assert.Equal([AddRepoResult.Added, AddRepoResult.Added], result.Outcomes.Select(outcome => outcome.Result));
+        Assert.Equal(["alpha", "gamma", "delta"], fixture.ViewModel.RepoCards.Select(card => card.RepoName));
+        Assert.Equal(3, SettingsStore.Load(fixture.ConfigDirectory).RecentRepos.Count);
+        Assert.Equal(1, fixture.Saving.Saves);
+        Assert.False(fixture.ViewModel.GlobalProgress.IsActive);
+    }
+
+    /// <summary>
+    ///     Test that Discard after a failed save leaves memory, the cards, the displayed list and the
+    ///     file exactly as saved - including a listed repo the add would have moved into a collapsed
+    ///     group (its group, its place and the collapsed state are unchanged).
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_EnqueueAddRepos_SaveFailsThenDiscard_LeavesEverythingAsSavedIncludingMovedRepos()
+    {
+        // Arrange: a collapsed "Work" group, a listed repo outside it, and a new folder; the file is
+        // saved once so its content can be compared afterwards
+        var fixture = CreateFixture(("alpha", "Work"), ("beta", null), ("omega", null));
+        fixture.ViewModel.ToggleGroupCollapsed("Work");
+        var beta = fixture.Card("beta");
+        var newRepo = CreateDirectory("gamma");
+        var fileBefore = await File.ReadAllTextAsync(Path.Combine(fixture.ConfigDirectory, "settings.json"), TestContext.Current.CancellationToken);
+        var orderBefore = fixture.Settings.RecentRepos.Select(repo => repo.Path).ToList();
+        var shownBefore = Describe(fixture.ViewModel);
+        var asked = 0;
+        fixture.ViewModel.AddSaveFailed += (_, request) =>
+        {
+            asked++;
+            request.Respond(false);
+        };
+        fixture.Saving.Fail = true;
+
+        // Act: add the listed repo and the new folder to the collapsed group, then Discard
+        var result = await fixture.ViewModel.EnqueueAddReposAsync([beta.RepoPath, newRepo], "Work");
+
+        // Assert: reported as not saved, and nothing changed anywhere
+        Assert.Equal(1, asked);
+        Assert.Equal([AddRepoResult.SaveFailed, AddRepoResult.SaveFailed], result.Outcomes.Select(outcome => outcome.Result));
+        Assert.Null(beta.GroupName);
+        Assert.Null(fixture.Settings.RecentRepos.Single(repo => repo.Path == beta.RepoPath).GroupName);
+        Assert.Equal(orderBefore, fixture.Settings.RecentRepos.Select(repo => repo.Path));
+        Assert.True(fixture.ViewModel.IsGroupCollapsed("Work"));
+        Assert.Equal(["alpha", "beta", "omega"], fixture.ViewModel.RepoCards.Select(card => card.RepoName));
+        Assert.Equal(shownBefore, Describe(fixture.ViewModel));
+        Assert.Equal(fileBefore, await File.ReadAllTextAsync(Path.Combine(fixture.ConfigDirectory, "settings.json"), TestContext.Current.CancellationToken));
+        Assert.False(fixture.ViewModel.GlobalProgress.IsActive);
+    }
+
+    /// <summary>
+    ///     Test that a failed save with nobody to ask (no subscriber to the question) discards the add.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_EnqueueAddRepos_SaveFailsWithNoOneToAsk_Discards()
+    {
+        // Arrange
+        var fixture = CreateFixture("alpha");
+        var newRepo = CreateDirectory("gamma");
+        fixture.Saving.Fail = true;
+
+        // Act
+        var result = await fixture.ViewModel.EnqueueAddReposAsync([newRepo], null);
+
+        // Assert
+        var outcome = Assert.Single(result.Outcomes);
+        Assert.Equal(AddRepoResult.SaveFailed, outcome.Result);
+        Assert.Contains("The disk is full.", outcome.Problem, StringComparison.Ordinal);
+        Assert.Single(fixture.ViewModel.RepoCards);
+        Assert.Single(fixture.Settings.RecentRepos);
     }
 
     /// <summary>
@@ -444,13 +541,15 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
             .. repos.Select(repo => new RecentRepo { Path = CreateDirectory(repo.Name), GroupName = repo.Group })
         ];
         var starter = new FakeAgentToolProcessStarter();
+        var saving = new SaveControl();
         var viewModel = new MainWindowViewModel(
             settings, configDirectory: configDirectory,
             // Launch-safe by construction: a fixture never starts a real process
-            processStarter: starter, shellDetector: FakeAgentToolProcessStarter.CreateShellDetector());
+            processStarter: starter, shellDetector: FakeAgentToolProcessStarter.CreateShellDetector(),
+            saveSettings: candidate => saving.Save(candidate, configDirectory));
         var failures = new List<string>();
         viewModel.SettingsSaveFailed += (_, message) => failures.Add(message);
-        return new Fixture(viewModel, settings, configDirectory, failures, starter);
+        return new Fixture(viewModel, settings, configDirectory, failures, starter, saving);
     }
 
     /// <summary>
@@ -496,9 +595,11 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
     /// <param name="Failures">The messages of <see cref="MainWindowViewModel.SettingsSaveFailed"/>.</param>
     /// <param name="Starter">The process starter every card launches through; it records launches
     ///     and starts nothing.</param>
+    /// <param name="Saving">Counts the view model's saves and can make them fail without touching the
+    ///     file.</param>
     private sealed record Fixture(
         MainWindowViewModel ViewModel, AppSettings Settings, string ConfigDirectory, List<string> Failures,
-        FakeAgentToolProcessStarter Starter)
+        FakeAgentToolProcessStarter Starter, SaveControl Saving)
     {
         /// <summary>
         ///     Finds a repo's card by the repo's folder name.
@@ -522,5 +623,39 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
         ///     Makes saving work again.
         /// </summary>
         public void RestoreSaving() => Directory.Delete(Path.Combine(ConfigDirectory, "settings.json"), recursive: true);
+    }
+
+    /// <summary>
+    ///     The save seam of a fixture's view model: writes the settings file like the application does,
+    ///     counts the saves that succeeded, and can be made to fail (leaving the file as it is).
+    /// </summary>
+    private sealed class SaveControl
+    {
+        /// <summary>
+        ///     Gets or sets whether every save fails.
+        /// </summary>
+        public bool Fail { get; set; }
+
+        /// <summary>
+        ///     Gets how many saves succeeded.
+        /// </summary>
+        public int Saves { get; private set; }
+
+        /// <summary>
+        ///     Saves the settings, or fails like a full disk would.
+        /// </summary>
+        /// <param name="settings">The settings to save.</param>
+        /// <param name="configDirectory">The directory to save them to.</param>
+        /// <exception cref="InvalidOperationException">Thrown when <see cref="Fail"/> is set.</exception>
+        public void Save(AppSettings settings, string configDirectory)
+        {
+            if (Fail)
+            {
+                throw new InvalidOperationException("The disk is full.");
+            }
+
+            SettingsStore.Save(settings, configDirectory);
+            Saves++;
+        }
     }
 }

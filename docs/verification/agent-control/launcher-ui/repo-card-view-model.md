@@ -24,7 +24,11 @@ byte, adds a file, makes a managed folder a junction or symbolic link) and calls
 answers the `AgentFilesChoiceRequest` and a source-registry factory that counts, or throws on, any package access. The
 tests that must control exactly when a package source answers (stale and retired upgrade checks, the busy guard) give
 the card an in-memory source whose answer a test releases, or that signals when it is read and then never answers, so no
-timing assumption is needed. One test gives the card an owner callback that accepts the first change and refuses the
+timing assumption is needed. The background cheap refresh and the background working-tree check are verified the
+same way: the card is given a `GatedBackgroundWorkRunner` (a test helper of the `LauncherUI` tests) through its
+`backgroundWork` constructor parameter, which holds the read until the test releases it, so a test asserts the state
+while the read is outstanding and after it ran, and whether a superseded or retired read applies anything. One test
+gives the card an owner callback that accepts the first change and refuses the
 rest; the other tests build cards without an owner. The server-source tests start the in-process `MockNuGetFeed`
 (Kestrel, plain HTTP on a fresh loopback port, optionally requiring a Basic sign-in) and a `FakeCredentialPrompt`, with
 the NuGet HTTP cache isolated per test process (`HttpCacheIsolation`). Apart from the picture tests
@@ -111,8 +115,29 @@ on, and the tests that reach no launch assert that the starter was not called.
   or "check failed" behind; an invalid source configuration is a problem, never "up to date".
 - A retired card cancels what it runs, reports nothing and checks nothing; every picture a card replaces, clears,
   never shows or drops when retired is disposed, and the picture it shows is intact.
+- The background cheap refresh and the background working-tree check return while their read is held, keep the
+  previous state (a card never checked stays "not checked yet", never dirty) until the read has run, then apply it,
+  and apply nothing when a newer refresh started or the card was retired meanwhile.
 
 #### Test Scenarios
+
+**RepoCardViewModel_CheapRefreshInBackground_AppliesWhenReadAndOnlyIfStillNewest**: With the read held at the gate,
+the background cheap refresh of a pinned repo has not completed and the card still shows no pin; once released the
+pin's package and version and the branch are applied
+(`RepoCardViewModel_RefreshCheapInBackgroundAsync_ReadHeld_ReturnsAndAppliesWhenReleased`). A background refresh held
+while a newer synchronous refresh reads version 2 and the pin then changes to version 3 leaves version 2 shown when
+the older read finally runs (`RepoCardViewModel_RefreshCheapInBackgroundAsync_NewerRefreshStarted_OlderResultDropped`).
+A card retired while its background read is held applies nothing
+(`RepoCardViewModel_RefreshCheapInBackgroundAsync_Retired_AppliesNothing`). These cover
+`AgentControl-RepoCardViewModel-CheapRefreshInBackground`.
+
+**RepoCardViewModel_GitStatusInBackground_NotCheckedUntilGitAnswers**: With `git status` held at the gate on a clean
+working tree, the background check has not completed and the card is not checked, not dirty and cannot pull; once
+released it is checked, can pull and is not dirty
+(`RepoCardViewModel_RefreshDirtyStatusInBackgroundAsync_StatusHeld_StaysNotYetCheckedUntilDone`). A card retired while
+its check is held applies nothing - still not checked and cannot pull
+(`RepoCardViewModel_RefreshDirtyStatusInBackgroundAsync_Retired_AppliesNothing`). These cover
+`AgentControl-RepoCardViewModel-GitStatusInBackground`.
 
 **RepoCardViewModel_DisplayInfo_ExposesFolderNameAndPackageChip**: The card's display name
 resolves to the repo's leaf folder name, a `Refresh` after a pin file is written populates the

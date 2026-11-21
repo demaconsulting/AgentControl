@@ -63,17 +63,83 @@ sections:
           The MainWindowViewModel class shall add several folders in one request, with or without a
           group, handling each folder as a single add would, reporting what became of each (added,
           moved into the group, already listed, missing, not a Git repository, not saved) in the
-          order given, going on with the next folder when one cannot be saved, handling a folder
-          given twice (in another letter case or with a trailing directory separator) once, and
-          opening a collapsed target group once.
+          order given, handling a folder given twice (in another letter case or with a trailing
+          directory separator) once, opening a collapsed target group, and saving the whole
+          request once and rebuilding the list once - changing nothing when that save fails, and
+          then reporting every folder that would have been added or moved as not saved, with the
+          reason.
         justification: |
           A multi-folder pick or a drop of many folders must not stop at the first folder that
           cannot be added, and the caller needs every outcome to tell the user what happened.
+          Saving and redrawing once per folder made large adds slow; saving once keeps memory,
+          the list and the file in step whatever happens.
         tests:
           - MainWindowViewModel_AddRepos_MixedPaths_ReportsAnOutcomePerPath
           - MainWindowViewModel_AddRepos_SameFolderWithAndWithoutTrailingSeparator_AddsOneCard
-          - MainWindowViewModel_AddRepos_SaveFailsForOne_ContinuesWithTheRest
+          - MainWindowViewModel_AddRepos_SaveFails_NothingAddedAndEveryFolderReportedNotSaved
           - MainWindowViewModel_AddRepos_IntoCollapsedGroup_OpensItOnce
+          - MainWindowViewModel_AddReposAsync_SeveralFolders_SavesOnceAndUpdatesTheListOnce
+
+      - id: AgentControl-MainWindowViewModel-AddReposInBackground
+        title: >-
+          The MainWindowViewModel class shall check the folders of an add without making its caller
+          wait for the file system or git, add nothing until every folder was checked, check each
+          folder again against the list when it adds (so a repo listed meanwhile is not added
+          twice), and not check the working tree of a repo it adds (its Git status stays not checked
+          until the card asks for it).
+        justification: |
+          The window's thread must stay free while many folders are read; the list may change
+          meanwhile; and the working-tree check is deferred to when a card is shown, so an add does
+          not run git status for every repo.
+        tests:
+          - MainWindowViewModel_AddReposAsync_WhileFoldersAreChecked_ReturnsAndAddsNothingYet
+          - MainWindowViewModel_AddReposAsync_RepoListedMeanwhile_IsAlreadyListed
+          - MainWindowViewModel_AddReposAsync_NewRepo_GitStatusNotCheckedAndNoStatusRun
+
+      - id: AgentControl-MainWindowViewModel-AddReposProgress
+        title: >-
+          The MainWindowViewModel class shall report the progress of an add - how many of its
+          folders have been checked out of how many - and show it in the global progress while the
+          add runs, clearing it when the add has ended.
+        justification: |
+          The user must see that an add is running and how far it has got.
+        tests:
+          - MainWindowViewModel_AddReposAsync_ReportsProgressCounts
+          - MainWindowViewModel_EnqueueAddRepos_ShowsAndClearsGlobalProgress
+
+      - id: AgentControl-MainWindowViewModel-AddReposCancel
+        title: >-
+          The MainWindowViewModel class shall stop an add, and every add queued after it, when it is
+          canceled before it saves, saving nothing and adding nothing.
+        justification: |
+          A canceled add must leave no trace in the list or the settings.
+        tests:
+          - MainWindowViewModel_EnqueueAddRepos_Canceled_SavesNothingAndAddsNothing
+
+      - id: AgentControl-MainWindowViewModel-AddReposQueued
+        title: >-
+          The MainWindowViewModel class shall run an add requested while another add runs after that
+          add has ended, never at the same time, without adding a folder twice.
+        justification: |
+          Two adds changing the list and the settings at once could add a repo twice or lose one
+          add's changes.
+        tests:
+          - MainWindowViewModel_EnqueueAddRepos_SecondBatchWhileFirstRuns_RunsAfterItWithoutDuplicates
+
+      - id: AgentControl-MainWindowViewModel-AddReposSaveFailure
+        title: >-
+          The MainWindowViewModel class shall, when the save at the end of an add fails, ask whether
+          to retry (with the reason) and wait for the answer, saving the add again on Retry and, on
+          Discard or when nobody can be asked, reporting the folders as not saved while the
+          settings, the cards and the list - including the group, the place and the collapsed state
+          of repos the add would have moved - stay as they were saved.
+        justification: |
+          A failed save must not lose the user's add without a choice, and giving up must never
+          leave memory different from the file.
+        tests:
+          - MainWindowViewModel_EnqueueAddRepos_SaveFailsThenRetry_AddsTheBatch
+          - MainWindowViewModel_EnqueueAddRepos_SaveFailsThenDiscard_LeavesEverythingAsSavedIncludingMovedRepos
+          - MainWindowViewModel_EnqueueAddRepos_SaveFailsWithNoOneToAsk_Discards
 
       - id: AgentControl-MainWindowViewModel-AddGitReposOnly
         title: >-
@@ -327,10 +393,9 @@ sections:
           Likewise, a cached clean/dirty result computed against the previously configured Git
           executable must not keep being shown once the user has pointed AgentControl at a
           different executable, since subsequent Pull operations will use the new one. However,
-          GitClient's git status check is synchronous and un-timed, so eagerly re-checking
-          every tracked repo's status on every settings save (rather than only the repos that
-          actually need a recheck) could block the UI thread for a large or slow/networked repo
-          list.
+          GitClient's git status check is un-timed, so eagerly re-checking every tracked repo's
+          status on every settings save (rather than only the repos that actually need a recheck)
+          could take long for a large or slow/networked repo list.
         tests:
           - MainWindowViewModel_ApplySettings_PreservesRecentReposAndPersistsUpdatedFields
           - MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache
@@ -339,6 +404,17 @@ sections:
           - MainWindowViewModel_ApplySettings_GitExecutablePathChanged_RefreshesGitStatus
           - MainWindowViewModel_ApplySettings_SourceLocationWithEmbeddedCredential_ThrowsAndKeepsCurrentSettings
           - MainWindowViewModel_ApplySettings_SaveFails_KeepsPreviousSettingsLive
+
+      - id: AgentControl-MainWindowViewModel-ApplySettingsInBackground
+        title: >-
+          The MainWindowViewModel class shall return from applying settings once they are saved,
+          before the cards' refresh has read the disk and git, show that refresh in the global
+          progress (without a cancel) while it runs, and clear the progress when it has finished.
+        justification: |
+          Refreshing every card after a settings save reads git for each repo; the window that
+          saved the settings must not wait for it.
+        tests:
+          - MainWindowViewModel_ApplySettings_CardRefreshHeld_ReturnsAndShowsRefreshingProgress
 
       - id: AgentControl-MainWindowViewModel-InvalidateChangedSources
         title: >-

@@ -23,3 +23,13 @@ sections:
           - CommittedAgentFilesCache_UnknownRepoPath_IsTreatedAsCacheMiss
           - CommittedAgentFilesCache_Invalidate_ClearsOnlyThatRepoPath
           - CommittedAgentFilesCache_SetSameKeyTwice_OverwritesPreviousValue
+
+      - id: AgentControl-CommittedAgentFilesCache-ConcurrentUse
+        title: >-
+          The CommittedAgentFilesCache class shall keep every stored value, and return it, when
+          values are stored, looked up and invalidated from several threads at the same time.
+        justification: |
+          Cards read git, and consult the cache, on worker threads while the window's thread may
+          invalidate entries; a lost or corrupted entry would show a wrong committed-files badge.
+        tests:
+          - CommittedAgentFilesCache_ConcurrentSetAndGet_ReturnsEveryStoredValue

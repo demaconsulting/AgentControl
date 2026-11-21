@@ -84,6 +84,113 @@ internal enum AddRepoResult
 internal sealed record AddRepoOutcome(string Path, AddRepoResult Result, string? Problem = null);
 
 /// <summary>
+///     What a folder that was asked to be added turned out to be, as read from the file system (see
+///     <see cref="MainWindowViewModel.InspectFolder"/>).
+/// </summary>
+internal enum RepoFolderKind
+{
+    /// <summary>
+    ///     Nothing exists at the path.
+    /// </summary>
+    Missing,
+
+    /// <summary>
+    ///     A file exists at the path (a dropped file), not a folder.
+    /// </summary>
+    NotAFolder,
+
+    /// <summary>
+    ///     A folder that is not the top folder of a Git repository.
+    /// </summary>
+    NotAGitRepositoryRoot,
+
+    /// <summary>
+    ///     The top folder of a Git repository.
+    /// </summary>
+    GitRoot
+}
+
+/// <summary>
+///     What the background part of an add learned about one folder; immutable, so it can be handed
+///     from a worker thread to the UI thread, where the add is committed.
+/// </summary>
+/// <param name="Path">The folder's path, as it was given.</param>
+/// <param name="NormalizedPath">The folder's path in its normalized form (see
+///     <see cref="MainWindowViewModel.NormalizeRepoPath"/>), the form a new entry is stored in.</param>
+/// <param name="Kind">What the folder is.</param>
+/// <param name="ListedAtStart">Whether the repo was already listed when the add started; such a repo
+///     is never subject to the Git check's facts, so its cheap facts were not read.</param>
+/// <param name="Cheap">The cheap-refresh facts of a Git repository root that was not listed (its pin,
+///     branch and committed-files answer), or <see langword="null"/> when not read.</param>
+internal sealed record RepoFolderFacts(
+    string Path, string NormalizedPath, RepoFolderKind Kind, bool ListedAtStart, RepoCheapFacts? Cheap);
+
+/// <summary>
+///     How far a background add has got: how many of its folders have been checked.
+/// </summary>
+/// <param name="Completed">How many folders have been checked so far.</param>
+/// <param name="Total">How many folders the add checks.</param>
+internal readonly record struct AddReposProgress(int Completed, int Total);
+
+/// <summary>
+///     What became of a background add (see <see cref="MainWindowViewModel.AddReposAsync"/>).
+/// </summary>
+/// <param name="Outcomes">One outcome per distinct, non-blank folder, in the order given; empty when
+///     the add was canceled.</param>
+/// <param name="Canceled">Whether the add was canceled before anything was saved or added.</param>
+internal sealed record AddReposBatchResult(IReadOnlyList<AddRepoOutcome> Outcomes, bool Canceled);
+
+/// <summary>
+///     Carries the question the view asks when the settings could not be saved while repos were being
+///     added - try saving again, or discard the add - and carries the answer back.
+/// </summary>
+/// <remarks>
+///     Raised by <see cref="MainWindowViewModel.AddSaveFailed"/>. The add waits for
+///     <see cref="Answer"/>; nothing of the add has been applied at that point, so Discard needs no
+///     undo. The message is written for the user. The first answer wins; later calls to
+///     <see cref="Respond"/> are ignored. Thread-safe.
+/// </remarks>
+internal sealed class SettingsSaveRetryRequest
+{
+    /// <summary>
+    ///     Completes with the user's answer; runs continuations asynchronously so answering from the
+    ///     view never runs the add inside the dialog's close handling.
+    /// </summary>
+    private readonly TaskCompletionSource<bool> _answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    ///     Initializes a request.
+    /// </summary>
+    /// <param name="message">The complete question to show: what failed, why, and what Retry and
+    ///     Discard do. Must not be <see langword="null"/>.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="message"/> is
+    ///     <see langword="null"/>.</exception>
+    public SettingsSaveRetryRequest(string message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        Message = message;
+    }
+
+    /// <summary>
+    ///     Gets the complete question to show the user.
+    /// </summary>
+    public string Message { get; }
+
+    /// <summary>
+    ///     Gets the task that completes with <see langword="true"/> for Retry and
+    ///     <see langword="false"/> for Discard (or when the question could not be shown).
+    /// </summary>
+    public Task<bool> Answer => _answer.Task;
+
+    /// <summary>
+    ///     Records the user's answer.
+    /// </summary>
+    /// <param name="retry"><see langword="true"/> to try saving again; <see langword="false"/> to
+    ///     discard the add.</param>
+    public void Respond(bool retry) => _answer.TrySetResult(retry);
+}
+
+/// <summary>
 ///     The two ways the "Move" items of a group header's menu change the group's place in the list.
 /// </summary>
 internal enum RepoGroupMove
@@ -194,6 +301,35 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private const int MaxConcurrentUpgradeChecks = 4;
 
     /// <summary>
+    ///     The most folders whose file-system and git facts are read at the same time while repos are
+    ///     added, and the most cards refreshed at the same time after Settings were saved, so a large
+    ///     batch never starts dozens of git processes at once.
+    /// </summary>
+    private const int MaxConcurrentFolderInspections = 4;
+
+    /// <summary>
+    ///     Saves settings to disk; see the constructor.
+    /// </summary>
+    private readonly Action<AppSettings> _saveSettings;
+
+    /// <summary>
+    ///     Runs the blocking reads of adds and refreshes off the UI thread; see the constructor.
+    /// </summary>
+    private readonly IBackgroundWorkRunner _backgroundWork;
+
+    /// <summary>
+    ///     The adds that are running or queued and share one Cancel and one progress operation, or
+    ///     <see langword="null"/> when none is (see <see cref="EnqueueAddReposAsync"/>).
+    /// </summary>
+    private AddQueueSession? _addSession;
+
+    /// <summary>
+    ///     Identifies the most recent card refresh started by <see cref="ApplySettings"/>, so an older
+    ///     one that is still running does not update the list or start the upgrade check after it.
+    /// </summary>
+    private int _settingsRefreshGeneration;
+
+    /// <summary>
     ///     How often the periodic background upgrade re-check runs by default: the lifetime of a
     ///     cached listing, so no card's upgrade badge is older than the listing it was derived from
     ///     is allowed to be.
@@ -278,11 +414,6 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     private readonly Lock _activeFailureMemosLock = new();
 
-    /// <summary>
-    ///     The configuration directory settings are persisted to/from, or <see langword="null"/>
-    ///     to use <see cref="SettingsStore.GetDefaultConfigDirectory"/>.
-    /// </summary>
-    private readonly string? _configDirectory;
 
     /// <summary>
     ///     Test-only startup overrides passed through to every <see cref="RepoCardViewModel"/>.
@@ -348,6 +479,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="shellDetector">Detects the shell for every card's launch;
     ///     <see langword="null"/> uses a real <see cref="ShellDetector"/>. Supplied so tests get a
     ///     deterministic shell.</param>
+    /// <param name="saveSettings">Writes settings to disk; <see langword="null"/> uses
+    ///     <see cref="SettingsStore.Save"/> into <paramref name="configDirectory"/>. Supplied so tests
+    ///     can count saves and make them fail. It must throw <see cref="InvalidOperationException"/>
+    ///     when the settings could not be written.</param>
+    /// <param name="backgroundWork">Runs the blocking reads of adds and card refreshes off the UI
+    ///     thread, for this view model and every card; <see langword="null"/> uses the thread pool.
+    ///     Supplied so tests can hold the reads at a gate.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="settings"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when
@@ -362,7 +500,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         TimeSpan? upgradeRecheckInterval = null,
         Func<AppSettings, PackageSourceRegistry>? registryFactory = null,
         IAgentToolProcessStarter? processStarter = null,
-        ShellDetector? shellDetector = null)
+        ShellDetector? shellDetector = null,
+        Action<AppSettings>? saveSettings = null,
+        IBackgroundWorkRunner? backgroundWork = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(
@@ -381,7 +521,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _processStarter = processStarter;
         _shellDetector = shellDetector;
         _startupOptions = startupOptions;
-        _configDirectory = configDirectory;
+        _saveSettings = saveSettings ?? (candidate => SettingsStore.Save(candidate, configDirectory));
+        _backgroundWork = backgroundWork ?? ThreadPoolBackgroundWorkRunner.Instance;
+        GlobalProgress = new GlobalProgressViewModel();
         _applyTheme = applyTheme;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _upgradeRecheckInterval = upgradeRecheckInterval ?? DefaultUpgradeRecheckInterval;
@@ -531,6 +673,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public AppSettings Settings => _settings;
 
     /// <summary>
+    ///     Gets the state of the global progress strip under the app bar, which shows the bulk
+    ///     operations of this view model (adding repositories, refreshing the cards after Settings were
+    ///     saved) and lets the user cancel an add.
+    /// </summary>
+    public GlobalProgressViewModel GlobalProgress { get; }
+
+    /// <summary>
     ///     Gets the credential facilities that NuGet server sources use to sign in, or
     ///     <see langword="null"/> when there are none.
     /// </summary>
@@ -540,6 +689,12 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     Adds a repository to the end of the repo list (the bottom of its section) and persists
     ///     the updated settings.
     /// </summary>
+    /// <remarks>
+    ///     The synchronous single add, kept for callers that add one known folder; the window adds
+    ///     through <see cref="EnqueueAddReposAsync"/>, which reads the folder off the UI thread. Both
+    ///     use the same checks and the same all-or-nothing commit. The working-tree check of the new
+    ///     card is not made here: it runs in the background when the card is first shown.
+    /// </remarks>
     /// <param name="repoPath">Absolute path to the repository root to add.</param>
     /// <returns>
     ///     <see langword="true"/> if the repo was added; <see langword="false"/> if
@@ -561,9 +716,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <remarks>
     ///     The same add as <see cref="AddRepo"/> (same folder and Git repository checks, same pin
     ///     loading, one save), with the group set on the new entry before it is saved, so the repo
-    ///     never shows up ungrouped in between. A group that is collapsed is expanded afterwards so the
-    ///     repo that was just added is visible. The group is a per-user setting and is never written to
-    ///     the repository.
+    ///     never shows up ungrouped in between. A group that is collapsed is expanded in the same save
+    ///     so the repo that was just added is visible. The group is a per-user setting and is never
+    ///     written to the repository.
     /// </remarks>
     /// <param name="repoPath">Absolute path to the repository root to add.</param>
     /// <param name="groupName">The group to put the repo in; it must be a valid group name (see
@@ -571,34 +726,37 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     case joins that group under its own spelling.</param>
     /// <returns>What became of the repo (see <see cref="AddRepoResult"/>); never
     ///     <see cref="AddRepoResult.AlreadyListed"/> for a repo that has a card (it is moved), nor
-    ///     <see cref="AddRepoResult.SaveFailed"/> (a failed save throws).</returns>
+    ///     <see cref="AddRepoResult.SaveFailed"/> (a failed save of an add throws; a failed save of a
+    ///     move is reported through <see cref="SettingsSaveFailed"/> and gives
+    ///     <see cref="AddRepoResult.MoveFailed"/>).</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="repoPath"/> is null, empty or
     ///     whitespace, or <paramref name="groupName"/> is not a valid group name.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
-    ///     the repo was not added (the list, the cards and the file are unchanged).</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written for
+    ///     a new repo; the repo was not added (the list, the cards and the file are unchanged).</exception>
     public AddRepoResult AddRepoToGroup(string repoPath, string groupName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoPath);
 
         var target = ResolveAddTargetGroup(groupName);
-        var result = AddRepoCore(repoPath, target);
-        OpenGroupAfterAdd(target, [result]);
-        return result;
+        return AddRepoCore(repoPath, target);
     }
 
     /// <summary>
-    ///     Adds several folders at once - from the folder picker with several folders chosen, or
-    ///     dropped from the file manager - each as <see cref="AddRepo"/> (or, with a group,
+    ///     Adds several folders at once, synchronously, each as <see cref="AddRepo"/> (or, with a group,
     ///     <see cref="AddRepoToGroup"/>) would, and reports what became of each.
     /// </summary>
     /// <remarks>
-    ///     Every folder is checked and added on its own: one that is missing, not a Git repository
-    ///     root, already listed or that cannot be saved does not stop the others. A folder that appears
-    ///     more than once (see <see cref="IsSameRepoPath"/>) is handled once; blank entries are ignored. With a
-    ///     group, a repo that is already listed is moved into it, and a collapsed group is opened once
-    ///     at the end when anything was added to or moved into it. Each new repo is saved as it is
-    ///     added (so the list, the cards and the file stay in step whatever fails), and its upgrade
-    ///     check starts in the background.
+    ///     The synchronous core of the add, kept for callers that add known folders; the window adds
+    ///     through <see cref="EnqueueAddReposAsync"/>, which reads the folders off the UI thread and
+    ///     shows progress. Both share the same checks and the same commit: one that is missing, not a
+    ///     Git repository root or already listed does not stop the others; a folder that appears more
+    ///     than once (see <see cref="IsSameRepoPath"/>) is handled once; blank entries are ignored. With
+    ///     a group, a repo that is already listed is moved into it, and a collapsed group is opened
+    ///     when anything was added to or moved into it. Everything the batch changes is saved
+    ///     <b>once</b> and the list is rebuilt once; when that save fails nothing at all changed and
+    ///     every folder that would have been added or moved is reported as
+    ///     <see cref="AddRepoResult.SaveFailed"/> with the reason. The upgrade checks of the new repos
+    ///     start in the background; their working-tree checks run when their cards are first shown.
     /// </remarks>
     /// <param name="repoPaths">The folders' absolute paths, in the order to add them.</param>
     /// <param name="groupName">The group to put the repos in, or <see langword="null"/> for none;
@@ -614,28 +772,22 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ArgumentNullException.ThrowIfNull(repoPaths);
 
         var target = groupName is null ? null : ResolveAddTargetGroup(groupName);
-        var outcomes = new List<AddRepoOutcome>();
-        foreach (var path in repoPaths
-                     .Where(path => !string.IsNullOrWhiteSpace(path))
-                     .DistinctBy(NormalizeRepoPath, StringComparer.OrdinalIgnoreCase))
-        {
-            try
-            {
-                outcomes.Add(new AddRepoOutcome(path, AddRepoCore(path, target)));
-            }
-            catch (InvalidOperationException ex)
-            {
-                // This folder was not saved; the next ones are still tried
-                outcomes.Add(new AddRepoOutcome(path, AddRepoResult.SaveFailed, SecretRedactor.SafeMessage(ex)));
-            }
-        }
 
-        if (target is not null)
+        // The same steps as the background add, inline: plan, read every folder, commit once
+        var plan = PlanAddBatch(repoPaths);
+        var facts = plan.Folders
+            .Select(folder => InspectFolder(folder.Path, folder.Listed, plan.GitExecutablePath))
+            .ToList();
+        var commit = PrepareAddCommit(facts, target);
+        try
         {
-            OpenGroupAfterAdd(target, outcomes.Select(outcome => outcome.Result));
+            ApplyAddCommit(commit);
+            return commit.Outcomes;
         }
-
-        return outcomes;
+        catch (InvalidOperationException ex)
+        {
+            return commit.ToSaveFailedOutcomes(SecretRedactor.SafeMessage(ex));
+        }
     }
 
     /// <summary>
@@ -658,27 +810,762 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    ///     Opens a collapsed group after repos were added to or moved into it, so they are visible.
+    ///     Gets the task of the adds that are running or queued (see
+    ///     <see cref="EnqueueAddReposAsync"/>), so a caller (the window's tests) can wait for them to
+    ///     settle; completed when no add is running. Never faults.
     /// </summary>
-    /// <param name="groupName">The group the repos were put in.</param>
-    /// <param name="results">What became of each repo; the group is opened only when at least one
-    ///     was added or moved in.</param>
-    private void OpenGroupAfterAdd(string groupName, IEnumerable<AddRepoResult> results)
+    internal Task PendingAddRepos { get; private set; } = Task.CompletedTask;
+
+    /// <summary>
+    ///     Raised when the settings could not be saved at the end of a background add: the view asks
+    ///     the user whether to try saving again (Retry) or to drop the add (Discard), and answers
+    ///     through <see cref="SettingsSaveRetryRequest.Respond"/>.
+    /// </summary>
+    /// <remarks>
+    ///     Nothing of the add has been applied when this is raised, so the list still shows what is
+    ///     on disk; Retry saves the add again (re-checked against the list as it is then), and Discard
+    ///     leaves everything as it is. Without a subscriber nobody can be asked, so the add is
+    ///     discarded and its folders are reported as not saved.
+    /// </remarks>
+    public event EventHandler<SettingsSaveRetryRequest>? AddSaveFailed;
+
+    /// <summary>
+    ///     Adds folders (from the folder picker or dropped from the file manager) in the background,
+    ///     after any add that is already running or queued, showing progress in
+    ///     <see cref="GlobalProgress"/>; the add the window uses.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///     Adding many folders used to freeze the window, because every folder was checked with git on
+    ///     the UI thread and saved on its own. Here each folder is read off the UI thread (see
+    ///     <see cref="AddReposAsync"/>) and the whole batch is committed on the UI thread with one save
+    ///     and one list rebuild, so the window stays usable: the filter, collapsing, renaming and
+    ///     removing keep working while an add runs. The commit re-checks every folder against the list
+    ///     as it is then, so a repo listed meanwhile is never added twice, and a target group removed
+    ///     meanwhile is created again by the add (the user asked for that group).
+    ///     </para>
+    ///     <para>
+    ///     A further request while an add runs waits for it and then runs; adds never run at the same
+    ///     time. The running add and the queued ones share one progress operation with one Cancel
+    ///     (<see cref="CancelAddRepos"/>), which stops them all before they save anything. When the
+    ///     save fails the user is asked through <see cref="AddSaveFailed"/>. Must be called on the UI
+    ///     thread.
+    ///     </para>
+    /// </remarks>
+    /// <param name="repoPaths">The folders' absolute paths, in the order to add them. Must not be
+    ///     <see langword="null"/>.</param>
+    /// <param name="groupName">The group to put the repos in, or <see langword="null"/> for none;
+    ///     when given it must be a valid group name.</param>
+    /// <returns>A task that completes with what became of each folder, or with a canceled result
+    ///     (nothing saved or added) when the user canceled or the window closed. It never faults for
+    ///     an expected failure (a failed save is part of the result).</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="repoPaths"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="groupName"/> is given but is
+    ///     not a valid group name; nothing was queued.</exception>
+    public Task<AddReposBatchResult> EnqueueAddReposAsync(IReadOnlyList<string> repoPaths, string? groupName)
     {
-        if (!results.Any(result => result is AddRepoResult.Added or AddRepoResult.MovedExisting) ||
-            !IsGroupCollapsed(groupName))
+        ArgumentNullException.ThrowIfNull(repoPaths);
+        if (groupName is not null)
+        {
+            ResolveAddTargetGroup(groupName);
+        }
+
+        // A closed window adds nothing
+        if (_disposed)
+        {
+            return Task.FromResult(new AddReposBatchResult([], Canceled: true));
+        }
+
+        // Join the adds that are running, unless there are none or they were canceled: a canceled
+        // session's Cancel must not reach an add the user asked for afterwards
+        if (_addSession is null || _addSession.Cancellation.IsCancellationRequested)
+        {
+            _addSession = new AddQueueSession(this);
+        }
+
+        var session = _addSession;
+        session.Pending++;
+        var batch = RunQueuedAddAsync(PendingAddRepos, session, repoPaths, groupName);
+        PendingAddRepos = batch;
+        return batch;
+    }
+
+    /// <summary>
+    ///     Cancels the add that is running and every add queued after it (the global progress strip's
+    ///     Cancel). An add that is already saving completes; nothing else is saved or added. No
+    ///     message is shown afterwards.
+    /// </summary>
+    public void CancelAddRepos() => _addSession?.Cancel();
+
+    /// <summary>
+    ///     Runs one queued add once the adds before it have ended, and ends the shared progress
+    ///     operation after the last add of its session.
+    /// </summary>
+    /// <param name="previous">The adds queued before this one; may have faulted, which does not stop
+    ///     this one.</param>
+    /// <param name="session">The session this add belongs to.</param>
+    /// <param name="repoPaths">The folders to add.</param>
+    /// <param name="groupName">The group to put them in, or <see langword="null"/>.</param>
+    /// <returns>What became of each folder.</returns>
+    private async Task<AddReposBatchResult> RunQueuedAddAsync(
+        Task previous, AddQueueSession session, IReadOnlyList<string> repoPaths, string? groupName)
+    {
+        try
+        {
+            // Adds never run at the same time: wait for the ones before, whatever became of them
+            await Task.WhenAny(previous);
+
+            var operation = session.Progress;
+            operation.AllowCancel = true;
+            operation.SetIndeterminate("Adding repositories...");
+            var progress = new ImmediateProgress<AddReposProgress>(report =>
+                operation.Report(
+                    report.Completed,
+                    report.Total,
+                    $"Adding {report.Completed} of {report.Total} repositories..."));
+            return await AddReposAsync(
+                repoPaths,
+                groupName,
+                progress,
+                session.Cancellation.Token,
+                onSaving: () =>
+                {
+                    operation.AllowCancel = false;
+                    operation.SetIndeterminate("Saving...");
+                });
+        }
+        finally
+        {
+            session.Pending--;
+            if (session.Pending == 0)
+            {
+                session.End();
+                if (ReferenceEquals(_addSession, session))
+                {
+                    _addSession = null;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Adds folders the way <see cref="AddRepos"/> does, but reads each folder off the UI thread and
+    ///     can be canceled until it saves; the body of every queued add.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///     Steps: plan on the UI thread (blank and duplicate paths dropped, which folders are already
+    ///     listed, which git to run); read each folder through the background runner, at most
+    ///     <see cref="MaxConcurrentFolderInspections"/> at a time (whether it exists, whether it is the
+    ///     top folder of a Git repository and, for a repo not yet listed, its pin, branch and
+    ///     committed agent folders - the slow part), reporting progress as each completes; then, on
+    ///     the UI thread, commit the batch: one save and one list rebuild. The working-tree check of
+    ///     the new repos is not made: it runs in the background when a card is first shown, and until
+    ///     then the card shows its status as not checked yet.
+    ///     </para>
+    ///     <para>
+    ///     Canceled (or the view model disposed) before the commit, nothing is saved or added. A
+    ///     failed save asks the user through <see cref="AddSaveFailed"/> (see
+    ///     <see cref="CommitAddBatchAsync"/>). The awaits resume on the caller's synchronization
+    ///     context, which is the UI thread in the application, so every change to the list happens
+    ///     there.
+    ///     </para>
+    /// </remarks>
+    /// <param name="repoPaths">The folders' absolute paths, in the order to add them. Must not be
+    ///     <see langword="null"/>.</param>
+    /// <param name="groupName">The group to put the repos in, or <see langword="null"/>; when given it
+    ///     must be a valid group name.</param>
+    /// <param name="progress">Told how many folders have been checked, from 0 up to the total, or
+    ///     <see langword="null"/>. Called on the thread the awaits resume on.</param>
+    /// <param name="cancellationToken">Cancels the add before it saves.</param>
+    /// <param name="onSaving">Called once the folders have been checked and the add is about to save,
+    ///     or <see langword="null"/>; the strip shows "Saving..." from then on.</param>
+    /// <returns>What became of each folder, or a canceled result.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="repoPaths"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="groupName"/> is given but is
+    ///     not a valid group name.</exception>
+    internal async Task<AddReposBatchResult> AddReposAsync(
+        IReadOnlyList<string> repoPaths,
+        string? groupName,
+        IProgress<AddReposProgress>? progress,
+        CancellationToken cancellationToken,
+        Action? onSaving = null)
+    {
+        ArgumentNullException.ThrowIfNull(repoPaths);
+        if (groupName is not null)
+        {
+            ResolveAddTargetGroup(groupName);
+        }
+
+        if (_disposed || cancellationToken.IsCancellationRequested)
+        {
+            return new AddReposBatchResult([], Canceled: true);
+        }
+
+        // Plan on the UI thread: cheap, no file-system access
+        var plan = PlanAddBatch(repoPaths);
+        var total = plan.Folders.Count;
+        progress?.Report(new AddReposProgress(0, total));
+
+        // Read every folder in the background, a few at a time; the results keep the request order
+        var facts = new RepoFolderFacts[total];
+        var completed = 0;
+        using (var throttle = new SemaphoreSlim(MaxConcurrentFolderInspections))
+        {
+            var inspections = plan.Folders.Select(async (folder, index) =>
+            {
+                await throttle.WaitAsync(cancellationToken);
+                try
+                {
+                    facts[index] = await _backgroundWork.RunAsync(
+                        () => InspectFolder(folder.Path, folder.Listed, plan.GitExecutablePath), cancellationToken);
+                }
+                finally
+                {
+                    throttle.Release();
+                }
+
+                progress?.Report(new AddReposProgress(Interlocked.Increment(ref completed), total));
+            }).ToList();
+
+            try
+            {
+                await Task.WhenAll(inspections);
+            }
+            catch (OperationCanceledException)
+            {
+                return new AddReposBatchResult([], Canceled: true);
+            }
+        }
+
+        // The last moment to stop: nothing has been saved or added yet
+        if (_disposed || cancellationToken.IsCancellationRequested)
+        {
+            return new AddReposBatchResult([], Canceled: true);
+        }
+
+        onSaving?.Invoke();
+        return await CommitAddBatchAsync(facts, groupName);
+    }
+
+    /// <summary>
+    ///     Commits a background add on the UI thread, asking the user what to do when the save fails.
+    /// </summary>
+    /// <remarks>
+    ///     Each attempt re-checks the folders against the list as it is at that moment and saves
+    ///     everything in one go (see <see cref="ApplyAddCommit"/>), so a failed save changed nothing.
+    ///     The user is then asked through <see cref="AddSaveFailed"/>: Retry tries again (the loop),
+    ///     Discard (or no one to ask, or a closed window) gives up and reports the folders that would
+    ///     have been added or moved as not saved, with the reason. Memory, cards, the displayed list
+    ///     and the file then still match, including the groups, order and collapsed state of repos the
+    ///     add would have moved.
+    /// </remarks>
+    /// <param name="facts">What was read about each folder, in request order.</param>
+    /// <param name="groupName">The requested group, or <see langword="null"/>.</param>
+    /// <returns>What became of each folder.</returns>
+    private async Task<AddReposBatchResult> CommitAddBatchAsync(IReadOnlyList<RepoFolderFacts> facts, string? groupName)
+    {
+        while (true)
+        {
+            // Re-resolved on every attempt: the groups may have changed while the user was asked
+            var commit = PrepareAddCommit(facts, groupName is null ? null : ResolveAddTargetGroup(groupName));
+            string problem;
+            try
+            {
+                ApplyAddCommit(commit);
+                return new AddReposBatchResult(commit.Outcomes, Canceled: false);
+            }
+            catch (InvalidOperationException ex)
+            {
+                problem = SecretRedactor.SafeMessage(ex);
+            }
+
+            // Ask whether to try again; nobody to ask (or a closed window) means Discard
+            var request = new SettingsSaveRetryRequest(
+                $"The repositories could not be added because the settings could not be saved. {problem}\n\n" +
+                "Retry to save again, or Discard to leave the list as it is.");
+            if (_disposed || AddSaveFailed is null)
+            {
+                request.Respond(false);
+            }
+            else
+            {
+                AddSaveFailed.Invoke(this, request);
+            }
+
+            if (!await request.Answer || _disposed)
+            {
+                return new AddReposBatchResult(commit.ToSaveFailedOutcomes(problem), Canceled: false);
+            }
+        }
+    }
+
+    /// <summary>
+    ///     The shared single add behind <see cref="AddRepo"/> and <see cref="AddRepoToGroup"/>: one
+    ///     folder through the batch steps, read inline.
+    /// </summary>
+    /// <param name="repoPath">Absolute path to the repository root.</param>
+    /// <param name="groupName">The already validated and canonical group to put the repo in, or
+    ///     <see langword="null"/> for none (the top-bar add).</param>
+    /// <returns>What became of the repo; never <see cref="AddRepoResult.SaveFailed"/> (a failed save of
+    ///     an add throws; a failed save of a move is reported and gives
+    ///     <see cref="AddRepoResult.MoveFailed"/>).</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written for
+    ///     a new repo; nothing was added.</exception>
+    private AddRepoResult AddRepoCore(string repoPath, string? groupName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoPath);
+
+        var plan = PlanAddBatch([repoPath]);
+        var folder = plan.Folders[0];
+        var commit = PrepareAddCommit([InspectFolder(folder.Path, folder.Listed, plan.GitExecutablePath)], groupName);
+        var result = commit.Outcomes[0].Result;
+        if (result != AddRepoResult.MovedExisting)
+        {
+            // A failed save of a new repo throws, as a single add always did
+            ApplyAddCommit(commit);
+            return result;
+        }
+
+        // A repo that is already listed moved from a button the user pressed: a failed save is told
+        try
+        {
+            ApplyAddCommit(commit);
+            return result;
+        }
+        catch (InvalidOperationException ex)
+        {
+            ReportSaveFailure(ex);
+            return AddRepoResult.MoveFailed;
+        }
+    }
+
+    /// <summary>
+    ///     Plans an add on the UI thread: drops blank and repeated paths, notes which folders are
+    ///     already listed and which git executable to run, without touching the file system.
+    /// </summary>
+    /// <param name="repoPaths">The requested paths, in order.</param>
+    /// <returns>The distinct, non-blank folders in request order, and the git executable.</returns>
+    private AddBatchPlan PlanAddBatch(IEnumerable<string> repoPaths)
+    {
+        var listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in RepoCards.Select(card => card.RepoPath).Concat(_settings.RecentRepos.Select(repo => repo.Path)))
+        {
+            listed.Add(NormalizeRepoPath(path));
+        }
+
+        var folders = repoPaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .DistinctBy(NormalizeRepoPath, StringComparer.OrdinalIgnoreCase)
+            .Select(path => new PlannedFolder(path, listed.Contains(NormalizeRepoPath(path))))
+            .ToList();
+        return new AddBatchPlan(folders, RepoCardViewModel.ResolveGitExecutablePath(_settings, _startupOptions));
+    }
+
+    /// <summary>
+    ///     Reads what an add needs to know about one folder from the file system and git; safe on any
+    ///     thread (it touches no view-model state).
+    /// </summary>
+    /// <remarks>
+    ///     A path that is not a folder is <see cref="RepoFolderKind.Missing"/>, or
+    ///     <see cref="RepoFolderKind.NotAFolder"/> when it is a file; a folder is checked for being the
+    ///     top folder of a Git repository (see <see cref="GitClient.IsRepositoryRoot"/>, file system
+    ///     only). Only for a Git repository root that is not listed are the card's cheap facts read
+    ///     (its pin, branch, <c>HEAD</c> and committed agent folders, see
+    ///     <see cref="RepoCardViewModel.ReadCheapFacts"/>), so the new card needs no git call on the UI
+    ///     thread. The working tree is not checked.
+    /// </remarks>
+    /// <param name="path">The folder's path, as given.</param>
+    /// <param name="listed">Whether the repo was listed when the add was planned.</param>
+    /// <param name="gitExecutablePath">The git executable to run.</param>
+    /// <returns>The facts.</returns>
+    internal static RepoFolderFacts InspectFolder(string path, bool listed, string gitExecutablePath)
+    {
+        var normalized = NormalizeRepoPath(path);
+        if (!Directory.Exists(path))
+        {
+            return new RepoFolderFacts(
+                path, normalized, File.Exists(path) ? RepoFolderKind.NotAFolder : RepoFolderKind.Missing, listed, null);
+        }
+
+        if (!GitClient.IsRepositoryRoot(path))
+        {
+            return new RepoFolderFacts(path, normalized, RepoFolderKind.NotAGitRepositoryRoot, listed, null);
+        }
+
+        var cheap = listed ? null : RepoCardViewModel.ReadCheapFacts(normalized, gitExecutablePath, cache: null);
+        return new RepoFolderFacts(path, normalized, RepoFolderKind.GitRoot, listed, cheap);
+    }
+
+    /// <summary>
+    ///     Decides, on the UI thread and against the list as it is now, what becomes of each folder of
+    ///     an add, without changing anything.
+    /// </summary>
+    /// <remarks>
+    ///     The checks, in order: a path that is not a folder is <see cref="AddRepoResult.Missing"/>, or
+    ///     <see cref="AddRepoResult.NotAGitRepository"/> when it is a file (a dropped file); a repo that
+    ///     is listed now (see <see cref="IsSameRepoPath"/>) is <see cref="AddRepoResult.AlreadyListed"/>
+    ///     or, with a group and a card, moved into the group - it is never subject to the Git check, so
+    ///     the repos already in the list are left as they are; a folder that is not the top folder of a
+    ///     Git repository is <see cref="AddRepoResult.NotAGitRepository"/>; anything else is added,
+    ///     stored in its normalized form (see <see cref="NormalizeRepoPath"/>). A folder added earlier
+    ///     in the same batch counts as listed for the folders after it.
+    /// </remarks>
+    /// <param name="facts">What was read about each folder, in request order.</param>
+    /// <param name="target">The canonical group to put the repos in, or <see langword="null"/>.</param>
+    /// <returns>The outcomes and the steps that carry them out.</returns>
+    private AddBatchCommit PrepareAddCommit(IReadOnlyList<RepoFolderFacts> facts, string? target)
+    {
+        // The list as it is now: the cards by normalized path, and every listed path
+        var cards = new Dictionary<string, RepoCardViewModel>(StringComparer.OrdinalIgnoreCase);
+        foreach (var card in RepoCards)
+        {
+            cards.TryAdd(NormalizeRepoPath(card.RepoPath), card);
+        }
+
+        var listed = new HashSet<string>(cards.Keys, StringComparer.OrdinalIgnoreCase);
+        foreach (var repo in _settings.RecentRepos)
+        {
+            listed.Add(NormalizeRepoPath(repo.Path));
+        }
+
+        var outcomes = new List<AddRepoOutcome>();
+        var steps = new List<AddStep>();
+        foreach (var folder in facts)
+        {
+            AddRepoResult result;
+            if (folder.Kind == RepoFolderKind.Missing)
+            {
+                result = AddRepoResult.Missing;
+            }
+            else if (folder.Kind == RepoFolderKind.NotAFolder)
+            {
+                result = AddRepoResult.NotAGitRepository;
+            }
+            else if (listed.Contains(folder.NormalizedPath))
+            {
+                // Listed: moved into the group when there is one (and a card to move), else refused
+                if (target is not null && cards.TryGetValue(folder.NormalizedPath, out var existing))
+                {
+                    steps.Add(new AddStep(null, null, existing));
+                    result = AddRepoResult.MovedExisting;
+                }
+                else
+                {
+                    result = AddRepoResult.AlreadyListed;
+                }
+            }
+            else if (folder.Kind != RepoFolderKind.GitRoot)
+            {
+                result = AddRepoResult.NotAGitRepository;
+            }
+            else
+            {
+                var pin = folder.Cheap?.Pin;
+                var recentRepo = new RecentRepo
+                {
+                    Path = folder.NormalizedPath,
+                    GroupName = target,
+                    PinnedPackageName = pin?.PackageName,
+                    PinnedPackageVersion = pin?.Version
+                };
+                steps.Add(new AddStep(recentRepo, folder.Cheap, null));
+                listed.Add(folder.NormalizedPath);
+                result = AddRepoResult.Added;
+            }
+
+            outcomes.Add(new AddRepoOutcome(folder.Path, result));
+        }
+
+        return new AddBatchCommit(target, outcomes, steps);
+    }
+
+    /// <summary>
+    ///     Carries out a prepared add: saves everything it changes in one go and, only once that
+    ///     succeeded, creates the new cards, puts the cards in the stored order, rebuilds the list once
+    ///     and starts the new repos' upgrade checks.
+    /// </summary>
+    /// <remarks>
+    ///     The settings change (see <see cref="ApplyAddSteps"/>) appends the new entries, moves the
+    ///     listed repos into the group at the bottom of their section, and opens the group when
+    ///     anything joined it; it is made all-or-nothing by <see cref="CommitSettingsChange"/>, so a
+    ///     failed save leaves memory, the cards, the displayed list and the file exactly as they were.
+    ///     A batch that changes nothing saves nothing.
+    /// </remarks>
+    /// <param name="commit">The prepared add.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
+    ///     nothing changed.</exception>
+    private void ApplyAddCommit(AddBatchCommit commit)
+    {
+        if (commit.Steps.Count == 0)
         {
             return;
         }
 
-        try
+        // One save for the whole batch; a failure throws here, before anything changed
+        CommitSettingsChange(settings => ApplyAddSteps(settings, commit));
+
+        // Saved: create the new cards from what was read in the background (a folder read before it
+        // was listed has facts; one whose facts are missing is refreshed in the background)
+        var newCards = new List<RepoCardViewModel>();
+        foreach (var step in commit.Steps.Where(step => step.NewRepo is not null))
         {
-            ToggleGroupCollapsed(groupName);
+            var card = CreateCard(step.NewRepo!);
+            if (step.Cheap is { } cheap)
+            {
+                card.ApplyCheapFacts(cheap);
+            }
+            else
+            {
+                _ = card.RefreshCheapInBackgroundAsync(CancellationToken.None);
+            }
+
+            AttachCardEvents(card);
+            newCards.Add(card);
         }
-        catch (InvalidOperationException)
+
+        // The cards follow the stored order, which the change set
+        var byPath = new Dictionary<string, RepoCardViewModel>(StringComparer.OrdinalIgnoreCase);
+        foreach (var card in RepoCards.Concat(newCards))
         {
-            // The repos are in their group; only remembering that the group is open failed
+            byPath.TryAdd(card.RepoPath, card);
         }
+
+        var ordered = _settings.RecentRepos
+            .Select(repo => byPath.GetValueOrDefault(repo.Path))
+            .OfType<RepoCardViewModel>()
+            .Distinct()
+            .ToList();
+        SyncCollection(RepoCards, ordered);
+
+        // The moved cards' group changed on their shared entries: tell their views, then rebuild once
+        foreach (var step in commit.Steps.Where(step => step.MovedCard is not null))
+        {
+            step.MovedCard!.RaiseGroupPropertiesChanged();
+        }
+
+        UpdateDisplayedRepoCards();
+
+        // The new cards' upgrade checks read package sources, so they run in the background
+        BeginCardsUpgradeRefresh(newCards);
+    }
+
+    /// <summary>
+    ///     The settings change of an add, run by <see cref="CommitSettingsChange"/> on the candidate and
+    ///     then on the live settings; deterministic, as that requires.
+    /// </summary>
+    /// <remarks>
+    ///     In request order: a new repo's entry is appended; a listed repo's entry gets the group and is
+    ///     moved to the bottom of its section (after the section's last other entry, or the end of the
+    ///     list when the section has no other entry), which makes the order the user's own. When anything
+    ///     joined the group, the group is removed from the collapsed sections so the repos are visible.
+    /// </remarks>
+    /// <param name="settings">The settings to change.</param>
+    /// <param name="commit">The prepared add.</param>
+    private static void ApplyAddSteps(AppSettings settings, AddBatchCommit commit)
+    {
+        var joinedGroup = false;
+        foreach (var step in commit.Steps)
+        {
+            if (step.NewRepo is { } newRepo)
+            {
+                settings.RecentRepos.Add(newRepo);
+                joinedGroup |= commit.Target is not null;
+                continue;
+            }
+
+            var entry = settings.RecentRepos.FirstOrDefault(
+                repo => string.Equals(repo.Path, step.MovedCard!.RepoPath, StringComparison.OrdinalIgnoreCase));
+            if (entry is null)
+            {
+                continue;
+            }
+
+            entry.GroupName = commit.Target;
+            if (MoveToSectionEnd(settings.RecentRepos, entry))
+            {
+                settings.HasUserRepoOrder = true;
+            }
+
+            joinedGroup = true;
+        }
+
+        if (joinedGroup && commit.Target is { } target)
+        {
+            settings.CollapsedGroups?.RemoveAll(name => RepoGroupName.Comparer.Equals(name, target));
+        }
+    }
+
+    /// <summary>
+    ///     Moves an entry to the bottom of its section in a repo list: after the last other entry of the
+    ///     same section, or to the end of the list when the section has no other entry. The list
+    ///     instance is kept (the settings share it by reference).
+    /// </summary>
+    /// <param name="repos">The repo list.</param>
+    /// <param name="entry">The entry to move; it is in <paramref name="repos"/>.</param>
+    /// <returns><see langword="true"/> when the order changed.</returns>
+    private static bool MoveToSectionEnd(List<RecentRepo> repos, RecentRepo entry)
+    {
+        var section = GetSectionOf(entry);
+        var ordered = repos.Where(other => !ReferenceEquals(other, entry)).ToList();
+        var index = ordered.FindLastIndex(other =>
+            GetSectionOf(other) is var otherSection &&
+            otherSection.Kind == section.Kind &&
+            RepoGroupName.Comparer.Equals(otherSection.Name, section.Name)) + 1;
+        if (index == 0)
+        {
+            index = ordered.Count;
+        }
+
+        ordered.Insert(index, entry);
+        if (ordered.SequenceEqual(repos, ReferenceEqualityComparer.Instance))
+        {
+            return false;
+        }
+
+        repos.Clear();
+        repos.AddRange(ordered);
+        return true;
+    }
+
+    /// <summary>
+    ///     Gets the section a repo entry is listed in, by the same rule as
+    ///     <see cref="GetSectionOf(RepoCardViewModel)"/> for its card.
+    /// </summary>
+    /// <param name="repo">The entry.</param>
+    /// <returns>The section's kind and display name.</returns>
+    private static (RepoGroupKind Kind, string Name) GetSectionOf(RecentRepo repo)
+    {
+        if (repo.IsFavorite)
+        {
+            return (RepoGroupKind.Favorites, RepoGroupName.FavoritesName);
+        }
+
+        return RepoGroupName.Sanitize(repo.GroupName) is { } group
+            ? (RepoGroupKind.Group, group)
+            : (RepoGroupKind.Ungrouped, RepoGroupName.UngroupedName);
+    }
+
+    /// <summary>
+    ///     One folder of a planned add.
+    /// </summary>
+    /// <param name="Path">The folder's path, as given.</param>
+    /// <param name="Listed">Whether the repo was listed when the add was planned.</param>
+    private sealed record PlannedFolder(string Path, bool Listed);
+
+    /// <summary>
+    ///     A planned add: its folders and the git executable to read them with.
+    /// </summary>
+    /// <param name="Folders">The distinct, non-blank folders in request order.</param>
+    /// <param name="GitExecutablePath">The git executable.</param>
+    private sealed record AddBatchPlan(IReadOnlyList<PlannedFolder> Folders, string GitExecutablePath);
+
+    /// <summary>
+    ///     One change a commit makes: a new repo (with the facts read for its card) or a listed repo
+    ///     moved into the group.
+    /// </summary>
+    /// <param name="NewRepo">The new entry, or <see langword="null"/> for a move.</param>
+    /// <param name="Cheap">The new card's facts, or <see langword="null"/> when not read.</param>
+    /// <param name="MovedCard">The card of the listed repo to move, or <see langword="null"/> for an
+    ///     add.</param>
+    private sealed record AddStep(RecentRepo? NewRepo, RepoCheapFacts? Cheap, RepoCardViewModel? MovedCard);
+
+    /// <summary>
+    ///     A prepared add: the outcomes it gives and the steps that carry them out.
+    /// </summary>
+    /// <param name="Target">The canonical group, or <see langword="null"/>.</param>
+    /// <param name="Outcomes">One outcome per folder, in request order.</param>
+    /// <param name="Steps">The changes, in request order.</param>
+    private sealed record AddBatchCommit(string? Target, IReadOnlyList<AddRepoOutcome> Outcomes, IReadOnlyList<AddStep> Steps)
+    {
+        /// <summary>
+        ///     Gets the outcomes when the save failed: every folder that would have been added or moved
+        ///     is <see cref="AddRepoResult.SaveFailed"/> with the reason; the others keep their outcome.
+        /// </summary>
+        /// <param name="problem">Why the settings could not be saved, safe to show.</param>
+        /// <returns>The outcomes.</returns>
+        public IReadOnlyList<AddRepoOutcome> ToSaveFailedOutcomes(string problem) =>
+        [
+            .. Outcomes.Select(outcome => outcome.Result is AddRepoResult.Added or AddRepoResult.MovedExisting
+                ? new AddRepoOutcome(outcome.Path, AddRepoResult.SaveFailed, problem)
+                : outcome)
+        ];
+    }
+
+    /// <summary>
+    ///     The adds that run one after the other under one progress operation and one Cancel.
+    /// </summary>
+    private sealed class AddQueueSession
+    {
+        /// <summary>
+        ///     Whether the session has ended.
+        /// </summary>
+        private bool _ended;
+
+        /// <summary>
+        ///     Initializes a session and shows its progress operation.
+        /// </summary>
+        /// <param name="owner">The view model whose strip shows it.</param>
+        public AddQueueSession(MainWindowViewModel owner)
+        {
+            Progress = owner.GlobalProgress.Begin("Adding repositories...", Cancel);
+        }
+
+        /// <summary>
+        ///     Gets the cancellation shared by the session's adds.
+        /// </summary>
+        public CancellationTokenSource Cancellation { get; } = new();
+
+        /// <summary>
+        ///     Gets the session's progress operation.
+        /// </summary>
+        public GlobalProgressOperation Progress { get; }
+
+        /// <summary>
+        ///     Gets or sets how many of the session's adds have not ended yet.
+        /// </summary>
+        public int Pending { get; set; }
+
+        /// <summary>
+        ///     Cancels the session's adds (once it has ended, nothing is left to cancel).
+        /// </summary>
+        public void Cancel()
+        {
+            if (!_ended)
+            {
+                Cancellation.Cancel();
+            }
+        }
+
+        /// <summary>
+        ///     Ends the session: removes its progress operation and releases its cancellation.
+        /// </summary>
+        public void End()
+        {
+            if (_ended)
+            {
+                return;
+            }
+
+            _ended = true;
+            Progress.Dispose();
+            Cancellation.Dispose();
+        }
+    }
+
+    /// <summary>
+    ///     An <see cref="IProgress{T}"/> that reports on the calling thread at once, unlike
+    ///     <see cref="Progress{T}"/>, which posts; the add reports from its UI-thread continuations, so
+    ///     the strip is updated in step with the work.
+    /// </summary>
+    /// <typeparam name="T">The report type.</typeparam>
+    /// <param name="report">What to do with each report.</param>
+    private sealed class ImmediateProgress<T>(Action<T> report) : IProgress<T>
+    {
+        /// <inheritdoc />
+        public void Report(T value) => report(value);
     }
 
     /// <summary>
@@ -829,99 +1716,6 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         string.Equals(NormalizeRepoPath(first), NormalizeRepoPath(second), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    ///     The shared add: checks the folder, then either adds a new entry (in
-    ///     <paramref name="groupName"/> when given) or, for a repo already listed, moves its entry
-    ///     into <paramref name="groupName"/> when given.
-    /// </summary>
-    /// <remarks>
-    ///     The checks, in order: a path that is not a folder is <see cref="AddRepoResult.Missing"/>, or
-    ///     <see cref="AddRepoResult.NotAGitRepository"/> when it is a file (a dropped file); a repo
-    ///     that is already listed (see <see cref="IsSameRepoPath"/>) is
-    ///     <see cref="AddRepoResult.AlreadyListed"/> or moved into the group -
-    ///     it is never subject to the Git check, so the repos already in the list are left as they are;
-    ///     a folder that is not the top folder of a Git repository (see
-    ///     <see cref="GitClient.IsRepositoryRoot"/>) is <see cref="AddRepoResult.NotAGitRepository"/>.
-    ///     A new entry stores the path in its normalized form (see <see cref="NormalizeRepoPath"/>).
-    /// </remarks>
-    /// <param name="repoPath">Absolute path to the repository root.</param>
-    /// <param name="groupName">The already validated and canonical group to put the repo in, or
-    ///     <see langword="null"/> for none (the top-bar add).</param>
-    /// <returns>What became of the repo; never <see cref="AddRepoResult.SaveFailed"/> (a failed save
-    ///     throws).</returns>
-    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
-    ///     nothing was added.</exception>
-    private AddRepoResult AddRepoCore(string repoPath, string? groupName)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repoPath);
-
-        if (!Directory.Exists(repoPath))
-        {
-            return File.Exists(repoPath) ? AddRepoResult.NotAGitRepository : AddRepoResult.Missing;
-        }
-
-        // A repo that is already listed is not added twice, however either path is written; the
-        // group flow moves it instead
-        var existing = RepoCards.FirstOrDefault(card => IsSameRepoPath(card.RepoPath, repoPath));
-        if (existing is not null || _settings.RecentRepos.Any(r => IsSameRepoPath(r.Path, repoPath)))
-        {
-            if (groupName is null || existing is null)
-            {
-                return AddRepoResult.AlreadyListed;
-            }
-
-            // A failed save is reported through SettingsSaveFailed by the card, and nothing moved
-            if (!existing.MoveToGroup(groupName))
-            {
-                return AddRepoResult.MoveFailed;
-            }
-
-            // The repo joins the group at the bottom, like a repo added to it; a failure to save
-            // that place is reported, and the repo stays in the group where it was
-            PlaceCard(existing, null, false);
-            return AddRepoResult.MovedExisting;
-        }
-
-        // Only the top folder of a Git repository can be tracked (synced, pulled, launched in)
-        if (!GitClient.IsRepositoryRoot(repoPath))
-        {
-            return AddRepoResult.NotAGitRepository;
-        }
-
-        var pin = TryLoadPin(repoPath);
-        var recentRepo = new RecentRepo
-        {
-            Path = NormalizeRepoPath(repoPath),
-            GroupName = groupName,
-            PinnedPackageName = pin?.PackageName,
-            PinnedPackageVersion = pin?.Version
-        };
-
-        // Prepare the card first, then persist; only a successful save puts the repo in the live
-        // list, so a failed save leaves the list, the cards and the file exactly as they were
-        var card = CreateCard(recentRepo);
-        card.RefreshCheap();
-        card.RefreshDirtyStatus();
-        try
-        {
-            CommitSettingsChange(settings => settings.RecentRepos.Add(recentRepo));
-        }
-        catch (InvalidOperationException)
-        {
-            card.Retire();
-            throw;
-        }
-
-        AttachCardEvents(card);
-        RepoCards.Add(card);
-        UpdateDisplayedRepoCards();
-
-        // The new card's upgrade check reads its package source, so it runs in the background
-        // rather than delaying the card's appearance
-        BeginSingleCardUpgradeRefresh(card);
-        return AddRepoResult.Added;
-    }
-
-    /// <summary>
     ///     Removes a repo card from the recent-repos list, unconditionally, and persists the
     ///     updated settings.
     /// </summary>
@@ -959,20 +1753,26 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     <see cref="PackageVersionCache"/> for each package source that was changed or removed
     ///     (cached results for an edited source would otherwise be silently reused; sources that
     ///     did not change keep theirs), and
-    ///     re-runs each card's cheap refresh (pin file, branch, committed-files badge, whether the
-    ///     pin's source is configured) so those properties reflect any changed package-source/git-path
-    ///     settings immediately, then starts the background upgrade-availability check
+    ///     starts re-running each card's cheap refresh (pin file, branch, committed-files badge,
+    ///     whether the pin's source is configured) in the background so those properties reflect any
+    ///     changed package-source/git-path settings, then the background upgrade-availability check
     ///     (<see cref="BeginUpgradeRefresh()"/>) against the new sources.
     /// </summary>
     /// <remarks>
-    ///     Deliberately uses <see cref="RepoCardViewModel.RefreshCheap"/> rather than a full
+    ///     The save and the adoption happen before this returns; the card refresh runs in the
+    ///     background (see <see cref="RefreshCardsAfterSettingsAsync"/>), reading git off the UI
+    ///     thread and showing "Refreshing repositories..." in <see cref="GlobalProgress"/>, so the
+    ///     window stays usable however many repos are listed. <see cref="PendingRefresh"/> (and
+    ///     <see cref="RecheckAfterSettingsClosed"/> after a save) completes when the refresh and the
+    ///     upgrade check that follows it have finished.
+    ///     Deliberately uses <see cref="RepoCardViewModel.RefreshCheapInBackgroundAsync"/> rather than a full
     ///     <see cref="RepoCardViewModel.RefreshAsync"/> for every card: <c>GitClient</c>'s
-    ///     synchronous, un-timed <c>git status</c> call means refreshing every tracked repo's
-    ///     dirty status on the UI thread could freeze the window for a large or slow/networked
+    ///     un-timed <c>git status</c> call means refreshing every tracked repo's
+    ///     dirty status could take long for a large or slow/networked
     ///     repo list. A fresh Git status check is instead requested only for the cards that
     ///     actually need one - those that reappeared (were missing, now present) since they were
     ///     last checked (unlike a newly-constructed card, an already-realized card's one-time
-    ///     lazy <see cref="RepoCardViewModel.RefreshDirtyStatus"/> trigger in
+    ///     lazy <see cref="RepoCardViewModel.RefreshDirtyStatusInBackgroundAsync"/> trigger in
     ///     <c>MainWindow.axaml.cs</c> will not fire again for it), or every present card when
     ///     <see cref="AppSettings.GitExecutablePath"/> itself changed - a previously-cached
     ///     <see cref="RepoCardViewModel.CanPull"/>/<see cref="RepoCardViewModel.PullTooltip"/>
@@ -1016,7 +1816,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         updated.CollapsedGroups = _settings.CollapsedGroups;
         updated.GroupColors = _settings.GroupColors;
         updated.GroupOrder = _settings.GroupOrder;
-        SettingsStore.Save(updated, _configDirectory);
+        _saveSettings(updated);
         _settings = updated;
         OnPropertyChanged(nameof(Settings));
 
@@ -1025,21 +1825,105 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _applyTheme?.Invoke(updated.Theme);
 
         InvalidateChangedSources(previousSources, updated.GetEffectiveSources());
-        foreach (var card in RepoCards)
+
+        // Every check still running was started for the previous settings: this refresh, and the
+        // upgrade check it starts when it is done, supersede them
+        var previousRefresh = _refreshCancellation;
+        var cancellation = new CancellationTokenSource();
+        _refreshCancellation = cancellation;
+        if (previousRefresh is not null)
         {
-            var wasMissing = card.IsMissing;
-            card.RefreshCheap();
-            if ((wasMissing && !card.IsMissing) || (gitExecutablePathChanged && !card.IsMissing))
+            previousRefresh.Cancel();
+            previousRefresh.Dispose();
+        }
+
+        CancelPeriodicRecheck();
+
+        // The cards are refreshed in the background (git runs for each), showing progress; the
+        // upgrade check against the new sources follows
+        var generation = ++_settingsRefreshGeneration;
+        PendingRefresh = RefreshCardsAfterSettingsAsync(generation, gitExecutablePathChanged, cancellation.Token);
+    }
+
+    /// <summary>
+    ///     Refreshes every card after the settings were saved - its cheap checks and, where needed, its
+    ///     working-tree check - in the background with progress in <see cref="GlobalProgress"/>, then
+    ///     rebuilds the list once and starts the upgrade check against the new sources.
+    /// </summary>
+    /// <remarks>
+    ///     Each card reads the disk and git off the UI thread (see
+    ///     <see cref="RepoCardViewModel.RefreshCheapInBackgroundAsync"/>), at most
+    ///     <see cref="MaxConcurrentFolderInspections"/> at a time, so the window stays usable however
+    ///     many repos are listed; the strip shows "Refreshing repositories..." with the count and has
+    ///     no Cancel (the refresh only reads). A card whose folder came back, or every present card when
+    ///     the git executable changed, also gets a fresh working-tree check (see
+    ///     <see cref="ApplySettings"/>). Counted as a launch-style check while it runs, so the periodic
+    ///     round does not start meanwhile. A newer <see cref="ApplySettings"/> supersedes it: the
+    ///     superseded one neither rebuilds the list nor starts the upgrade check (the card-level
+    ///     generations already make the newest read win). <see cref="Dispose"/> cancels it.
+    /// </remarks>
+    /// <param name="generation">This refresh's number (see <see cref="_settingsRefreshGeneration"/>).</param>
+    /// <param name="gitExecutablePathChanged">Whether the git executable setting changed.</param>
+    /// <param name="cancellationToken">Cancels the reads that have not started.</param>
+    /// <returns>A task that completes when the cards were refreshed and the upgrade check that
+    ///     follows has finished; cancellation is not an error.</returns>
+    private async Task RefreshCardsAfterSettingsAsync(
+        int generation, bool gitExecutablePathChanged, CancellationToken cancellationToken)
+    {
+        var cards = RepoCards.ToList();
+        Interlocked.Increment(ref _launchChecksInFlight);
+        var operation = cards.Count == 0 ? null : GlobalProgress.Begin("Refreshing repositories...");
+        var completed = 0;
+        try
+        {
+            operation?.Report(0, cards.Count, "Refreshing repositories...");
+            using var throttle = new SemaphoreSlim(MaxConcurrentFolderInspections);
+            var refreshes = cards.Select(async card =>
             {
-                card.RefreshDirtyStatus();
+                await throttle.WaitAsync(cancellationToken);
+                try
+                {
+                    var wasMissing = card.IsMissing;
+                    await card.RefreshCheapInBackgroundAsync(cancellationToken);
+                    if (!card.IsMissing && (wasMissing || gitExecutablePathChanged))
+                    {
+                        await card.RefreshDirtyStatusInBackgroundAsync();
+                    }
+                }
+                finally
+                {
+                    throttle.Release();
+                }
+
+                operation?.Report(Interlocked.Increment(ref completed), cards.Count, "Refreshing repositories...");
+            }).ToList();
+
+            try
+            {
+                await Task.WhenAll(refreshes);
             }
+            catch (OperationCanceledException)
+            {
+                // The window closed: nothing more to do
+                return;
+            }
+        }
+        finally
+        {
+            operation?.Dispose();
+            Interlocked.Decrement(ref _launchChecksInFlight);
+        }
+
+        // A newer save took over (it rebuilds and checks itself), or the window closed
+        if (_disposed || generation != _settingsRefreshGeneration)
+        {
+            return;
         }
 
         UpdateDisplayedRepoCards();
 
-        // Re-check upgrades against the new sources in the background; any check still running
-        // for the previous settings is cancelled
-        BeginUpgradeRefresh();
+        // Re-check upgrades against the new sources in the background
+        await BeginUpgradeRefresh();
     }
 
     /// <summary>
@@ -1066,21 +1950,21 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public Task BeginUpgradeRefresh() => StartUpgradeRefresh([.. RepoCards]);
 
     /// <summary>
-    ///     Starts the background upgrade check for a single card (a repo that was just added),
-    ///     without canceling the check of the other cards.
+    ///     Starts the background upgrade check for the cards of repos that were just added, without
+    ///     canceling the check of the other cards.
     /// </summary>
-    /// <param name="card">The card to check.</param>
-    private void BeginSingleCardUpgradeRefresh(RepoCardViewModel card)
+    /// <param name="cards">The cards to check; nothing starts for none.</param>
+    private void BeginCardsUpgradeRefresh(IReadOnlyList<RepoCardViewModel> cards)
     {
         // A disposed view model (the window closed) starts no check
-        if (_disposed)
+        if (_disposed || cards.Count == 0)
         {
             return;
         }
 
         var token = _refreshCancellation?.Token ?? CancellationToken.None;
         var previous = PendingRefresh;
-        PendingRefresh = Task.WhenAll(previous, CheckUpgradesAsync([card], token));
+        PendingRefresh = Task.WhenAll(previous, CheckUpgradesAsync(cards, token));
     }
 
     /// <summary>
@@ -1378,8 +2262,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     ///     Stops the periodic upgrade re-check (see <see cref="StartPeriodicUpgradeRecheck"/>) and
-    ///     cancels the round that is running and the background upgrade check (launch, settings
-    ///     change, added repo) that is running; called when the main window closes.
+    ///     cancels the round that is running, the background upgrade check (launch, settings
+    ///     change, added repo) and card refresh that are running, and the adds that have not saved
+    ///     yet; called when the main window closes.
     /// </summary>
     public void Dispose()
     {
@@ -1392,6 +2277,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _recheckTimer?.Dispose();
         _recheckTimer = null;
         CancelPeriodicRecheck();
+
+        // Adds that have not saved yet stop: nothing more is added after the window closed
+        CancelAddRepos();
 
         // The launch-time check must not keep waiting for a slow source (or publish to cards) after
         // the window closed
@@ -1543,7 +2431,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </remarks>
     /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be
     ///     written.</exception>
-    public void SaveSettings() => SettingsStore.Save(_settings, _configDirectory);
+    public void SaveSettings() => _saveSettings(_settings);
 
     /// <summary>
     ///     Raised when a change the user made in the main window (marking a favorite, choosing a group
@@ -1591,7 +2479,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         candidate.RepairGroupSettings();
 
         // Save the candidate; an exception here leaves the live settings as they were
-        SettingsStore.Save(candidate, _configDirectory);
+        _saveSettings(candidate);
 
         // Saved: adopt the change
         change(_settings);
@@ -2404,7 +3292,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     new order.
     /// </summary>
     /// <remarks>
-    ///     The section is the one the card is listed in (see <see cref="GetSectionOf"/>); other
+    ///     The section is the one the card is listed in (see <see cref="GetSectionOf(RepoCardViewModel)"/>); other
     ///     sections' cards, which may be interleaved with it in the stored list, keep their relative
     ///     order. Nothing changes (and nothing is saved) when the move is not allowed.
     /// </remarks>
@@ -2684,7 +3572,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             commitChange: CommitRepoChange,
             registryFactory: _registryFactory,
             processStarter: _processStarter,
-            shellDetector: _shellDetector);
+            shellDetector: _shellDetector,
+            backgroundWork: _backgroundWork);
 
     /// <summary>
     ///     Creates the provider that the settings window's "Test connection" lists versions
@@ -2712,23 +3601,5 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     Interactive: true,
                     EnforceMinimumGitVersion: true))
             : new NuGetSourceProvider(definition, RepoCardViewModel.GetNuGetRootBase(_startupOptions), Credentials);
-
-    /// <summary>
-    ///     Attempts to load the pin file for a newly-added repo, tolerating a repo that has never
-    ///     been synced (no pin file yet).
-    /// </summary>
-    /// <param name="repoPath">Absolute path to the repository root.</param>
-    /// <returns>The loaded pin, or <see langword="null"/> if none exists or it fails to load.</returns>
-    private static RepoPin? TryLoadPin(string repoPath)
-    {
-        try
-        {
-            return RepoPinStore.Load(repoPath);
-        }
-        catch (InvalidOperationException)
-        {
-            return null;
-        }
-    }
 }
 

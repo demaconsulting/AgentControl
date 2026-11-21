@@ -31,6 +31,7 @@ input-files:
   - docs/verification/agent-control/launcher-ui/repo-group-header-view-model.md
   - docs/verification/agent-control/launcher-ui/group-name-view-model.md
   - docs/verification/agent-control/launcher-ui/dialog-behavior.md
+  - docs/verification/agent-control/launcher-ui/global-progress-view-model.md
   - docs/verification/agent-control/agent-package-management.md
   - docs/verification/agent-control/agent-package-management/package-source.md
   - docs/verification/agent-control/agent-package-management/package-source-registry.md

@@ -29,6 +29,7 @@
                 Background="{DynamicResource AppBarBackground}"
                 BorderBrush="{DynamicResource SurfaceDivider}"
                 BorderThickness="0,0,0,1"
+                DragDrop.AllowDrop="True"
                 Padding="12,8">
         <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
             <!-- The logo reuses the About window's treatment (white backing panel so the icon's
@@ -87,6 +88,57 @@
         </Grid>
         </Border>
 
+        <!-- Global progress strip, directly under the app bar: a thin bar and one compact line of
+             status text (with Cancel when the operation can be stopped) shown only while a bulk
+             operation runs - adding several repositories, or refreshing the cards after Settings
+             were saved. Fully collapsed (no space reserved) when idle, so the idle layout is
+             unchanged. The bar is indeterminate until the amount of work is known. -->
+        <Border DockPanel.Dock="Top"
+                Name="GlobalProgressStrip"
+                AutomationProperties.AutomationId="GlobalProgressStrip"
+                IsVisible="{Binding GlobalProgress.IsActive}"
+                Background="{DynamicResource GlobalProgressStripBackground}"
+                BorderBrush="{DynamicResource SurfaceDivider}"
+                BorderThickness="0,0,0,1"
+                Padding="12,0,12,2">
+            <StackPanel Spacing="2">
+                <ProgressBar Name="GlobalProgressBar"
+                             AutomationProperties.AutomationId="GlobalProgressBar"
+                             AutomationProperties.Name="{Binding GlobalProgress.AccessibleName}"
+                             IsIndeterminate="{Binding GlobalProgress.IsIndeterminate}"
+                             Minimum="0"
+                             Maximum="{Binding GlobalProgress.Maximum}"
+                             Value="{Binding GlobalProgress.Value}"
+                             Foreground="{DynamicResource GlobalProgressForeground}"
+                             Background="{DynamicResource GlobalProgressTrack}"
+                             MinHeight="3" Height="3"
+                             Margin="-12,0,-12,0"
+                             CornerRadius="0" />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBlock Grid.Column="0"
+                               Name="GlobalProgressText"
+                               AutomationProperties.AutomationId="GlobalProgressText"
+                               Text="{Binding GlobalProgress.Text}"
+                               Foreground="{DynamicResource GlobalProgressTextForeground}"
+                               FontSize="11"
+                               TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center" />
+                    <Button Grid.Column="1"
+                            Name="GlobalProgressCancelButton"
+                            AutomationProperties.AutomationId="GlobalProgressCancelButton"
+                            AutomationProperties.Name="Cancel adding repositories"
+                            Command="{Binding GlobalProgress.CancelCommand}"
+                            IsVisible="{Binding GlobalProgress.CanCancel}"
+                            ToolTip.Tip="Stop adding repositories; nothing more is added"
+                            Padding="8,1" FontSize="11">
+                        <StackPanel Orientation="Horizontal" Spacing="3">
+                            <materialIcons:MaterialIcon Kind="Cancel" Width="12" Height="12" />
+                            <TextBlock Text="Cancel" FontSize="11" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+            </StackPanel>
+        </Border>
         <!-- Recent-repos list, with an empty-state placeholder shown instead when there is
              nothing to display (no repos added yet, or the filter matches none). The whole area
              accepts folders dragged from the file manager (see RepoListArea_Drop); the overlay

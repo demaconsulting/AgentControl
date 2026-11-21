@@ -16,9 +16,14 @@ not changed since the last check.
 keyed by a normalized repo path and the `HEAD` commit hash at the time the result was
 recorded.
 
+**\_lock**: `Lock` — guards `_cache`, so lookups, stores and invalidations made from different threads at the same
+time never corrupt the dictionary or observe it half-updated.
+
 This cache is in-memory only (no persistence): the `HEAD`-hash key is naturally invalidated by
-a process restart or a new commit. Not thread-safe; used only from the UI thread, consistent
-with every other view-model-adjacent class in this codebase.
+a process restart or a new commit. Safe for concurrent use: a card's cheap refresh reads git, and consults the cache,
+on a worker thread (so the window stays responsive while many repos are added or refreshed) while the UI thread may
+consult or invalidate the same cache, so every member normalizes its key outside the lock and then accesses the
+dictionary inside it (`AgentControl-CommittedAgentFilesCache-ConcurrentUse`).
 
 #### Key Methods
 
@@ -43,10 +48,12 @@ rather than silently producing duplicate, inconsistent cache entries.
 
 #### Dependencies
 
-- **.NET BCL** — `System.Collections.Generic.Dictionary`, `System.IO.Path`.
+- **.NET BCL** — `System.Collections.Generic.Dictionary`, `System.IO.Path`, `System.Threading.Lock`.
 
 #### Callers
 
-- **RepoCardViewModel.RefreshBranchAndCommittedFiles** — consults `TryGetCached` after
-  resolving the current `HEAD` hash via `GitClient.GetHeadCommitHash`, and calls `Set` on a
-  cache miss after invoking `GitClient.HasCommittedAgentFiles`.
+- **RepoCardViewModel** — `ReadCheapFacts` (on a worker thread for a background cheap refresh, or on the UI thread for
+  the synchronous one) consults `TryGetCached` after resolving the current `HEAD` hash via
+  `GitClient.GetHeadCommitHash` and calls `Set` on a cache miss after invoking `GitClient.HasCommittedAgentFiles`;
+  `ApplyBranchFacts` (UI thread) stores the answer it applies, and `RefreshBranchAndCommittedFiles` consults the cache
+  the same way for a direct re-read.

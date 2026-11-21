@@ -4,7 +4,9 @@
 
 `CommittedAgentFilesCache` is verified with unit tests defined in
 `CommittedAgentFilesCacheTests.cs`. Every test operates purely on in-memory repo-path/hash
-keys and boolean values; no filesystem or git dependency is involved.
+keys and boolean values; no filesystem or git dependency is involved. The concurrent-use test runs the stores, lookups
+and invalidations on thread-pool tasks started together and checks every value afterwards; it asserts no timing or
+thread identity.
 
 #### Test Environment
 
@@ -18,6 +20,7 @@ N/A - standard test environment.
   stale or default value.
 - Invalidating one repo path does not affect any other cached entry.
 - Setting the same key twice overwrites the previous value.
+- Values stored, looked up and invalidated from several threads at once are all kept and returned as stored.
 
 #### Test Scenarios
 
@@ -36,3 +39,9 @@ intact; setting the same key twice overwrites the previously cached value. This 
 tested by `CommittedAgentFilesCache_Invalidate_ClearsOnlyThatRepoPath` and
 `CommittedAgentFilesCache_SetSameKeyTwice_OverwritesPreviousValue`, covering
 `AgentControl-CommittedAgentFilesCache-Cache`.
+
+**CommittedAgentFilesCache_ConcurrentUse_EveryStoredValueKept**: Sixty-four tasks started together each store a value
+for its own repo and `HEAD`, invalidate an unrelated repo and read its value back; every task finds its value as
+stored, and every value is still there afterwards. This scenario is tested by
+`CommittedAgentFilesCache_ConcurrentSetAndGet_ReturnsEveryStoredValue`, covering
+`AgentControl-CommittedAgentFilesCache-ConcurrentUse`.

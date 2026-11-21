@@ -386,7 +386,7 @@ public sealed class RepoGroupWindowTests : IDisposable
     ///     that group, and that canceling the picker changes nothing.
     /// </summary>
     [Fact]
-    public void MainWindow_HeaderMenuAddRepository_PickedFolderJoinsGroup_CancelChangesNothing() => HeadlessTestApp.Run(() =>
+    public void MainWindow_HeaderMenuAddRepository_PickedFolderJoinsGroup_CancelChangesNothing() => HeadlessTestApp.RunAsync(async () =>
     {
         // Arrange: a Work group and an ungrouped repo; the picker is answered by the test
         var (window, viewModel) = CreateWindow(("a", "Work", false), ("c", null, false));
@@ -398,6 +398,7 @@ public sealed class RepoGroupWindowTests : IDisposable
         {
             // Act: cancel the picker
             ClickHeaderAddRepository(window);
+            await RepoReorderWindowTests.SettleAddsAsync(viewModel);
 
             // Assert: nothing changed and no message appeared
             Assert.Equal(2, viewModel.RepoCards.Count);
@@ -406,6 +407,7 @@ public sealed class RepoGroupWindowTests : IDisposable
             // Act: pick a folder
             answer = [fresh];
             ClickHeaderAddRepository(window);
+            await RepoReorderWindowTests.SettleAddsAsync(viewModel);
 
             // Assert: a new card, in Work, shown under the Work header
             Assert.Equal(3, viewModel.RepoCards.Count);
@@ -424,7 +426,7 @@ public sealed class RepoGroupWindowTests : IDisposable
     ///     tells the user it was already in the list, rather than adding a second entry.
     /// </summary>
     [Fact]
-    public void MainWindow_HeaderMenuAddRepository_AlreadyListedRepo_MovesIntoGroupAndSaysSo() => HeadlessTestApp.Run(() =>
+    public void MainWindow_HeaderMenuAddRepository_AlreadyListedRepo_MovesIntoGroupAndSaysSo() => HeadlessTestApp.RunAsync(async () =>
     {
         // Arrange
         var (window, viewModel) = CreateWindow(("a", "Work", false), ("c", null, false));
@@ -435,6 +437,7 @@ public sealed class RepoGroupWindowTests : IDisposable
         {
             // Act
             ClickHeaderAddRepository(window);
+            await RepoReorderWindowTests.SettleAddsAsync(viewModel);
 
             // Assert: still two repos, "c" is in Work, and a message says it was already listed
             Assert.Equal(2, viewModel.RepoCards.Count);
@@ -453,7 +456,7 @@ public sealed class RepoGroupWindowTests : IDisposable
     ///     one that is already listed with a message.
     /// </summary>
     [Fact]
-    public void MainWindow_AddRepoButton_UsesSamePickerAndAddsUngrouped() => HeadlessTestApp.Run(() =>
+    public void MainWindow_AddRepoButton_UsesSamePickerAndAddsUngrouped() => HeadlessTestApp.RunAsync(async () =>
     {
         // Arrange
         var (window, viewModel) = CreateWindow(("a", "Work", false));
@@ -468,6 +471,7 @@ public sealed class RepoGroupWindowTests : IDisposable
             // Act: a new folder
             addButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Dispatcher.UIThread.RunJobs();
+            await RepoReorderWindowTests.SettleAddsAsync(viewModel);
 
             // Assert: added, in no group
             Assert.Null(viewModel.RepoCards.Single(card => card.RepoName == "fresh").GroupName);
@@ -477,6 +481,7 @@ public sealed class RepoGroupWindowTests : IDisposable
             answer = [existing];
             addButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Dispatcher.UIThread.RunJobs();
+            await RepoReorderWindowTests.SettleAddsAsync(viewModel);
 
             // Assert: refused with a message, and still in its group
             Assert.Equal(2, viewModel.RepoCards.Count);
@@ -802,7 +807,7 @@ public sealed class RepoGroupWindowTests : IDisposable
     ///     tells the user in one message which folders were not added and why.
     /// </summary>
     [Fact]
-    public void MainWindow_AddRepoButton_SeveralFoldersPicked_AddsEachAndSummarizesTheRest() => HeadlessTestApp.Run(() =>
+    public void MainWindow_AddRepoButton_SeveralFoldersPicked_AddsEachAndSummarizesTheRest() => HeadlessTestApp.RunAsync(async () =>
     {
         // Arrange: two new repositories, a plain folder and a repo that is already listed
         var (window, viewModel) = CreateWindow(("a", "Work", false));
@@ -818,6 +823,7 @@ public sealed class RepoGroupWindowTests : IDisposable
             // Act
             window.FindControl<Button>("AddRepoButton")!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Dispatcher.UIThread.RunJobs();
+            await RepoReorderWindowTests.SettleAddsAsync(viewModel);
 
             // Assert: both repositories added (ungrouped), and one message that names the others
             Assert.Equal(["a", "first", "second"], viewModel.RepoCards.Select(card => card.RepoName));
@@ -840,7 +846,7 @@ public sealed class RepoGroupWindowTests : IDisposable
     ///     every repository in that group, silently when all were added.
     /// </summary>
     [Fact]
-    public void MainWindow_HeaderMenuAddRepository_SeveralFolders_JoinTheGroup() => HeadlessTestApp.Run(() =>
+    public void MainWindow_HeaderMenuAddRepository_SeveralFolders_JoinTheGroup() => HeadlessTestApp.RunAsync(async () =>
     {
         // Arrange
         var (window, viewModel) = CreateWindow(("a", "Work", false), ("loose", null, false));
@@ -852,6 +858,7 @@ public sealed class RepoGroupWindowTests : IDisposable
         {
             // Act
             ClickHeaderAddRepository(window);
+            await RepoReorderWindowTests.SettleAddsAsync(viewModel);
 
             // Assert
             Assert.Equal("Work", viewModel.RepoCards.Single(card => card.RepoName == "first").GroupName);
@@ -874,7 +881,7 @@ public sealed class RepoGroupWindowTests : IDisposable
     ///     that says why, and nothing is added.
     /// </summary>
     [Fact]
-    public void MainWindow_AddRepoButton_FolderThatIsNotAGitRepository_IsRefusedWithAMessage() => HeadlessTestApp.Run(() =>
+    public void MainWindow_AddRepoButton_FolderThatIsNotAGitRepository_IsRefusedWithAMessage() => HeadlessTestApp.RunAsync(async () =>
     {
         // Arrange
         var (window, viewModel) = CreateWindow(("a", null, false));
@@ -887,6 +894,7 @@ public sealed class RepoGroupWindowTests : IDisposable
             // Act
             window.FindControl<Button>("AddRepoButton")!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Dispatcher.UIThread.RunJobs();
+            await RepoReorderWindowTests.SettleAddsAsync(viewModel);
 
             // Assert
             Assert.Single(viewModel.RepoCards);
@@ -907,7 +915,7 @@ public sealed class RepoGroupWindowTests : IDisposable
     ///     with a message that says why, and nothing is added.
     /// </summary>
     [Fact]
-    public void MainWindow_AddRepoButton_FolderThatDoesNotExist_IsRefusedWithAMessage() => HeadlessTestApp.Run(() =>
+    public void MainWindow_AddRepoButton_FolderThatDoesNotExist_IsRefusedWithAMessage() => HeadlessTestApp.RunAsync(async () =>
     {
         // Arrange
         var (window, viewModel) = CreateWindow(("a", null, false));
@@ -919,6 +927,7 @@ public sealed class RepoGroupWindowTests : IDisposable
             // Act
             window.FindControl<Button>("AddRepoButton")!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Dispatcher.UIThread.RunJobs();
+            await RepoReorderWindowTests.SettleAddsAsync(viewModel);
 
             // Assert
             Assert.Single(viewModel.RepoCards);
@@ -1015,7 +1024,15 @@ public sealed class RepoGroupWindowTests : IDisposable
     {
         foreach (var path in _tempPaths.Where(Directory.Exists))
         {
-            Directory.Delete(path, recursive: true);
+            try
+            {
+                Directory.Delete(path, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A card's background git check may still have the folder as its working directory
+                // when the window closes; leaving a temporary folder behind is harmless
+            }
         }
     }
 

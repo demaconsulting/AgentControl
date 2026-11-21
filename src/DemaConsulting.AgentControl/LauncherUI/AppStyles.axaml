@@ -39,6 +39,11 @@
                     <SolidColorBrush x:Key="GroupHeaderForeground" Color="#E6E6EA" />
                     <SolidColorBrush x:Key="SurfaceDivider" Color="#3A3A42" />
                     <SolidColorBrush x:Key="AppBarBackground" Color="#1B1B1F" />
+                    <!-- Global progress strip under the app bar: bar, its track, the strip and its status text -->
+                    <SolidColorBrush x:Key="GlobalProgressForeground" Color="#7CB7FF" />
+                    <SolidColorBrush x:Key="GlobalProgressTrack" Color="#2A2A31" />
+                    <SolidColorBrush x:Key="GlobalProgressStripBackground" Color="#1B1B1F" />
+                    <SolidColorBrush x:Key="GlobalProgressTextForeground" Color="#E6E6EA" />
                     <SolidColorBrush x:Key="ErrorForeground" Color="#FF8A80" />
                     <SolidColorBrush x:Key="WarningForeground" Color="#F2C14E" />
                     <SolidColorBrush x:Key="SuccessForeground" Color="#56D364" />
@@ -181,6 +186,11 @@
                     <SolidColorBrush x:Key="GroupHeaderForeground" Color="#2B2B30" />
                     <SolidColorBrush x:Key="SurfaceDivider" Color="#D0D0D8" />
                     <SolidColorBrush x:Key="AppBarBackground" Color="#FFFFFF" />
+                    <!-- Global progress strip under the app bar: bar, its track, the strip and its status text -->
+                    <SolidColorBrush x:Key="GlobalProgressForeground" Color="#0A5FC4" />
+                    <SolidColorBrush x:Key="GlobalProgressTrack" Color="#D6DBE4" />
+                    <SolidColorBrush x:Key="GlobalProgressStripBackground" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="GlobalProgressTextForeground" Color="#2B2B30" />
                     <SolidColorBrush x:Key="ErrorForeground" Color="#B42318" />
                     <SolidColorBrush x:Key="WarningForeground" Color="#7A4A00" />
                     <SolidColorBrush x:Key="SuccessForeground" Color="#17692D" />

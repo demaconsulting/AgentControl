@@ -1243,7 +1243,15 @@ public sealed class UsabilityWindowTests : IDisposable
     {
         foreach (var path in _tempPaths.Where(Directory.Exists))
         {
-            Directory.Delete(path, recursive: true);
+            try
+            {
+                Directory.Delete(path, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A card's background git check may still have the folder as its working directory
+                // when the window closes; leaving a temporary folder behind is harmless
+            }
         }
     }
 

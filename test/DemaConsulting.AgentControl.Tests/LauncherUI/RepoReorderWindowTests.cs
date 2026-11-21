@@ -1074,7 +1074,7 @@ public sealed class RepoReorderWindowTests : IDisposable
     ///     section, are added to that group (and no card is moved).
     /// </summary>
     [Fact]
-    public void MainWindow_DropFolders_OnGroupHeader_AddsThemToTheGroup() => HeadlessTestApp.Run(() =>
+    public void MainWindow_DropFolders_OnGroupHeader_AddsThemToTheGroup() => HeadlessTestApp.RunAsync(async () =>
     {
         // Arrange
         var (window, viewModel, _) = CreateWindow(Spec("w1", "Work"), Spec("h1", "Home"), Spec("u1"));
@@ -1086,7 +1086,9 @@ public sealed class RepoReorderWindowTests : IDisposable
         {
             // Act: two folders onto the Work header, one onto the Home card
             var effects = DropExternal(window, OnHeader(window, "Work"), first, second);
+            await SettleAddsAsync(viewModel);
             DropExternal(window, UpperHalf(window, "h1"), third);
+            await SettleAddsAsync(viewModel);
 
             // Assert
             Assert.Equal(DragDropEffects.Copy, effects);
@@ -1107,7 +1109,7 @@ public sealed class RepoReorderWindowTests : IDisposable
     ///     on a repo, not a place to add to) or on empty space in the list are added without a group.
     /// </summary>
     [Fact]
-    public void MainWindow_DropFolders_OnUngroupedFavoritesOrEmptySpace_AddsThemUngrouped() => HeadlessTestApp.Run(() =>
+    public void MainWindow_DropFolders_OnUngroupedFavoritesOrEmptySpace_AddsThemUngrouped() => HeadlessTestApp.RunAsync(async () =>
     {
         // Arrange
         var (window, viewModel, _) = CreateWindow(Spec("f", "Work", favorite: true), Spec("w1", "Work"), Spec("u1"));
@@ -1119,8 +1121,11 @@ public sealed class RepoReorderWindowTests : IDisposable
         {
             // Act
             DropExternal(window, OnHeader(window, "Ungrouped"), onUngrouped);
+            await SettleAddsAsync(viewModel);
             DropExternal(window, OnHeader(window, "Favorites"), onFavorites);
+            await SettleAddsAsync(viewModel);
             DropExternal(window, BelowTheRows(window), onEmpty);
+            await SettleAddsAsync(viewModel);
 
             // Assert: all three ungrouped, none a favorite
             foreach (var name in new[] { "dropUngrouped", "dropFavorites", "dropEmpty" })
@@ -1140,7 +1145,7 @@ public sealed class RepoReorderWindowTests : IDisposable
     ///     Test that folders dropped on the empty-state panel (no repo listed yet) are added.
     /// </summary>
     [Fact]
-    public void MainWindow_DropFolders_OnEmptyStatePanel_AddsThem() => HeadlessTestApp.Run(() =>
+    public void MainWindow_DropFolders_OnEmptyStatePanel_AddsThem() => HeadlessTestApp.RunAsync(async () =>
     {
         // Arrange: no repos, so the empty-state panel is shown
         var (window, viewModel, _) = CreateWindow();
@@ -1153,6 +1158,7 @@ public sealed class RepoReorderWindowTests : IDisposable
         {
             // Act
             var effects = DropExternal(window, center, repo);
+            await SettleAddsAsync(viewModel);
 
             // Assert
             Assert.Equal(DragDropEffects.Copy, effects);
@@ -1171,10 +1177,10 @@ public sealed class RepoReorderWindowTests : IDisposable
     ///     ungrouped, and that the feedback is cleared when the drag leaves and after the drop.
     /// </summary>
     [Fact]
-    public void MainWindow_DropFolders_ShowsCopyFeedbackAndClearsIt() => HeadlessTestApp.Run(() =>
+    public void MainWindow_DropFolders_ShowsCopyFeedbackAndClearsIt() => HeadlessTestApp.RunAsync(async () =>
     {
         // Arrange
-        var (window, _, _) = CreateWindow(Spec("w1", "Work"), Spec("u1"));
+        var (window, viewModel, _) = CreateWindow(Spec("w1", "Work"), Spec("u1"));
         var transfer = CreateFileTransfer(window, CreateRepoDirectory("fresh"));
         var area = window.FindControl<Grid>("RepoListArea")!;
         var overlay = window.FindControl<Border>("ExternalDropOverlay")!;
@@ -1201,6 +1207,7 @@ public sealed class RepoReorderWindowTests : IDisposable
             // A drop clears too
             RaiseExternal(window, transfer, RawDragEventType.DragEnter, OnHeader(window, "Work"));
             RaiseExternal(window, transfer, RawDragEventType.Drop, OnHeader(window, "Work"));
+            await SettleAddsAsync(viewModel);
             Assert.False(overlay.IsVisible);
             Assert.All(
                 window.FindControl<ListBox>("RepoListBox")!.GetVisualDescendants().OfType<ListBoxItem>(),
@@ -1218,7 +1225,7 @@ public sealed class RepoReorderWindowTests : IDisposable
     ///     moved by the drop.
     /// </summary>
     [Fact]
-    public void MainWindow_DropFile_IsSkippedAsNotARepository() => HeadlessTestApp.Run(() =>
+    public void MainWindow_DropFile_IsSkippedAsNotARepository() => HeadlessTestApp.RunAsync(async () =>
     {
         // Arrange
         var (window, viewModel, _) = CreateWindow(Spec("u1"), Spec("u2"));
@@ -1232,6 +1239,7 @@ public sealed class RepoReorderWindowTests : IDisposable
         {
             // Act: dropped on a card, which must not be taken for a card move
             DropExternal(window, UpperHalf(window, "u1"), file, repo, plain);
+            await SettleAddsAsync(viewModel);
 
             // Assert
             Assert.Equal(["u1", "u2", "fresh"], viewModel.RepoCards.Select(card => card.RepoName));
@@ -1247,6 +1255,359 @@ public sealed class RepoReorderWindowTests : IDisposable
             window.Close();
         }
     });
+
+    /// <summary>
+    ///     Test the auto-scroll step for pointer positions relative to the list's viewport: nothing in
+    ///     the middle or at a zone's inner boundary, slowly just inside a zone, faster deeper in and
+    ///     beyond the edge (over the app bar, below the list), capped, the nearer edge for a short
+    ///     viewport, and nothing for an unusable height or position.
+    /// </summary>
+    /// <param name="pointerY">The pointer's height relative to the viewport's top.</param>
+    /// <param name="viewportHeight">The viewport's height.</param>
+    /// <param name="expected">The expected step per tick (negative scrolls up).</param>
+    [Theory]
+    [InlineData(200.0, 400.0, 0.0)]
+    [InlineData(32.0, 400.0, 0.0)]
+    [InlineData(31.0, 400.0, -4.25)]
+    [InlineData(0.0, 400.0, -12.0)]
+    [InlineData(-96.0, 400.0, -36.0)]
+    [InlineData(-500.0, 400.0, -36.0)]
+    [InlineData(368.0, 400.0, 0.0)]
+    [InlineData(369.0, 400.0, 4.25)]
+    [InlineData(400.0, 400.0, 12.0)]
+    [InlineData(496.0, 400.0, 36.0)]
+    [InlineData(10.0, 40.0, -6.5)]
+    [InlineData(20.0, 40.0, 0.0)]
+    [InlineData(30.0, 40.0, 6.5)]
+    [InlineData(10.0, 0.0, 0.0)]
+    [InlineData(10.0, -5.0, 0.0)]
+    [InlineData(double.NaN, 400.0, 0.0)]
+    public void MainWindow_ComputeAutoScrollStep_ZonesAndDepth_GiveExpectedSteps(
+        double pointerY, double viewportHeight, double expected)
+    {
+        // Act
+        var step = MainWindow.ComputeAutoScrollStep(pointerY, viewportHeight);
+
+        // Assert
+        Assert.Equal(expected, step, 6);
+    }
+
+    /// <summary>
+    ///     Test that the auto-scroll speed never drops as the pointer goes deeper into a zone and beyond
+    ///     the edge, and never exceeds the cap.
+    /// </summary>
+    [Fact]
+    public void MainWindow_ComputeAutoScrollStep_DeeperIsNeverSlower()
+    {
+        // Arrange / Act: from the inner boundary of the top zone to far above the list
+        var steps = Enumerable.Range(0, 300)
+            .Select(offset => Math.Abs(MainWindow.ComputeAutoScrollStep(31.0 - offset, 400.0)))
+            .ToList();
+
+        // Assert
+        Assert.All(steps.Zip(steps.Skip(1)), pair => Assert.True(pair.Second >= pair.First));
+        Assert.All(steps, step => Assert.InRange(step, MainWindow.AutoScrollMinStep, MainWindow.AutoScrollMaxStep));
+    }
+
+    /// <summary>
+    ///     Test that a card held still near the bottom edge of the list keeps the list scrolling (every
+    ///     tick scrolls further, without a new drag event) and that the scroll stops when the drag
+    ///     leaves the list.
+    /// </summary>
+    [Fact]
+    public void MainWindow_DragCardNearListEdge_KeepsScrollingWhileHeldAndStopsOnLeave() =>
+        HeadlessTestApp.RunAsync(async () =>
+        {
+            // Arrange: a short window over a long list
+            var (window, _, _) = CreateShortWindow(16);
+
+            try
+            {
+                var drag = BeginDrag(window, "r00");
+                var scroller = ListScroller(window);
+                var nearBottom = NearListEdge(window, top: false);
+
+                // Act: the card is dragged near the bottom edge and held there
+                Raise(window, drag, RawDragEventType.DragEnter, nearBottom);
+                Raise(window, drag, RawDragEventType.DragOver, nearBottom);
+
+                // Assert: the auto-scroll runs, and each tick scrolls further down
+                Assert.True(window.IsAutoScrolling);
+                var before = scroller.Offset.Y;
+                window.AutoScrollTick();
+                var afterOne = scroller.Offset.Y;
+                window.AutoScrollTick();
+                Assert.True(afterOne > before, $"first tick: {before} -> {afterOne}");
+                Assert.True(scroller.Offset.Y > afterOne, $"second tick: {afterOne} -> {scroller.Offset.Y}");
+
+                // Act: the drag leaves the list (and the window)
+                Raise(window, drag, RawDragEventType.DragLeave, new Point(-50, -50));
+
+                // Assert
+                Assert.False(window.IsAutoScrolling);
+                await drag.CompleteAsync();
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+
+    /// <summary>
+    ///     Test that a group header held over the app bar (above the list) scrolls the list up, that a
+    ///     drop there is refused (the groups keep their order) and that the drop stops the scroll.
+    /// </summary>
+    [Fact]
+    public void MainWindow_DragGroupHeaderOverAppBar_ScrollsUpAndDropIsRefused() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a short window over many groups, scrolled to the bottom
+        var (window, viewModel, _) = CreateShortWindow(12, grouped: true);
+
+        try
+        {
+            var scroller = ListScroller(window);
+            scroller.Offset = new Vector(0, scroller.Extent.Height);
+            Dispatcher.UIThread.RunJobs();
+            var orderBefore = GroupOrder(viewModel);
+            var lastGroup = orderBefore[^1];
+            var drag = BeginGroupDrag(window, lastGroup);
+            var overAppBar = OverAppLogo(window);
+
+            // Act: the header is held over the app bar
+            var effects = RaiseAndGetEffects(window, drag, RawDragEventType.DragEnter, overAppBar);
+            var offsetBefore = scroller.Offset.Y;
+            window.AutoScrollTick();
+
+            // Assert: nothing can be dropped there, and the list scrolls up
+            Assert.Equal(DragDropEffects.None, effects);
+            Assert.True(window.IsAutoScrolling);
+            Assert.True(scroller.Offset.Y < offsetBefore, $"tick: {offsetBefore} -> {scroller.Offset.Y}");
+
+            // Act: dropped on the app bar
+            Raise(window, drag, RawDragEventType.Drop, overAppBar);
+            await drag.CompleteAsync();
+
+            // Assert: refused, nothing reordered, the scroll stopped
+            Assert.False(window.IsAutoScrolling);
+            Assert.Equal(orderBefore, GroupOrder(viewModel));
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that folders from the file manager held near the bottom edge of the list scroll it, and
+    ///     that dropping them stops the scroll (and adds them).
+    /// </summary>
+    [Fact]
+    public void MainWindow_DropFoldersNearBottomEdge_AutoScrollsAndDropStopsIt() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange
+        var (window, viewModel, _) = CreateShortWindow(16);
+        var transfer = CreateFileTransfer(window, CreateRepoDirectory("fresh"));
+
+        try
+        {
+            var scroller = ListScroller(window);
+            var nearBottom = NearListEdge(window, top: false);
+
+            // Act: held near the bottom edge
+            RaiseExternal(window, transfer, RawDragEventType.DragEnter, nearBottom);
+            RaiseExternal(window, transfer, RawDragEventType.DragOver, nearBottom);
+            var before = scroller.Offset.Y;
+            window.AutoScrollTick();
+
+            // Assert
+            Assert.True(window.IsAutoScrolling);
+            Assert.True(scroller.Offset.Y > before, $"tick: {before} -> {scroller.Offset.Y}");
+
+            // Act: dropped
+            RaiseExternal(window, transfer, RawDragEventType.Drop, nearBottom);
+            await SettleAddsAsync(viewModel);
+
+            // Assert: the scroll stopped and the folder was added
+            Assert.False(window.IsAutoScrolling);
+            Assert.Contains(viewModel.RepoCards, card => card.RepoName == "fresh");
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that after an auto-scroll tick the insertion line is shown for the card that is now
+    ///     under the (unmoved) pointer, on exactly one row.
+    /// </summary>
+    [Fact]
+    public void MainWindow_AutoScrollTick_UpdatesDropIndicatorForThePointer() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a card dragged near the bottom edge, with the line on the card under the pointer
+        var (window, _, _) = CreateShortWindow(16);
+
+        try
+        {
+            var drag = BeginDrag(window, "r00");
+            var nearBottom = NearListEdge(window, top: false);
+            Raise(window, drag, RawDragEventType.DragEnter, nearBottom);
+            Raise(window, drag, RawDragEventType.DragOver, nearBottom);
+            var before = RowsWithLine(window);
+
+            // Act: scroll until another card is under the pointer
+            for (var tick = 0; tick < 40 && RowsWithLine(window).SequenceEqual(before); tick++)
+            {
+                window.AutoScrollTick();
+            }
+
+            // Assert: the line moved to the card now under the pointer, and is shown once
+            var after = RowsWithLine(window);
+            Assert.Single(after);
+            Assert.NotEqual(before, after);
+            await drag.CompleteAsync();
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that a card drag that ends (however it ends, here without a drop) stops the auto-scroll.
+    /// </summary>
+    [Fact]
+    public void MainWindow_CardDragEnds_StopsAutoScroll() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange
+        var (window, _, _) = CreateShortWindow(16);
+
+        try
+        {
+            var drag = BeginDrag(window, "r00");
+            var nearBottom = NearListEdge(window, top: false);
+            Raise(window, drag, RawDragEventType.DragEnter, nearBottom);
+            Raise(window, drag, RawDragEventType.DragOver, nearBottom);
+            Assert.True(window.IsAutoScrolling);
+
+            // Act: the drag ends without a drop (Escape)
+            await drag.CompleteAsync();
+
+            // Assert
+            Assert.False(window.IsAutoScrolling);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Creates a shown main window, short enough that its list scrolls, over repos named
+    ///     <c>r00</c>, <c>r01</c>, ... (each in its own group <c>g00</c>, <c>g01</c>, ... when
+    ///     <paramref name="grouped"/>).
+    /// </summary>
+    /// <param name="count">How many repos.</param>
+    /// <param name="grouped">Whether each repo is in a group of its own.</param>
+    /// <returns>The window, its view model and its configuration directory.</returns>
+    private (MainWindow Window, MainWindowViewModel ViewModel, string ConfigDirectory) CreateShortWindow(
+        int count, bool grouped = false)
+    {
+        var created = CreateWindow(
+        [
+            .. Enumerable.Range(0, count).Select(index => Spec(
+                $"r{index:00}", grouped ? $"g{index:00}" : null))
+        ]);
+        created.Window.Height = 420;
+        Dispatcher.UIThread.RunJobs();
+        return created;
+    }
+
+    /// <summary>
+    ///     Gets the repo list's scroll viewer.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <returns>The scroll viewer.</returns>
+    private static ScrollViewer ListScroller(MainWindow window) =>
+        window.FindControl<ListBox>("RepoListBox")!.GetVisualDescendants().OfType<ScrollViewer>().First();
+
+    /// <summary>
+    ///     Gets a point inside the list, 8 DIP from its top or bottom edge (in the auto-scroll zone).
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <param name="top">Whether near the top edge rather than the bottom.</param>
+    /// <returns>The point, in window coordinates.</returns>
+    private static Point NearListEdge(MainWindow window, bool top)
+    {
+        var scroller = ListScroller(window);
+        var y = top ? 8 : scroller.Bounds.Height - 8;
+        return scroller.TranslatePoint(new Point(scroller.Bounds.Width / 2, y), window)
+               ?? throw new InvalidOperationException("The list is not in the window.");
+    }
+
+    /// <summary>
+    ///     Gets a point over the app bar's logo, above the list.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <returns>The point, in window coordinates.</returns>
+    private static Point OverAppLogo(MainWindow window)
+    {
+        var logo = window.FindControl<Border>("AppLogo")!;
+        return logo.TranslatePoint(new Point(logo.Bounds.Width / 2, logo.Bounds.Height / 2), window)
+               ?? throw new InvalidOperationException("The logo is not in the window.");
+    }
+
+    /// <summary>
+    ///     Lists the user's groups in the order the list shows them (realized or not).
+    /// </summary>
+    /// <param name="viewModel">The window's view model.</param>
+    /// <returns>The group names.</returns>
+    private static List<string> GroupOrder(MainWindowViewModel viewModel) =>
+        [.. viewModel.DisplayedItems.OfType<RepoGroupHeaderViewModel>().Where(header => header.IsUserGroup).Select(header => header.Name)];
+
+    /// <summary>
+    ///     Lists the repos whose rows show the insertion line.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <returns>The repo names.</returns>
+    private static List<string> RowsWithLine(MainWindow window) =>
+        [.. window.FindControl<ListBox>("RepoListBox")!.GetVisualDescendants().OfType<ListBoxItem>()
+            .Where(row => row.DataContext is RepoCardViewModel &&
+                          (row.Classes.Contains("dropAbove") || row.Classes.Contains("dropBelow")))
+            .Select(row => ((RepoCardViewModel)row.DataContext!).RepoName)];
+
+    /// <summary>
+    ///     Raises one platform drag event of an in-window drag and returns the effect the window
+    ///     answered with (whichever element handled it).
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <param name="drag">The drag.</param>
+    /// <param name="type">The drag event.</param>
+    /// <param name="point">The pointer position, in window coordinates.</param>
+    /// <returns>The effect.</returns>
+    private static DragDropEffects RaiseAndGetEffects(MainWindow window, DragSession drag, RawDragEventType type, Point point)
+    {
+        var effects = DragDropEffects.Move;
+        EventHandler<DragEventArgs> record = (_, e) => effects = e.DragEffects;
+        RoutedEvent<DragEventArgs>[] events = [DragDrop.DragEnterEvent, DragDrop.DragOverEvent];
+        foreach (var routedEvent in events)
+        {
+            window.AddHandler(routedEvent, record, RoutingStrategies.Bubble, handledEventsToo: true);
+        }
+
+        try
+        {
+            Raise(window, drag, type, point);
+            return effects;
+        }
+        finally
+        {
+            foreach (var routedEvent in events)
+            {
+                window.RemoveHandler(routedEvent, record);
+            }
+        }
+    }
 
     /// <summary>
     ///     Deletes the temporary folders the tests created.
@@ -1578,7 +1939,7 @@ public sealed class RepoReorderWindowTests : IDisposable
     /// <param name="window">The window whose storage provider describes the items.</param>
     /// <param name="paths">The dragged files' and folders' paths.</param>
     /// <returns>The data transfer.</returns>
-    private static DataTransfer CreateFileTransfer(MainWindow window, params string[] paths)
+    internal static DataTransfer CreateFileTransfer(MainWindow window, params string[] paths)
     {
         var transfer = new DataTransfer();
         foreach (var path in paths)
@@ -1606,7 +1967,7 @@ public sealed class RepoReorderWindowTests : IDisposable
     /// <param name="type">The drag event.</param>
     /// <param name="point">The pointer position, in window coordinates.</param>
     /// <returns>The effect the window set on the last drag event it handled.</returns>
-    private static DragDropEffects RaiseExternal(MainWindow window, IDataTransfer transfer, RawDragEventType type, Point point)
+    internal static DragDropEffects RaiseExternal(MainWindow window, IDataTransfer transfer, RawDragEventType type, Point point)
     {
         var effects = DragDropEffects.None;
         EventHandler<DragEventArgs> record = (_, e) => effects = e.DragEffects;
@@ -1638,7 +1999,7 @@ public sealed class RepoReorderWindowTests : IDisposable
     /// <param name="point">The pointer position, in window coordinates.</param>
     /// <param name="paths">The dropped files' and folders' paths.</param>
     /// <returns>The effect the window answered the drag over the point with.</returns>
-    private static DragDropEffects DropExternal(MainWindow window, Point point, params string[] paths)
+    internal static DragDropEffects DropExternal(MainWindow window, Point point, params string[] paths)
     {
         var transfer = CreateFileTransfer(window, paths);
         RaiseExternal(window, transfer, RawDragEventType.DragEnter, point);
@@ -1793,6 +2154,20 @@ public sealed class RepoReorderWindowTests : IDisposable
     /// <returns>The entries' paths.</returns>
     private static List<string> ListEntries(string path) =>
         [.. Directory.EnumerateFileSystemEntries(path, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal)];
+
+    /// <summary>
+    ///     Waits for the folders dropped (or picked) so far to be added: runs the posted add, awaits the
+    ///     view model's queued adds (their background checks resume on the UI thread while this waits),
+    ///     then runs what the add posted afterwards (its message).
+    /// </summary>
+    /// <param name="viewModel">The window's view model.</param>
+    /// <returns>A task that completes when the adds have ended.</returns>
+    internal static async Task SettleAddsAsync(MainWindowViewModel viewModel)
+    {
+        Dispatcher.UIThread.RunJobs();
+        await viewModel.PendingAddRepos;
+        Dispatcher.UIThread.RunJobs();
+    }
 
     /// <summary>
     ///     Runs the UI thread's jobs until the condition holds (or about thirty seconds passed), then asserts it.

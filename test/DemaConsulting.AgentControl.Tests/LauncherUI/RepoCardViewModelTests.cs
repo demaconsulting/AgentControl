@@ -3678,6 +3678,159 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that the background cheap refresh returns while its read is held (the card keeps its
+    ///     previous state) and applies what it read once the read runs.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshCheapInBackgroundAsync_ReadHeld_ReturnsAndAppliesWhenReleased()
+    {
+        // Arrange: a pinned repo whose card has not been refreshed yet, and a gated runner
+        var repo = CreateTempDirectory();
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var stub = GitStub.Create();
+        _tempPaths.Add(stub.Path);
+        var settings = new AppSettings { GitExecutablePath = stub.Path };
+        var gate = new GatedBackgroundWorkRunner();
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), backgroundWork: gate);
+
+        // Act: start the refresh; its read is held
+        var refresh = card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
+        await gate.FirstCall;
+
+        // Assert: returned, nothing applied yet
+        Assert.False(refresh.IsCompleted);
+        Assert.Null(card.PinnedPackageName);
+
+        // Act
+        gate.Release();
+        await refresh;
+
+        // Assert: the pin and the branch were applied
+        Assert.Equal("contoso-agents", card.PinnedPackageName);
+        Assert.Equal("1.0.0", card.PinnedPackageVersion);
+        Assert.Equal("main", card.CurrentBranch);
+    }
+
+    /// <summary>
+    ///     Test that a background cheap refresh whose read finishes after a newer refresh started drops
+    ///     its result, so the newest read always has the last word.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshCheapInBackgroundAsync_NewerRefreshStarted_OlderResultDropped()
+    {
+        // Arrange: a background refresh held at the gate
+        var repo = CreateTempDirectory();
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var stub = GitStub.Create();
+        _tempPaths.Add(stub.Path);
+        var settings = new AppSettings { GitExecutablePath = stub.Path };
+        var gate = new GatedBackgroundWorkRunner();
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), backgroundWork: gate);
+        var older = card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
+        await gate.FirstCall;
+
+        // Act: a newer (synchronous) refresh sees version 2; then the pin changes again and the older
+        // read runs - it would see version 3
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "2.0.0" });
+        card.RefreshCheap();
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "3.0.0" });
+        gate.Release();
+        await older;
+
+        // Assert: the newer refresh's answer stands
+        Assert.Equal("2.0.0", card.PinnedPackageVersion);
+    }
+
+    /// <summary>
+    ///     Test that a card retired while its background cheap refresh was reading applies nothing.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshCheapInBackgroundAsync_Retired_AppliesNothing()
+    {
+        // Arrange
+        var repo = CreateTempDirectory();
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var gate = new GatedBackgroundWorkRunner();
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo }, () => new AppSettings(), new PackageVersionCache(), backgroundWork: gate);
+        var refresh = card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
+        await gate.FirstCall;
+
+        // Act: the card is removed from the list, then the read runs
+        card.Retire();
+        gate.Release();
+        await refresh;
+
+        // Assert
+        Assert.Null(card.PinnedPackageName);
+    }
+
+    /// <summary>
+    ///     Test that the background working-tree check leaves the card "not checked yet" (never dirty)
+    ///     while git is held, and applies git's answer once it runs.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshDirtyStatusInBackgroundAsync_StatusHeld_StaysNotYetCheckedUntilDone()
+    {
+        // Arrange: a clean working tree, and a gated runner
+        var repo = CreateTempDirectory();
+        var stub = GitStub.Create(statusOutput: "", statusExitCode: 0);
+        _tempPaths.Add(stub.Path);
+        var settings = new AppSettings { GitExecutablePath = stub.Path };
+        var gate = new GatedBackgroundWorkRunner();
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), backgroundWork: gate);
+
+        // Act: start the check; git is held
+        var check = card.RefreshDirtyStatusInBackgroundAsync();
+        await gate.FirstCall;
+
+        // Assert: not checked yet, so neither dirty nor offering Pull
+        Assert.False(check.IsCompleted);
+        Assert.False(card.GitStatusChecked);
+        Assert.False(card.IsWorkingTreeDirty);
+        Assert.False(card.CanPull);
+
+        // Act
+        gate.Release();
+        await check;
+
+        // Assert: git's answer (clean) applied
+        Assert.True(card.GitStatusChecked);
+        Assert.True(card.CanPull);
+        Assert.False(card.IsWorkingTreeDirty);
+    }
+
+    /// <summary>
+    ///     Test that a card retired while its background working-tree check was running applies nothing.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshDirtyStatusInBackgroundAsync_Retired_AppliesNothing()
+    {
+        // Arrange
+        var repo = CreateTempDirectory();
+        var stub = GitStub.Create(statusOutput: "", statusExitCode: 0);
+        _tempPaths.Add(stub.Path);
+        var settings = new AppSettings { GitExecutablePath = stub.Path };
+        var gate = new GatedBackgroundWorkRunner();
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), backgroundWork: gate);
+        var check = card.RefreshDirtyStatusInBackgroundAsync();
+        await gate.FirstCall;
+
+        // Act
+        card.Retire();
+        gate.Release();
+        await check;
+
+        // Assert
+        Assert.False(card.GitStatusChecked);
+        Assert.False(card.CanPull);
+    }
+
+    /// <summary>
     ///     Creates a unique temporary directory tracked for cleanup in <see cref="Dispose"/>.
     /// </summary>
     private string CreateTempDirectory()

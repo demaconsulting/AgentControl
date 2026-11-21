@@ -6,11 +6,11 @@
 # - LauncherUI spans the recent-repos main window, per-repo cards, the package-selection
 #   window, the settings window, the package-source editor and the sign-in dialog
 #   (MainWindowViewModel, RepoCardViewModel, SelectPackageWindowViewModel,
-#   SettingsWindowViewModel, SourceEditorViewModel, CredentialPromptViewModel), plus four
+#   SettingsWindowViewModel, SourceEditorViewModel, CredentialPromptViewModel), plus five
 #   further independently testable units with their own requirements files (RepoImageLocator,
-#   RepoGroupHeaderViewModel, GroupNameViewModel, DialogBehavior), plus their
-#   Avalonia .axaml Views (including CredentialPromptWindow and the AvaloniaCredentialPrompt
-#   that shows it) and shared MVVM support types (RelayCommand, ViewModelBase,
+#   RepoGroupHeaderViewModel, GroupNameViewModel, DialogBehavior, GlobalProgressViewModel), plus
+#   their Avalonia .axaml Views (including CredentialPromptWindow and the AvaloniaCredentialPrompt
+#   that shows it) and shared MVVM support types (RelayCommand, ViewModelBase, BackgroundWorkRunner,
 #   the display-name and favorite converters, PathEllipsisText, ColorPalettePanel, AppStyles.axaml,
 #   ThirdPartyDependencies), which are documented as supporting types of this subsystem
 #   rather than given separate unit files (their dedicated test files, where they have one, are
@@ -854,6 +854,136 @@ sections:
           - MainWindow_DropFolders_OnEmptyStatePanel_AddsThem
           - MainWindow_DropFolders_ShowsCopyFeedbackAndClearsIt
           - MainWindow_DropFile_IsSkippedAsNotARepository
+
+      - id: AgentControl-LauncherUI-AddReposResponsive
+        title: >-
+          The LauncherUI subsystem shall keep the window usable - its UI thread free, the filter,
+          collapsing, renaming and removing working - while the folders of an add are being checked,
+          and shall add them only once every folder was checked.
+        justification: |
+          Checking a folder reads the disk and runs git; done for many folders on the window's own
+          thread it froze the window for a long time after a large drop. Adding the repos together
+          when all are known keeps the list from jumping while the user works in it.
+        children:
+          - AgentControl-MainWindowViewModel-AddReposInBackground
+        tests:
+          - MainWindow_DropFolders_WhileChecked_WindowStaysResponsiveAndShowsProgress
+
+      - id: AgentControl-LauncherUI-GlobalProgress
+        title: >-
+          The LauncherUI subsystem shall show, directly under the app bar and only while repos are
+          being added or the repo cards are refreshed after the settings were saved, a thin progress
+          bar - without an amount until the amount of work is known, then with it - and a short
+          status text (for example "Adding 7 of 20 repositories..."), named for screen readers and
+          legible in the light and the dark theme, and shall take no space when no such work runs.
+        justification: |
+          Work that is not tied to one repo card needs a place of its own to show that the
+          application is busy and how far it has got, without covering the list or moving it while
+          nothing runs.
+        children:
+          - AgentControl-MainWindowViewModel-AddReposProgress
+          - AgentControl-GlobalProgressViewModel-IdleHidden
+          - AgentControl-GlobalProgressViewModel-ShowsOperation
+          - AgentControl-GlobalProgressViewModel-ReportsAmount
+          - AgentControl-GlobalProgressViewModel-OverlappingOperations
+          - AgentControl-GlobalProgressViewModel-AccessibleName
+        tests:
+          - MainWindow_DropFolders_WhileChecked_WindowStaysResponsiveAndShowsProgress
+          - MainWindow_SettingsApplied_RefreshesCardsInBackgroundShowingProgress
+          - ThemeResources_GlobalProgress_IsLegibleInLightAndDark
+
+      - id: AgentControl-LauncherUI-AddCancel
+        title: >-
+          The LauncherUI subsystem shall offer a Cancel button in the progress strip while repos are
+          being added that stops the add, and every add queued after it, before anything is added
+          or saved, without a message afterwards.
+        justification: |
+          A drop of the wrong folders, or of far more than intended, must be stoppable without
+          having to remove the repos one by one afterwards.
+        children:
+          - AgentControl-MainWindowViewModel-AddReposCancel
+          - AgentControl-GlobalProgressViewModel-CancelOnce
+          - AgentControl-GlobalProgressViewModel-NoCancelWhenNotCancelable
+        tests:
+          - MainWindow_GlobalProgressCancel_WhileAddingFolders_AddsNothing
+
+      - id: AgentControl-LauncherUI-AddQueued
+        title: >-
+          The LauncherUI subsystem shall run an add requested (by a drop or the folder picker) while
+          another add runs after that add has ended, never at the same time, and shall not add a
+          folder both adds name twice.
+        justification: |
+          The window stays usable during an add, so the user can drop more folders; two adds working
+          on the list at once could add a repo twice or save one over the other.
+        children:
+          - AgentControl-MainWindowViewModel-AddReposQueued
+        tests:
+          - MainWindow_DropFolders_WhileAnAddRuns_AddsThemAfterwards
+
+      - id: AgentControl-LauncherUI-AddSaveFailureChoice
+        title: >-
+          The LauncherUI subsystem shall, when the repos of an add cannot be saved, ask the user -
+          saying why in plain words - whether to try the save again (Retry) or to give up the add
+          (Discard, also the answer to Escape and closing the question), add the repos when a retry
+          succeeds, and leave the list as it was saved, and say which folders were not added, after
+          Discard.
+        justification: |
+          The settings file can be locked or on a full disk for a moment; the user should be able
+          to try again without picking the folders again, and giving up must never leave a list
+          that differs from what is saved.
+        children:
+          - AgentControl-MainWindowViewModel-AddReposSaveFailure
+        tests:
+          - MainWindow_AddSaveFails_RetryAddsThem
+          - MainWindow_AddSaveFails_DiscardLeavesListAsSaved
+
+      - id: AgentControl-LauncherUI-SettingsApplyResponsive
+        title: >-
+          The LauncherUI subsystem shall refresh the repo cards after the settings were saved
+          without making the window wait for that refresh, showing it in the progress strip without
+          a Cancel button.
+        justification: |
+          Saving the settings refreshes every card (its pin, branch and committed agent folders);
+          with many repos that work must not freeze the window.
+        children:
+          - AgentControl-MainWindowViewModel-ApplySettingsInBackground
+          - AgentControl-RepoCardViewModel-CheapRefreshInBackground
+        tests:
+          - MainWindow_SettingsApplied_RefreshesCardsInBackgroundShowingProgress
+
+      - id: AgentControl-LauncherUI-GitStatusInBackground
+        title: >-
+          The LauncherUI subsystem shall check the working tree of a repo card shown in the window,
+          and after a Refresh or a Pull, without making the window wait for git, showing the card's
+          Git status as not checked yet until git has answered.
+        justification: |
+          The working-tree check is the slowest git call; made for every card shown (at start-up,
+          or for a batch of repos just added) on the window's thread it froze the window. A card
+          must never be shown as having uncommitted changes before git has said so.
+        children:
+          - AgentControl-RepoCardViewModel-GitStatusInBackground
+        tests:
+          - MainWindow_CardShown_ChecksGitStatusInBackground
+
+      - id: AgentControl-LauncherUI-DragAutoScroll
+        title: >-
+          The LauncherUI subsystem shall keep the repo list scrolling while a dragged repo card, group
+          header or folders from the file manager are held near the top or bottom edge of the list,
+          over the app bar above it or below it - faster the deeper the pointer is, up to a limit -
+          showing where a drop would land as the list moves, and shall stop scrolling when the drag
+          leaves, drops or ends.
+        justification: |
+          A long list can only be reordered, or folders dropped into a group far down, when the list
+          scrolls under a pointer held still near its edge; scrolling only when the pointer moves
+          made long lists hard to use, and a fixed slow speed made long distances tedious.
+        tests:
+          - MainWindow_ComputeAutoScrollStep_ZonesAndDepth_GiveExpectedSteps
+          - MainWindow_ComputeAutoScrollStep_DeeperIsNeverSlower
+          - MainWindow_DragCardNearListEdge_KeepsScrollingWhileHeldAndStopsOnLeave
+          - MainWindow_DragGroupHeaderOverAppBar_ScrollsUpAndDropIsRefused
+          - MainWindow_DropFoldersNearBottomEdge_AutoScrollsAndDropStopsIt
+          - MainWindow_AutoScrollTick_UpdatesDropIndicatorForThePointer
+          - MainWindow_CardDragEnds_StopsAutoScroll
 
       - id: AgentControl-LauncherUI-AddRepoGitRootOnly
         title: >-

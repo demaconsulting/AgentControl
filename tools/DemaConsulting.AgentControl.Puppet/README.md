@@ -153,7 +153,10 @@ without it.
 - **Main** (`Agent Control`): `AppLogo` (the logo in the app bar; its name is `AgentControl`), `FilterTextBox`,
   `AddRepoButton`, `OpenSettingsButton`, `OpenAboutButton`, `EmptyStatePanel`, `EmptyStateText`, `RepoListBox`,
   `ExternalDropOverlay` (the outline around the list area, shown only while folders dragged from File Explorer would
-  be added without a group).
+  be added without a group), and - present only while bulk work runs (adding repositories, or refreshing the cards
+  after Settings are saved) - `GlobalProgressStrip` (the strip under the app bar), `GlobalProgressBar` (its name is
+  the status text), `GlobalProgressText` (for example `Adding 7 of 20 repositories...`) and
+  `GlobalProgressCancelButton` (only while repositories are being added and not yet saving; it stops the add).
 - **Group header** (repeated, one per section, in `RepoListBox`; only present once a repo is in a group):
   `GroupHeaderToggleButton` (collapses or expands; its name says the section, count and state, for example
   `Work, 2 repos, collapsed`, and so does its list item), `GroupHeaderNameText`, `GroupHeaderCountText`, and, for

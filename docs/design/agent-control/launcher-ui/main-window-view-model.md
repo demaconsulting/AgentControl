@@ -14,10 +14,13 @@ changes. Window-management concerns (opening
 intentionally left to `MainWindow`'s code-behind, since they require live Avalonia
 `Window`/`IStorageProvider` instances that cannot be constructed in a headless unit test.
 
-The unit uses two independently documented `LauncherUI` units: `RepoGroupHeaderViewModel` (the header row that
-starts a section, with `RepoGroupKind`, which kind of section a header introduces - see its own design) and
+The unit uses three independently documented `LauncherUI` units: `RepoGroupHeaderViewModel` (the header row that
+starts a section, with `RepoGroupKind`, which kind of section a header introduces - see its own design),
 `GroupNameViewModel` (the validating view model of the group-name prompt window `GroupNameWindow` - see its own
-design).
+design) and `GlobalProgressViewModel` (the progress strip under the app bar, in which this view model shows its bulk
+work - adding repositories and refreshing the cards after a settings save - see its own design). The folders of an
+add and the cards' refresh after a settings save are read off the UI thread through the `IBackgroundWorkRunner` seam
+(the `BackgroundWorkRunner` supporting type), and every add is saved once for the whole batch.
 
 #### Data Model
 
@@ -81,9 +84,50 @@ means the end of the section (a drop on its header). `RepoDropTarget.ForHeader(h
 group if one was given), `MovedExisting` (already listed, moved into the requested group), `MoveFailed` (that move
 could not be saved; already reported through `SettingsSaveFailed`), `AlreadyListed` (already listed and no group was
 requested), `Missing` (the folder does not exist), `NotAGitRepository` (not the top folder of a Git repository, or a
-file rather than a folder) and `SaveFailed` (the new entry could not be saved; used only by `AddRepos`, which does not
-throw). **AddRepoOutcome**: `record` (`Path`, `Result`, `Problem`) — one folder of a multi-folder add, with, for
+file rather than a folder) and `SaveFailed` (the batch could not be saved; used only by the multi-folder adds, which do
+not throw). **AddRepoOutcome**: `record` (`Path`, `Result`, `Problem`) — one folder of a multi-folder add, with, for
 `SaveFailed`, the reason the save failed, safe to show (secrets redacted by `SecretRedactor.SafeMessage`).
+
+**RepoFolderKind**: `enum` (`Missing`, `NotAFolder`, `NotAGitRepositoryRoot`, `GitRoot`) — what a folder of an add
+turned out to be on disk. **RepoFolderFacts**: immutable `record` (`Path`, `NormalizedPath`, `Kind`, `ListedAtStart`,
+`Cheap`) — what the background part of an add read about one folder, handed from the worker thread to the UI thread;
+`Cheap` is the `RepoCheapFacts` (pin, branch, `HEAD`, committed agent folders) of a Git root that was not listed when
+the add was planned, otherwise `null`. **AddReposProgress**: `readonly record struct` (`Completed`, `Total`) — how
+many folders of an add have been checked. **AddReposBatchResult**: `record` (`Outcomes`, `Canceled`) — what became of a
+background add; `Outcomes` is empty and `Canceled` `true` when it was canceled before anything was saved or added.
+**SettingsSaveRetryRequest**: `class` (`Message`, `Answer`, `Respond(bool retry)`) — the Retry/Discard question raised
+by `AddSaveFailed`: a `TaskCompletionSource<bool>` with `RunContinuationsAsynchronously` (so answering from the dialog
+never runs the add inside its close handling); the first answer wins; thread-safe.
+
+**GlobalProgress**: `GlobalProgressViewModel` (get-only) — the state of the progress strip under the app bar, created
+by the constructor; this view model is its only caller (`AgentControl-MainWindowViewModel-AddReposProgress`,
+`-ApplySettingsInBackground`).
+
+**PendingAddRepos**: `Task` (internal) — the chain of adds that are running or queued; completed when no add runs.
+Never faults. Tests and the window's tests await it to let adds settle.
+
+**_saveSettings**, **_backgroundWork**: `Action<AppSettings>` and `IBackgroundWorkRunner` — constructor seams: how a
+candidate is written (`SettingsStore.Save` into the configuration directory by default; it must throw
+`InvalidOperationException` when the file cannot be written; tests count saves and make them fail) and how blocking
+reads run off the UI thread (`ThreadPoolBackgroundWorkRunner.Instance` by default, passed on to every card; tests hold
+the reads at a gate). Every save of the view model goes through `_saveSettings` (`CommitSettingsChange`,
+`ApplySettings`, `SaveSettings`).
+
+**_addSession**: `AddQueueSession?` (private class) — the adds that are running or queued and share one progress
+operation (`GlobalProgressOperation`, begun with "Adding repositories..." and `CancelAddRepos` as its cancel action),
+one `CancellationTokenSource` and a count of adds not yet ended; `null` when no add runs. Ending the last add of the
+session disposes its progress operation and its cancellation.
+
+**_settingsRefreshGeneration**: `int` — identifies the most recent card refresh started by `ApplySettings`, so an
+older one that is still running neither rebuilds the list nor starts the upgrade check.
+
+**MaxConcurrentFolderInspections**: `const int` = 4 — the most folders read at the same time during an add, and the
+most cards refreshed at the same time after a settings save, so a large batch never starts dozens of git processes at
+once.
+
+**AddSaveFailed**: `EventHandler<SettingsSaveRetryRequest>` (public event) — raised when the save at the end of a
+background add failed; the window asks Retry or Discard and answers through the request
+(`AgentControl-MainWindowViewModel-AddReposSaveFailure`). Without a subscriber the add is discarded.
 
 **HasNoDisplayedRepos**: `bool` (derived) — `true` when `DisplayedItems` is empty (no repo matches,
 or there is none; a list whose sections are all collapsed still has its headers), so the
@@ -170,7 +214,8 @@ apart:
    `RecentRepo.Clone()` and the collapsed list, the group colors and the group order copied), and `change` is applied
    to the **candidate** only; then `AppSettings.RepairGroupSettings` runs on the candidate, so a group that lost its
    last repo forgets its color and position in the file.
-2. *Save*: the candidate is written with `SettingsStore.Save`. If that throws (a file that cannot be written, a source
+2. *Save*: the candidate is written through the `_saveSettings` seam (`SettingsStore.Save` in the application). If
+   that throws (a file that cannot be written, a source
    location that embeds a credential), the exception leaves the method before anything live was touched.
 3. *Commit*: only after a successful save is the same `change` applied to the live settings, followed by the same
    repair, so memory and the file agree. Because the change runs
@@ -183,8 +228,10 @@ later, unrelated save can never write the failed change because the live setting
 (`AgentControl-MainWindowViewModel-FailedSaveChangesNothing`, `-FailedSaveNotPersistedLater`,
 `-ChangeAppliedWhenSaved`). The direct operations (`AddRepo`, `AddRepoToGroup`, `RemoveRepo`,
 `ToggleGroupCollapsed`, `RenameGroup`, `RemoveGroup`) let the `InvalidOperationException` of the failed save reach
-their caller, which shows a message (`-SaveFailureRefusesOperation`); `AddRepos` catches it per folder instead (see
-below). The changes that originate in a card are made
+their caller, which shows a message (`-SaveFailureRefusesOperation`) - except that `AddRepoToGroup` reports a failed
+move of a repo that is already listed through `SettingsSaveFailed`; `AddRepos` turns it into `SaveFailed` outcomes and
+`EnqueueAddReposAsync` into the Retry/Discard question instead (see below). The changes that originate in a card are
+made
 through the private `CommitRepoChange(repo, change)`, handed to each card as its `commitChange` callback when
 `CreateCard` builds it: the callback applies the change to the repo's entry through `CommitSettingsChange`, returns
 `true` when it was saved (or when the repo is no longer in the list, which needs no saving), and on a failed save
@@ -207,7 +254,8 @@ that already has a user order is kept whatever the launch times are (`-OrderKept
   `string? configDirectory = null`, `PackageCredentialContext? credentials = null`,
   `Action<ThemePreference>? applyTheme = null`, `TimeProvider? timeProvider = null`,
   `TimeSpan? upgradeRecheckInterval = null`, `Func<AppSettings, PackageSourceRegistry>? registryFactory = null`,
-  `IAgentToolProcessStarter? processStarter = null` and `ShellDetector? shellDetector = null`.
+  `IAgentToolProcessStarter? processStarter = null`, `ShellDetector? shellDetector = null`,
+  `Action<AppSettings>? saveSettings = null` and `IBackgroundWorkRunner? backgroundWork = null`.
 - *Preconditions*: `settings` is not null; `upgradeRecheckInterval`, when given, is positive.
 - *Postconditions*: One `RepoCardViewModel` exists per `RecentRepo` in `settings.RecentRepos`;
   each card's cheap refresh (`RefreshCheap`) has run; `DisplayedItems` and `DisplayedRepoCards`
@@ -216,7 +264,9 @@ that already has a user order is kept whatever the launch times are (`-OrderKept
 
 Only the cheap per-card checks run eagerly at construction — the working-tree dirty check is
 deferred/lazy, per architecture.md's repo-fact caching strategy, so startup stays fast even
-with many tracked repos.
+with many tracked repos. The constructor still runs the cheap checks synchronously, before the window exists (so no
+progress strip is shown at start-up); the working-tree checks of the cards the window then shows run in the
+background (`RepoCardViewModel.RefreshDirtyStatusInBackgroundAsync`).
 
 **BeginUpgradeRefresh**: Starts checking every card's upgrade availability in the background.
 
@@ -286,10 +336,11 @@ with many tracked repos.
   arrives after the superseding check completed, while the cancelled round's provider call is still in flight, finds the
   round still registered and starts nothing - two rounds never overlap on the shared cache and card state.
 - *`Dispose`* (`IDisposable`; the main window calls it when it closes): disposes the timer, cancels the running round
-  and the background upgrade check tracked by `_refreshCancellation` (launch, settings change, added repo: it is
-  cancelled, disposed and cleared the way `StartUpgradeRefresh` replaces it), so neither keeps waiting for a slow
-  source or updates cards after the window closed, and refuses further starts (a repo added afterwards starts no
-  check); calling it twice is harmless.
+  and the background upgrade check and card refresh tracked by `_refreshCancellation` (launch, settings change, added
+  repo: it is cancelled, disposed and cleared the way `StartUpgradeRefresh` replaces it), so neither keeps waiting for
+  a slow source or updates cards after the window closed, cancels the adds that have not saved yet
+  (`CancelAddRepos`), and refuses further starts (a repo added afterwards starts no check, an add requested afterwards
+  returns a canceled result); calling it twice is harmless.
 
 **RecheckAfterSettingsClosed**: Checks again, in the background, the cards that show a package source problem or a
 failed upgrade check, once the Settings window has closed
@@ -298,7 +349,8 @@ failed upgrade check, once the Settings window has closed
 - *Parameters*: `bool settingsSaved` — whether the Settings window saved the settings (its `Saved` event was raised)
   before it closed; `false` for Cancel, Escape or closing it without saving (including after a save that failed).
 - *Returns*: A task that completes when the check it started has finished (cancellation is not an error); after a save
-  it returns `PendingRefresh` (the check the save started); already completed when the view model is disposed or no
+  it returns `PendingRefresh` (the background card refresh the save started and the upgrade check that follows it);
+  already completed when the view model is disposed or no
   card needs checking. The window ignores it; tests await it.
 - *Behavior*: While Settings is open the user may sign in with **Test connection** - whose provider
   (`CreateConnectionTestProvider`) uses `Credentials`, the same `SessionCredentialStore` the cards read without a prompt
@@ -314,7 +366,7 @@ failed upgrade check, once the Settings window has closed
   sign-in dialog), `relistSources` false (the cache is not cleared: a
   failure is never cached, so these cards read their sources again, while a listing cached for another card still
   serves), a shared `SourceFailureMemo`, a few at a time, counted in `_launchChecksInFlight` so no periodic round starts
-  over it. Like the check of an added repo (`BeginSingleCardUpgradeRefresh`) it runs with the token of
+  over it. Like the check of added repos (`BeginCardsUpgradeRefresh`) it runs with the token of
   `_refreshCancellation`, does not cancel a check that is running, is canceled by a later `StartUpgradeRefresh` or by
   `Dispose`, and is merged into `PendingRefresh` (`Task.WhenAll(PendingRefresh, check)`); the cards' generation
   counter keeps the newest result where it overlaps another check.
@@ -340,29 +392,47 @@ failed upgrade check, once the Settings window has closed
 - *Preconditions*: None beyond a non-null/non-whitespace path.
 - *Postconditions*: On success, a new card is appended at the end of `RepoCards` (and its entry at the end of
   `AppSettings.RecentRepos`), so it is at the bottom of its section (`-NewRepoAtEnd`), settings are persisted, and
-  `DisplayedRepoCards` is recomputed (`AgentControl-MainWindowViewModel-AddRepo`). The new card is prepared first and
-  its entry added through `CommitSettingsChange`; if the save fails the prepared card is retired, the exception
-  reaches the caller and the list, the cards and the file are exactly as they were.
+  `DisplayedRepoCards` is recomputed (`AgentControl-MainWindowViewModel-AddRepo`). It is a one-folder batch of the
+  shared add steps (`AddRepoCore`): the folder is read inline, its entry is saved through `CommitSettingsChange`, and
+  only then is the card created from the facts read; if the save fails the exception reaches the caller and the list,
+  the cards and the file are exactly as they were. The new card's working tree is not checked here: that runs in the
+  background when its card is first shown.
 
 Returns `false` without persisting when `repoPath` does not exist on disk, is already
 present (`IsSameRepoPath`: the same folder ignoring letter case and a trailing directory separator), or is not the top
 folder of a Git repository.
-Attempts to load an
-existing pin via `RepoPinStore.Load`, tolerating (returning `null` for) a repo that has never
-been synced.
+Loads an existing pin with the folder's cheap facts (`RepoCardViewModel.ReadCheapFacts`), tolerating a repo that has
+never been synced (no pin) and a pin file that cannot be read (no pin).
 
-**AddRepoCore** (private, shared by every add path): the checks, in order:
+**Add steps** (private, shared by every add path - `AddRepo`, `AddRepoToGroup`, `AddRepos` and `AddReposAsync`):
 
-1. A path that is not a folder is `Missing`, or `NotAGitRepository` when it is an existing file (a dropped file).
-2. A repo that is already listed (`IsSameRepoPath` against every card and every saved entry, whatever form the saved
-   path has) is `AlreadyListed` for a plain add, or is moved into the
-   requested group (`MovedExisting` / `MoveFailed`). A listed repo is never subject to the Git check, so the repos
-   already in the list are left as they are, whatever their folders hold.
-3. A folder for which `GitClient.IsRepositoryRoot` is `false` - no `.git` folder or file directly in it, for example a
-   subfolder of a repository - is `NotAGitRepository` and nothing is added
-   (`AgentControl-MainWindowViewModel-AddGitReposOnly`).
-4. Otherwise the new card is prepared and its entry, with the path in its `NormalizeRepoPath` form, saved through
-   `CommitSettingsChange` (`Added`); a failed save retires the prepared card and throws `InvalidOperationException`.
+1. **PlanAddBatch** (UI thread, no file-system access): drops blank paths, keeps the first of the paths that name the
+   same folder (`NormalizeRepoPath`, ignoring case), notes for each whether it is listed now (a card or a saved entry)
+   and resolves the git executable.
+2. **InspectFolder** (internal, static, any thread): reads one folder - a path that is not a folder is `Missing`, or
+   `NotAFolder` when it is a file (a dropped file); a folder for which `GitClient.IsRepositoryRoot` is `false` is
+   `NotAGitRepositoryRoot`; otherwise `GitRoot`, and only for a Git root that was not listed it also reads
+   `RepoCardViewModel.ReadCheapFacts(path, git, cache: null)` (pin, branch, `HEAD`, committed agent folders), so the new
+   card needs no git call on the UI thread. The working tree is not checked. Returns an immutable `RepoFolderFacts`.
+3. **PrepareAddCommit** (UI thread, changes nothing): decides each folder's outcome against the list **as it is now**
+   (so a repo listed while the folders were read is caught, and a folder added earlier in the same batch counts as
+   listed for later ones), in the order: `Missing`; a file is `NotAGitRepository`; a listed repo is `AlreadyListed` for
+   a plain add, or `MovedExisting` with a group (when it has a card) - a listed repo is never subject to the Git
+   check, so the repos already in the list are left as they are; a folder that is not a Git root is `NotAGitRepository`
+   (`AgentControl-MainWindowViewModel-AddGitReposOnly`); otherwise `Added`, with a new `RecentRepo` (path in its
+   `NormalizeRepoPath` form, the group, the pin from the facts). It returns the outcomes and the steps (new entries
+   and moves) in request order.
+4. **ApplyAddCommit** (UI thread): a batch with no step saves nothing. Otherwise it calls `CommitSettingsChange` once
+   with `ApplyAddSteps`, a deterministic change that, in request order, appends each new entry and, for a moved repo,
+   sets the group on its entry and moves the entry to the bottom of its section (`MoveToSectionEnd`: after the
+   section's last other entry, or the end of the list; marks `HasUserRepoOrder` when the order changed), and removes
+   the target group from the collapsed sections when anything joined it. A failed save throws
+   `InvalidOperationException` with nothing changed. Only after the save: the new cards are created
+   (`CreateCard` + `ApplyCheapFacts`, or a background `RefreshCheapInBackgroundAsync` for a card whose facts were not
+   read), their events attached, `RepoCards` put in the stored order (`SyncCollection`), the moved cards told their
+   group
+   changed, the list rebuilt **once** (`UpdateDisplayedRepoCards`), and the new cards' upgrade checks started in the
+   background (`BeginCardsUpgradeRefresh`).
 
 **NormalizeRepoPath** (internal, static): Gets the form of a repo path that identifies its folder.
 
@@ -376,8 +446,9 @@ been synced.
 
 **IsSameRepoPath** (internal, static): Tells whether two repo paths name the same folder - their `NormalizeRepoPath`
 forms are equal by ordinal comparison ignoring letter case - so a folder written with and without a trailing directory
-separator, or in another letter case, is one repo. Used by `AddRepoCore`'s already-listed check, by `AddRepos` to handle
-a folder given twice once, and by `MainWindow` to find the card a card drag carries.
+separator, or in another letter case, is one repo. Used by the add's duplicate handling (through `NormalizeRepoPath`),
+and
+by `MainWindow` to find the card a card drag carries.
 
 **AddRepoToGroup**: Adds a repository straight into one of the user's groups, or moves an already listed repo into it.
 
@@ -387,32 +458,79 @@ a folder given twice once, and by `MainWindow` to find the card a card drag carr
   repository); never `AlreadyListed` (a listed repo is moved) nor `SaveFailed` (a failed save throws).
 - *Preconditions*: a non-blank path and a valid group name (`RepoGroupName.Validate`); a built-in section's name or a
   blank name throws `ArgumentException`.
-- *Postconditions*: shares the add with `AddRepo` (the private `AddRepoCore`), with the group - spelled as an existing
-  group of the same name ignoring case - set on the new entry before the single save, so the repo is never listed
-  ungrouped in between; a repo already listed is moved with `RepoCardViewModel.MoveToGroup` instead of being added
-  twice, and then placed at the bottom of the group like a newly added one (a failure to save that place is reported
-  through `SettingsSaveFailed`; the repo stays in the group, where it was, and the result stays `MovedExisting`);
-  and a collapsed target group is expanded so the repo is visible
+- *Postconditions*: shares the add steps with `AddRepo` (the private `AddRepoCore`, a one-folder batch), with the
+  group - spelled as an existing group of the same name ignoring case - set on the new entry before the single save, so
+  the repo is never listed ungrouped in between; a repo already listed is moved into the group and placed at the bottom
+  of its section in the same save instead of being added twice (a failed save of that move is reported through
+  `SettingsSaveFailed` and gives `MoveFailed`, nothing changed); and a collapsed target group is expanded in the same
+  save so the repo is visible
   (`AgentControl-MainWindowViewModel-AddRepoToGroup`, `-NewRepoAtEnd`). The group is stored in the user's settings
   only.
 
-**AddRepos**: Adds several folders at once - several folders chosen in the folder picker, or folders dropped from the
-file manager - each as `AddRepo` (or, with a group, `AddRepoToGroup`) would, and reports what became of each
-(`AgentControl-MainWindowViewModel-AddRepos`).
+**AddRepos**: Adds several folders at once, synchronously - each as `AddRepo` (or, with a group, `AddRepoToGroup`)
+would - and reports what became of each (`AgentControl-MainWindowViewModel-AddRepos`). The window adds through
+`EnqueueAddReposAsync` instead; both share the add steps.
 
 - *Parameters*: `IEnumerable<string> repoPaths` (in the order to add them), `string? groupName` (`null` for none).
 - *Returns*: `IReadOnlyList<AddRepoOutcome>` — one outcome per distinct, non-blank path, in the order given.
 - *Preconditions*: `repoPaths` is not null (`ArgumentNullException`); a given `groupName` is a valid group name, checked
   and spelled like an existing group once, before anything is added (`ArgumentException`, nothing added).
 - *Postconditions*: Blank paths are ignored and a folder given more than once (`IsSameRepoPath`: ignoring letter case
-  and a trailing directory separator) is handled once, under the first spelling given.
-  Every folder goes through `AddRepoCore` on its own and is saved as it is added, so the list, the cards and the file
-  stay in step whatever fails; one folder that is missing, not a Git repository, already listed or cannot be saved does
-  not stop the others - a failed save (`InvalidOperationException`) becomes that folder's `SaveFailed` outcome with
-  the redacted reason, and the next folder is tried. With a group, a collapsed target group is opened **once** at the
-  end when anything was added to or moved into it (`OpenGroupAfterAdd`, which `AddRepoToGroup` uses too; a failure to
-  remember the open state is ignored, the repos are in their group). Each new card's upgrade check starts in the
-  background as for a single add.
+  and a trailing directory separator) is handled once, under the first spelling given. The plan, an inline
+  `InspectFolder` per folder and one commit: one folder that is missing, not a Git repository or already listed does
+  not stop the others; the whole batch is saved **once** and the list rebuilt once; a collapsed target group is opened
+  in that same save when anything was added to or moved into it. When the save fails (`InvalidOperationException`)
+  nothing at all changed and every folder that would have been added or moved gets the `SaveFailed` outcome with the
+  redacted reason (all-or-nothing); the other folders keep their outcome. The new cards' upgrade checks start in the
+  background; their working-tree checks run when their cards are first shown.
+
+**EnqueueAddReposAsync**: The add the window uses - folders from the picker or dropped from the file manager - run in
+the background after any add that is already running or queued, with progress in `GlobalProgress`
+(`AgentControl-MainWindowViewModel-AddReposInBackground`, `-AddReposQueued`, `-AddReposProgress`).
+
+- *Parameters*: `IReadOnlyList<string> repoPaths`, `string? groupName`.
+- *Returns*: `Task<AddReposBatchResult>` — what became of each folder, or a canceled result (nothing saved or added)
+  when the user canceled or the window closed; it never faults for an expected failure (a failed save is part of the
+  result).
+- *Preconditions*: called on the UI thread; `repoPaths` not null (`ArgumentNullException`); a given `groupName` valid
+  (`ArgumentException` at once, nothing queued).
+- *Algorithm*: a disposed view model returns a canceled result. The request joins the running session (`_addSession`),
+  or starts a new one when there is none or it was canceled (so an earlier Cancel never reaches an add asked for
+  afterwards); a new session begins its progress operation ("Adding repositories...", cancelable). The request is
+  chained after `PendingAddRepos` (`RunQueuedAddAsync` awaits the previous task, whatever became of it), so adds never
+  run at the same time, and becomes the new `PendingAddRepos`. When its turn comes it shows "Adding repositories..."
+  (Cancel allowed), reports "Adding {completed} of {total} repositories..." as folders are checked, and switches to
+  "Saving..." with Cancel no longer allowed just before it commits. The last add of a session to end disposes the
+  progress operation, so the strip goes idle (or shows an operation that is still running).
+- *Postconditions*: the list reflects the batch, committed once; a repo listed while the folders were read is
+  `AlreadyListed`, never added twice, including a folder named by two queued requests; a target group removed while
+  the add ran is created again by the commit (the user asked for that group).
+
+**CancelAddRepos**: Cancels the running add and every add queued after it (the strip's Cancel)
+(`AgentControl-MainWindowViewModel-AddReposCancel`). An add that is already saving completes; nothing else is saved or
+added, and the canceled requests return a canceled result, so the window shows no message.
+
+**AddReposAsync** (internal): The body of a queued add.
+
+- *Parameters*: `IReadOnlyList<string> repoPaths`, `string? groupName`, `IProgress<AddReposProgress>? progress`,
+  `CancellationToken cancellationToken`, `Action? onSaving = null`.
+- *Algorithm*: canceled or disposed already: a canceled result. Plan on the UI thread and report `(0, total)`; read
+  every folder through `_backgroundWork.RunAsync(() => InspectFolder(...))`, at most
+  `MaxConcurrentFolderInspections` at a time (a `SemaphoreSlim`), keeping the results by index so the request order
+  holds, and report `(completed, total)` as each completes (the continuations resume on the UI thread, so progress is
+  reported there); a cancellation while reading gives a canceled result. Checked once more before the commit - the
+  last moment to stop, nothing has been saved or added - then `onSaving` and `CommitAddBatchAsync`. The working tree
+  of the new repos is not checked: their cards show the Git status as not checked yet until shown.
+
+**CommitAddBatchAsync** (private): Commits a background add on the UI thread, asking the user when the save fails
+(`AgentControl-MainWindowViewModel-AddReposSaveFailure`). Each attempt re-resolves the target group and prepares the
+commit against the list as it is then (`PrepareAddCommit`, `ApplyAddCommit`); on `InvalidOperationException` it raises
+`AddSaveFailed` with a `SettingsSaveRetryRequest` whose message says the repositories could not be added because the
+settings could not be saved, gives the redacted reason and says what Retry and Discard do, and awaits the answer:
+Retry loops; Discard (or a disposed view model, or no subscriber, which answers Discard at once) returns the outcomes
+with every folder that would have been added or moved as `SaveFailed`. Because the commit is candidate-first, nothing
+needs undoing: memory, the cards, the list and the file still match, including the group, the place and the collapsed
+state of repos the add would have moved.
 
 **DescribeAddOutcomes** (internal, static, pure): Words what the user needs to know about an add
 (`AgentControl-MainWindowViewModel-AddReposSummary`).
@@ -463,14 +581,22 @@ Performs no confirmation itself: `MainWindow`'s code-behind is responsible for s
   `PackageVersionCache` is invalidated for each package source that was edited or removed (the
   sources before and after are compared by alias and by `PackageSourceDefinition.IsEquivalentTo`;
   unchanged sources keep their cached results)
-  (`AgentControl-MainWindowViewModel-InvalidateChangedSources`), and every card's cheap refresh
-  re-runs. A present card
-  is additionally given a fresh Git status check (via `RefreshDirtyStatus`) when either it
-  reappeared (was missing, now present) during this call, so it is not left showing a "not yet
+  (`AgentControl-MainWindowViewModel-InvalidateChangedSources`). The save and the adoption happen before the method
+  returns; the cards are then refreshed in the background: the method cancels the upgrade check and the periodic round
+  that were running (they were started for the previous settings) and sets `PendingRefresh` to
+  `RefreshCardsAfterSettingsAsync`, which counts as a launch-style check while it runs (so no periodic round starts),
+  shows "Refreshing repositories..." with the card count in `GlobalProgress` (no Cancel; nothing for an empty list),
+  runs every card's `RefreshCheapInBackgroundAsync`, at most `MaxConcurrentFolderInspections` at a time, reporting the
+  count as each completes, rebuilds the list once and then awaits `BeginUpgradeRefresh` against the new sources
+  (`AgentControl-MainWindowViewModel-ApplySettingsInBackground`). A newer `ApplySettings` supersedes an older refresh
+  (`_settingsRefreshGeneration`): the older one neither rebuilds the list nor starts the upgrade check (the cards'
+  own generations already make the newest read win); `Dispose` cancels it. A present card
+  is additionally given a fresh Git status check (via `RefreshDirtyStatusInBackgroundAsync`) when either it
+  reappeared (was missing, now present) during this refresh, so it is not left showing a "not yet
   checked" state indefinitely, or `GitExecutablePath` itself changed, so a clean/dirty result
   cached against the previously configured executable is not kept showing once a different
   executable is in effect; a present card that was already checked and whose executable path
-  did not change only gets the cheap refresh, avoiding a synchronous `git status` call — which
+  did not change only gets the cheap refresh, avoiding a `git status` call — which
   `GitClient` runs with no timeout — for every tracked repo on every settings save
   (`AgentControl-MainWindowViewModel-ApplySettings`). Once the settings are saved, the saved
   `Theme` is handed to the injected theme applier (`Action<ThemePreference>`, supplied by `App`), so the
@@ -680,20 +806,24 @@ catches it and tells the user); a change that comes from a card or a header butt
 `SettingsSaveFailed` (the callback returns `false`, the card keeps its value); `MoveCard`, `DropCard`, `SetGroupColor`,
 `MoveGroup`, `DropGroup` and the order
 placement of `AddRepoToGroup` do not throw for a failed save either: they report it through `SettingsSaveFailed`,
-return `false` (or keep `MovedExisting`) and change nothing; `AddRepos` does not throw for a failed save of one folder
-either: that folder's outcome is `SaveFailed` with the redacted reason, the next folders are still tried, and the
-window shows the reason in the summary of `DescribeAddOutcomes`; `AddRepos` throws `ArgumentNullException` for a null
-list and `ArgumentException` for an invalid group name before adding anything; `ToggleGroupCollapsed` throws
+return `false` (or `MoveFailed`) and change nothing; `AddRepos` does not throw for a failed save either: nothing of
+the batch changed, every folder that would have been added or moved gets the `SaveFailed` outcome with the redacted
+reason, and the window shows the reason in the summary of `DescribeAddOutcomes`; `EnqueueAddReposAsync` turns a failed
+save into the Retry/Discard question (`AddSaveFailed`) and, on Discard, into the same `SaveFailed` outcomes, and its
+task never faults for an expected failure (a queued add whose predecessor faulted still runs); a cancellation before
+the commit is a canceled result, not an exception; `AddRepos` and `EnqueueAddReposAsync` throw `ArgumentNullException`
+for a null list and `ArgumentException` for an invalid group name before adding (or queuing) anything;
+`ToggleGroupCollapsed` throws
 `ArgumentException` for a blank name, while `RenameGroup` and `RemoveGroup` report an unknown group or unusable name
 by returning `false`, as `SetGroupColor` does for an unknown group or color. A folder that is not a Git repository is
 an outcome (`NotAGitRepository`), not an error. Group names read from
 settings are repaired (`RepoGroupName.Sanitize`) on the fly, a null collapsed list reads as empty, so
 damaged values never throw. `SaveSettings`
 propagates `InvalidOperationException` from `SettingsStore.Save` if the settings file cannot
-be written; it writes the live settings as they are and is not used for the user's changes. `TryLoadPin` (private)
-catches `InvalidOperationException` from `RepoPinStore.Load`
-and returns `null`, so a corrupt or unreadable pin file never prevents `AddRepo` from
-succeeding.
+be written; it writes the live settings as they are and is not used for the user's changes. A pin file that cannot be
+read while a folder is added is captured in its `RepoCheapFacts` (the card then shows the reason) and never prevents
+the add from succeeding. A background card refresh after a settings save that is canceled (the window closed) ends
+quietly.
 
 #### Dependencies
 
@@ -702,12 +832,17 @@ succeeding.
   card when its repo is removed.
 - **RepoGroupHeaderViewModel** (`LauncherUI`) — one header per section, updated in place (count, collapsed state,
   color, move availability); its toggle, rename, remove, add-repository and move requests are handled here.
+- **GlobalProgressViewModel** (`LauncherUI`) — the progress strip's state (`GlobalProgress`), in which the adds (one
+  cancelable operation per session) and the card refresh after a settings save (not cancelable) are shown.
+- **IBackgroundWorkRunner** / **ThreadPoolBackgroundWorkRunner** (`LauncherUI` supporting type,
+  `BackgroundWorkRunner.cs`) — runs the folder reads of an add off the UI thread, and is passed on to every card for
+  its background refreshes.
 - **CardColorPalette** (`LauncherUI` supporting type) — checks and spells a group color name in `SetGroupColor`.
 - **GitClient** (`GitIntegration` subsystem) — the static `IsRepositoryRoot`, which every add path uses to accept only
   the top folder of a Git repository (no git process is started).
-- **SecretRedactor** (`PackageCredentials` subsystem) — makes the reason of a failed save of `AddRepos` safe to show.
-- **RepoPinStore** (`RepoConfig` subsystem) — `AddRepo` attempts to load an existing pin for a
-  newly-added repo.
+- **SecretRedactor** (`PackageCredentials` subsystem) — makes the reason of a failed save of an add safe to show.
+- **RepoCardViewModel.ReadCheapFacts** (`LauncherUI`) — reads, on a worker thread, the pin (`RepoConfig`'s
+  `RepoPinStore`), branch and committed agent folders of a folder being added, before it has a card.
 - **SettingsStore** (`Settings` subsystem) — saves the candidate settings of every change and of `ApplySettings`
   (`SaveSettings` persists the live `AppSettings` as they are);
   **RepoGroupName** (`Settings` subsystem) — the group-name rules used for sorting, validation and
@@ -725,8 +860,10 @@ succeeding.
 
 - **App** — constructs `MainWindowViewModel` in `OnFrameworkInitializationCompleted`, passing the
   process-wide `PackageCredentialContext`, and assigns it as `MainWindow.DataContext`.
-- **MainWindow** (code-behind) — calls `AddRepos` and `DescribeAddOutcomes` for the app bar's Add button, a header's
-  "Add repository..." (both with several folders) and folders dropped from the file manager, and calls `RemoveRepo`,
+- **MainWindow** (code-behind) — calls `EnqueueAddReposAsync` and `DescribeAddOutcomes` for the app bar's Add button,
+  a header's "Add repository..." (both with several folders) and folders dropped from the file manager (the drop's
+  add posted to the UI thread), binds the progress strip to `GlobalProgress`, answers `AddSaveFailed` with the
+  Retry/Discard `ConfirmationWindow`, and calls `RemoveRepo`,
   `ToggleGroupCollapsed`, `RenameGroup` and
   `RemoveGroup` (catching the `InvalidOperationException` of a failed save and showing a message), asks
   `IsReorderEnabled`, `CanMoveCard`/`GetMoveDisabledReason`, `GetReorderDisabledReason`, `CanDrop` and `CanDropGroup`

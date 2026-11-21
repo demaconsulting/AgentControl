@@ -142,9 +142,19 @@ folders git tracks and stops git tracking chosen ones.
   different hash or unknown repo path as a cache miss; overwrites a previously cached value
   for the same key (`AgentControl-CommittedAgentFilesCache-Cache`).
 - *Constraints*: `Invalidate` clears only the entry for the given repo path, leaving other
-  repos' cached entries untouched.
+  repos' cached entries untouched. Every method is safe to call from several threads at the same time (a private lock
+  guards the dictionary), because cards consult it from worker threads while the UI thread may invalidate it
+  (`AgentControl-CommittedAgentFilesCache-ConcurrentUse`).
 
 ### Design
+
+**Queries from any thread** (`AgentControl-GitIntegration-QueriesFromAnyThread`). The launcher reads git for many repos
+off its UI thread (adding folders, refreshing the cards after a settings save, the working-tree check of shown
+cards), so every repository query of the subsystem - branch, `HEAD` commit, committed agent folders, repository root
+and working-tree state - must give the same answer when made from several threads at once. `GitClient` holds no
+mutable state (it starts a new git process for every call, and `IsRepositoryRoot` is a static file-system check), so
+concurrent calls are independent; `CommittedAgentFilesCache`, the one shared mutable object, takes a private lock
+around its dictionary in every member.
 
 `GitClient` invokes the configured git executable (default `git`, overridable via Settings)
 as an external process for every query. Status/pull/committed-files queries surface failures

@@ -64,8 +64,10 @@ the units, `GitCredentialClient` (in `GitIntegration`) and `SignatureVerificatio
 belong to the Git repository source feature. `RepoGroupName` (in
 `Settings`) is the unit holding the rules for the names of the user's repo groups, and `RepoImageLocator`,
 `RepoGroupHeaderViewModel`, `GroupNameViewModel` and `DialogBehavior` (in `LauncherUI`) belong to the repo-picture,
-repo-group and dialog features; `PathEllipsisText`, `ColorPalettePanel` (the shared content of the card and group
-color pop-ups) and `ThemePreferenceDisplayNameConverter` are documented
+repo-group and dialog features; `GlobalProgressViewModel` (in `LauncherUI`) backs the progress strip under the app bar
+that shows bulk work (adding repositories, refreshing the cards after Settings are saved); `PathEllipsisText`,
+`ColorPalettePanel` (the shared content of the card and group color pop-ups), `ThemePreferenceDisplayNameConverter`
+and `BackgroundWorkRunner` (the seam that runs file-system and git reads off the UI thread) are documented
 supporting types of `LauncherUI`, not units.
 
 ![Software Structure](SoftwareStructureView.svg)
@@ -87,7 +89,9 @@ Settings, Logging, Startup and Utilities](architecture.svg)
     - **LauncherUI/** - main window, repo cards, package-selection, settings, package-source editor
       (including the signature options and "Forget saved sign-in") and sign-in windows; the user's group colors and
       group order (header menu, drag and drop), adding several repos at once (multi-select picker and folders dropped
-      from the file manager) and the About window with its banner
+      from the file manager, checked in the background, with progress and Cancel in the global progress strip under
+      the app bar, `GlobalProgressViewModel`, and a Retry/Discard question when the add cannot be saved), the
+      background-work seam (`BackgroundWorkRunner`) and the About window with its banner
     - **AgentPackageManagement/** - package source model, source providers (zip folder, NuGet
       folder and server, Git repository) and registry, package discovery, version comparison, the content identity of a
       delivered package, and the platform

@@ -909,7 +909,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     ///     synchronous <c>git status</c> call for every repo on every settings save.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_ApplySettings_RepoReappeared_RefreshesGitStatusImmediately()
+    public async Task MainWindowViewModel_ApplySettings_RepoReappeared_RefreshesGitStatusImmediately()
     {
         // Arrange: a card for a repo that currently does not exist on disk
         var repoPath = Path.Combine(Path.GetTempPath(), "agentcontrol_reappear_" + Guid.NewGuid());
@@ -925,9 +925,10 @@ public sealed class MainWindowViewModelTests : IDisposable
         _tempPaths.Add(stub.Path);
         var updated = new AppSettings { GitExecutablePath = stub.Path };
         viewModel.ApplySettings(updated);
+        await viewModel.PendingRefresh;
 
-        // Assert: the card immediately reflects a fresh (clean) Git status, not a stale or
-        // "not yet checked" state
+        // Assert: once the background refresh is done, the card reflects a fresh (clean) Git
+        // status, not a stale or "not yet checked" state
         Assert.False(viewModel.RepoCards[0].IsMissing);
         Assert.True(viewModel.RepoCards[0].GitStatusChecked);
         Assert.True(viewModel.RepoCards[0].CanPull);
@@ -941,7 +942,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     ///     UI thread with a synchronous status check for every tracked repo.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_ApplySettings_RepoAlreadyPresentAndChecked_DoesNotRecheckGitStatus()
+    public async Task MainWindowViewModel_ApplySettings_RepoAlreadyPresentAndChecked_DoesNotRecheckGitStatus()
     {
         // Arrange: a card for a repo that exists on disk and already has a completed Git status
         // check (simulating the one-time lazy trigger having already fired)
@@ -963,6 +964,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         // Act: settings are reapplied without the repo ever having gone missing
         var updated = new AppSettings { GitExecutablePath = stub.Path };
         viewModel.ApplySettings(updated);
+        await viewModel.PendingRefresh;
 
         // Assert: no additional "git status" invocation was made for the already-checked,
         // still-present repo
@@ -976,7 +978,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     ///     executable must not keep being shown once a different executable is configured.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_ApplySettings_GitExecutablePathChanged_RefreshesGitStatus()
+    public async Task MainWindowViewModel_ApplySettings_GitExecutablePathChanged_RefreshesGitStatus()
     {
         // Arrange: a card for a present repo whose cached Git status (from the first, "clean"
         // executable) is already checked
@@ -998,8 +1000,9 @@ public sealed class MainWindowViewModelTests : IDisposable
         _tempPaths.Add(dirtyStub.Path);
         var updated = new AppSettings { GitExecutablePath = dirtyStub.Path };
         viewModel.ApplySettings(updated);
+        await viewModel.PendingRefresh;
 
-        // Assert: the card reflects the new executable's status immediately, not the stale
+        // Assert: the card reflects the new executable's status, not the stale
         // result cached against the old one
         Assert.True(viewModel.RepoCards[0].GitStatusChecked);
         Assert.False(viewModel.RepoCards[0].CanPull);
@@ -1245,6 +1248,309 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         // Assert
         Assert.IsType<NuGetSourceProvider>(provider);
+    }
+
+    /// <summary>
+    ///     Test that a background add returns to its caller while the folders are still being checked
+    ///     (held at a gate) and adds nothing until they have been, then adds them all.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_AddReposAsync_WhileFoldersAreChecked_ReturnsAndAddsNothingYet()
+    {
+        // Arrange: two repo folders and a background runner that holds every check
+        var gate = new GatedBackgroundWorkRunner();
+        var repoA = CreateRepoDirectory();
+        var repoB = CreateRepoDirectory();
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory(), backgroundWork: gate);
+
+        // Act: start the add; the checks are held
+        var add = viewModel.EnqueueAddReposAsync([repoA, repoB], null);
+        await gate.FirstCall;
+
+        // Assert: the caller got control back, nothing is added yet, and progress is shown
+        Assert.False(add.IsCompleted);
+        Assert.Empty(viewModel.RepoCards);
+        Assert.True(viewModel.GlobalProgress.IsActive);
+        Assert.True(viewModel.GlobalProgress.CanCancel);
+
+        // Act: let the checks run
+        gate.Release();
+        var result = await add;
+
+        // Assert: both added, and the strip is gone
+        Assert.False(result.Canceled);
+        Assert.Equal([AddRepoResult.Added, AddRepoResult.Added], result.Outcomes.Select(outcome => outcome.Result));
+        Assert.Equal([repoA, repoB], viewModel.RepoCards.Select(card => card.RepoPath));
+        Assert.False(viewModel.GlobalProgress.IsActive);
+    }
+
+    /// <summary>
+    ///     Test that a background add of several folders saves the settings once and rebuilds the
+    ///     displayed list once for the whole batch.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_AddReposAsync_SeveralFolders_SavesOnceAndUpdatesTheListOnce()
+    {
+        // Arrange: a counting save seam, and a counter of list rebuilds
+        var configDir = CreateTempDirectory();
+        var saves = 0;
+        var viewModel = new MainWindowViewModel(
+            new AppSettings(),
+            configDirectory: configDir,
+            saveSettings: settings =>
+            {
+                Interlocked.Increment(ref saves);
+                SettingsStore.Save(settings, configDir);
+            });
+        var rebuilds = 0;
+        viewModel.PropertyChanged += (_, e) =>
+            rebuilds += e.PropertyName == nameof(MainWindowViewModel.HasNoDisplayedRepos) ? 1 : 0;
+        string[] repos = [CreateRepoDirectory(), CreateRepoDirectory(), CreateRepoDirectory(), CreateRepoDirectory()];
+
+        // Act
+        var result = await viewModel.EnqueueAddReposAsync(repos, null);
+
+        // Assert: four added with one save and one rebuild, and the file holds all four
+        Assert.All(result.Outcomes, outcome => Assert.Equal(AddRepoResult.Added, outcome.Result));
+        Assert.Equal(4, viewModel.RepoCards.Count);
+        Assert.Equal(1, saves);
+        Assert.Equal(1, rebuilds);
+        Assert.Equal(4, SettingsStore.Load(configDir).RecentRepos.Count);
+    }
+
+    /// <summary>
+    ///     Test that a background add reports its progress: the total at once, then each checked folder
+    ///     up to the total.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_AddReposAsync_ReportsProgressCounts()
+    {
+        // Arrange
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory());
+        var reports = new List<AddReposProgress>();
+        var progress = new RecordingProgress(reports);
+        string[] repos = [CreateRepoDirectory(), CreateRepoDirectory(), CreateRepoDirectory()];
+
+        // Act
+        await viewModel.AddReposAsync(repos, null, progress, CancellationToken.None);
+
+        // Assert: 0 of 3 first, then 1, 2 and 3 of 3 (in whatever order the checks finished)
+        lock (reports)
+        {
+            Assert.Equal(new AddReposProgress(0, 3), reports[0]);
+            Assert.All(reports, report => Assert.Equal(3, report.Total));
+            Assert.Equal([0, 1, 2, 3], reports.Select(report => report.Completed).Order());
+        }
+    }
+
+    /// <summary>
+    ///     Test that a repo listed while a background add was checking it is not added twice: the add
+    ///     re-checks the list when it commits.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_AddReposAsync_RepoListedMeanwhile_IsAlreadyListed()
+    {
+        // Arrange: a background add of one repo, held while its folder is checked
+        var gate = new GatedBackgroundWorkRunner();
+        var repo = CreateRepoDirectory();
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory(), backgroundWork: gate);
+        var add = viewModel.EnqueueAddReposAsync([repo], null);
+        await gate.FirstCall;
+
+        // Act: the same repo is added another way meanwhile, then the background add completes
+        Assert.True(viewModel.AddRepo(repo));
+        gate.Release();
+        var result = await add;
+
+        // Assert: reported as already listed, and listed once
+        Assert.Equal(AddRepoResult.AlreadyListed, Assert.Single(result.Outcomes).Result);
+        Assert.Single(viewModel.RepoCards);
+        Assert.Single(viewModel.Settings.RecentRepos);
+    }
+
+    /// <summary>
+    ///     Test that adding a repo does not check its working tree: the card shows its Git status as not
+    ///     checked yet and no <c>git status</c> ran (the check is deferred until the card is shown).
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_AddReposAsync_NewRepo_GitStatusNotCheckedAndNoStatusRun()
+    {
+        // Arrange: a git stub that logs every invocation
+        var invocationLog = Path.Combine(Path.GetTempPath(), "agentcontrol_add_invocations_" + Guid.NewGuid() + ".log");
+        _tempPaths.Add(invocationLog);
+        var stub = GitStub.Create(invocationLogPath: invocationLog);
+        _tempPaths.Add(stub.Path);
+        var viewModel = new MainWindowViewModel(
+            new AppSettings { GitExecutablePath = stub.Path }, configDirectory: CreateTempDirectory());
+        var repo = CreateRepoDirectory();
+
+        // Act
+        await viewModel.EnqueueAddReposAsync([repo], null);
+        await viewModel.PendingRefresh;
+
+        // Assert: the card's branch was read (cheap facts), but not its working tree
+        var card = Assert.Single(viewModel.RepoCards);
+        Assert.Equal("main", card.CurrentBranch);
+        Assert.False(card.GitStatusChecked);
+        Assert.False(card.IsWorkingTreeDirty);
+        Assert.Equal(0, CountStatusInvocations(invocationLog));
+    }
+
+    /// <summary>
+    ///     Test that canceling a background add before it saves adds nothing and saves nothing.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_EnqueueAddRepos_Canceled_SavesNothingAndAddsNothing()
+    {
+        // Arrange: an add held while its folders are checked, and a counting save seam
+        var gate = new GatedBackgroundWorkRunner();
+        var configDir = CreateTempDirectory();
+        var saves = 0;
+        var viewModel = new MainWindowViewModel(
+            new AppSettings(),
+            configDirectory: configDir,
+            saveSettings: settings =>
+            {
+                Interlocked.Increment(ref saves);
+                SettingsStore.Save(settings, configDir);
+            },
+            backgroundWork: gate);
+        var add = viewModel.EnqueueAddReposAsync([CreateRepoDirectory(), CreateRepoDirectory()], null);
+        await gate.FirstCall;
+
+        // Act: Cancel on the progress strip, then the held checks finish
+        viewModel.GlobalProgress.CancelCommand.Execute(null);
+        gate.Release();
+        var result = await add;
+
+        // Assert: canceled, nothing added or saved, and the strip is gone
+        Assert.True(result.Canceled);
+        Assert.Empty(result.Outcomes);
+        Assert.Empty(viewModel.RepoCards);
+        Assert.Empty(viewModel.Settings.RecentRepos);
+        Assert.Equal(0, saves);
+        Assert.False(File.Exists(Path.Combine(configDir, "settings.json")));
+        Assert.False(viewModel.GlobalProgress.IsActive);
+    }
+
+    /// <summary>
+    ///     Test that an add requested while another runs waits for it (it checks nothing meanwhile),
+    ///     then runs, and that a folder both adds name is added once.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_EnqueueAddRepos_SecondBatchWhileFirstRuns_RunsAfterItWithoutDuplicates()
+    {
+        // Arrange: the first add is held while its two folders are checked
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory(), backgroundWork: gate);
+        var repoA = CreateRepoDirectory();
+        var repoB = CreateRepoDirectory();
+        var repoC = CreateRepoDirectory();
+        var first = viewModel.EnqueueAddReposAsync([repoA, repoB], null);
+        await gate.FirstCall;
+
+        // Act: a second add (sharing one folder) is requested while the first one runs
+        var second = viewModel.EnqueueAddReposAsync([repoB, repoC], null);
+
+        // Assert: the second one waits - it has not checked any folder yet
+        Assert.False(second.IsCompleted);
+        Assert.Equal(2, gate.Calls);
+
+        // Act: let everything run
+        gate.Release();
+        var firstResult = await first;
+        var secondResult = await second;
+        await viewModel.PendingAddRepos;
+
+        // Assert: the first added both, the second found its shared folder listed and added the other
+        Assert.Equal([AddRepoResult.Added, AddRepoResult.Added], firstResult.Outcomes.Select(outcome => outcome.Result));
+        Assert.Equal([AddRepoResult.AlreadyListed, AddRepoResult.Added], secondResult.Outcomes.Select(outcome => outcome.Result));
+        Assert.Equal([repoA, repoB, repoC], viewModel.RepoCards.Select(card => card.RepoPath));
+        Assert.Equal(4, gate.Calls);
+        Assert.False(viewModel.GlobalProgress.IsActive);
+    }
+
+    /// <summary>
+    ///     Test that the global progress shows the add's count while folders are checked, and clears
+    ///     when the add has ended.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_EnqueueAddRepos_ShowsAndClearsGlobalProgress()
+    {
+        // Arrange
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory(), backgroundWork: gate);
+        Assert.False(viewModel.GlobalProgress.IsActive);
+
+        // Act: the add is held while its folders are checked
+        var add = viewModel.EnqueueAddReposAsync([CreateRepoDirectory(), CreateRepoDirectory()], null);
+        await gate.FirstCall;
+
+        // Assert: determinate, with the count
+        Assert.True(viewModel.GlobalProgress.IsActive);
+        Assert.False(viewModel.GlobalProgress.IsIndeterminate);
+        Assert.Equal("Adding 0 of 2 repositories...", viewModel.GlobalProgress.Text);
+        Assert.Equal(2, viewModel.GlobalProgress.Maximum);
+
+        // Act
+        gate.Release();
+        await add;
+
+        // Assert
+        Assert.False(viewModel.GlobalProgress.IsActive);
+        Assert.Equal(string.Empty, viewModel.GlobalProgress.Text);
+    }
+
+    /// <summary>
+    ///     Test that applying settings returns while the cards' refresh is still reading (held at a
+    ///     gate), showing "Refreshing repositories..." without Cancel, and that the refresh completes
+    ///     and clears the strip once the reads run.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_ApplySettings_CardRefreshHeld_ReturnsAndShowsRefreshingProgress()
+    {
+        // Arrange: one listed repo and a runner that holds the cards' background reads
+        var gate = new GatedBackgroundWorkRunner();
+        var repo = CreateTempDirectory();
+        var viewModel = new MainWindowViewModel(
+            new AppSettings { RecentRepos = [new RecentRepo { Path = repo }] },
+            configDirectory: CreateTempDirectory(),
+            backgroundWork: gate);
+
+        // Act: apply settings; the card refresh is held
+        viewModel.ApplySettings(new AppSettings());
+        await gate.FirstCall;
+
+        // Assert: returned with the refresh still running, shown in the strip without Cancel
+        Assert.False(viewModel.PendingRefresh.IsCompleted);
+        Assert.True(viewModel.GlobalProgress.IsActive);
+        Assert.Equal("Refreshing repositories...", viewModel.GlobalProgress.Text);
+        Assert.False(viewModel.GlobalProgress.CanCancel);
+
+        // Act
+        gate.Release();
+        await viewModel.PendingRefresh;
+
+        // Assert
+        Assert.False(viewModel.GlobalProgress.IsActive);
+        Assert.False(viewModel.RepoCards[0].IsMissing);
+    }
+
+    /// <summary>
+    ///     An <see cref="IProgress{T}"/> that records every report at once (thread-safe), unlike
+    ///     <see cref="Progress{T}"/>, which posts.
+    /// </summary>
+    /// <param name="reports">The list the reports are added to; locked while adding.</param>
+    private sealed class RecordingProgress(List<AddReposProgress> reports) : IProgress<AddReposProgress>
+    {
+        /// <inheritdoc />
+        public void Report(AddReposProgress value)
+        {
+            lock (reports)
+            {
+                reports.Add(value);
+            }
+        }
     }
 
     /// <summary>

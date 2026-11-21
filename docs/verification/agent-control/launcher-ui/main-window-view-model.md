@@ -8,8 +8,16 @@ or several and the Git-repository check), `RepoGroupingTests.cs`
 stability, new
 repos, the legacy seed, Move, drag and drop, filtering, persistence, and the order of the groups),
 `MainWindowViewModelPersistenceTests.cs` (every
-change the user makes when the settings file cannot be written) and `MainWindowViewModelRecheckTests.cs` (the periodic
-upgrade re-check, on a fake clock). Each test constructs a real `MainWindowViewModel` against a unique temporary
+change the user makes when the settings file cannot be written, including the Retry/Discard question of a background
+add) and `MainWindowViewModelRecheckTests.cs` (the periodic
+upgrade re-check, on a fake clock). The background add and the background card refresh after a settings save are
+verified through the view model's two constructor seams rather than timing: `backgroundWork` takes a
+`GatedBackgroundWorkRunner` (a test helper that counts every piece of work and holds it until the test releases it), so
+a test asserts what holds while the folders are still being checked - the add has returned to its caller, nothing is
+added, the global progress shows the count - and `saveSettings` takes a delegate that counts saves and can fail on
+demand, so "one save per batch", Cancel, Retry and Discard are deterministic. Tests that apply settings or add in the
+background await `PendingRefresh` or the add's task before asserting. Each test constructs a real `MainWindowViewModel`
+against a unique temporary
 configuration directory (via `SettingsStore`) and unique temporary repo directories, so tests are hermetic and can run
 in parallel with each other, subject to the `RealProcess` xUnit collection (which disables parallelization) since
 constructing a view model with recent repos spawns real git subprocesses via `GitStub` or the system git executable as
@@ -31,10 +39,20 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 - Only the top folder of a Git repository (a `.git` folder or file directly in it) is added, by every add path; a
   subfolder, a plain folder and a file are refused as not a Git repository, a missing path as missing, and repos already
   in the list are kept whatever their folders hold.
-- Adding several folders reports one outcome per distinct folder, in order, goes on past a folder that is refused or
-  cannot be saved, and opens a collapsed target group once; the message for the user is nothing when everything was
+- Adding several folders reports one outcome per distinct folder, in order, goes on past a folder that is refused,
+  saves the whole batch once (all or nothing: when that save fails nothing is added and every folder that would have
+  been added or moved is reported as not saved) and opens a collapsed target group in that save; the message for the
+  user is nothing when everything was
   added, the single-add message for one folder, and one summary by kind of outcome (at most five names per line) for
   several.
+- A background add returns to its caller while its folders are checked, adds nothing until all are checked, reports
+  its progress (0 of the total first, then each checked folder) in the global progress and clears it when it ends,
+  re-checks the list when it commits (a repo listed meanwhile is not added twice), does not check the working tree of a
+  new repo, waits for an add already running, stops with nothing saved or added when canceled, and on a failed save asks
+  Retry (which adds the batch) or Discard (which, like no one to ask, leaves memory, the cards, the list and the file -
+  including repos the add would have moved - as saved).
+- Applying settings returns before the cards' background refresh has read anything, shows "Refreshing
+  repositories..." without Cancel while it runs and clears it when done.
 - Search filtering and the user's own ordering (favorites first, then the stored order, never launch time) produce the
   documented result for every tested input.
 - A launch, a refresh and applying settings never reorder the cards; a new repo goes to the end; settings without a
@@ -133,10 +151,56 @@ directory separator is handled once and gives one card, saved without the separa
 (`MainWindowViewModel_AddRepos_SameFolderWithAndWithoutTrailingSeparator_AddsOneCard`); several folders added into a
 collapsed group all
 join it, a listed repo is moved into it, and the group is opened once
-(`MainWindowViewModel_AddRepos_IntoCollapsedGroup_OpensItOnce`); and when the save of one folder fails that folder is
-reported as not saved with the reason and the folders after it are added once saving works
-(`MainWindowViewModel_AddRepos_SaveFailsForOne_ContinuesWithTheRest`, in `MainWindowViewModelPersistenceTests.cs`).
+(`MainWindowViewModel_AddRepos_IntoCollapsedGroup_OpensItOnce`); when the save fails nothing at all is added (cards,
+settings and the displayed list are unchanged), both new folders are reported as not saved with the reason, and the
+same folders are added once saving works
+(`MainWindowViewModel_AddRepos_SaveFails_NothingAddedAndEveryFolderReportedNotSaved`, in
+`MainWindowViewModelPersistenceTests.cs`); and four folders added in the background are saved with exactly one save
+and the displayed list is rebuilt exactly once (`HasNoDisplayedRepos` notified once), the file holding all four
+(`MainWindowViewModel_AddReposAsync_SeveralFolders_SavesOnceAndUpdatesTheListOnce`).
 These cover `AgentControl-MainWindowViewModel-AddRepos`.
+
+**MainWindowViewModel_AddReposInBackground_ReturnsAtOnceAndAddsWhenAllAreChecked**: With the folder checks held at the
+gate, a background add of two repos has not completed, no card is added and the global progress is active with Cancel;
+once released both are added in request order and the progress is cleared
+(`MainWindowViewModel_AddReposAsync_WhileFoldersAreChecked_ReturnsAndAddsNothingYet`). A repo added another way while
+the background add checks it is reported `AlreadyListed` and listed once
+(`MainWindowViewModel_AddReposAsync_RepoListedMeanwhile_IsAlreadyListed`). A new repo's card has its branch read but
+its Git status not checked, is not shown as dirty, and the stub git's invocation log holds no `status` call
+(`MainWindowViewModel_AddReposAsync_NewRepo_GitStatusNotCheckedAndNoStatusRun`). These cover
+`AgentControl-MainWindowViewModel-AddReposInBackground`.
+
+**MainWindowViewModel_AddReposProgress_CountsShownAndCleared**: A background add of three folders reports `(0, 3)`
+first and then 1, 2 and 3 of 3 in whatever order the checks finish
+(`MainWindowViewModel_AddReposAsync_ReportsProgressCounts`); through `EnqueueAddReposAsync` the global progress is idle
+before, determinate with "Adding 0 of 2 repositories..." and a maximum of 2 while the checks are held, and idle with no
+text after (`MainWindowViewModel_EnqueueAddRepos_ShowsAndClearsGlobalProgress`). These cover
+`AgentControl-MainWindowViewModel-AddReposProgress`.
+
+**MainWindowViewModel_AddReposCancel_NothingSavedOrAdded**: The global progress's Cancel is executed while the folder
+checks are held; once released the result is canceled with no outcome, no card or entry is added, no save was made
+and no settings file exists, and the progress is cleared
+(`MainWindowViewModel_EnqueueAddRepos_Canceled_SavesNothingAndAddsNothing`). This covers
+`AgentControl-MainWindowViewModel-AddReposCancel`.
+
+**MainWindowViewModel_AddReposQueued_SecondAddRunsAfterTheFirst**: While the first add's two folder checks are held, a
+second add sharing one folder is requested; it has not completed and has checked nothing (still two calls at the gate);
+once released the first adds both folders, the second reports its shared folder `AlreadyListed` and adds the other,
+four checks were made in all and the cards are in request order
+(`MainWindowViewModel_EnqueueAddRepos_SecondBatchWhileFirstRuns_RunsAfterItWithoutDuplicates`). This covers
+`AgentControl-MainWindowViewModel-AddReposQueued`.
+
+**MainWindowViewModel_AddReposSaveFailure_RetryOrDiscard**: Tested by `MainWindowViewModelPersistenceTests.cs`. With
+saving failing, a background add of two folders asks once, with a message that says the settings could not be saved
+and gives the reason; after saving works again Retry adds both with one more save and clears the progress
+(`MainWindowViewModel_EnqueueAddRepos_SaveFailsThenRetry_AddsTheBatch`). Adding a listed repo and a new folder to a
+collapsed group and answering Discard reports both as not saved, and the listed repo keeps its group (none), the stored
+order is unchanged, the group stays collapsed, the cards, the displayed list and the settings file's content are
+exactly as before
+(`MainWindowViewModel_EnqueueAddRepos_SaveFailsThenDiscard_LeavesEverythingAsSavedIncludingMovedRepos`);
+with no subscriber to the question the add is discarded and the folder reported as not saved with the reason
+(`MainWindowViewModel_EnqueueAddRepos_SaveFailsWithNoOneToAsk_Discards`). These cover
+`AgentControl-MainWindowViewModel-AddReposSaveFailure`.
 
 **MainWindowViewModel_AddReposSummary_NothingOneMessageOrOneSummary**: `DescribeAddOutcomes` returns nothing when every
 folder was added (`MainWindowViewModel_DescribeAddOutcomes_AllAdded_ReturnsNull`); for one folder it gives the
@@ -291,14 +355,14 @@ covering `AgentControl-MainWindowViewModel-GroupOrderPersisted`).
 is called with an updated `AppSettings`; the existing recent-repos list survives, the new
 field values are adopted and persisted, and the shared `PackageVersionCache` is invalidated so
 a changed package-source path is reflected immediately rather than served from a stale cache.
-A repo that reappeared since its last check gets an immediate fresh Git status (`RefreshCheap`
-followed by `RefreshDirtyStatus`), rather than being left showing a stale or indefinitely
+A repo that reappeared since its last check gets an immediate fresh Git status (the background cheap refresh followed
+by the background working-tree check), rather than being left showing a stale or indefinitely
 "not yet checked" Pull-disabled state. A present repo also gets an immediate fresh Git status
 when `GitExecutablePath` itself changed, so a clean/dirty result cached against the previously
 configured executable is not kept showing once a different executable is in effect. A repo
 that was already present, already checked, and whose executable path did not change only gets
-the cheap refresh, so re-saving settings does not re-run a synchronous `git status` for every
-tracked repo. This scenario is tested by
+the cheap refresh, so re-saving settings does not re-run `git status` for every
+tracked repo. These tests await `PendingRefresh` (the background refresh) before asserting. This scenario is tested by
 `MainWindowViewModel_ApplySettings_PreservesRecentReposAndPersistsUpdatedFields`,
 `MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache`,
 `MainWindowViewModel_ApplySettings_RepoReappeared_RefreshesGitStatusImmediately`,
@@ -326,6 +390,13 @@ a configuration location that cannot be written throws `InvalidOperationExceptio
 settings instance is still the previous one with its previous values and recent repos. This
 scenario is tested by `MainWindowViewModel_ApplySettings_SaveFails_KeepsPreviousSettingsLive`,
 covering `AgentControl-MainWindowViewModel-ApplySettings`.
+
+**MainWindowViewModel_ApplySettingsInBackground_ReturnsBeforeTheCardRefresh**: With one listed repo and the cards'
+background reads held at the gate, `ApplySettings` returns while `PendingRefresh` has not completed, and the global
+progress shows "Refreshing repositories..." without Cancel; once released the refresh completes, the progress is
+cleared and the card reflects the refresh (present)
+(`MainWindowViewModel_ApplySettings_CardRefreshHeld_ReturnsAndShowsRefreshingProgress`). This covers
+`AgentControl-MainWindowViewModel-ApplySettingsInBackground`.
 
 **MainWindowViewModel_BackgroundUpgradeCheck_ConstructionReadsNoSourceAndFailuresAreIsolated**:
 Constructing the view model with a pinned repo reads no package source until the upgrade refresh

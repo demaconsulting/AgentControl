@@ -76,6 +76,11 @@ Below the app bar is the list of **repo cards**, described in the next section, 
 section (see *Organizing Repos with Groups* and *Ordering Your Repos*). With no repos, or when the filter matches
 none, a short message says so instead.
 
+While AgentControl works on many repos at once - adding repositories, or refreshing every card after you save
+Settings - a thin **progress strip** appears directly under the app bar: a progress bar and a short line such as
+"Adding 7 of 20 repositories...", with a **Cancel** button while repositories are being added. The window stays
+usable meanwhile. The strip disappears, taking no space, as soon as the work is done.
+
 AgentControl follows your operating system's light or dark setting by default, and every window works in both
 themes; to always use one of them, choose a **Theme** in Settings (see *Settings*).
 
@@ -107,6 +112,25 @@ Git repository (it has no `.git` folder or file). When you add several folders, 
 were added; otherwise one message says, for example, "Added 3 of 5 folders.", followed by a line for each reason
 (already in the list or moved into the group, not the top folder of a Git repository, not found, or not saved).
 Each line names at most five folders and then says how many more there are.
+
+**Adding many folders at once.** The folders are checked in the background, so the window stays usable - you can
+filter, collapse, reorder or remove repos meanwhile. The progress strip under the app bar shows how far the check has
+got, for example "Adding 7 of 20 repositories...", and the new cards appear together once every folder has been
+checked. A repo that you add in another way while the check runs is not added twice. If you remove a group while
+repositories are being added to it, the add creates the group again, because that is where you asked to put them.
+
+- **Cancel.** Click **Cancel** in the progress strip to stop the add: nothing of it is added, and no message is shown.
+  Once the add has started saving ("Saving..."), Cancel is no longer offered and the add completes.
+- **Adding more while an add runs.** Folders you drop or pick while an add is still running wait for it and are added
+  right after it; one Cancel stops them all.
+- **When the settings cannot be saved.** If AgentControl cannot save the new repos (for example because the settings
+  file is locked or the disk is full), a question says why and offers **Retry** and **Discard**. **Retry** tries to
+  save again. **Discard** (also the answer to **Escape** and to closing the question) gives up the add and leaves the
+  list exactly as it was saved, and the message that follows names the folders that were not added.
+
+A new card's Git status (whether it has uncommitted changes) is checked in the background once the card is shown;
+until then the card does not show the **uncommitted-changes** warning and **Git Pull** says the status has not been
+checked yet.
 
 Each repo card shows:
 
@@ -232,6 +256,11 @@ leave the cards where they are, so a repo is always where you last put it.
   updates. Where a drop is accepted, no line is shown next to the card itself.
 - **In the flat list** (no groups) there are no sections to drop into, so dragging only reorders within the
   favorites at the top, or within the other repos.
+- **Scrolling while you drag.** To move a card further than the window shows, hold it near the top or bottom edge
+  of the list, over the app bar above the list, or below the list: the list keeps scrolling while you hold it there,
+  faster the further out the pointer is, and the line follows the card under the pointer. The same works when you
+  drag a group header or folders from File Explorer. The scrolling stops when you drop, move back toward the middle
+  of the list, or leave the window. Nothing can be dropped on the app bar.
 - **While the filter has text, ordering is off.** Only some repos are shown, so their positions cannot be changed:
   dragging does nothing and the **Reorder** submenu is disabled, with the tooltip "Clear the filter to change the order:
   while the filter has text only some repos are shown, so their positions cannot be changed." Filtering itself
@@ -1279,6 +1308,11 @@ Tools section](images/settings-dark.png)
   Windows PowerShell, PowerShell (`pwsh`) and the Command shell (`cmd`), from the next launch; you do not need to
   restart AgentControl. On macOS/Linux behavior is unchanged: AgentControl does not open a terminal window there, so
   the choice has no effect.
+
+After you save Settings, AgentControl refreshes every card (its pin, branch and committed agent folders) in the
+background, showing "Refreshing repositories..." in the progress strip under the app bar, and then checks for
+upgrades against your sources; the window stays usable meanwhile, and the strip disappears when the cards have been
+refreshed.
 
 # About
 
