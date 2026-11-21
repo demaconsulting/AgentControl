@@ -34,10 +34,12 @@ namespace DemaConsulting.AgentControl.UiTests;
 /// </summary>
 /// <remarks>
 ///     The folder picker is the Windows Common Item Dialog, which the application shows (owned by its
-///     main window) when Add is invoked. It is driven through UI Automation, and real keyboard input
-///     is sent to it only after <see cref="DialogInputProbe.BringToForeground"/> made it the
-///     foreground window. A picker left open by a failed assertion is canceled by the teardown that
-///     closes every window the application still has open.
+///     main window) when Add is invoked; <see cref="NativeFolderPicker"/> clicks Add once the main
+///     window is ready and finds the picker as a native window owned by the main window. It is
+///     driven through UI Automation, and real keyboard input is sent to it only after
+///     <see cref="DialogInputProbe.BringToForeground"/> made it the foreground window. A picker left
+///     open by a failed assertion is canceled by the teardown that closes every window the
+///     application still has open.
 /// </remarks>
 public sealed class AddRepoTests
 {
@@ -78,8 +80,7 @@ public sealed class AddRepoTests
         Assert.Equal(["repo"], RepoNames(mainWindow));
 
         // Act: Add opens the folder picker; open the folder and select all three, as a user does
-        Find(mainWindow, "AddRepoButton").AsButton().Invoke();
-        var picker = WaitForFolderPicker(context);
+        var picker = NativeFolderPicker.Open(context, mainWindow, Find(mainWindow, "AddRepoButton"), FolderPickerTitle);
         NavigatePicker(context, picker, picked);
         FindListItem(picker, "alpha-repo").Patterns.SelectionItem.Pattern.Select();
         FindListItem(picker, "beta-repo").Patterns.SelectionItem.Pattern.AddToSelection();
@@ -167,8 +168,7 @@ public sealed class AddRepoTests
         Assert.Equal(["repo"], RepoNames(mainWindow));
 
         // Act: Add opens the folder picker; type the subfolder's path in its folder box and select it
-        Find(mainWindow, "AddRepoButton").AsButton().Invoke();
-        var picker = WaitForFolderPicker(context);
+        var picker = NativeFolderPicker.Open(context, mainWindow, Find(mainWindow, "AddRepoButton"), FolderPickerTitle);
         FindFolderBox(picker).AsTextBox().Text = docs;
         FindSelectFolderButton(picker).AsButton().Invoke();
 
@@ -203,41 +203,6 @@ public sealed class AddRepoTests
     {
         Directory.CreateDirectory(Path.Combine(path, ".git"));
         File.WriteAllText(Path.Combine(path, ".git", "HEAD"), "ref: refs/heads/main\n");
-    }
-
-    /// <summary>
-    ///     Waits for the folder picker the application opened, which UI Automation shows either as a
-    ///     top-level window of the application or as a window inside the main window's tree.
-    /// </summary>
-    /// <param name="context">The running test context.</param>
-    /// <returns>The folder picker.</returns>
-    private static Window WaitForFolderPicker(AgentControlTestContext context)
-    {
-        var picker = Retry.WhileNull(
-            () =>
-            {
-                foreach (var topLevel in context.App!.GetAllTopLevelWindows(context.Automation!))
-                {
-                    if (string.Equals(topLevel.Title, FolderPickerTitle, StringComparison.Ordinal))
-                    {
-                        return topLevel;
-                    }
-
-                    var inner = topLevel.FindAllDescendants(cf => cf.ByControlType(ControlType.Window))
-                        .FirstOrDefault(window => string.Equals(window.Name, FolderPickerTitle, StringComparison.Ordinal));
-                    if (inner is not null)
-                    {
-                        return inner.AsWindow();
-                    }
-                }
-
-                return null;
-            },
-            TimeSpan.FromSeconds(15),
-            TimeSpan.FromMilliseconds(200),
-            ignoreException: true).Result;
-        Assert.True(picker is not null, $"The folder picker \"{FolderPickerTitle}\" did not open.");
-        return picker;
     }
 
     /// <summary>
