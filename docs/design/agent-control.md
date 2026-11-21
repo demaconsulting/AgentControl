@@ -249,15 +249,18 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   git process) and leaves the repos already in the list as they are; `DescribeAddOutcomes` turns the outcomes into one
   message (nothing when all were added, nothing after a cancel).
 - *Responsive repo-list work* (`AgentControl-System-ResponsiveRepoListWork`): adding folders and refreshing the cards
-  after Settings are saved read the disk and run git for every repo, so that work never runs on the UI thread. Each
-  folder of an add is read through the `IBackgroundWorkRunner` seam (`BackgroundWorkRunner`, the thread pool in the
-  application), at most four at a time; the results are immutable records and the batch is committed on the UI thread
-  with one save and one list rebuild. Adds are queued (a further drop or pick waits for the running add), share one
-  Cancel that stops them before anything is saved, and a failed save asks the user (Retry or Discard; Discard leaves
-  the list as saved). The progress of this bulk work is shown by `GlobalProgressViewModel` in a strip directly under
-  the app bar, collapsed while idle. The working-tree check of a card shown in the window, and after a Refresh or a
-  Pull, also runs in the background (`RepoCardViewModel.RefreshDirtyStatusInBackgroundAsync`), and the committed-files
-  cache it shares with the UI thread is safe for concurrent use (`AgentControl-GitIntegration-QueriesFromAnyThread`).
+  after Settings are saved read the disk and run git for every repo, so that work never runs on the UI thread. Every
+  such read - each folder of an add, each card's refresh after a settings save, the working-tree check of each card
+  shown - goes through one shared queue (`RepoRefreshQueue`, over the `IBackgroundWorkRunner` seam, the thread pool in
+  the application) that runs at most two at a time across all of them, joins a read already waiting for the same repo
+  and puts the cards on screen first; every git command runs under a time limit and a git that does not answer is
+  stopped and reported on its card (`GitClient`). The results are immutable records and the batch is committed on the UI
+  thread with one save and one list rebuild. Adds are queued (a further drop or pick waits for the running add), share
+  one Cancel that stops them before anything is saved, and a failed save asks the user (Retry or Discard; Discard leaves
+  the list as saved). The progress of this bulk work is shown by `GlobalProgressViewModel` in a strip directly under the
+  app bar, collapsed while idle. The working-tree check of a card shown in the window, and after a Refresh or a Pull,
+  also runs in the background through the queue, and the committed-files cache it shares with the UI thread is safe for
+  concurrent use (`AgentControl-GitIntegration-QueriesFromAnyThread`).
 - *Repo order* (`AgentControl-System-RepoOrder`, `AgentControl-System-RepoReorder`,
   `AgentControl-System-RepoOrderRemembered`): the order of the cards is the user's own and is the order of
   `AppSettings.RecentRepos` itself, so a removed repo leaves the order with no extra bookkeeping. Favorites stay
@@ -721,7 +724,8 @@ an unwanted or repeated file write.
    was not added is shown (`AgentControl-System-AddSeveralRepos`, `AgentControl-System-AddGitReposOnly`,
    `AgentControl-System-ResponsiveRepoListWork`). A saved theme is applied to the running application after the save
    (`AgentControl-System-Appearance`); the cards are then refreshed in the background (their pin, branch and
-   committed agent folders read off the UI thread) with "Refreshing repositories..." in the progress strip.
+   committed agent folders read off the UI thread, two at a time through the shared refresh queue) with "Refreshing
+   repositories {completed} of {total}..." in the progress strip.
 7. Throughout, `Utilities.PathHelpers.SafePathCombine` validates any caller-supplied path
    component before file-system use, and `Logging` records process-launch and
    git-integration detail to the diagnostic log file.

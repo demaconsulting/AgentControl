@@ -67,8 +67,8 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 internal sealed partial class MainWindow : Window
 {
     /// <summary>
-    ///     Tracks which repo cards have already had their (lazy, non-cacheable)
-    ///     <see cref="RepoCardViewModel.RefreshDirtyStatusInBackgroundAsync"/> triggered by this window, so the
+    ///     Tracks which repo cards have already had their (lazy, non-cacheable) working-tree check
+    ///     (<see cref="RepoCardViewModel.RefreshRepoStateAsync"/>) triggered by this window, so the
     ///     first-attach trigger (see remarks on <see cref="RepoCard_AttachedToVisualTree"/>) does
     ///     not repeatedly re-run the working-tree check every time a virtualized list container
     ///     is recycled/reattached for the same card.
@@ -699,9 +699,11 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Starts a newly-realized repo card's lazy working-tree check
-    ///     (<see cref="RepoCardViewModel.RefreshDirtyStatusInBackgroundAsync"/>, which runs git off the UI thread)
-    ///     the first time its list container attaches to the visual tree.
+    ///     Starts a newly-realized repo card's lazy working-tree check through the shared refresh queue
+    ///     (<see cref="RepoCardViewModel.RefreshRepoStateAsync"/> at the priority of a visible card,
+    ///     which runs git off the UI thread) the first time its list container attaches to the visual
+    ///     tree, and moves any of the card's reads that still wait in the queue ahead of the background
+    ///     ones.
     /// </summary>
     /// <remarks>
     ///     <b>Simplification note:</b> this is a "first-attach" trigger, not true
@@ -725,9 +727,12 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        // The check runs in the background: showing many cards at once (startup, or a batch of
-        // repos just added) never waits for git; each card shows "not checked yet" until it answers
-        _ = card.RefreshDirtyStatusInBackgroundAsync();
+        // The check runs in the background through the shared queue, a couple of repos at a time:
+        // showing many cards at once (startup, or a batch of repos just added) never waits for git and
+        // never starts a git per card at once; each card shows "not checked yet" until it answers. A
+        // card on screen goes ahead of the cards nobody sees yet.
+        card.PrioritizeRepoState(RepoRefreshPriority.Visible);
+        _ = card.RefreshRepoStateAsync(RepoRefreshPriority.Visible, cheapFacts: false, workingTree: true);
     }
 
     /// <summary>

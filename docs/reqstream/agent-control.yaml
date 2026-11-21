@@ -148,14 +148,18 @@ sections:
           refreshed after the settings are saved, showing the progress of that work under the app
           bar; it shall let the user cancel an add before anything is added, run an add requested
           meanwhile after the running one, and, when the added repos cannot be saved, let the user
-          retry the save or discard the add, which leaves the list as it was saved.
+          retry the save or discard the add, which leaves the list as it was saved; it shall read
+          the repos a few at a time, and stop a git command that does not answer and say so on the
+          repo's card.
         tags: [system]
         justification: |
           Adding many repos at once (a drop of a whole folder of clones) or refreshing a long list
           reads the disk and runs git for every repo; a window that stops responding meanwhile looks
           like a crash. The user needs to see that work is going on, to be able to stop an add that
           was a mistake, and to keep control when the settings cannot be written instead of losing
-          the add silently or ending up with a list that does not match what is saved.
+          the add silently or ending up with a list that does not match what is saved. Starting a
+          git process for every repo at once floods the machine, and a git that never answers must
+          not hold the work or keep running unnoticed.
         children:
           - AgentControl-LauncherUI-AddReposResponsive
           - AgentControl-LauncherUI-GlobalProgress
@@ -164,7 +168,10 @@ sections:
           - AgentControl-LauncherUI-AddSaveFailureChoice
           - AgentControl-LauncherUI-SettingsApplyResponsive
           - AgentControl-LauncherUI-GitStatusInBackground
+          - AgentControl-LauncherUI-BoundedRepoReads
+          - AgentControl-LauncherUI-GitTimeoutShown
           - AgentControl-GitIntegration-QueriesFromAnyThread
+          - AgentControl-GitIntegration-LocalGitTimeout
         tests:
           - windows@AddRepoButton_FolderPickerWithSeveralRepos_AddsThemAndRemovesTheProgressStrip
 

@@ -32,6 +32,7 @@ input-files:
   - docs/verification/agent-control/launcher-ui/group-name-view-model.md
   - docs/verification/agent-control/launcher-ui/dialog-behavior.md
   - docs/verification/agent-control/launcher-ui/global-progress-view-model.md
+  - docs/verification/agent-control/launcher-ui/repo-refresh-queue.md
   - docs/verification/agent-control/agent-package-management.md
   - docs/verification/agent-control/agent-package-management/package-source.md
   - docs/verification/agent-control/agent-package-management/package-source-registry.md
@@ -73,6 +74,7 @@ input-files:
   - docs/verification/agent-control/startup/startup-options.md
   - docs/verification/agent-control/utilities.md
   - docs/verification/agent-control/utilities/path-helpers.md
+  - docs/verification/agent-control/utilities/blocking-call-guard.md
   - docs/verification/ots.md
   - docs/verification/ots/avalonia.md
   - docs/verification/ots/buildmark.md

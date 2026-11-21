@@ -1580,3 +1580,26 @@ sections:
           Nothing can be listed with a git that is too old, so no version can be offered.
         tests:
           - RepoCardViewModel_RefreshUpgradeStatus_GitTooOld_ShowsSourceProblemWithoutSignIn
+
+      - id: AgentControl-RepoCardViewModel-RefreshingState
+        title: >-
+          The RepoCardViewModel class shall report that it is refreshing while a read of its repo
+          state (its pin, branch and committed agent folders, or its working tree) waits to run or
+          runs, announce when that changes, and stop reporting it once the reads were applied.
+        justification: |
+          With reads queued a couple at a time a card may wait a while for its state; the user must
+          see that its state is being refreshed rather than take the shown state as current.
+        tests:
+          - RepoCardViewModel_RefreshRepoStateAsync_WhileQueued_ShowsRefreshingAndClearsAfter
+
+      - id: AgentControl-RepoCardViewModel-GitTimeoutShown
+        title: >-
+          The RepoCardViewModel class shall, when git did not answer a read of its repo state within
+          its time limit and was stopped, show in its status message that git was stopped, that the
+          repo's Git state is unknown and that Refresh tries again, show the Git state as unknown,
+          and remove that message once a later read gets an answer.
+        justification: |
+          The user must learn why the card shows no Git state and what to do; a message that stays
+          after git answers again would be wrong.
+        tests:
+          - RepoCardViewModel_RefreshRepoStateAsync_GitTimesOut_ShowsGitProblemOnCard

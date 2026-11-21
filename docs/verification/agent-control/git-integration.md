@@ -56,6 +56,8 @@ the test's isolated git configuration.
 - A failure of the remote capability is classified and reported in one fixed sentence that repeats neither the address
   nor git's text; a git older than the minimum is refused with advice before any other command; a git that hangs is
   stopped at the time limit.
+- A local git command that hangs past its time limit, or whose caller gives up, is stopped before it finishes and
+  reported as timed out or canceled.
 
 ### Test Scenarios
 
@@ -178,3 +180,10 @@ classification and missing-git requirements) and
 `AgentControl-GitIntegration-RemoteGitMinimumVersion`, children: the `AgentControl-GitRemoteClient-MinimumGitVersion*`
 and `-UnreadableVersionNotBlocked` requirements, and `AgentControl-GitIntegration-RemoteGitBounded`, children: the time
 limit, cancellation, unstopped-process and output-limit requirements).
+
+**GitIntegration_LocalGit_HungGitIsStoppedAndReported**: With a stub standing in for git and a one-second local limit,
+a working-tree query that hangs is stopped and reported as timed out with the limit, a `HEAD` query whose caller gives
+up half a second after it started is stopped and reported as canceled, and neither command finished. This scenario is
+tested by `GitIntegrationSubsystem_LocalGitHangs_IsStoppedAndReportedAsTimedOut`, covering
+`AgentControl-GitIntegration-LocalGitTimeout` (children: `AgentControl-GitClient-TimeoutStopsGit` and
+`AgentControl-GitClient-CancelStopsGit`).

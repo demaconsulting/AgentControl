@@ -65,7 +65,9 @@ belong to the Git repository source feature. `RepoGroupName` (in
 `Settings`) is the unit holding the rules for the names of the user's repo groups, and `RepoImageLocator`,
 `RepoGroupHeaderViewModel`, `GroupNameViewModel` and `DialogBehavior` (in `LauncherUI`) belong to the repo-picture,
 repo-group and dialog features; `GlobalProgressViewModel` (in `LauncherUI`) backs the progress strip under the app bar
-that shows bulk work (adding repositories, refreshing the cards after Settings are saved); `PathEllipsisText`,
+that shows bulk work (adding repositories, refreshing the cards after Settings are saved); `RepoRefreshQueue` (in
+`LauncherUI`) is the one queue every lazy read of a repo's state goes through, two at a time;
+`BlockingCallGuard` (in `Utilities`) lets the tests refuse a git or disk call made on the UI thread; `PathEllipsisText`,
 `ColorPalettePanel` (the shared content of the card and group color pop-ups), `ThemePreferenceDisplayNameConverter`
 and `BackgroundWorkRunner` (the seam that runs file-system and git reads off the UI thread) are documented
 supporting types of `LauncherUI`, not units.
@@ -90,8 +92,9 @@ Settings, Logging, Startup and Utilities](architecture.svg)
       (including the signature options and "Forget saved sign-in") and sign-in windows; the user's group colors and
       group order (header menu, drag and drop), adding several repos at once (multi-select picker and folders dropped
       from the file manager, checked in the background, with progress and Cancel in the global progress strip under
-      the app bar, `GlobalProgressViewModel`, and a Retry/Discard question when the add cannot be saved), the
-      background-work seam (`BackgroundWorkRunner`) and the About window with its banner
+      the app bar, `GlobalProgressViewModel`, and a Retry/Discard question when the add cannot be saved), the shared
+      repo refresh queue (`RepoRefreshQueue`), the background-work seam (`BackgroundWorkRunner`) and the About window
+      with its banner
     - **AgentPackageManagement/** - package source model, source providers (zip folder, NuGet
       folder and server, Git repository) and registry, package discovery, version comparison, the content identity of a
       delivered package, and the platform
@@ -113,7 +116,7 @@ Settings, Logging, Startup and Utilities](architecture.svg)
       user's repo groups
     - **Logging/** - diagnostic file logging setup
     - **Startup/** - startup-argument parsing
-    - **Utilities/** - shared utilities subsystem
+    - **Utilities/** - shared utilities subsystem (safe path combination, the test-enabled blocking-call guard)
   - **DemaConsulting.AgentControl.Msi/** - WiX Toolset MSI installer project
 - **test/** - test projects
   - **DemaConsulting.AgentControl.Tests/** - unit, subsystem and headless-window tests, plus test support

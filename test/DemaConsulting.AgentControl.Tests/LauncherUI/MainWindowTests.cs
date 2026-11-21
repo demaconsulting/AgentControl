@@ -27,6 +27,7 @@ using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.RepoSync;
@@ -989,8 +990,8 @@ public sealed class MainWindowTests : IDisposable
 
     /// <summary>
     ///     Test that saving the settings refreshes the cards in the background: while their reads are
-    ///     held the UI thread stays free and the strip shows "Refreshing repositories..." without Cancel;
-    ///     once they run the strip goes.
+    ///     held the UI thread stays free and the strip shows "Refreshing repositories 0 of 1..." without
+    ///     Cancel; once they run the strip goes.
     /// </summary>
     [Fact]
     public void MainWindow_SettingsApplied_RefreshesCardsInBackgroundShowingProgress() => HeadlessTestApp.RunAsync(async () =>
@@ -1017,10 +1018,10 @@ public sealed class MainWindowTests : IDisposable
             var ran = false;
             await Dispatcher.UIThread.InvokeAsync(() => ran = true);
 
-            // Assert: the window is free and the strip shows the refresh, without Cancel
+            // Assert: the window is free and the strip shows the refresh with its count, without Cancel
             Assert.True(ran);
             Assert.True(strip.IsVisible);
-            Assert.Equal("Refreshing repositories...", window.FindControl<TextBlock>("GlobalProgressText")!.Text);
+            Assert.Equal("Refreshing repositories 0 of 1...", window.FindControl<TextBlock>("GlobalProgressText")!.Text);
             Assert.False(window.FindControl<Button>("GlobalProgressCancelButton")!.IsVisible);
 
             // Act: the reads run
@@ -1073,6 +1074,109 @@ public sealed class MainWindowTests : IDisposable
             // Assert: git's answer is shown
             Assert.True(card.GitStatusChecked);
             Assert.True(card.CanPull);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that when many cards are shown at once their working-tree checks go through the shared
+    ///     queue: while git is held only two checks run, the window stays free, and once git runs every
+    ///     shown card gets its answer without more than two checks ever running at the same time.
+    /// </summary>
+    [Fact]
+    public void MainWindow_CardsShown_WorkingTreeChecksRunAtMostTwoAtOnce() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: six clean repos (stub git), every background read held
+        var stub = Tests.GitIntegration.GitStub.Create(statusOutput: "", statusExitCode: 0);
+        _tempPaths.Add(stub.Path);
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = new MainWindowViewModel(
+            new AppSettings
+            {
+                GitExecutablePath = stub.Path,
+                RecentRepos = [.. Enumerable.Range(0, 6).Select(_ => new RecentRepo { Path = CreateTempDirectory() })]
+            },
+            configDirectory: CreateTempDirectory(),
+            backgroundWork: gate);
+
+        // Act: show the window; the shown cards' checks start and are held
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 1600 };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            await gate.FirstCall;
+            var handedOverWhileHeld = gate.Calls;
+            var ran = false;
+            await Dispatcher.UIThread.InvokeAsync(() => ran = true);
+            var shown = viewModel.RepoCards.Where(card => card.IsRefreshing).ToList();
+
+            // Assert: two checks run, the window is free, and every shown card says it is refreshing
+            // (two running, the rest waiting their turn)
+            Assert.Equal(2, handedOverWhileHeld);
+            Assert.True(ran);
+            Assert.True(shown.Count >= 2);
+
+            // Act
+            gate.Release();
+            await Task.WhenAll(shown.Select(card => card.GitStatusRefreshTask));
+
+            // Assert: every shown card has git's answer and no longer says it is refreshing, and never
+            // more than two ran at once
+            Assert.All(shown, card => Assert.True(card.GitStatusChecked));
+            Assert.All(shown, card => Assert.False(card.IsRefreshing));
+            Assert.Equal(2, gate.MaxInFlight);
+        }
+        finally
+        {
+            gate.Release();
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that when git does not answer a card's working-tree check within its time limit, git is
+    ///     stopped and the card says so - its Git state unknown, Refresh to try again - while the
+    ///     window stays usable.
+    /// </summary>
+    [Fact]
+    public void MainWindow_CardShown_GitHangs_CardSaysGitWasStopped() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a repo whose git hangs on its working-tree check, and a one-second git limit
+        var stub = Tests.GitIntegration.GitStub.Create(statusSleepSeconds: Tests.GitIntegration.GitStub.HangSeconds);
+        _tempPaths.Add(stub.Path);
+        _tempPaths.Add(stub.FinishedMarkerPath);
+        var viewModel = new MainWindowViewModel(
+            new AppSettings { GitExecutablePath = stub.Path, RecentRepos = [new RecentRepo { Path = CreateTempDirectory() }] },
+            configDirectory: CreateTempDirectory(),
+            gitTimeouts: new GitClientTimeouts(TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(10)));
+        var card = Assert.Single(viewModel.RepoCards);
+
+        // Act: show the window; the card's check runs into the limit
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 700 };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            var ran = false;
+            await Dispatcher.UIThread.InvokeAsync(() => ran = true);
+            await card.GitStatusRefreshTask;
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the window stayed free; the card's message says git was stopped and what to do,
+            // and the Git state is unknown rather than clean or dirty
+            Assert.True(ran);
+            var message = Assert.Single(window.GetVisualDescendantsOf<TextBlock>("RepoStatusMessageText"));
+            Assert.True(message.IsVisible);
+            Assert.Contains("Git did not answer within 1 seconds and was stopped", message.Text, StringComparison.Ordinal);
+            Assert.Contains("Use Refresh to try again.", message.Text, StringComparison.Ordinal);
+            Assert.True(card.GitStatusUnavailable);
+            Assert.False(card.CanPull);
         }
         finally
         {

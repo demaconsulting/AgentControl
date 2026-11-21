@@ -1623,8 +1623,8 @@ public sealed class MainWindowViewModelTests : IDisposable
 
     /// <summary>
     ///     Test that applying settings returns while the cards' refresh is still reading (held at a
-    ///     gate), showing "Refreshing repositories..." without Cancel, and that the refresh completes
-    ///     and clears the strip once the reads run.
+    ///     gate), showing "Refreshing repositories 0 of 1..." without Cancel, and that the refresh
+    ///     completes and clears the strip once the reads run.
     /// </summary>
     [Fact]
     public async Task MainWindowViewModel_ApplySettings_CardRefreshHeld_ReturnsAndShowsRefreshingProgress()
@@ -1641,10 +1641,11 @@ public sealed class MainWindowViewModelTests : IDisposable
         viewModel.ApplySettings(new AppSettings());
         await gate.FirstCall;
 
-        // Assert: returned with the refresh still running, shown in the strip without Cancel
+        // Assert: returned with the refresh still running, shown in the strip with its count and
+        // without Cancel
         Assert.False(viewModel.PendingRefresh.IsCompleted);
         Assert.True(viewModel.GlobalProgress.IsActive);
-        Assert.Equal("Refreshing repositories...", viewModel.GlobalProgress.Text);
+        Assert.Equal("Refreshing repositories 0 of 1...", viewModel.GlobalProgress.Text);
         Assert.False(viewModel.GlobalProgress.CanCancel);
 
         // Act
@@ -1654,6 +1655,74 @@ public sealed class MainWindowViewModelTests : IDisposable
         // Assert
         Assert.False(viewModel.GlobalProgress.IsActive);
         Assert.False(viewModel.RepoCards[0].IsMissing);
+    }
+
+    /// <summary>
+    ///     Test that a background add of many folders checks at most two of them at the same time (the
+    ///     shared refresh queue's limit), and still adds every one.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_AddReposAsync_ManyFolders_AtMostTwoInspectedAtOnce()
+    {
+        // Arrange: six repo folders and a runner that holds every check
+        var gate = new GatedBackgroundWorkRunner();
+        var repos = Enumerable.Range(0, 6).Select(_ => CreateRepoDirectory()).ToList();
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory(), backgroundWork: gate);
+
+        // Act: start the add; the checks are held
+        var add = viewModel.EnqueueAddReposAsync(repos, null);
+        await gate.FirstCall;
+        var handedOverWhileHeld = gate.Calls;
+
+        // Assert: only two checks were started
+        Assert.Equal(RepoRefreshQueue.DefaultMaxConcurrentReads, handedOverWhileHeld);
+
+        // Act: let them all run
+        gate.Release();
+        var result = await add;
+
+        // Assert: every folder checked and added, never more than two at once
+        Assert.All(result.Outcomes, outcome => Assert.Equal(AddRepoResult.Added, outcome.Result));
+        Assert.Equal(repos, viewModel.RepoCards.Select(card => card.RepoPath));
+        Assert.Equal(6, gate.Calls);
+        Assert.Equal(2, gate.MaxInFlight);
+    }
+
+    /// <summary>
+    ///     Test that the cards' refresh after a settings save shares one limit with an add that runs at
+    ///     the same time: however many repos are read, at most two reads run at once.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_ApplySettings_RefreshUsesSharedQueueLimit()
+    {
+        // Arrange: four listed repos and a runner that holds every read
+        var gate = new GatedBackgroundWorkRunner();
+        var listed = Enumerable.Range(0, 4).Select(_ => CreateRepoDirectory()).ToList();
+        var viewModel = new MainWindowViewModel(
+            new AppSettings { RecentRepos = [.. listed.Select(path => new RecentRepo { Path = path })] },
+            configDirectory: CreateTempDirectory(),
+            backgroundWork: gate);
+
+        // Act: settings are saved (four card reads) and two folders are added (two folder checks)
+        viewModel.ApplySettings(new AppSettings());
+        var add = viewModel.EnqueueAddReposAsync([CreateRepoDirectory(), CreateRepoDirectory()], null);
+        await gate.FirstCall;
+        var handedOverWhileHeld = gate.Calls;
+
+        // Assert: two reads in all, not two per caller, and the strip counts the cards' refresh
+        Assert.Equal(2, handedOverWhileHeld);
+        Assert.True(viewModel.GlobalProgress.IsActive);
+
+        // Act: let everything run
+        gate.Release();
+        await add;
+        await viewModel.PendingRefresh;
+
+        // Assert: every read ran, never more than two at once, and the strip is gone
+        Assert.Equal(6, viewModel.RepoCards.Count);
+        Assert.Equal(6, gate.Calls);
+        Assert.Equal(2, gate.MaxInFlight);
+        Assert.False(viewModel.GlobalProgress.IsActive);
     }
 
     /// <summary>

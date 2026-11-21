@@ -12,5 +12,6 @@ package AgentControl {
         }
 
         part pathHelpers : PathHelpers;
+        part blockingCallGuard : BlockingCallGuard;
     }
 }

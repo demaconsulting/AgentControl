@@ -3,7 +3,8 @@
 #
 # PURPOSE:
 # - Define requirements for the AgentControl Utilities subsystem
-# - The Utilities subsystem spans PathHelpers.cs (safe path-combination utilities)
+# - The Utilities subsystem spans PathHelpers.cs (safe path-combination utilities) and
+#   BlockingCallGuard.cs (refuses blocking git and disk calls on a thread the tests guard)
 # - Subsystem requirements describe the shared utility behavior available to all other subsystems
 
 sections:
@@ -26,3 +27,19 @@ sections:
           - UtilitiesSubsystem_DirectoryCreationWorkflow_ValidPaths_CreatesDirectories
           - UtilitiesSubsystem_PathTraversalValidation_DangerousPaths_ThrowsException
           - UtilitiesSubsystem_AbsolutePathRejection_ThrowsException
+
+      - id: AgentControl-Utilities-BlockingCallGuard
+        title: >-
+          The Utilities subsystem shall let the automated tests mark a thread on which a blocking
+          git or disk call is refused and recorded, without affecting any other thread or any thread
+          once the mark ends.
+        justification: |
+          The window must never wait for the disk or a process, yet such a call on its thread still
+          works and only freezes the window; the tests need a way to notice it the moment it is
+          added, without changing what the shipped application does.
+        children:
+          - AgentControl-BlockingCallGuard-RefusesGuardedThread
+          - AgentControl-BlockingCallGuard-ScopedPerThread
+          - AgentControl-BlockingCallGuard-RecordsViolations
+        tests:
+          - UtilitiesSubsystem_BlockingCallGuard_GuardedThreadRefusedOthersUnaffected

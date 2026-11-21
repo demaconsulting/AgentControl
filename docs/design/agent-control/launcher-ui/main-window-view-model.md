@@ -18,9 +18,10 @@ The unit uses three independently documented `LauncherUI` units: `RepoGroupHeade
 starts a section, with `RepoGroupKind`, which kind of section a header introduces - see its own design),
 `GroupNameViewModel` (the validating view model of the group-name prompt window `GroupNameWindow` - see its own
 design) and `GlobalProgressViewModel` (the progress strip under the app bar, in which this view model shows its bulk
-work - adding repositories and refreshing the cards after a settings save - see its own design). The folders of an
-add and the cards' refresh after a settings save are read off the UI thread through the `IBackgroundWorkRunner` seam
-(the `BackgroundWorkRunner` supporting type), and every add is saved once for the whole batch.
+work - adding repositories and refreshing the cards after a settings save - see its own design). It owns the one
+`RepoRefreshQueue` (see its own design) through which the folders of an add, the cards' refresh after a settings save
+and the cards' own reads are read off the UI thread, at most two at a time across all of them
+(`AgentControl-MainWindowViewModel-SharedRepoReads`), and every add is saved once for the whole batch.
 
 #### Data Model
 
@@ -109,9 +110,20 @@ Never faults. Tests and the window's tests await it to let adds settle.
 **_saveSettings**, **_backgroundWork**: `Action<AppSettings>` and `IBackgroundWorkRunner` — constructor seams: how a
 candidate is written (`SettingsStore.Save` into the configuration directory by default; it must throw
 `InvalidOperationException` when the file cannot be written; tests count saves and make them fail) and how blocking
-reads run off the UI thread (`ThreadPoolBackgroundWorkRunner.Instance` by default, passed on to every card; tests hold
-the reads at a gate). Every save of the view model goes through `_saveSettings` (`CommitSettingsChange`,
+reads run off the UI thread (`ThreadPoolBackgroundWorkRunner.Instance` by default, the runner of the refresh queue;
+tests hold the reads at a gate). Every save of the view model goes through `_saveSettings` (`CommitSettingsChange`,
 `ApplySettings`, `SaveSettings`).
+
+**_refreshQueue**, **_ownsRefreshQueue**: `RepoRefreshQueue` and `bool` — the queue every repo read goes through,
+created here over `_backgroundWork` (two reads at a time) unless the constructor's optional `refreshQueue` supplied
+one, and handed to every card; `Dispose` shuts down a queue created here. Its `ProgressChanged` is handled by
+`OnRefreshQueueProgressChanged`.
+
+**_refreshProgress**: `GlobalProgressOperation?` — the strip's operation for the queue's current wave of counted reads
+("Refreshing repositories {completed} of {total}...", no cancel action); `null` while no wave runs.
+
+**_gitTimeouts**: `GitClientTimeouts?` — the constructor's optional `gitTimeouts`, passed to every card and to the
+add's folder checks (`null`: `GitClientTimeouts.Default`); tests pass a short limit against a git that hangs.
 
 **_addSession**: `AddQueueSession?` (private class) — the adds that are running or queued and share one progress
 operation (`GlobalProgressOperation`, begun with "Adding repositories..." and `CancelAddRepos` as its cancel action),
@@ -120,10 +132,6 @@ session disposes its progress operation and its cancellation.
 
 **_settingsRefreshGeneration**: `int` — identifies the most recent card refresh started by `ApplySettings`, so an
 older one that is still running neither rebuilds the list nor starts the upgrade check.
-
-**MaxConcurrentFolderInspections**: `const int` = 4 — the most folders read at the same time during an add, and the
-most cards refreshed at the same time after a settings save, so a large batch never starts dozens of git processes at
-once.
 
 **AddSaveFailed**: `EventHandler<SettingsSaveRetryRequest>` (public event) — raised when the save at the end of a
 background add failed; the window asks Retry or Discard and answers through the request
@@ -255,7 +263,9 @@ that already has a user order is kept whatever the launch times are (`-OrderKept
   `Action<ThemePreference>? applyTheme = null`, `TimeProvider? timeProvider = null`,
   `TimeSpan? upgradeRecheckInterval = null`, `Func<AppSettings, PackageSourceRegistry>? registryFactory = null`,
   `IAgentToolProcessStarter? processStarter = null`, `ShellDetector? shellDetector = null`,
-  `Action<AppSettings>? saveSettings = null` and `IBackgroundWorkRunner? backgroundWork = null`.
+  `Action<AppSettings>? saveSettings = null`, `IBackgroundWorkRunner? backgroundWork = null`,
+  `RepoRefreshQueue? refreshQueue = null` and `GitClientTimeouts? gitTimeouts = null`. Must be called on the UI
+  thread: the refresh queue it creates posts its progress to the synchronization context current then.
 - *Preconditions*: `settings` is not null; `upgradeRecheckInterval`, when given, is positive.
 - *Postconditions*: One `RepoCardViewModel` exists per `RecentRepo` in `settings.RecentRepos`;
   each card's cheap refresh (`RefreshCheap`) has run; `DisplayedItems` and `DisplayedRepoCards`
@@ -266,7 +276,7 @@ Only the cheap per-card checks run eagerly at construction — the working-tree 
 deferred/lazy, per architecture.md's repo-fact caching strategy, so startup stays fast even
 with many tracked repos. The constructor still runs the cheap checks synchronously, before the window exists (so no
 progress strip is shown at start-up); the working-tree checks of the cards the window then shows run in the
-background (`RepoCardViewModel.RefreshDirtyStatusInBackgroundAsync`).
+background, through the shared refresh queue (`RepoCardViewModel.RefreshRepoStateAsync`).
 
 **BeginUpgradeRefresh**: Starts checking every card's upgrade availability in the background.
 
@@ -339,8 +349,9 @@ background (`RepoCardViewModel.RefreshDirtyStatusInBackgroundAsync`).
   and the background upgrade check and card refresh tracked by `_refreshCancellation` (launch, settings change, added
   repo: it is cancelled, disposed and cleared the way `StartUpgradeRefresh` replaces it), so neither keeps waiting for
   a slow source or updates cards after the window closed, cancels the adds that have not saved yet
-  (`CancelAddRepos`), and refuses further starts (a repo added afterwards starts no check, an add requested afterwards
-  returns a canceled result); calling it twice is harmless.
+  (`CancelAddRepos`), shuts down a refresh queue it created (its waiting reads are canceled and a running git is
+  stopped) and ends the strip's refresh line, and refuses further starts (a repo added afterwards starts no check, an
+  add requested afterwards returns a canceled result); calling it twice is harmless.
 
 **RecheckAfterSettingsClosed**: Checks again, in the background, the cards that show a package source problem or a
 failed upgrade check, once the Settings window has closed
@@ -412,8 +423,10 @@ never been synced (no pin) and a pin file that cannot be read (no pin).
 2. **InspectFolder** (internal, static, any thread): reads one folder - a path that is not a folder is `Missing`, or
    `NotAFolder` when it is a file (a dropped file); a folder for which `GitClient.IsRepositoryRoot` is `false` is
    `NotAGitRepositoryRoot`; otherwise `GitRoot`, and only for a Git root that was not listed it also reads
-   `RepoCardViewModel.ReadCheapFacts(path, git, cache: null)` (pin, branch, `HEAD`, committed agent folders), so the new
-   card needs no git call on the UI thread. The working tree is not checked. Returns an immutable `RepoFolderFacts`.
+   `RepoCardViewModel.ReadCheapFacts(path, git, cache: null, cancellationToken)` (pin, branch, `HEAD`, committed agent
+   folders, with a `GitClient` of the configured executable and `_gitTimeouts`), so the new card needs no git call on
+   the UI thread. The working tree is not checked. Returns an immutable `RepoFolderFacts`; the token (the refresh
+   queue's shutdown) stops a running git.
 3. **PrepareAddCommit** (UI thread, changes nothing): decides each folder's outcome against the list **as it is now**
    (so a repo listed while the folders were read is caught, and a folder added earlier in the same batch counts as
    listed for later ones), in the order: `Missing`; a file is `NotAGitRepository`; a listed repo is `AlreadyListed` for
@@ -429,7 +442,8 @@ never been synced (no pin) and a pin file that cannot be read (no pin).
    the target group from the collapsed sections when anything joined it (so a target group collapsed while the add ran
    is opened). A failed save throws
    `InvalidOperationException` with nothing changed. Only after the save: the new cards are created
-   (`CreateCard` + `ApplyCheapFacts`, or a background `RefreshCheapInBackgroundAsync` for a card whose facts were not
+   (`CreateCard` + `ApplyCheapFacts`, or a background `RefreshCheapInBackgroundAsync` through the shared queue for a
+   card whose facts were not
    read - a repo that was listed when the add was planned but removed before the commit), their events attached,
    `RepoCards` put in the stored order (`SyncCollection`), the moved cards told their
    group
@@ -519,10 +533,12 @@ added, and the canceled requests return a canceled result, so the window shows n
 - *Parameters*: `IReadOnlyList<string> repoPaths`, `string? groupName`, `IProgress<AddReposProgress>? progress`,
   `CancellationToken cancellationToken`, `Action? onSaving = null`.
 - *Algorithm*: canceled or disposed already: a canceled result. Plan on the UI thread and report `(0, total)`; read
-  every folder through `_backgroundWork.RunAsync(() => InspectFolder(...))`, at most
-  `MaxConcurrentFolderInspections` at a time (a `SemaphoreSlim`), keeping the results by index so the request order
+  every folder through the shared queue (`_refreshQueue.EnqueueAsync` with the key (normalized path,
+  `FolderInspection`), priority `Visible`, `InspectFolder` as the read and the add's token as the requester's), so the
+  add shares the limit of two reads with every other repo read, keeping the results by index so the request order
   holds, and report `(completed, total)` as each completes (the continuations resume on the UI thread, so progress is
-  reported there); a cancellation while reading gives a canceled result. Checked once more before the commit - the
+  reported there); a cancellation while reading gives a canceled result - the add's waiting checks leave the queue, and
+  a check that already runs finishes without being used. Checked once more before the commit - the
   last moment to stop, nothing has been saved or added - then `onSaving` and `CommitAddBatchAsync`. The working tree
   of the new repos is not checked: their cards show the Git status as not checked yet until shown.
 
@@ -589,23 +605,31 @@ Performs no confirmation itself: `MainWindow`'s code-behind is responsible for s
   returns; the cards are then refreshed in the background: the method cancels the upgrade check and the periodic round
   that were running (they were started for the previous settings) and sets `PendingRefresh` to
   `RefreshCardsAfterSettingsAsync`, which counts as a launch-style check while it runs (so no periodic round starts),
-  shows "Refreshing repositories..." with the card count in `GlobalProgress` (no Cancel; nothing for an empty list),
-  runs every card's `RefreshCheapInBackgroundAsync`, at most `MaxConcurrentFolderInspections` at a time, reporting the
-  count as each completes, rebuilds the list once and then awaits `BeginUpgradeRefresh` against the new sources
+  queues every card's cheap facts through the shared refresh queue at background priority, in display order (the
+  cards in `DisplayedRepoCards` first, then the collapsed and filtered-out ones), counted in the queue's progress wave
+  (`RepoCardViewModel.RefreshRepoStateAsync` with `reportsProgress`), so `GlobalProgress` shows "Refreshing
+  repositories {completed} of {total}..." (no Cancel; nothing for an empty list; see `OnRefreshQueueProgressChanged`),
+  rebuilds the list once and then awaits `BeginUpgradeRefresh` against the new sources
   (`AgentControl-MainWindowViewModel-ApplySettingsInBackground`). A newer `ApplySettings` supersedes an older refresh
   (`_settingsRefreshGeneration`): the older one neither rebuilds the list nor starts the upgrade check (the cards'
   own generations already make the newest read win); `Dispose` cancels it. A present card
-  is additionally given a fresh Git status check (via `RefreshDirtyStatusInBackgroundAsync`) when either it
+  is additionally given a fresh Git status check (through the queue, after its cheap facts) when either it
   reappeared (was missing, now present) during this refresh, so it is not left showing a "not yet
   checked" state indefinitely, or `GitExecutablePath` itself changed, so a clean/dirty result
   cached against the previously configured executable is not kept showing once a different
   executable is in effect; a present card that was already checked and whose executable path
-  did not change only gets the cheap refresh, avoiding a `git status` call — which
-  `GitClient` runs with no timeout — for every tracked repo on every settings save
+  did not change only gets the cheap refresh, avoiding a `git status` call — which scans
+  the whole working tree — for every tracked repo on every settings save
   (`AgentControl-MainWindowViewModel-ApplySettings`). Once the settings are saved, the saved
   `Theme` is handed to the injected theme applier (`Action<ThemePreference>`, supplied by `App`), so the
   choice takes effect without a restart (`AgentControl-MainWindowViewModel-ApplyTheme`); a refused save never reaches
   this step (`AgentControl-MainWindowViewModel-RefusedThemeNotApplied`).
+
+**OnRefreshQueueProgressChanged** (private): Shows the shared refresh queue's wave of counted reads in
+`GlobalProgress`: while it is active, one operation without a cancel action (begun on the first report) reporting
+"Refreshing repositories {completed} of {total}..."; when it ends (or the view model was disposed), the operation is
+disposed. The queue was created on the UI thread and posts its reports there, so the strip only changes on the UI
+thread.
 
 **CreateConnectionTestProvider**: Creates the provider that the settings window's
 **Test connection** lists through for a source being edited: for a NuGet source the `NuGetSourceProvider`, with the
@@ -837,16 +861,18 @@ quietly.
 - **RepoGroupHeaderViewModel** (`LauncherUI`) — one header per section, updated in place (count, collapsed state,
   color, move availability); its toggle, rename, remove, add-repository and move requests are handled here.
 - **GlobalProgressViewModel** (`LauncherUI`) — the progress strip's state (`GlobalProgress`), in which the adds (one
-  cancelable operation per session) and the card refresh after a settings save (not cancelable) are shown.
+  cancelable operation per session) and the refresh queue's waves of counted reads (not cancelable) are shown.
+- **RepoRefreshQueue** (`LauncherUI`) — the one queue (two reads at a time) through which the folder checks of an add
+  and every card's reads run off the UI thread; created and disposed here and handed to every card.
 - **IBackgroundWorkRunner** / **ThreadPoolBackgroundWorkRunner** (`LauncherUI` supporting type,
-  `BackgroundWorkRunner.cs`) — runs the folder reads of an add off the UI thread, and is passed on to every card for
-  its background refreshes.
+  `BackgroundWorkRunner.cs`) — the runner under the refresh queue.
 - **CardColorPalette** (`LauncherUI` supporting type) — checks and spells a group color name in `SetGroupColor`.
 - **GitClient** (`GitIntegration` subsystem) — the static `IsRepositoryRoot`, which every add path uses to accept only
   the top folder of a Git repository (no git process is started).
 - **SecretRedactor** (`PackageCredentials` subsystem) — makes the reason of a failed save of an add safe to show.
-- **RepoCardViewModel.ReadCheapFacts** (`LauncherUI`) — reads, on a worker thread, the pin (`RepoConfig`'s
-  `RepoPinStore`), branch and committed agent folders of a folder being added, before it has a card.
+- **RepoCardViewModel.ReadCheapFacts** (`LauncherUI`) — reads, on a worker thread of the refresh queue, the pin
+  (`RepoConfig`'s `RepoPinStore`), branch and committed agent folders of a folder being added, before it has a card,
+  through a `GitClient` (`GitIntegration`) with `_gitTimeouts`.
 - **SettingsStore** (`Settings` subsystem) — saves the candidate settings of every change and of `ApplySettings`
   (`SaveSettings` persists the live `AppSettings` as they are);
   **RepoGroupName** (`Settings` subsystem) — the group-name rules used for sorting, validation and

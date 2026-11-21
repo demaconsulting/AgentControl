@@ -5,7 +5,8 @@
 # - Define requirements for the AgentControl GitIntegration subsystem
 # - GitIntegration spans GitClient.cs (invokes the configured git executable for status,
 #   pull, branch, and committed-files queries and for stopping git tracking managed agent folders,
-#   and tells whether a folder is the top folder of a Git repository),
+#   and tells whether a folder is the top folder of a Git repository; every command runs under a
+#   time limit and can be canceled),
 #   CommittedAgentFilesCache.cs (caches the
 #   committed-agent-files-changed check keyed by HEAD commit hash), GitCredentialClient.cs
 #   (keeps, finds and removes a package feed's sign-in in the user's own Git credential helper)
@@ -280,3 +281,17 @@ sections:
           - AgentControl-GitClient-RepositoryRoot
         tests:
           - GitIntegrationSubsystem_RepositoryRoot_RepositoryWorktreeAndSubfolder
+
+      - id: AgentControl-GitIntegration-LocalGitTimeout
+        title: >-
+          The GitIntegration subsystem shall stop a git command on a local repository that does not
+          answer within its time limit, or whose caller gives up, together with every process it
+          started, and report a stopped command as timed out.
+        justification: |
+          A git that hangs must neither hold the work waiting for it forever nor keep running after
+          the window has closed, and the user must be able to learn that git did not answer.
+        children:
+          - AgentControl-GitClient-TimeoutStopsGit
+          - AgentControl-GitClient-CancelStopsGit
+        tests:
+          - GitIntegrationSubsystem_LocalGitHangs_IsStoppedAndReportedAsTimedOut

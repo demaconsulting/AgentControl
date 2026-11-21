@@ -58,7 +58,10 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 ///     <see langword="null"/> when git could not tell.</param>
 /// <param name="HasCommittedAgentFiles">Whether managed agent folders are committed to git.</param>
 /// <param name="GitQueryFailed">Whether git could not answer the branch, <c>HEAD</c> or committed-files
-///     questions (not a repository, git missing).</param>
+///     questions (not a repository, git missing, or git hung and was stopped).</param>
+/// <param name="GitProblem">When git did not answer within its time limit and was stopped, what to tell
+///     the user; <see langword="null"/> otherwise (an ordinary git failure is not shown as a
+///     problem).</param>
 internal sealed record RepoCheapFacts(
     bool IsMissing,
     RepoPin? Pin,
@@ -66,7 +69,8 @@ internal sealed record RepoCheapFacts(
     string? CurrentBranch,
     string? HeadHash,
     bool HasCommittedAgentFiles,
-    bool GitQueryFailed);
+    bool GitQueryFailed,
+    string? GitProblem = null);
 
 /// <summary>
 ///     View model for a single card in the main window's recent-repos list: describes the repo
@@ -215,11 +219,47 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     private int _gitStatusGeneration;
 
+
     /// <summary>
-    ///     Runs the card's background reads (the cheap refresh and the working-tree check) off the UI
-    ///     thread; see the constructor.
+    ///     The queue every lazy read of this card's repo state goes through (shared by every card of
+    ///     the window); see the constructor.
     /// </summary>
-    private readonly IBackgroundWorkRunner _backgroundWork;
+    private readonly RepoRefreshQueue _refreshQueue;
+
+    /// <summary>
+    ///     Whether <see cref="_refreshQueue"/> is the card's own (none was supplied), so the card shuts
+    ///     it down when it is retired.
+    /// </summary>
+    private readonly bool _ownsRefreshQueue;
+
+    /// <summary>
+    ///     Signaled when the card is retired, so its reads that still wait in the queue are given up.
+    /// </summary>
+    private readonly CancellationTokenSource _retiredCancellation = new();
+
+    /// <summary>
+    ///     The token of <see cref="_retiredCancellation"/>, taken once so it stays usable after the
+    ///     source was disposed by <see cref="Retire"/>.
+    /// </summary>
+    private readonly CancellationToken _retiredToken;
+
+    /// <summary>
+    ///     How many of the card's own repo-state reads wait in the queue or run; see
+    ///     <see cref="IsRefreshing"/>.
+    /// </summary>
+    private int _refreshesInFlight;
+
+    /// <summary>
+    ///     The time limits of the card's git commands, or <see langword="null"/> for
+    ///     <see cref="GitClientTimeouts.Default"/>; see the constructor.
+    /// </summary>
+    private readonly GitClientTimeouts? _gitTimeouts;
+
+    /// <summary>
+    ///     The git problem (a timeout) the card last showed as its status message, so a later read that
+    ///     answers clears it again; <see langword="null"/> when none is shown.
+    /// </summary>
+    private string? _shownGitProblem;
 
     /// <summary>
     ///     Applies a change to this repo's settings entry on behalf of the card, saving it first; see
@@ -330,9 +370,17 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     without starting a shell.</param>
     /// <param name="shellDetector">Detects the shell the agent tool runs in; <see langword="null"/>
     ///     uses a real <see cref="ShellDetector"/>. Supplied so tests get a deterministic shell.</param>
-    /// <param name="backgroundWork">Runs the background reads of <see cref="RefreshCheapInBackgroundAsync"/> and
-    ///     <see cref="RefreshDirtyStatusInBackgroundAsync"/> off the UI thread; <see langword="null"/> uses the
-    ///     thread pool. Supplied so tests can hold the reads at a gate.</param>
+    /// <param name="backgroundWork">Runs the card's repo-state reads off the UI thread when the card has
+    ///     a refresh queue of its own (<paramref name="refreshQueue"/> is <see langword="null"/>);
+    ///     <see langword="null"/> uses the thread pool. Supplied so tests can hold the reads at a
+    ///     gate.</param>
+    /// <param name="refreshQueue">The queue the card's repo-state reads go through, shared by every
+    ///     card of the window so only a few run at once; <see langword="null"/> gives the card a queue
+    ///     of its own over <paramref name="backgroundWork"/> (a card used on its own, as in tests),
+    ///     which it shuts down when it is retired.</param>
+    /// <param name="gitTimeouts">The time limits of the card's git commands, or
+    ///     <see langword="null"/> for <see cref="GitClientTimeouts.Default"/>. Supplied so tests can use a
+    ///     short limit against a git that hangs.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="recentRepo"/>,
     ///     <paramref name="getSettings"/>, or <paramref name="packageVersionCache"/> is
     ///     <see langword="null"/>.</exception>
@@ -347,7 +395,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
         Func<RecentRepo, Action<RecentRepo>, bool>? commitChange = null,
         IAgentToolProcessStarter? processStarter = null,
         ShellDetector? shellDetector = null,
-        IBackgroundWorkRunner? backgroundWork = null)
+        IBackgroundWorkRunner? backgroundWork = null,
+        RepoRefreshQueue? refreshQueue = null,
+        GitClientTimeouts? gitTimeouts = null)
     {
         ArgumentNullException.ThrowIfNull(recentRepo);
         ArgumentNullException.ThrowIfNull(getSettings);
@@ -363,7 +413,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
         _commitChange = commitChange;
         _processStarter = processStarter ?? new AgentToolProcessStarter();
         _shellDetector = shellDetector ?? new ShellDetector();
-        _backgroundWork = backgroundWork ?? ThreadPoolBackgroundWorkRunner.Instance;
+        _ownsRefreshQueue = refreshQueue is null;
+        _refreshQueue = refreshQueue ?? new RepoRefreshQueue(backgroundWork);
+        _retiredToken = _retiredCancellation.Token;
+        _gitTimeouts = gitTimeouts;
 
         LaunchCommand = new AsyncRelayCommand(LaunchAsync, ReportUnexpectedFailure, () => !IsMissing && !IsBusy);
         PullCommand = new AsyncRelayCommand(PullAsync, ReportUnexpectedFailure, () => CanPull && !IsMissing && !IsBusy);
@@ -1977,6 +2030,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
         IsCheckingUpgrade = false;
         CancelOperation();
 
+        // The card's reads that still wait in the queue are given up, so they take no slot; a queue of
+        // the card's own is shut down (its running read's git is stopped)
+        if (!_retiredToken.IsCancellationRequested)
+        {
+            _retiredCancellation.Cancel();
+            _retiredCancellation.Dispose();
+        }
+
+        if (_ownsRefreshQueue)
+        {
+            _refreshQueue.Dispose();
+        }
+
         // Nobody is listening any more: release the window's handlers and anything they reference
         ReleaseNotesReady = null;
         ErrorOccurred = null;
@@ -2150,41 +2216,136 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return;
         }
 
-        ApplyCheapFacts(ReadCheapFacts(RepoPath, ResolveGitExecutablePath(_getSettings()), _committedAgentFilesCache));
+        ApplyCheapFacts(ReadCheapFacts(
+            RepoPath, CreateGitClient(_getSettings()), _committedAgentFilesCache, CancellationToken.None));
     }
 
     /// <summary>
-    ///     Gets the task of the most recent <see cref="RefreshCheapInBackgroundAsync"/>, so a caller (a test) can
-    ///     wait for the card to settle. Never faults.
+    ///     Gets a value indicating whether one of the card's repo-state reads (its cheap facts or its
+    ///     working-tree check) waits in the shared refresh queue or runs, so the card can show that its
+    ///     state is being refreshed.
+    /// </summary>
+    public bool IsRefreshing => Volatile.Read(ref _refreshesInFlight) > 0;
+
+    /// <summary>
+    ///     Gets the task of the most recent <see cref="RefreshRepoStateAsync"/>, so a caller (a test) can
+    ///     wait for the card's state to settle. Never faults.
+    /// </summary>
+    internal Task RefreshStateTask { get; private set; } = Task.CompletedTask;
+
+    /// <summary>
+    ///     Gets the task of the most recent cheap-facts read through the queue (see
+    ///     <see cref="RefreshRepoStateAsync"/> and <see cref="RefreshCheapInBackgroundAsync"/>), so a
+    ///     caller (a test) can wait for the card to settle. Never faults.
     /// </summary>
     internal Task CheapRefreshTask { get; private set; } = Task.CompletedTask;
 
     /// <summary>
-    ///     Runs the same checks as <see cref="RefreshCheap"/>, reading the disk and git off the UI
-    ///     thread and applying what was found on the caller's (UI) thread.
+    ///     Gets the task of the most recent working-tree check through the queue (see
+    ///     <see cref="RefreshRepoStateAsync"/> and <see cref="RefreshDirtyStatusInBackgroundAsync"/>), so
+    ///     a caller (a test) can wait for the check to settle. Never faults.
+    /// </summary>
+    internal Task GitStatusRefreshTask { get; private set; } = Task.CompletedTask;
+
+    /// <summary>
+    ///     Re-reads the card's repo state - its cheap facts, its working tree, or both - through the
+    ///     shared refresh queue, off the UI thread, and applies what was found on the caller's (UI)
+    ///     thread.
     /// </summary>
     /// <remarks>
-    ///     Used where many cards are refreshed while the window is in use (after Settings were saved),
-    ///     so the window never waits for git. The card keeps showing its previous state until the
-    ///     facts arrive. The facts are dropped when the card was retired meanwhile or a newer cheap
-    ///     refresh (synchronous or background) or a direct pin/branch re-read started, so the newest
-    ///     read always has the last word. Also available as <see cref="CheapRefreshTask"/>.
+    ///     <para>
+    ///     Every lazy refresh of a card goes through here, so however many cards and callers there are,
+    ///     only a few git processes run at once (see <see cref="RepoRefreshQueue"/>). A read of the same
+    ///     kind that already waits in the queue for this repo is joined rather than queued again, at the
+    ///     higher of the two priorities. <see cref="IsRefreshing"/> is true while any of the card's reads
+    ///     waits or runs; the card keeps showing its previous state meanwhile.
+    ///     </para>
+    ///     <para>
+    ///     The answer is dropped when the card was retired meanwhile or a newer read of the same kind
+    ///     (through the queue or synchronous) started, so the newest read always has the last word. A
+    ///     git command that hung and was stopped is shown as the card's status message; an ordinary git
+    ///     failure (not a repository, git missing) is shown as unknown state, as before. Must be called
+    ///     on the UI thread; the returned task completes there too.
+    ///     </para>
     /// </remarks>
-    /// <param name="cancellationToken">Cancels the read before it starts; nothing is applied then.</param>
-    /// <returns>A task that completes when the facts were applied (or dropped). Cancellation is not
-    ///     an error: the task completes without throwing.</returns>
-    internal Task RefreshCheapInBackgroundAsync(CancellationToken cancellationToken = default)
+    /// <param name="priority">How urgently the state is wanted: background, a card that is shown, or
+    ///     a user action.</param>
+    /// <param name="cheapFacts">Whether to read the cheap facts (folder, pin file, branch,
+    ///     <c>HEAD</c> and committed agent folders).</param>
+    /// <param name="workingTree">Whether to check the working tree (<c>git status</c>). Skipped for a
+    ///     card whose folder is missing (Pull is then simply not offered).</param>
+    /// <param name="reportsProgress">Whether the cheap-facts read counts in the queue's progress wave
+    ///     (shown in the global progress strip by the window).</param>
+    /// <param name="cancellationToken">Gives up the reads that have not started; nothing is applied
+    ///     then.</param>
+    /// <returns>A task that completes when every requested read was applied, dropped or given up;
+    ///     never faults. Also available as <see cref="RefreshStateTask"/>.</returns>
+    internal Task RefreshRepoStateAsync(
+        RepoRefreshPriority priority,
+        bool cheapFacts,
+        bool workingTree,
+        bool reportsProgress = false,
+        CancellationToken cancellationToken = default)
     {
-        CheapRefreshTask = RefreshCheapCoreAsync(cancellationToken);
-        return CheapRefreshTask;
+        var reads = new List<Task>(2);
+        if (cheapFacts)
+        {
+            CheapRefreshTask = ReadCheapFactsThroughQueueAsync(priority, reportsProgress, cancellationToken);
+            reads.Add(CheapRefreshTask);
+        }
+
+        if (workingTree)
+        {
+            GitStatusRefreshTask = ReadWorkingTreeThroughQueueAsync(priority, cancellationToken);
+            reads.Add(GitStatusRefreshTask);
+        }
+
+        RefreshStateTask = reads.Count switch
+        {
+            0 => Task.CompletedTask,
+            1 => reads[0],
+            _ => Task.WhenAll(reads)
+        };
+        return RefreshStateTask;
     }
 
     /// <summary>
-    ///     The body of <see cref="RefreshCheapInBackgroundAsync"/>.
+    ///     Raises the priority of the card's repo-state reads that still wait in the shared queue, for
+    ///     example when the card is shown in the window or the user acts on it.
     /// </summary>
-    /// <param name="cancellationToken">Cancels the read before it starts.</param>
-    /// <returns>A task that completes when the facts were applied (or dropped).</returns>
-    private async Task RefreshCheapCoreAsync(CancellationToken cancellationToken)
+    /// <param name="priority">The priority the reads should have at least.</param>
+    internal void PrioritizeRepoState(RepoRefreshPriority priority)
+    {
+        _refreshQueue.Promote(new RepoRefreshKey(RepoPath, RepoRefreshKind.CheapFacts), priority);
+        _refreshQueue.Promote(new RepoRefreshKey(RepoPath, RepoRefreshKind.WorkingTree), priority);
+    }
+
+    /// <summary>
+    ///     Runs the same checks as <see cref="RefreshCheap"/> through the shared refresh queue, at
+    ///     background priority, reading the disk and git off the UI thread and applying what was found
+    ///     on the caller's (UI) thread.
+    /// </summary>
+    /// <remarks>
+    ///     The background form of <see cref="RefreshRepoStateAsync"/> for the cheap facts alone (see
+    ///     there for coalescing and for which answers are dropped). Also available as
+    ///     <see cref="CheapRefreshTask"/>.
+    /// </remarks>
+    /// <param name="cancellationToken">Gives up the read before it starts; nothing is applied then.</param>
+    /// <returns>A task that completes when the facts were applied (or dropped). Cancellation is not
+    ///     an error: the task completes without throwing.</returns>
+    internal Task RefreshCheapInBackgroundAsync(CancellationToken cancellationToken = default) =>
+        RefreshRepoStateAsync(RepoRefreshPriority.Background, cheapFacts: true, workingTree: false,
+            cancellationToken: cancellationToken);
+
+    /// <summary>
+    ///     Reads the card's cheap facts through the shared refresh queue and applies them.
+    /// </summary>
+    /// <param name="priority">The read's priority.</param>
+    /// <param name="reportsProgress">Whether the read counts in the queue's progress wave.</param>
+    /// <param name="cancellationToken">Gives up the read before it starts.</param>
+    /// <returns>A task that completes when the facts were applied (or dropped); never faults.</returns>
+    private async Task ReadCheapFactsThroughQueueAsync(
+        RepoRefreshPriority priority, bool reportsProgress, CancellationToken cancellationToken)
     {
         if (_isRetired)
         {
@@ -2194,23 +2355,18 @@ internal sealed class RepoCardViewModel : ViewModelBase
         // Numbered and prepared here, on the UI thread, before anything runs in the background
         var generation = ++_cheapRefreshGeneration;
         var repoPath = RepoPath;
-        var gitExecutablePath = ResolveGitExecutablePath(_getSettings());
+        var git = CreateGitClient(_getSettings());
         var cache = _committedAgentFilesCache;
 
-        RepoCheapFacts facts;
-        try
-        {
-            facts = await _backgroundWork.RunAsync(
-                () => ReadCheapFacts(repoPath, gitExecutablePath, cache), cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            // Canceled before the read started (the window closed, or a newer refresh took over)
-            return;
-        }
+        var facts = await ReadThroughQueueAsync(
+            RepoRefreshKind.CheapFacts,
+            priority,
+            token => ReadCheapFacts(repoPath, git, cache, token),
+            reportsProgress,
+            cancellationToken);
 
-        // Retired meanwhile, or a newer read started: that one has the last word
-        if (_isRetired || generation != _cheapRefreshGeneration)
+        // Given up, retired meanwhile, or a newer read started: that one has the last word
+        if (facts is null || _isRetired || generation != _cheapRefreshGeneration)
         {
             return;
         }
@@ -2219,22 +2375,90 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
+    ///     Requests one read of the card's repo through the shared queue on behalf of the card, keeping
+    ///     <see cref="IsRefreshing"/> up while it waits or runs.
+    /// </summary>
+    /// <typeparam name="T">The read's result type.</typeparam>
+    /// <param name="kind">What is read.</param>
+    /// <param name="priority">The read's priority.</param>
+    /// <param name="read">The read; runs on a worker thread.</param>
+    /// <param name="reportsProgress">Whether the read counts in the queue's progress wave.</param>
+    /// <param name="cancellationToken">Gives up the read before it starts.</param>
+    /// <returns>The read's result, or <see langword="null"/> when it was given up, the card was
+    ///     retired, or the queue was shut down.</returns>
+    private async Task<T?> ReadThroughQueueAsync<T>(
+        RepoRefreshKind kind,
+        RepoRefreshPriority priority,
+        Func<CancellationToken, T> read,
+        bool reportsProgress,
+        CancellationToken cancellationToken)
+        where T : class
+    {
+        // The card's own retirement gives the read up as well as the caller's token
+        using var giveUp = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _retiredToken);
+        BeginRefreshing();
+        try
+        {
+            return await _refreshQueue.EnqueueAsync(
+                new RepoRefreshKey(RepoPath, kind), priority, read, reportsProgress, giveUp.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Given up, retired, or the window closed: nothing to apply
+            return null;
+        }
+        finally
+        {
+            EndRefreshing();
+        }
+    }
+
+    /// <summary>
+    ///     Counts one more of the card's reads as waiting or running, announcing
+    ///     <see cref="IsRefreshing"/> when it turns on.
+    /// </summary>
+    private void BeginRefreshing()
+    {
+        if (Interlocked.Increment(ref _refreshesInFlight) == 1)
+        {
+            OnPropertyChanged(nameof(IsRefreshing));
+        }
+    }
+
+    /// <summary>
+    ///     Counts one of the card's reads as ended, announcing <see cref="IsRefreshing"/> when it turns
+    ///     off.
+    /// </summary>
+    private void EndRefreshing()
+    {
+        if (Interlocked.Decrement(ref _refreshesInFlight) == 0)
+        {
+            OnPropertyChanged(nameof(IsRefreshing));
+        }
+    }
+
+    /// <summary>
     ///     Reads what a cheap refresh needs to know about a repo from the disk and git: whether the
     ///     folder exists, the pin file, the branch, <c>HEAD</c> and whether agent folders are
     ///     committed.
     /// </summary>
     /// <remarks>
-    ///     Pure I/O with no view-model state, so it is safe on any thread; the main window's add runs
-    ///     it on worker threads for folders that are not cards yet. A failure to read the pin file or
-    ///     to run git is captured in the result rather than thrown.
+    ///     Pure I/O with no view-model state, so it is safe on any thread; the shared refresh queue
+    ///     runs it on worker threads, and the main window's add runs it for folders that are not cards
+    ///     yet. A failure to read the pin file or to run git is captured in the result rather than
+    ///     thrown; a git command that hung past its time limit and was stopped is captured as
+    ///     <see cref="RepoCheapFacts.GitProblem"/> so the card can say so.
     /// </remarks>
     /// <param name="repoPath">The repository's root folder.</param>
-    /// <param name="gitExecutablePath">The git executable to run.</param>
+    /// <param name="git">The git client to ask (its executable and time limits).</param>
     /// <param name="cache">The committed-files cache to consult and fill, or <see langword="null"/>
     ///     to always ask git (a repo that has no card yet). The cache is safe for concurrent use.</param>
+    /// <param name="cancellationToken">Stops a running git when signaled (the window closed).</param>
     /// <returns>The facts.</returns>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled; git was stopped.</exception>
     internal static RepoCheapFacts ReadCheapFacts(
-        string repoPath, string gitExecutablePath, CommittedAgentFilesCache? cache)
+        string repoPath, GitClient git, CommittedAgentFilesCache? cache, CancellationToken cancellationToken)
     {
         // A folder that does not exist has nothing else to read
         if (!Directory.Exists(repoPath))
@@ -2257,16 +2481,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
         // The branch and the committed-files answer, the latter cached by HEAD commit
         try
         {
-            var git = new GitClient(gitExecutablePath);
-            var branch = git.GetCurrentBranch(repoPath);
-            var headHash = git.GetHeadCommitHash(repoPath);
+            var branch = git.GetCurrentBranch(repoPath, cancellationToken);
+            var headHash = git.GetHeadCommitHash(repoPath, cancellationToken);
             if (cache is null || !cache.TryGetCached(repoPath, headHash, out var hasCommittedFiles))
             {
-                hasCommittedFiles = git.HasCommittedAgentFiles(repoPath);
+                hasCommittedFiles = git.HasCommittedAgentFiles(repoPath, cancellationToken);
                 cache?.Set(repoPath, headHash, hasCommittedFiles);
             }
 
             return new RepoCheapFacts(false, pin, pinLoadError, branch, headHash, hasCommittedFiles, false);
+        }
+        catch (GitCommandTimeoutException ex)
+        {
+            return new RepoCheapFacts(false, pin, pinLoadError, null, null, false, true, DescribeGitTimeout(ex));
         }
         catch (InvalidOperationException)
         {
@@ -2275,16 +2502,26 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
+    ///     Describes, for the card's status message, a git command that did not answer in time.
+    /// </summary>
+    /// <param name="timeout">The timeout.</param>
+    /// <returns>What happened and what the user can do.</returns>
+    private static string DescribeGitTimeout(GitCommandTimeoutException timeout) =>
+        $"Git did not answer within {timeout.Timeout.TotalSeconds:0.###} seconds and was stopped; " +
+        "the repo's Git state is unknown. Use Refresh to try again.";
+
+    /// <summary>
     ///     Applies what a cheap refresh read (see <see cref="ReadCheapFacts"/>) to the card's
     ///     properties.
     /// </summary>
     /// <remarks>
-    ///     Called on the UI thread, by <see cref="RefreshCheap"/>, by <see cref="RefreshCheapInBackgroundAsync"/>
-    ///     and by the owning <see cref="MainWindowViewModel"/> for a card it creates from facts read in
-    ///     the background while repos were added. Any upgrade check still in flight is made
-    ///     irrelevant (it was started against the old pin), and any background cheap read still in
-    ///     flight is superseded. Starts the background picture refresh. A retired card is left as
-    ///     it is.
+    ///     Called on the UI thread, by <see cref="RefreshCheap"/>, by the queued reads of
+    ///     <see cref="RefreshRepoStateAsync"/> and by the owning <see cref="MainWindowViewModel"/> for a
+    ///     card it creates from facts read in the background while repos were added. Any upgrade check
+    ///     still in flight is made irrelevant (it was started against the old pin), and any background
+    ///     cheap read still in flight is superseded. A git timeout is shown as the card's status message
+    ///     (and cleared again by a later read that got an answer). Starts the background picture
+    ///     refresh. A retired card is left as it is.
     /// </remarks>
     /// <param name="facts">The facts to apply. Must not be <see langword="null"/>.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="facts"/> is
@@ -2305,6 +2542,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         // a new check when one is wanted)
         InvalidateUpgradeCheck();
 
+        ShowGitProblem(facts.GitProblem);
         IsMissing = facts.IsMissing;
         if (IsMissing)
         {
@@ -2344,6 +2582,30 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
+    ///     Shows a git problem (a command that hung and was stopped) as the card's status message, or
+    ///     clears the one shown before once git answered again; a status message from anything else (an
+    ///     action's outcome) is left alone.
+    /// </summary>
+    /// <param name="problem">The problem, or <see langword="null"/> when git answered.</param>
+    private void ShowGitProblem(string? problem)
+    {
+        if (problem is not null)
+        {
+            _shownGitProblem = problem;
+            StatusMessage = problem;
+        }
+        else if (_shownGitProblem is not null)
+        {
+            if (StatusMessage == _shownGitProblem)
+            {
+                StatusMessage = null;
+            }
+
+            _shownGitProblem = null;
+        }
+    }
+
+    /// <summary>
     ///     Re-checks the repo's working-tree cleanliness via <see cref="GitClient"/>, updating
     ///     <see cref="CanPull"/>.
     /// </summary>
@@ -2351,9 +2613,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Deliberately not called by <see cref="RefreshCheap"/> or the constructor - per
     ///     architecture.md's repo-fact caching strategy, working-tree dirty/clean state is not
     ///     cacheable by <c>HEAD</c> hash (it reflects uncommitted local edits), so it is computed
-    ///     lazily instead. The window uses <see cref="RefreshDirtyStatusInBackgroundAsync"/> (off the UI
-    ///     thread); this synchronous form remains for callers that already run off the hot path.
-    ///     Supersedes any background check still running.
+    ///     lazily instead. The window uses <see cref="RefreshRepoStateAsync"/> (through the shared
+    ///     queue, off the UI thread); this synchronous form remains for callers that already run off
+    ///     the hot path. Supersedes any background check still running.
     /// </remarks>
     public void RefreshDirtyStatus()
     {
@@ -2367,36 +2629,30 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Gets the task of the most recent <see cref="RefreshDirtyStatusInBackgroundAsync"/>, so a caller (a test)
-    ///     can wait for the working-tree check to settle. Never faults.
-    /// </summary>
-    internal Task GitStatusRefreshTask { get; private set; } = Task.CompletedTask;
-
-    /// <summary>
-    ///     Re-checks the repo's working-tree cleanliness like <see cref="RefreshDirtyStatus"/>, running
-    ///     <c>git status</c> off the UI thread and applying the answer on the caller's (UI) thread.
+    ///     Re-checks the repo's working-tree cleanliness like <see cref="RefreshDirtyStatus"/>, through
+    ///     the shared refresh queue at background priority, running <c>git status</c> off the UI thread
+    ///     and applying the answer on the caller's (UI) thread.
     /// </summary>
     /// <remarks>
-    ///     The working-tree check is the slowest git call (it scans the whole working tree), so it
-    ///     never runs on the UI thread from the window: once when a card is first shown, and after a
-    ///     Refresh or a Pull. Until the answer arrives the card keeps its previous state; a card never
-    ///     checked stays "not checked yet" (<see cref="GitStatusChecked"/> is
-    ///     <see langword="false"/>), so it is never shown as dirty before git has answered. The answer
-    ///     is dropped when the card was retired meanwhile or a newer working-tree check started. Also
+    ///     The background form of <see cref="RefreshRepoStateAsync"/> for the working tree alone. The
+    ///     working-tree check is the slowest git call (it scans the whole working tree), so it never
+    ///     runs on the UI thread from the window. Until the answer arrives the card keeps its previous
+    ///     state; a card never checked stays "not checked yet" (<see cref="GitStatusChecked"/> is
+    ///     <see langword="false"/>), so it is never shown as dirty before git has answered. Also
     ///     available as <see cref="GitStatusRefreshTask"/>.
     /// </remarks>
     /// <returns>A task that completes when the answer was applied (or dropped); never faults.</returns>
-    internal Task RefreshDirtyStatusInBackgroundAsync()
-    {
-        GitStatusRefreshTask = RefreshDirtyStatusCoreAsync();
-        return GitStatusRefreshTask;
-    }
+    internal Task RefreshDirtyStatusInBackgroundAsync() =>
+        RefreshRepoStateAsync(
+            RepoRefreshPriority.Background, cheapFacts: false, workingTree: true, cancellationToken: CancellationToken.None);
 
     /// <summary>
-    ///     The body of <see cref="RefreshDirtyStatusInBackgroundAsync"/>.
+    ///     Checks the card's working tree through the shared refresh queue and applies the answer.
     /// </summary>
-    /// <returns>A task that completes when the answer was applied (or dropped).</returns>
-    private async Task RefreshDirtyStatusCoreAsync()
+    /// <param name="priority">The check's priority.</param>
+    /// <param name="cancellationToken">Gives up the check before it starts.</param>
+    /// <returns>A task that completes when the answer was applied (or dropped); never faults.</returns>
+    private async Task ReadWorkingTreeThroughQueueAsync(RepoRefreshPriority priority, CancellationToken cancellationToken)
     {
         if (_isRetired)
         {
@@ -2412,50 +2668,72 @@ internal sealed class RepoCardViewModel : ViewModelBase
         // Numbered and prepared here, on the UI thread; only git runs in the background
         var generation = ++_gitStatusGeneration;
         var repoPath = RepoPath;
-        var gitExecutablePath = ResolveGitExecutablePath(_getSettings());
+        var git = CreateGitClient(_getSettings());
 
-        var clean = await _backgroundWork.RunAsync(
-            () => ReadWorkingTreeClean(repoPath, gitExecutablePath), CancellationToken.None);
+        var answer = await ReadThroughQueueAsync(
+            RepoRefreshKind.WorkingTree,
+            priority,
+            token => ReadWorkingTreeClean(repoPath, git, token),
+            reportsProgress: false,
+            cancellationToken);
 
-        // Retired meanwhile, or a newer check started: that one has the last word
-        if (_isRetired || generation != _gitStatusGeneration)
+        // Given up, retired meanwhile, or a newer check started: that one has the last word
+        if (answer is null || _isRetired || generation != _gitStatusGeneration)
         {
             return;
         }
 
-        ApplyGitStatus(clean);
+        ApplyGitStatus(answer);
     }
 
     /// <summary>
     ///     Asks git whether a repo's working tree is clean; safe on any thread.
     /// </summary>
     /// <param name="repoPath">The repository's root folder.</param>
-    /// <param name="gitExecutablePath">The git executable to run.</param>
-    /// <returns><see langword="true"/> when clean, <see langword="false"/> when it has uncommitted
-    ///     changes, <see langword="null"/> when git could not tell (not a repository, git missing).</returns>
-    private static bool? ReadWorkingTreeClean(string repoPath, string gitExecutablePath)
+    /// <param name="git">The git client to ask.</param>
+    /// <param name="cancellationToken">Stops a running git when signaled.</param>
+    /// <returns>The answer: clean, dirty, or unknown (not a repository, git missing, or git hung and was
+    ///     stopped - the last with the problem to show).</returns>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled; git was stopped.</exception>
+    private static WorkingTreeAnswer ReadWorkingTreeClean(string repoPath, GitClient git, CancellationToken cancellationToken)
     {
         try
         {
-            return new GitClient(gitExecutablePath).IsWorkingTreeClean(repoPath);
+            return new WorkingTreeAnswer(git.IsWorkingTreeClean(repoPath, cancellationToken), null);
+        }
+        catch (GitCommandTimeoutException ex)
+        {
+            return new WorkingTreeAnswer(null, DescribeGitTimeout(ex));
         }
         catch (InvalidOperationException)
         {
-            return null;
+            return new WorkingTreeAnswer(null, null);
         }
     }
 
     /// <summary>
     ///     Applies a working-tree answer to <see cref="CanPull"/>, <see cref="GitStatusUnavailable"/>
-    ///     and <see cref="GitStatusChecked"/>.
+    ///     and <see cref="GitStatusChecked"/>, showing a git timeout as the card's status message.
     /// </summary>
-    /// <param name="clean">The answer (see <see cref="ReadWorkingTreeClean"/>).</param>
-    private void ApplyGitStatus(bool? clean)
+    /// <param name="answer">The answer (see <see cref="ReadWorkingTreeClean"/>).</param>
+    private void ApplyGitStatus(WorkingTreeAnswer answer)
     {
-        CanPull = clean ?? false;
-        GitStatusUnavailable = clean is null;
+        ShowGitProblem(answer.GitProblem);
+        CanPull = answer.Clean ?? false;
+        GitStatusUnavailable = answer.Clean is null;
         GitStatusChecked = true;
     }
+
+    /// <summary>
+    ///     What a working-tree check found; immutable, so it can be handed from a worker thread to the
+    ///     UI thread.
+    /// </summary>
+    /// <param name="Clean"><see langword="true"/> when clean, <see langword="false"/> when it has
+    ///     uncommitted changes, <see langword="null"/> when git could not tell.</param>
+    /// <param name="GitProblem">For a git that hung and was stopped, what to tell the user; otherwise
+    ///     <see langword="null"/>.</param>
+    private sealed record WorkingTreeAnswer(bool? Clean, string? GitProblem);
 
     /// <summary>
     ///     Records that this repo was just successfully launched, stamping
@@ -3045,8 +3323,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
         try
         {
             var settings = _getSettings();
-            var git = new GitClient(ResolveGitExecutablePath(settings));
-            var result = await Task.Run(() => git.Pull(RepoPath), CancellationToken.None);
+            var git = CreateGitClient(settings);
+            var result = await Task.Run(() => git.Pull(RepoPath, CancellationToken.None), CancellationToken.None);
             var pullMessage = result.Succeeded
                 ? "Pull succeeded."
                 : $"Pull failed: {result.StandardError.Trim()}";
@@ -3558,7 +3836,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     {
         try
         {
-            var git = new GitClient(ResolveGitExecutablePath(_getSettings()));
+            var git = CreateGitClient(_getSettings());
             return await Task.Run(() => git.GetTrackedAgentFolders(RepoPath), CancellationToken.None);
         }
         catch (InvalidOperationException ex)
@@ -3638,7 +3916,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     before any file is replaced.</exception>
     private async Task<bool> UntrackAgentFoldersAsync(IReadOnlyList<string> trackedFolders)
     {
-        var git = new GitClient(ResolveGitExecutablePath(_getSettings()));
+        var git = CreateGitClient(_getSettings());
         try
         {
             await Task.Run(() => git.UntrackAgentFolders(RepoPath, trackedFolders), CancellationToken.None);
@@ -3666,7 +3944,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="trackedFolders">The folders that were untracked; never empty.</param>
     private async Task RestoreAgentFolderTrackingAsync(IReadOnlyList<string> trackedFolders)
     {
-        var git = new GitClient(ResolveGitExecutablePath(_getSettings()));
+        var git = CreateGitClient(_getSettings());
         try
         {
             await Task.Run(() => git.RestoreAgentFolderTracking(RepoPath, trackedFolders), CancellationToken.None);
@@ -4350,7 +4628,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         // A direct check is newer than any background check still in flight
         _gitStatusGeneration++;
         var settings = _getSettings();
-        ApplyGitStatus(ReadWorkingTreeClean(RepoPath, ResolveGitExecutablePath(settings)));
+        ApplyGitStatus(ReadWorkingTreeClean(RepoPath, CreateGitClient(settings), CancellationToken.None));
     }
 
     /// <summary>
@@ -4367,13 +4645,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
         try
         {
             var settings = _getSettings();
-            var git = new GitClient(ResolveGitExecutablePath(settings));
-            var branch = git.GetCurrentBranch(RepoPath);
+            var git = CreateGitClient(settings);
+            var branch = git.GetCurrentBranch(RepoPath, CancellationToken.None);
 
-            var headHash = git.GetHeadCommitHash(RepoPath);
+            var headHash = git.GetHeadCommitHash(RepoPath, CancellationToken.None);
             if (!_committedAgentFilesCache.TryGetCached(RepoPath, headHash, out var cached))
             {
-                cached = git.HasCommittedAgentFiles(RepoPath);
+                cached = git.HasCommittedAgentFiles(RepoPath, CancellationToken.None);
             }
 
             ApplyBranchFacts(branch, headHash, cached, gitQueryFailed: false);
@@ -4798,6 +5076,16 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
         ErrorOccurred?.Invoke(this, $"The operation failed: {SecretRedactor.SafeMessage(exception)}");
     }
+
+    /// <summary>
+    ///     Creates the git client the card runs its git commands through: the configured git
+    ///     executable (see <see cref="ResolveGitExecutablePath(AppSettings)"/>) with the card's time
+    ///     limits.
+    /// </summary>
+    /// <param name="settings">The current application settings.</param>
+    /// <returns>The client.</returns>
+    private GitClient CreateGitClient(AppSettings settings) =>
+        new(ResolveGitExecutablePath(settings), timeouts: _gitTimeouts);
 
     /// <summary>
     ///     Resolves the git executable path to use: the per-user setting if configured,

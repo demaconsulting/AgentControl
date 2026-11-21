@@ -105,10 +105,12 @@ button's bound `Command` (raising the click event alone does not run a view-mode
 
 **Background work, without timing.** The responsiveness requirements (`AgentControl-LauncherUI-AddReposResponsive`,
 `-GlobalProgress`, `-AddCancel`, `-AddQueued`, `-AddSaveFailureChoice`, `-SettingsApplyResponsive`,
-`-GitStatusInBackground`) are verified through two constructor seams instead of timing assertions. The background
-runner seam takes `GatedBackgroundWorkRunner` (a test helper in `GatedBackgroundWorkRunner.cs`, a supporting type of
-the tests): it counts every piece of work handed to it (`Calls`, with `FirstCall` completing at the first one) and holds
-it at a gate until the test calls `Release`, then runs it on the thread pool; while the work is held the tests assert
+`-GitStatusInBackground`, `-BoundedRepoReads`) are verified through two constructor seams instead of timing assertions.
+The background runner seam takes `GatedBackgroundWorkRunner` (a test helper in `GatedBackgroundWorkRunner.cs`, a
+supporting type of the tests), which sits under the shared refresh queue: it counts every piece of work handed to it
+(`Calls`, with `FirstCall` completing at the first one) and the most pieces handed over and unfinished at the same time
+(`MaxInFlight`, how many reads the queue ran at once), and holds the work at a gate until the test calls `Release`,
+then runs it on the thread pool; while the work is held the tests assert
 what the user would see - nothing added yet, the strip and its text, the Cancel button - and, in the headless window
 tests (`HeadlessTestApp.RunAsync`), that the UI thread is free: `Dispatcher.UIThread.InvokeAsync` of a trivial action
 completes while the add or the refresh is still held. No test asserts on thread identity or elapsed time. The save seam
@@ -125,6 +127,11 @@ scrolls, by raising the platform's drag events (card and group drags through the
 (`MainWindow.AutoScrollTick`) directly, since the headless platform does not advance real time; `IsAutoScrolling`
 tells whether the timer runs. Whether Avalonia's `DispatcherTimer` ticks while the operating system's own drag loop
 runs on Windows (OLE `DoDragDrop`) cannot be shown headlessly and must be confirmed by a UI run.
+
+**A git that hangs.** `MainWindowViewModel` takes optional git time limits (`GitClientTimeouts`), passed to every card;
+the headless test of `AgentControl-LauncherUI-GitTimeoutShown` uses a one-second local limit and a stub git whose
+working-tree query sleeps past it, so the timeout happens within the test without any timing assertion: the test
+awaits the card's working-tree check and asserts what the card shows.
 
 ### Test Environment
 
@@ -193,6 +200,8 @@ executable.
   afterwards; Cancel adds nothing and says nothing; a further add waits for the running one; a failed save asks Retry
   or Discard, Retry adds the folders and Discard leaves the list as saved; a shown card's working tree is checked in
   the background and shows "not checked yet" until git answers; and the strip is legible in both themes.
+- However many cards are shown, never more than two repo reads run at once, each card waiting for or undergoing a read
+  says it is refreshing until its state was applied, and a git that hangs is stopped and reported on its card.
 - A drag held near the list's top or bottom edge, over the app bar or below the list keeps the list scrolling, faster
   the deeper the pointer is, redraws the drop feedback as the list moves and stops when the drag leaves, drops or
   ends.
@@ -272,8 +281,8 @@ and groups during an add is verified through the child. This covers
 
 **LauncherUI_GlobalProgress_StripShownOnlyWhileBulkWorkRuns**: The strip is collapsed in an idle window, shows the add's
 count and Cancel while dropped folders are checked and goes when they are added
-(`MainWindow_DropFolders_WhileChecked_WindowStaysResponsiveAndShowsProgress`); it shows "Refreshing repositories..."
-without Cancel while the cards refresh after Settings are saved and goes when they are done
+(`MainWindow_DropFolders_WhileChecked_WindowStaysResponsiveAndShowsProgress`); it shows "Refreshing repositories 0 of
+1..." without Cancel while the cards refresh after Settings are saved and goes when they are done
 (`MainWindow_SettingsApplied_RefreshesCardsInBackgroundShowingProgress`); and in the light and the dark theme the bar
 reaches 3:1 against its track and the strip and the status text 4.5:1 on the strip
 (`ThemeResources_GlobalProgress_IsLegibleInLightAndDark`). These cover `AgentControl-LauncherUI-GlobalProgress`
@@ -302,7 +311,7 @@ Discard).
 
 **LauncherUI_SettingsApplyResponsive_CardsRefreshInTheBackground**: In a headless main window over one repo whose
 background reads are held, Settings is opened and saved; the UI thread is free and the strip shows "Refreshing
-repositories..." without Cancel; once the reads are released the refresh ends and the strip is gone
+repositories 0 of 1..." without Cancel; once the reads are released the refresh ends and the strip is gone
 (`MainWindow_SettingsApplied_RefreshesCardsInBackgroundShowingProgress`). This covers
 `AgentControl-LauncherUI-SettingsApplyResponsive` (children `AgentControl-MainWindowViewModel-ApplySettingsInBackground`
 and `AgentControl-RepoCardViewModel-CheapRefreshInBackground`).
@@ -312,6 +321,22 @@ whose stub git reports a clean working tree, with the background reads held; the
 started but the card is not checked yet and is not shown as dirty; once released the card is checked and can pull
 (`MainWindow_CardShown_ChecksGitStatusInBackground`). This covers `AgentControl-LauncherUI-GitStatusInBackground`
 (child `AgentControl-RepoCardViewModel-GitStatusInBackground`).
+
+**LauncherUI_BoundedRepoReads_ShownCardsCheckedTwoAtATime**: A headless main window is shown, tall enough for several
+cards, over six repos whose stub git reports clean working trees, with the background reads held; exactly two
+working-tree checks have been handed to the runner, the UI thread is free, and every shown card (at least two) says it
+is refreshing; once released every shown card is checked, none says it is refreshing any more, and never more than two
+checks ran at once (`MainWindow_CardsShown_WorkingTreeChecksRunAtMostTwoAtOnce`). This covers
+`AgentControl-LauncherUI-BoundedRepoReads` (children: the `AgentControl-RepoRefreshQueue` unit requirements,
+`AgentControl-MainWindowViewModel-SharedRepoReads`, whose unit tests show that adds and the settings refresh share the
+same limit, and `AgentControl-RepoCardViewModel-RefreshingState`).
+
+**LauncherUI_GitTimeoutShown_CardSaysGitWasStopped**: A headless main window is shown over one repo whose stub git
+hangs on its working-tree check, with a one-second git limit; the UI thread stays free, and once the check has ended
+the card's status message is visible and says that git did not answer within 1 seconds and was stopped and to use
+Refresh to try again, and the card's Git state is unknown (not clean, no Pull)
+(`MainWindow_CardShown_GitHangs_CardSaysGitWasStopped`). This covers `AgentControl-LauncherUI-GitTimeoutShown` (child
+`AgentControl-RepoCardViewModel-GitTimeoutShown`).
 
 **LauncherUI_DragAutoScroll_ListKeepsScrollingWhileADragIsHeldNearItsEdges**: The step function gives no scroll in
 the middle of the list and at a zone's inner boundary, 4.25 DIP per tick one pixel inside a 32-DIP zone, 12 at the

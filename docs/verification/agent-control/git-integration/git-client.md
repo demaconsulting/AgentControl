@@ -2,15 +2,15 @@
 
 #### Verification Approach
 
-`GitClient` is verified with unit tests defined in `GitClientTests.cs`. Most tests run
-against `GitStub`, a fake git executable script (matching the pattern used by
-`ProgramTests`/`RepoCardViewModelTests`) that records its invocation arguments and returns
-configured stdout/stderr/exit-code values, so those tests never depend on a real git installation
-or a real repository history. Tests using `GitStub` belong to the `RealProcess` xUnit
-collection since they still launch a real subprocess (the stub script itself). The tests of
-listing and stopping git tracking agent folders also use a real temporary git repository (built by
-`GitRepositoryFixture`, skipped where git is not installed and failed when the environment variable `CI`
-is set), because what git tracks before and after must be observed, not assumed.
+`GitClient` is verified with unit tests defined in `GitClientTests.cs`. Most tests run against `GitStub`, a fake git
+executable script (matching the pattern used by `ProgramTests`/`RepoCardViewModelTests`) that records its invocation
+arguments and returns configured stdout/stderr/exit-code values - and, for the time-limit tests, sleeps before it
+answers a chosen command and then writes a marker, so a test can tell that the command was stopped - so those tests
+never depend on a real git installation or a real repository history. Tests using `GitStub` belong to the `RealProcess`
+xUnit collection since they still launch a real subprocess (the stub script itself). The tests of listing and stopping
+git tracking agent folders also use a real temporary git repository (built by `GitRepositoryFixture`, skipped where git
+is not installed and failed when the environment variable `CI` is set), because what git tracks before and after must be
+observed, not assumed.
 
 #### Test Environment
 
@@ -25,6 +25,9 @@ Approach).
   `InvalidOperationException` rather than propagating a raw process failure.
 - The current-branch fast path avoids invoking git whenever `.git/HEAD` can be read directly.
 - The repository-root check reports a root only for a folder with its own `.git` folder or file.
+- A command that outlives its time limit, or whose caller cancels it, is stopped before it finishes and reported as
+  timed out (with the limit) or canceled; a pull runs under its own, longer limit.
+- On a thread guarded against blocking calls no git command starts.
 
 #### Test Scenarios
 
@@ -116,3 +119,20 @@ scenario is tested by `GitClient_IsRepositoryRoot_GitDirectory_ReturnsTrue`,
 `GitClient_IsRepositoryRoot_GitFile_ReturnsTrue`, `GitClient_IsRepositoryRoot_NoGit_ReturnsFalse`,
 `GitClient_IsRepositoryRoot_SubfolderOfRepository_ReturnsFalse`, `GitClient_IsRepositoryRoot_MissingFolder_ReturnsFalse`
 and `GitClient_IsRepositoryRoot_BlankPath_ThrowsArgumentException`, covering `AgentControl-GitClient-RepositoryRoot`.
+
+**GitClient_TimeLimit_HungGitIsStoppedAndReported**: A stub whose `status` sleeps well past a one-second local limit
+is stopped (it never writes its post-sleep marker) and reported as `GitCommandTimeoutException` - still an
+`InvalidOperationException` - naming `git status` and the one-second limit
+(`GitClient_IsWorkingTreeClean_GitHangsPastTimeout_StopsItAndThrowsTimedOut`); a pull that takes two seconds completes
+under the same one-second local limit, because a pull runs under the pull limit
+(`GitClient_Pull_UsesPullTimeoutNotLocalTimeout`). These cover `AgentControl-GitClient-TimeoutStopsGit`.
+
+**GitClient_Cancel_RunningGitIsStopped**: A stub whose `rev-parse HEAD` hangs is canceled by its caller after one
+second; the call throws `OperationCanceledException` and the stub never finishes. This scenario is tested by
+`GitClient_GetHeadCommitHash_Canceled_StopsGitAndThrowsCanceled`, covering `AgentControl-GitClient-CancelStopsGit`.
+
+**GitClient_GuardedThread_NoGitStarted**: On a thread guarded by `BlockingCallGuard`, `IsWorkingTreeClean`, `Pull`,
+`GetHeadCommitHash`, `HasCommittedAgentFiles` and `GetCurrentBranch` are each refused with
+`BlockingCallOnGuardedThreadException`, five refusals are recorded, and the stub's invocation log was never written, so
+git never started. This scenario is tested by `GitClient_AnyCommand_OnGuardedThread_ThrowsBlockingCallOnGuardedThread`;
+it verifies a guard point of `Quality-UiThreadRegressionGuard` and is not linked to a `GitClient` requirement.

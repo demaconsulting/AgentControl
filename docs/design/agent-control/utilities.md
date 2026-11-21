@@ -7,8 +7,10 @@
 The `Utilities` subsystem provides shared utility functions for the Agent Control. It
 supplies reusable, independently testable helpers consumed by other subsystems. Its primary
 responsibility is safe file-path manipulation, protecting callers from path-traversal
-vulnerabilities when constructing paths from caller-supplied inputs. The `Utilities` subsystem
-contains one unit: `PathHelpers`.
+vulnerabilities when constructing paths from caller-supplied inputs. It also provides the
+blocking-call guard the automated tests use to catch a git or disk call made on the window's UI
+thread (`AgentControl-Utilities-BlockingCallGuard`, which supports `Quality-UiThreadRegressionGuard`).
+The `Utilities` subsystem contains two units: `PathHelpers` and `BlockingCallGuard`.
 
 ### Interfaces
 
@@ -24,10 +26,29 @@ that escapes the base directory.
   when the combined path escapes the base directory; may propagate `NotSupportedException` or
   `PathTooLongException` from underlying BCL path operations.
 
+**BlockingCallGuard**: Lets the tests mark a thread on which blocking git and disk calls are refused.
+
+- *Type*: In-process .NET static methods: `GuardCurrentThread` (a disposable scope), `MarkCurrentThreadGuarded`,
+  `IsCurrentThreadGuarded`, `ThrowIfGuarded(operation)` and `TakeViolations`.
+- *Role*: Provider to two sides: the code that makes a blocking call asks `ThrowIfGuarded` first (in this phase
+  `GitClient`, `GitIntegration`), and the tests guard a thread and read the record.
+- *Contract*: On a guarded thread `ThrowIfGuarded` records the call and throws `BlockingCallOnGuardedThreadException`
+  (not an `InvalidOperationException`); on any other thread it does nothing. The guard and the record are per thread
+  (`AgentControl-BlockingCallGuard-RefusesGuardedThread`, `-ScopedPerThread`, `-RecordsViolations`).
+- *Constraints*: Nothing is guarded unless a test asks for it, so the shipped application is unaffected; safe to call
+  from any thread.
+
 ### Design
 
-The `Utilities` subsystem contains only the `PathHelpers` unit. It has no dependencies on other
-tool units or subsystems; it uses only .NET BCL types (`Path`, `ArgumentNullException`).
+The `Utilities` subsystem contains the `PathHelpers` and `BlockingCallGuard` units, which do not use each other. Neither
+has dependencies on other tool units or subsystems; they use only .NET BCL types (`Path`, `ArgumentNullException`,
+`ThreadStaticAttribute`).
+
+`BlockingCallGuard` keeps its state in thread-static fields: the depth of nested guard scopes, a lifetime flag and the
+list of refused calls. Because the state belongs to the calling thread, tests that run in parallel never see each
+other's guard, and the guard costs an unguarded thread two field reads. Its guard points live in the code that blocks
+(`GitClient.RunGit` and the `.git/HEAD` read of `GitClient.GetCurrentBranch`), so a new caller of that code on the UI
+thread is caught without any change to the guard.
 
 `PathHelpers.SafePathCombine` is a pure utility method: it performs no file-system I/O, holds
 no state, and throws immediately on invalid input. All calls to `SafePathCombine` in the

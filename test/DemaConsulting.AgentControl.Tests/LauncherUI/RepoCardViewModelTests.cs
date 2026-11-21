@@ -20,6 +20,7 @@
 
 using System.IO.Compression;
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.RepoSync;
@@ -3828,6 +3829,106 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Assert
         Assert.False(card.GitStatusChecked);
         Assert.False(card.CanPull);
+    }
+
+    /// <summary>
+    ///     Test that a card shows that it is refreshing while its repo-state reads wait in the queue or
+    ///     run - announcing the change - and stops once they were applied.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshRepoStateAsync_WhileQueued_ShowsRefreshingAndClearsAfter()
+    {
+        // Arrange: a clean repo whose reads are held at a gate
+        var repo = CreateTempDirectory();
+        var stub = GitStub.Create(statusOutput: "", statusExitCode: 0);
+        _tempPaths.Add(stub.Path);
+        var settings = new AppSettings { GitExecutablePath = stub.Path };
+        var gate = new GatedBackgroundWorkRunner();
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), backgroundWork: gate);
+        var announced = new List<bool>();
+        card.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(RepoCardViewModel.IsRefreshing))
+            {
+                lock (announced)
+                {
+                    announced.Add(card.IsRefreshing);
+                }
+            }
+        };
+        Assert.False(card.IsRefreshing);
+
+        // Act: refresh both the cheap facts and the working tree; the reads are held
+        var refresh = card.RefreshRepoStateAsync(
+            RepoRefreshPriority.UserAction, cheapFacts: true, workingTree: true, cancellationToken: TestContext.Current.CancellationToken);
+        await gate.FirstCall;
+
+        // Assert: refreshing, nothing applied yet
+        Assert.True(card.IsRefreshing);
+        Assert.False(refresh.IsCompleted);
+        Assert.Null(card.CurrentBranch);
+        Assert.False(card.GitStatusChecked);
+
+        // Act
+        gate.Release();
+        await refresh;
+
+        // Assert: both answers applied, no longer refreshing, and both changes announced once
+        Assert.False(card.IsRefreshing);
+        Assert.Equal("main", card.CurrentBranch);
+        Assert.True(card.GitStatusChecked);
+        Assert.True(card.CanPull);
+        lock (announced)
+        {
+            Assert.Equal([true, false], announced);
+        }
+    }
+
+    /// <summary>
+    ///     Test that when git hangs past its time limit while the card's state is refreshed, the card
+    ///     says so in its status message (and that Refresh can try again) and shows its Git state as
+    ///     unknown, and that the message goes once a later refresh gets an answer.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshRepoStateAsync_GitTimesOut_ShowsGitProblemOnCard()
+    {
+        // Arrange: a repo (no .git folder, so the branch is asked of git) whose git hangs on HEAD, a
+        // card with a one-second git limit, and a git that answers for later
+        var repo = CreateTempDirectory();
+        var hung = GitStub.Create(revParseHeadSleepSeconds: GitStub.HangSeconds);
+        var answering = GitStub.Create();
+        _tempPaths.Add(hung.Path);
+        _tempPaths.Add(hung.FinishedMarkerPath);
+        _tempPaths.Add(answering.Path);
+        var settings = new AppSettings { GitExecutablePath = hung.Path };
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repo },
+            () => settings,
+            new PackageVersionCache(),
+            gitTimeouts: new GitClientTimeouts(TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(10)));
+
+        // Act: refresh with the hung git
+        await card.RefreshRepoStateAsync(
+            RepoRefreshPriority.UserAction, cheapFacts: true, workingTree: false,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var messageAfterTimeout = card.StatusMessage;
+        var branchAfterTimeout = card.CurrentBranch;
+
+        // Act: git answers again, and the card is refreshed
+        settings.GitExecutablePath = answering.Path;
+        await card.RefreshRepoStateAsync(
+            RepoRefreshPriority.UserAction, cheapFacts: true, workingTree: false,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        // Assert: the timeout was shown with what to do, the Git state was unknown, and the message
+        // went once git answered
+        Assert.NotNull(messageAfterTimeout);
+        Assert.Contains("did not answer within 1 seconds and was stopped", messageAfterTimeout, StringComparison.Ordinal);
+        Assert.Contains("Use Refresh to try again.", messageAfterTimeout, StringComparison.Ordinal);
+        Assert.Null(branchAfterTimeout);
+        Assert.Null(card.StatusMessage);
+        Assert.Equal("main", card.CurrentBranch);
     }
 
     /// <summary>

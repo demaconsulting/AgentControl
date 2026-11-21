@@ -2487,3 +2487,41 @@ sections:
           - AgentControl-SelectPackageWindowViewModel-PreselectCancelled
         tests:
           - MainWindow_ChangePackageOnPinnedRepo_OpensSelectPackageOnThePinnedChoice
+
+      - id: AgentControl-LauncherUI-BoundedRepoReads
+        title: >-
+          The LauncherUI subsystem shall read the state of the repos - the folders of an add, the
+          cards refreshed after a settings save and the working trees of the cards shown - at most
+          two at a time across all of them, cards on screen before the others, read a repo that is
+          already waiting only once, keep the window usable meanwhile, and show on each card whose
+          state is waiting to be read or being read that it is refreshing.
+        justification: |
+          Every one of these used to start its own git processes, several per call site, so a large
+          list or drop flooded the machine with git processes. One shared limit keeps the machine
+          and the window responsive however many repos and callers there are.
+        children:
+          - AgentControl-RepoRefreshQueue-Limit
+          - AgentControl-RepoRefreshQueue-Coalesce
+          - AgentControl-RepoRefreshQueue-Priority
+          - AgentControl-RepoRefreshQueue-Promote
+          - AgentControl-RepoRefreshQueue-WaveProgress
+          - AgentControl-RepoRefreshQueue-Cancel
+          - AgentControl-RepoRefreshQueue-Shutdown
+          - AgentControl-RepoRefreshQueue-FailureIsolated
+          - AgentControl-MainWindowViewModel-SharedRepoReads
+          - AgentControl-RepoCardViewModel-RefreshingState
+        tests:
+          - MainWindow_CardsShown_WorkingTreeChecksRunAtMostTwoAtOnce
+
+      - id: AgentControl-LauncherUI-GitTimeoutShown
+        title: >-
+          The LauncherUI subsystem shall say on a repo's card when git did not answer within its
+          time limit and was stopped - the repo's Git state unknown, Refresh to try again - and show
+          its Git state as unknown, while the window stays usable.
+        justification: |
+          A git that hangs is stopped; the user must learn why the card shows no Git state and what
+          to do, instead of a card that silently shows nothing.
+        children:
+          - AgentControl-RepoCardViewModel-GitTimeoutShown
+        tests:
+          - MainWindow_CardShown_GitHangs_CardSaysGitWasStopped

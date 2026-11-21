@@ -19,7 +19,9 @@ support `AgentControl-System-GitSourceSafety`, `AgentControl-System-GitSourceTra
 `AgentControl-System-GitSources`; and `-RemoteGitNoBackgroundPrompt` and `-RemoteGitSignIn`, which support
 `AgentControl-System-GitSignInBackgroundNeverPrompts` and `AgentControl-System-GitSignIn`). It also tells whether a
 folder is the top folder of a Git repository (`AgentControl-GitIntegration-RepositoryRoot`, which supports
-`AgentControl-System-AddGitReposOnly`). The subsystem contains four
+`AgentControl-System-AddGitReposOnly`), and stops a local git command that does not answer within its time limit or
+whose caller gives up (`AgentControl-GitIntegration-LocalGitTimeout`, which supports
+`AgentControl-System-ResponsiveRepoListWork`). The subsystem contains four
 units: `GitClient`, `CommittedAgentFilesCache`, `GitCredentialClient` and `GitRemoteClient`.
 
 ### Interfaces
@@ -124,6 +126,22 @@ folders git tracks and stops git tracking chosen ones.
 - *Constraints*: Throws `InvalidOperationException` if both the fast path and the subprocess
   fallback fail.
 
+**GitClient time limits and cancellation**: Every `GitClient` query and `Pull` runs under a time limit and accepts a
+cancellation token.
+
+- *Type*: In-process .NET: the optional `GitClientTimeouts` constructor argument and the optional
+  `CancellationToken` parameter of `IsWorkingTreeClean`, `Pull`, `GetHeadCommitHash`, `HasCommittedAgentFiles` and
+  `GetCurrentBranch`.
+- *Role*: Provider. Its consumers are the cards' reads in the `LauncherUI` shared refresh queue, which pass the queue's
+  shutdown token, and the add's folder checks.
+- *Contract*: A command that has not finished within its limit (60 seconds on the local repository, 10 minutes for a
+  pull) is stopped with every process it started and reported as `GitCommandTimeoutException` (an
+  `InvalidOperationException` that names the limit); a canceled command is stopped the same way and reported as
+  `OperationCanceledException` (`AgentControl-GitIntegration-LocalGitTimeout`, `AgentControl-GitClient-TimeoutStopsGit`,
+  `AgentControl-GitClient-CancelStopsGit`).
+- *Constraints*: The methods block their calling thread and must run off the UI thread; on a thread guarded by
+  `BlockingCallGuard` (`Utilities`) they are refused before git starts.
+
 **GitClient.IsRepositoryRoot**: Reports whether a folder is the top folder of a Git repository.
 
 - *Type*: In-process .NET static method (file-system check only; no git process).
@@ -165,6 +183,14 @@ separately: because the recent-repos list may show many repo cards, it reads `.g
 directly first (recognizing a normal branch ref, a detached HEAD, and a worktree
 indirection file) and only falls back to invoking `git` when that fast path cannot determine
 an answer, keeping the common case free of subprocess overhead.
+
+Every `GitClient` command runs under a limit (`GitClientTimeouts`): a git on a network share, on a huge tree or held
+by a stuck lock may never answer, and without a limit it would hold the worker that waits for it - in the launcher one
+of the two slots of the shared refresh queue - and keep running unnoticed. A command past its limit, or one whose
+caller cancels (the window closed), is killed together with every process it started (`Process.Kill` of the whole
+tree), so no git is left behind; the timeout is reported as `GitCommandTimeoutException`, which existing callers
+already treat as "git could not tell" and the card shows as a message. Before starting anything `GitClient` asks
+`BlockingCallGuard` whether the calling thread may block, so the tests catch a git call made on the UI thread.
 
 `GitClient.IsRepositoryRoot` is the one question answered without git at all: it only looks for `.git` (a folder or a
 file) directly in the folder, so the launcher can check every folder of a multi-folder add or a file-manager drop

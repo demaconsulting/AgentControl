@@ -402,10 +402,19 @@ covering `AgentControl-MainWindowViewModel-ApplySettings`.
 
 **MainWindowViewModel_ApplySettingsInBackground_ReturnsBeforeTheCardRefresh**: With one listed repo and the cards'
 background reads held at the gate, `ApplySettings` returns while `PendingRefresh` has not completed, and the global
-progress shows "Refreshing repositories..." without Cancel; once released the refresh completes, the progress is
-cleared and the card reflects the refresh (present)
+progress shows "Refreshing repositories 0 of 1..." without Cancel; once released the refresh completes, the progress
+is cleared and the card reflects the refresh (present)
 (`MainWindowViewModel_ApplySettings_CardRefreshHeld_ReturnsAndShowsRefreshingProgress`). This covers
 `AgentControl-MainWindowViewModel-ApplySettingsInBackground`.
+
+**MainWindowViewModel_SharedRepoReads_TwoAtATimeAcrossAddsAndRefresh**: A background add of six repo folders, with the
+checks held at the gate, has handed exactly two checks to the runner; once released all six are added in request
+order, six checks ran and never more than two at once
+(`MainWindowViewModel_AddReposAsync_ManyFolders_AtMostTwoInspectedAtOnce`). With four listed repos, settings are
+applied (four card reads) and two folders are added (two checks) while the reads are held: two reads in all have been
+handed to the runner and the strip shows the refresh; once released every read ran, never more than two at once, all
+six repos are listed and the strip is gone (`MainWindowViewModel_ApplySettings_RefreshUsesSharedQueueLimit`). These
+cover `AgentControl-MainWindowViewModel-SharedRepoReads`.
 
 **MainWindowViewModel_BackgroundUpgradeCheck_ConstructionReadsNoSourceAndFailuresAreIsolated**:
 Constructing the view model with a pinned repo reads no package source until the upgrade refresh

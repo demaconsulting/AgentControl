@@ -301,13 +301,6 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private const int MaxConcurrentUpgradeChecks = 4;
 
     /// <summary>
-    ///     The most folders whose file-system and git facts are read at the same time while repos are
-    ///     added, and the most cards refreshed at the same time after Settings were saved, so a large
-    ///     batch never starts dozens of git processes at once.
-    /// </summary>
-    private const int MaxConcurrentFolderInspections = 4;
-
-    /// <summary>
     ///     Saves settings to disk; see the constructor.
     /// </summary>
     private readonly Action<AppSettings> _saveSettings;
@@ -316,6 +309,31 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     Runs the blocking reads of adds and refreshes off the UI thread; see the constructor.
     /// </summary>
     private readonly IBackgroundWorkRunner _backgroundWork;
+
+    /// <summary>
+    ///     The one queue every lazy repo-state read goes through - the folder checks of adds, the
+    ///     cards' refresh after a settings save and the working-tree checks of the cards shown - so only
+    ///     a few git processes run at once; see the constructor.
+    /// </summary>
+    private readonly RepoRefreshQueue _refreshQueue;
+
+    /// <summary>
+    ///     Whether <see cref="_refreshQueue"/> was created here (none was supplied), so
+    ///     <see cref="Dispose"/> shuts it down.
+    /// </summary>
+    private readonly bool _ownsRefreshQueue;
+
+    /// <summary>
+    ///     The time limits of every git command the cards and adds run, or <see langword="null"/> for
+    ///     <see cref="GitClientTimeouts.Default"/>; see the constructor.
+    /// </summary>
+    private readonly GitClientTimeouts? _gitTimeouts;
+
+    /// <summary>
+    ///     The global progress operation that shows the refresh queue's current wave, or
+    ///     <see langword="null"/> while no wave runs.
+    /// </summary>
+    private GlobalProgressOperation? _refreshProgress;
 
     /// <summary>
     ///     The adds that are running or queued and share one Cancel and one progress operation, or
@@ -486,6 +504,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="backgroundWork">Runs the blocking reads of adds and card refreshes off the UI
     ///     thread, for this view model and every card; <see langword="null"/> uses the thread pool.
     ///     Supplied so tests can hold the reads at a gate.</param>
+    /// <param name="refreshQueue">The queue every lazy repo-state read goes through, shared with every
+    ///     card; <see langword="null"/> creates one over <paramref name="backgroundWork"/> (two reads at
+    ///     a time), which <see cref="Dispose"/> shuts down. Create the view model on the UI thread: the
+    ///     queue reports its progress to the synchronization context current then.</param>
+    /// <param name="gitTimeouts">The time limits of every git command the cards and adds run, or
+    ///     <see langword="null"/> for <see cref="GitClientTimeouts.Default"/>. Supplied so tests can use a
+    ///     short limit against a git that hangs.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="settings"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when
@@ -502,7 +527,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IAgentToolProcessStarter? processStarter = null,
         ShellDetector? shellDetector = null,
         Action<AppSettings>? saveSettings = null,
-        IBackgroundWorkRunner? backgroundWork = null)
+        IBackgroundWorkRunner? backgroundWork = null,
+        RepoRefreshQueue? refreshQueue = null,
+        GitClientTimeouts? gitTimeouts = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(
@@ -524,6 +551,10 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _saveSettings = saveSettings ?? (candidate => SettingsStore.Save(candidate, configDirectory));
         _backgroundWork = backgroundWork ?? ThreadPoolBackgroundWorkRunner.Instance;
         GlobalProgress = new GlobalProgressViewModel();
+        _ownsRefreshQueue = refreshQueue is null;
+        _refreshQueue = refreshQueue ?? new RepoRefreshQueue(_backgroundWork);
+        _refreshQueue.ProgressChanged += OnRefreshQueueProgressChanged;
+        _gitTimeouts = gitTimeouts;
         _applyTheme = applyTheme;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _upgradeRecheckInterval = upgradeRecheckInterval ?? DefaultUpgradeRecheckInterval;
@@ -776,7 +807,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // The same steps as the background add, inline: plan, read every folder, commit once
         var plan = PlanAddBatch(repoPaths);
         var facts = plan.Folders
-            .Select(folder => InspectFolder(folder.Path, folder.Listed, plan.GitExecutablePath))
+            .Select(folder => InspectFolder(folder.Path, folder.Listed, plan.GitExecutablePath, _gitTimeouts, CancellationToken.None))
             .ToList();
         var commit = PrepareAddCommit(facts, target);
         try
@@ -956,8 +987,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <remarks>
     ///     <para>
     ///     Steps: plan on the UI thread (blank and duplicate paths dropped, which folders are already
-    ///     listed, which git to run); read each folder through the background runner, at most
-    ///     <see cref="MaxConcurrentFolderInspections"/> at a time (whether it exists, whether it is the
+    ///     listed, which git to run); read each folder through the shared refresh queue
+    ///     (<see cref="RepoRefreshQueue"/>, a couple at a time across every repo read of the window, at
+    ///     the priority of a visible card) (whether it exists, whether it is the
     ///     top folder of a Git repository and, for a repo not yet listed, its pin, branch and
     ///     committed agent folders - the slow part), reporting progress as each completes; then, on
     ///     the UI thread, commit the batch: one save and one list rebuild. The working-tree check of
@@ -1009,35 +1041,28 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var total = plan.Folders.Count;
         progress?.Report(new AddReposProgress(0, total));
 
-        // Read every folder in the background, a few at a time; the results keep the request order
+        // Read every folder in the background through the shared refresh queue (a couple at a time,
+        // across everything else that reads repos); the results keep the request order
         var facts = new RepoFolderFacts[total];
         var completed = 0;
-        using (var throttle = new SemaphoreSlim(MaxConcurrentFolderInspections))
+        var inspections = plan.Folders.Select(async (folder, index) =>
         {
-            var inspections = plan.Folders.Select(async (folder, index) =>
-            {
-                await throttle.WaitAsync(cancellationToken);
-                try
-                {
-                    facts[index] = await _backgroundWork.RunAsync(
-                        () => InspectFolder(folder.Path, folder.Listed, plan.GitExecutablePath), cancellationToken);
-                }
-                finally
-                {
-                    throttle.Release();
-                }
+            facts[index] = await _refreshQueue.EnqueueAsync(
+                new RepoRefreshKey(NormalizeRepoPath(folder.Path), RepoRefreshKind.FolderInspection),
+                RepoRefreshPriority.Visible,
+                token => InspectFolder(folder.Path, folder.Listed, plan.GitExecutablePath, _gitTimeouts, token),
+                reportsProgress: false,
+                cancellationToken);
+            progress?.Report(new AddReposProgress(Interlocked.Increment(ref completed), total));
+        }).ToList();
 
-                progress?.Report(new AddReposProgress(Interlocked.Increment(ref completed), total));
-            }).ToList();
-
-            try
-            {
-                await Task.WhenAll(inspections);
-            }
-            catch (OperationCanceledException)
-            {
-                return new AddReposBatchResult([], Canceled: true);
-            }
+        try
+        {
+            await Task.WhenAll(inspections);
+        }
+        catch (OperationCanceledException)
+        {
+            return new AddReposBatchResult([], Canceled: true);
         }
 
         // The last moment to stop: nothing has been saved or added yet
@@ -1120,7 +1145,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         var plan = PlanAddBatch([repoPath]);
         var folder = plan.Folders[0];
-        var commit = PrepareAddCommit([InspectFolder(folder.Path, folder.Listed, plan.GitExecutablePath)], groupName);
+        var commit = PrepareAddCommit(
+            [InspectFolder(folder.Path, folder.Listed, plan.GitExecutablePath, _gitTimeouts, CancellationToken.None)], groupName);
         var result = commit.Outcomes[0].Result;
         if (result != AddRepoResult.MovedExisting)
         {
@@ -1180,8 +1206,18 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="path">The folder's path, as given.</param>
     /// <param name="listed">Whether the repo was listed when the add was planned.</param>
     /// <param name="gitExecutablePath">The git executable to run.</param>
+    /// <param name="gitTimeouts">The time limits of the git commands, or <see langword="null"/> for
+    ///     <see cref="GitClientTimeouts.Default"/>.</param>
+    /// <param name="cancellationToken">Stops a running git when signaled (the window closed).</param>
     /// <returns>The facts.</returns>
-    internal static RepoFolderFacts InspectFolder(string path, bool listed, string gitExecutablePath)
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled; git was stopped.</exception>
+    internal static RepoFolderFacts InspectFolder(
+        string path,
+        bool listed,
+        string gitExecutablePath,
+        GitClientTimeouts? gitTimeouts = null,
+        CancellationToken cancellationToken = default)
     {
         var normalized = NormalizeRepoPath(path);
         if (!Directory.Exists(path))
@@ -1195,7 +1231,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return new RepoFolderFacts(path, normalized, RepoFolderKind.NotAGitRepositoryRoot, listed, null);
         }
 
-        var cheap = listed ? null : RepoCardViewModel.ReadCheapFacts(normalized, gitExecutablePath, cache: null);
+        var cheap = listed ? null : RepoCardViewModel.ReadCheapFacts(
+            normalized, new GitClient(gitExecutablePath, timeouts: gitTimeouts), cache: null, cancellationToken);
         return new RepoFolderFacts(path, normalized, RepoFolderKind.GitRoot, listed, cheap);
     }
 
@@ -1760,14 +1797,15 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     /// <remarks>
     ///     The save and the adoption happen before this returns; the card refresh runs in the
-    ///     background (see <see cref="RefreshCardsAfterSettingsAsync"/>), reading git off the UI
-    ///     thread and showing "Refreshing repositories..." in <see cref="GlobalProgress"/>, so the
+    ///     background through the shared refresh queue (see <see cref="RefreshCardsAfterSettingsAsync"/>),
+    ///     reading git off the UI thread and showing "Refreshing repositories {n} of {total}..." in
+    ///     <see cref="GlobalProgress"/>, so the
     ///     window stays usable however many repos are listed. <see cref="PendingRefresh"/> (and
     ///     <see cref="RecheckAfterSettingsClosed"/> after a save) completes when the refresh and the
     ///     upgrade check that follows it have finished.
-    ///     Deliberately uses <see cref="RepoCardViewModel.RefreshCheapInBackgroundAsync"/> rather than a full
-    ///     <see cref="RepoCardViewModel.RefreshAsync"/> for every card: <c>GitClient</c>'s
-    ///     un-timed <c>git status</c> call means refreshing every tracked repo's
+    ///     Deliberately refreshes only the cards' cheap facts rather than running a full
+    ///     <see cref="RepoCardViewModel.RefreshAsync"/> for every card: the
+    ///     <c>git status</c> call scans the whole working tree, so refreshing every tracked repo's
     ///     dirty status could take long for a large or slow/networked
     ///     repo list. A fresh Git status check is instead requested only for the cards that
     ///     actually need one - those that reappeared (were missing, now present) since they were
@@ -1847,75 +1885,62 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     ///     Refreshes every card after the settings were saved - its cheap checks and, where needed, its
-    ///     working-tree check - in the background with progress in <see cref="GlobalProgress"/>, then
-    ///     rebuilds the list once and starts the upgrade check against the new sources.
+    ///     working-tree check - through the shared refresh queue, then rebuilds the list once and starts
+    ///     the upgrade check against the new sources.
     /// </summary>
     /// <remarks>
-    ///     Each card reads the disk and git off the UI thread (see
-    ///     <see cref="RepoCardViewModel.RefreshCheapInBackgroundAsync"/>), at most
-    ///     <see cref="MaxConcurrentFolderInspections"/> at a time, so the window stays usable however
-    ///     many repos are listed; the strip shows "Refreshing repositories..." with the count and has
-    ///     no Cancel (the refresh only reads). A card whose folder came back, or every present card when
-    ///     the git executable changed, also gets a fresh working-tree check (see
-    ///     <see cref="ApplySettings"/>). Counted as a launch-style check while it runs, so the periodic
-    ///     round does not start meanwhile. A newer <see cref="ApplySettings"/> supersedes it: the
-    ///     superseded one neither rebuilds the list nor starts the upgrade check (the card-level
+    ///     Each card's cheap facts are queued at background priority in display order (the cards shown
+    ///     first, then the collapsed and filtered-out ones) and counted in the queue's progress wave, so
+    ///     the strip shows "Refreshing repositories {n} of {total}..." without Cancel (the refresh only
+    ///     reads) and the window stays usable however many repos are listed; the queue runs only a
+    ///     couple of reads at a time across everything that reads repos. A card whose folder came back,
+    ///     or every present card when the git executable changed, also gets a fresh working-tree check
+    ///     (see <see cref="ApplySettings"/>). Counted as a launch-style check while it runs, so the
+    ///     periodic round does not start meanwhile. A newer <see cref="ApplySettings"/> supersedes it:
+    ///     the superseded one neither rebuilds the list nor starts the upgrade check (the card-level
     ///     generations already make the newest read win). <see cref="Dispose"/> cancels it.
     /// </remarks>
     /// <param name="generation">This refresh's number (see <see cref="_settingsRefreshGeneration"/>).</param>
     /// <param name="gitExecutablePathChanged">Whether the git executable setting changed.</param>
-    /// <param name="cancellationToken">Cancels the reads that have not started.</param>
+    /// <param name="cancellationToken">Gives up the reads that have not started.</param>
     /// <returns>A task that completes when the cards were refreshed and the upgrade check that
     ///     follows has finished; cancellation is not an error.</returns>
     private async Task RefreshCardsAfterSettingsAsync(
         int generation, bool gitExecutablePathChanged, CancellationToken cancellationToken)
     {
-        var cards = RepoCards.ToList();
+        // Display order: the cards on screen first, then the rest
+        var cards = DisplayedRepoCards.Concat(RepoCards).Distinct().ToList();
         Interlocked.Increment(ref _launchChecksInFlight);
-        var operation = cards.Count == 0 ? null : GlobalProgress.Begin("Refreshing repositories...");
-        var completed = 0;
         try
         {
-            operation?.Report(0, cards.Count, "Refreshing repositories...");
-            using var throttle = new SemaphoreSlim(MaxConcurrentFolderInspections);
             var refreshes = cards.Select(async card =>
             {
-                await throttle.WaitAsync(cancellationToken);
-                try
+                var wasMissing = card.IsMissing;
+                await card.RefreshRepoStateAsync(
+                    RepoRefreshPriority.Background,
+                    cheapFacts: true,
+                    workingTree: false,
+                    reportsProgress: true,
+                    cancellationToken);
+                if (!cancellationToken.IsCancellationRequested && !card.IsMissing && (wasMissing || gitExecutablePathChanged))
                 {
-                    var wasMissing = card.IsMissing;
-                    await card.RefreshCheapInBackgroundAsync(cancellationToken);
-                    if (!card.IsMissing && (wasMissing || gitExecutablePathChanged))
-                    {
-                        await card.RefreshDirtyStatusInBackgroundAsync();
-                    }
+                    await card.RefreshRepoStateAsync(
+                        RepoRefreshPriority.Background,
+                        cheapFacts: false,
+                        workingTree: true,
+                        cancellationToken: cancellationToken);
                 }
-                finally
-                {
-                    throttle.Release();
-                }
-
-                operation?.Report(Interlocked.Increment(ref completed), cards.Count, "Refreshing repositories...");
             }).ToList();
 
-            try
-            {
-                await Task.WhenAll(refreshes);
-            }
-            catch (OperationCanceledException)
-            {
-                // The window closed: nothing more to do
-                return;
-            }
+            await Task.WhenAll(refreshes);
         }
         finally
         {
-            operation?.Dispose();
             Interlocked.Decrement(ref _launchChecksInFlight);
         }
 
         // A newer save took over (it rebuilds and checks itself), or the window closed
-        if (_disposed || generation != _settingsRefreshGeneration)
+        if (_disposed || cancellationToken.IsCancellationRequested || generation != _settingsRefreshGeneration)
         {
             return;
         }
@@ -1924,6 +1949,32 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         // Re-check upgrades against the new sources in the background
         await BeginUpgradeRefresh();
+    }
+
+    /// <summary>
+    ///     Shows the shared refresh queue's current wave of counted reads in
+    ///     <see cref="GlobalProgress"/>: "Refreshing repositories {n} of {total}..." without Cancel while
+    ///     the wave runs, and nothing once it ended.
+    /// </summary>
+    /// <remarks>
+    ///     The queue posts its progress to the UI thread's synchronization context in the application
+    ///     (it was created there), so the global progress is only changed on the UI thread. A closed
+    ///     window shows nothing more.
+    /// </remarks>
+    /// <param name="sender">The queue.</param>
+    /// <param name="progress">The wave's progress.</param>
+    private void OnRefreshQueueProgressChanged(object? sender, RepoRefreshProgress progress)
+    {
+        if (!progress.IsActive || _disposed)
+        {
+            _refreshProgress?.Dispose();
+            _refreshProgress = null;
+            return;
+        }
+
+        var text = $"Refreshing repositories {progress.Completed} of {progress.Total}...";
+        _refreshProgress ??= GlobalProgress.Begin(text);
+        _refreshProgress.Report(progress.Completed, progress.Total, text);
     }
 
     /// <summary>
@@ -2263,8 +2314,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <summary>
     ///     Stops the periodic upgrade re-check (see <see cref="StartPeriodicUpgradeRecheck"/>) and
     ///     cancels the round that is running, the background upgrade check (launch, settings
-    ///     change, added repo) and card refresh that are running, and the adds that have not saved
-    ///     yet; called when the main window closes.
+    ///     change, added repo) and card refresh that are running, the adds that have not saved
+    ///     yet, and every repo read of the shared refresh queue (a running git is stopped); called
+    ///     when the main window closes.
     /// </summary>
     public void Dispose()
     {
@@ -2290,6 +2342,17 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             refresh.Cancel();
             refresh.Dispose();
         }
+
+        // No repo is read any more: the waiting reads are dropped, a running git is stopped, and the
+        // strip's refresh line goes
+        _refreshQueue.ProgressChanged -= OnRefreshQueueProgressChanged;
+        if (_ownsRefreshQueue)
+        {
+            _refreshQueue.Dispose();
+        }
+
+        _refreshProgress?.Dispose();
+        _refreshProgress = null;
     }
 
     /// <summary>
@@ -3573,7 +3636,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             registryFactory: _registryFactory,
             processStarter: _processStarter,
             shellDetector: _shellDetector,
-            backgroundWork: _backgroundWork);
+            backgroundWork: _backgroundWork,
+            refreshQueue: _refreshQueue,
+            gitTimeouts: _gitTimeouts);
 
     /// <summary>
     ///     Creates the provider that the settings window's "Test connection" lists versions

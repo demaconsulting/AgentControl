@@ -1,0 +1,47 @@
+---
+# Software Unit Requirements for the BlockingCallGuard Class
+#
+# BlockingCallGuard refuses a blocking call (a git process, a disk read or write) made on a thread
+# that a test has marked as one that must never wait for one - the window's UI thread - so the
+# automated tests catch such a call. Nothing is guarded unless a test asks for it.
+
+sections:
+  - title: BlockingCallGuard Unit Requirements
+    requirements:
+      - id: AgentControl-BlockingCallGuard-RefusesGuardedThread
+        title: >-
+          The BlockingCallGuard class shall refuse a blocking call made on a guarded thread with an
+          error of its own kind naming the call - not the kind callers treat as an ordinary failure -
+          and shall let a blocking call on any other thread through.
+        justification: |
+          A blocking call on the window's thread still works, it only freezes the window, so
+          nothing notices it unless it is refused; it must not be mistaken for "git could not tell",
+          which callers swallow.
+        tests:
+          - BlockingCallGuard_ThrowIfGuarded_GuardedScope_ThrowsAndRecords
+          - BlockingCallGuard_ThrowIfGuarded_UnguardedThread_DoesNothing
+          - BlockingCallGuard_MarkCurrentThreadGuarded_DedicatedThread_StaysGuarded
+
+      - id: AgentControl-BlockingCallGuard-ScopedPerThread
+        title: >-
+          The BlockingCallGuard class shall guard only the thread that asked for it, until the
+          outermost of its nested guard scopes ends, or for the thread's lifetime when asked so.
+        justification: |
+          Tests run in parallel on other threads; a guard must never reach them, and a test must be
+          able to guard just the synchronous part of a gesture.
+        tests:
+          - BlockingCallGuard_GuardCurrentThread_ScopeDisposed_ThreadNoLongerGuarded
+          - BlockingCallGuard_GuardCurrentThread_NestedScopes_GuardUntilOutermostDisposed
+          - BlockingCallGuard_GuardCurrentThread_OtherThread_NotGuarded
+          - BlockingCallGuard_MarkCurrentThreadGuarded_DedicatedThread_StaysGuarded
+
+      - id: AgentControl-BlockingCallGuard-RecordsViolations
+        title: >-
+          The BlockingCallGuard class shall record every refused call on the thread it was made on,
+          and hand the record over, emptying it, when asked.
+        justification: |
+          Code under test may catch every exception; the record lets a test find a refused call
+          even then.
+        tests:
+          - BlockingCallGuard_TakeViolations_DrainsRecord
+          - BlockingCallGuard_ThrowIfGuarded_GuardedScope_ThrowsAndRecords

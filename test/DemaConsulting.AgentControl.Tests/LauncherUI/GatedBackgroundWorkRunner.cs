@@ -51,9 +51,25 @@ internal sealed class GatedBackgroundWorkRunner : IBackgroundWorkRunner
     private int _calls;
 
     /// <summary>
+    ///     How many pieces of work were handed over and have not finished (held or running).
+    /// </summary>
+    private int _inFlight;
+
+    /// <summary>
+    ///     The most pieces of work that were handed over and unfinished at the same time.
+    /// </summary>
+    private int _maxInFlight;
+
+    /// <summary>
     ///     Gets how many pieces of work were handed over so far.
     /// </summary>
     public int Calls => Volatile.Read(ref _calls);
+
+    /// <summary>
+    ///     Gets the most pieces of work that were handed over and unfinished (held at the gate or
+    ///     running) at the same time - how many reads the caller ran at once.
+    /// </summary>
+    public int MaxInFlight => Volatile.Read(ref _maxInFlight);
 
     /// <summary>
     ///     Gets a task that completes once the first piece of work has reached the gate.
@@ -72,8 +88,36 @@ internal sealed class GatedBackgroundWorkRunner : IBackgroundWorkRunner
 
         // Counted and announced at once, then held until the test opens the gate
         Interlocked.Increment(ref _calls);
+        var inFlight = Interlocked.Increment(ref _inFlight);
+        UpdateMaxInFlight(inFlight);
         _firstCall.TrySetResult();
-        await _gate.Task.ConfigureAwait(false);
-        return await Task.Run(work, CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            await _gate.Task.ConfigureAwait(false);
+            return await Task.Run(work, CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _inFlight);
+        }
+    }
+
+    /// <summary>
+    ///     Raises the recorded maximum to <paramref name="inFlight"/> when it is higher.
+    /// </summary>
+    /// <param name="inFlight">How many pieces of work are unfinished now.</param>
+    private void UpdateMaxInFlight(int inFlight)
+    {
+        var max = Volatile.Read(ref _maxInFlight);
+        while (inFlight > max)
+        {
+            var seen = Interlocked.CompareExchange(ref _maxInFlight, inFlight, max);
+            if (seen == max)
+            {
+                return;
+            }
+
+            max = seen;
+        }
     }
 }

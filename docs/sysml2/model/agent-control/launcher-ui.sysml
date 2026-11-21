@@ -22,8 +22,8 @@ package AgentControl {
          * support types (RelayCommand, AsyncRelayCommand, ViewModelBase, PackageSourceIcons,
          * PackageSourceItemViewModel, SelectPackageSourceViewModel, AvaloniaCredentialPrompt,
          * ConnectionTestResultKind, RepoCardStatus, CardColorPalette, ThirdPartyDependencies,
-         * BackgroundWorkRunner - the seam that runs blocking file-system and git reads off the UI
-         * thread - and the shared AppStyles.axaml theme resources). The pure display helpers - the value
+         * BackgroundWorkRunner - the seam under the repo refresh queue that runs blocking file-system
+         * and git reads off the UI thread - and the shared AppStyles.axaml theme resources). The pure display helpers - the value
          * converters (FavoriteIconConverter, AgentToolKindDisplayNameConverter,
          * ThemePreferenceDisplayNameConverter) and the PathEllipsisText and ColorPalettePanel
          * controls - are documented
@@ -33,8 +33,9 @@ package AgentControl {
          * (AgentToolKindDisplayNameConverterTests, ThemePreferenceDisplayNameConverterTests,
          * PathEllipsisTextTests). The independently testable classes with security or
          * interaction behavior of their own are units: RepoImageLocator,
-         * RepoGroupHeaderViewModel (with RepoGroupKind), GroupNameViewModel, DialogBehavior and
-         * GlobalProgressViewModel.
+         * RepoGroupHeaderViewModel (with RepoGroupKind), GroupNameViewModel, DialogBehavior,
+         * GlobalProgressViewModel and RepoRefreshQueue (the one queue, two reads at a time, every
+         * lazy read of a repo's state goes through).
          */
 
         metadata info : SoftwareInfo {
@@ -55,6 +56,7 @@ package AgentControl {
         part groupNameViewModel : GroupNameViewModel;
         part dialogBehavior : DialogBehavior;
         part globalProgressViewModel : GlobalProgressViewModel;
+        part repoRefreshQueue : RepoRefreshQueue;
         part avalonia : Avalonia;
     }
 }

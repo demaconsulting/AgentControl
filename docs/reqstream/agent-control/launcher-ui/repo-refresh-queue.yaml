@@ -1,0 +1,99 @@
+---
+# Software Unit Requirements for the RepoRefreshQueue Class
+#
+# RepoRefreshQueue is the one queue every lazy read of a repo's state goes through - the cards'
+# cheap facts and working-tree checks, and the folder checks of an add - so that however many
+# repos and callers there are, only a few git processes and disk reads run at the same time. Which
+# reads are queued, at which priority, is the MainWindowViewModel and RepoCardViewModel units'.
+
+sections:
+  - title: RepoRefreshQueue Unit Requirements
+    requirements:
+      - id: AgentControl-RepoRefreshQueue-Limit
+        title: >-
+          The RepoRefreshQueue class shall run at most two reads at the same time, however many are
+          requested, and run every read that is requested.
+        justification: |
+          Reading a long repo list started a git process per repo at once and made the machine
+          sluggish; two reads keep the work moving when one repo is slow without flooding the disk
+          and the antivirus with parallel git processes.
+        tests:
+          - RepoRefreshQueue_ManyReads_NeverMoreThanLimitAtOnce
+
+      - id: AgentControl-RepoRefreshQueue-Coalesce
+        title: >-
+          The RepoRefreshQueue class shall join a request to a read of the same kind for the same
+          repo that is still waiting - the read runs once, as the newest request asked, and every
+          requester gets its result - and shall queue one new read for a request whose read is
+          already running.
+        justification: |
+          The same repo is often asked for twice (shown on screen and refreshed after a settings
+          save); reading it twice wastes a slot. A read that already runs may predate the change the
+          new requester reacts to, so its result must not be reused.
+        tests:
+          - RepoRefreshQueue_SameKeyWhileWaiting_JoinsAndReadsOnce
+          - RepoRefreshQueue_SameKeyWhileRunning_QueuesOneNewRead
+
+      - id: AgentControl-RepoRefreshQueue-Priority
+        title: >-
+          The RepoRefreshQueue class shall start waiting reads requested for a user action before
+          those for a card that is shown, and those before background reads, and reads of the same
+          priority in the order they were requested.
+        justification: |
+          What the user waits for, or looks at, must not wait behind a long background refresh.
+        tests:
+          - RepoRefreshQueue_HigherPriority_StartsBeforeEarlierBackground
+
+      - id: AgentControl-RepoRefreshQueue-Promote
+        title: >-
+          The RepoRefreshQueue class shall let the priority of a waiting read be raised, so it
+          starts before the reads of its former priority, and shall report that a read that is not
+          waiting could not be raised.
+        justification: |
+          A card that was queued in the background becomes urgent when it is shown or acted on.
+        tests:
+          - RepoRefreshQueue_Promote_MovesWaitingItemAhead
+
+      - id: AgentControl-RepoRefreshQueue-WaveProgress
+        title: >-
+          The RepoRefreshQueue class shall report, for the reads asked to be counted, how many of
+          the current wave have finished out of how many were accepted - a joined request adding
+          nothing - and that the wave has ended when the last counted read finished, starting a new
+          wave with the next counted read, delivering the reports in order on the thread that was
+          current when the queue was created.
+        justification: |
+          The window shows bulk refreshes as "Refreshing repositories 12 of 50..." and must update
+          its progress strip on its own thread.
+        tests:
+          - RepoRefreshQueue_Progress_CountsCurrentWave
+          - RepoRefreshQueue_ProgressChanged_PostedToCapturedContext
+
+      - id: AgentControl-RepoRefreshQueue-Cancel
+        title: >-
+          The RepoRefreshQueue class shall let a requester give up a read: its request is canceled,
+          and a waiting read every requester gave up on is removed without running and without
+          being counted.
+        justification: |
+          A canceled add or a superseded refresh must not keep a slot busy or keep the progress
+          strip waiting for work nobody wants.
+        tests:
+          - RepoRefreshQueue_RequesterCanceledWhileWaiting_RemovedFromQueueAndWave
+
+      - id: AgentControl-RepoRefreshQueue-Shutdown
+        title: >-
+          The RepoRefreshQueue class shall, when shut down, signal the running reads to stop, cancel
+          the waiting ones without running them, end the progress, and refuse later requests.
+        justification: |
+          When the window closes no repo is read any more, and a git that is still running is
+          stopped instead of being left behind.
+        tests:
+          - RepoRefreshQueue_Dispose_CancelsWaitingAndSignalsRunningAndRefusesNew
+
+      - id: AgentControl-RepoRefreshQueue-FailureIsolated
+        title: >-
+          The RepoRefreshQueue class shall report a read that fails to its own requesters only,
+          and keep running the other reads.
+        justification: |
+          One broken repo must not stop the refresh of the others.
+        tests:
+          - RepoRefreshQueue_ReadThrows_FaultsOnlyThatTask

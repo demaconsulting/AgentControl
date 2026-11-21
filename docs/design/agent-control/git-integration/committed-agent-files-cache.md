@@ -52,8 +52,8 @@ rather than silently producing duplicate, inconsistent cache entries.
 
 #### Callers
 
-- **RepoCardViewModel** — `ReadCheapFacts` (on a worker thread for a background cheap refresh, or on the UI thread for
-  the synchronous one) consults `TryGetCached` after resolving the current `HEAD` hash via
-  `GitClient.GetHeadCommitHash` and calls `Set` on a cache miss after invoking `GitClient.HasCommittedAgentFiles`;
-  `ApplyBranchFacts` (UI thread) stores the answer it applies, and `RefreshBranchAndCommittedFiles` consults the cache
-  the same way for a direct re-read.
+- **RepoCardViewModel** — `ReadCheapFacts` (on a worker thread of the shared refresh queue for a background cheap
+  refresh, or on the calling thread for the synchronous one) consults `TryGetCached` after resolving the current `HEAD`
+  hash via `GitClient.GetHeadCommitHash` and calls `Set` on a cache miss after invoking
+  `GitClient.HasCommittedAgentFiles`; `ApplyBranchFacts` (UI thread) stores the answer it applies, and
+  `RefreshBranchAndCommittedFiles` consults the cache the same way for a direct re-read.

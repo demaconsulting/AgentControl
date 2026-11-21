@@ -12,4 +12,7 @@ package AgentControl {
             requirementFiles = ("docs/reqstream/agent-control/launcher-ui/repo-card-view-model.yaml");
         }
     }
+
+    // Every lazy read of the card's state (cheap facts, working tree) goes through the shared queue, two at a time across all cards
+    dependency RepoCardViewModel to RepoRefreshQueue;
 }

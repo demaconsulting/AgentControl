@@ -125,3 +125,16 @@ sections:
           functionality.
         children:
           - AgentControl-OTS-WixToolset-BuildInstaller
+
+      - id: Quality-UiThreadRegressionGuard
+        title: >-
+          The repository's automated tests shall be able to detect a blocking git or disk call made
+          on a thread they mark as the window's UI thread.
+        tags: [quality]
+        justification: |
+          A blocking call on the UI thread does not fail, it freezes the window, so ordinary tests
+          pass while the application becomes unresponsive. A guard the tests switch on turns such a
+          call into a test failure the moment it is introduced; the shipped application is not
+          affected.
+        children:
+          - AgentControl-Utilities-BlockingCallGuard

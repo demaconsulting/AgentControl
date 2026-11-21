@@ -15,15 +15,17 @@ window, the settings window, the package-source editor window and the sign-in di
 `AsyncRelayCommand`, `ViewModelBase`, `PackageSourceIcons`, `PackageSourceItemViewModel`,
 `SelectPackageSourceViewModel`, `AvaloniaCredentialPrompt`, `ConnectionTestResultKind`, `RepoCardStatus`,
 `CardColorPalette`, `ThirdPartyDependencies`, `ColorPalettePanel`), the shared theme resources and styles
-(`AppStyles.axaml`, included by `App.axaml`). The subsystem contains eleven units: the six
+(`AppStyles.axaml`, included by `App.axaml`). The subsystem contains twelve units: the six
 view-model units `MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`,
-`SettingsWindowViewModel`, `SourceEditorViewModel` and `CredentialPromptViewModel`, and five further
+`SettingsWindowViewModel`, `SourceEditorViewModel` and `CredentialPromptViewModel`, and six further
 independently testable classes with behavior of their own, each with its own requirements, design, verification
 document and review set: `RepoImageLocator` (finds and decodes a repo's untrusted picture; security-relevant),
 `RepoGroupHeaderViewModel` (with `RepoGroupKind`; the header row of a repo-list section), `GroupNameViewModel` (the
 validating view model of the group-name prompt), `DialogBehavior` (the keyboard behavior every dialog shares) and
 `GlobalProgressViewModel` (with `GlobalProgressOperation`; the progress strip under the app bar that shows bulk work -
-adding repositories, refreshing the cards after Settings are saved - with Cancel for an add).
+adding repositories, refreshing the cards after Settings are saved - with Cancel for an add) and `RepoRefreshQueue`
+(the one queue every lazy read of a repo's state goes through - the folder checks of an add, the cards' refresh after
+a settings save and the working-tree checks of the cards shown - so at most two run at once across all of them).
 
 **Supporting types.** The remaining types are documented here, as supporting types of the subsystem, rather than as
 units: the `RelayCommand`/`ViewModelBase`/`PackageSourceItemViewModel`-style MVVM plumbing and the `.axaml` Views are
@@ -31,7 +33,8 @@ declared glue with no logic of their own to verify apart from the units that bin
 `ConnectionTestResultKind` and `CardColorPalette` are small enumerations and static tables belonging to the card view
 model; `BackgroundWorkRunner.cs` (`IBackgroundWorkRunner` and its application implementation
 `ThreadPoolBackgroundWorkRunner`, a stateless `Task.Run` wrapper with one shared `Instance`) is the seam through which
-`MainWindowViewModel` and `RepoCardViewModel` run their blocking file-system and git reads off the UI thread; it has
+`RepoRefreshQueue` runs the blocking file-system and git reads of `MainWindowViewModel` and `RepoCardViewModel` off
+the UI thread; it has
 no logic of its own, and the tests replace it with `GatedBackgroundWorkRunner` (a test helper that holds every piece
 of work at a gate until released) to prove the callers stay free while the work runs;
 `AsyncRelayCommand` and `ThirdPartyDependencies` have dedicated test files
@@ -201,9 +204,10 @@ are saved.
 - *Role*: Provider.
 - *Contract*: Shows the most recently begun bulk operation that is still running: "Adding repositories..." while the
   folders of an add are counted, "Adding {completed} of {total} repositories..." as each folder has been checked,
-  "Saving..." while the add saves (no Cancel then), and "Refreshing repositories..." with the card count after a
-  settings save (no Cancel). Cancel stops the running add and every queued add before anything is saved or added, with
-  no message afterwards (`AgentControl-LauncherUI-GlobalProgress`, `AgentControl-LauncherUI-AddCancel`).
+  "Saving..." while the add saves (no Cancel then), and "Refreshing repositories {completed} of {total}..." while the
+  shared refresh queue reads the cards after a settings save (no Cancel). Cancel stops the running add and every queued
+  add before anything is saved or added, with no message afterwards (`AgentControl-LauncherUI-GlobalProgress`,
+  `AgentControl-LauncherUI-AddCancel`).
 - *Constraints*: Fully collapsed when idle, so the idle window is unchanged; the strip, its text and its bar use
   the theme brushes `GlobalProgressStripBackground`, `GlobalProgressTextForeground`, `GlobalProgressForeground` and
   `GlobalProgressTrack`, defined for both themes and checked for contrast.
@@ -315,8 +319,14 @@ the events that need a dialog.
   and the global progress strip*.
 - *`MainWindowViewModel` and `GlobalProgressViewModel`*: the main view-model creates one `GlobalProgressViewModel`
   (`GlobalProgress`) and is its only caller: `Begin` for a session of adds (with `CancelAddRepos` as the cancel action)
-  and for a card refresh after a settings save (no cancel action), reporting through the returned
-  `GlobalProgressOperation` and disposing it when the work ends. The window binds the strip to it and its Cancel
+  and for each wave of counted reads of the shared refresh queue (no cancel action), reporting through the returned
+  `GlobalProgressOperation` and disposing it when the work ends.
+- *`MainWindowViewModel`, `RepoCardViewModel` and `RepoRefreshQueue`*: the main view-model creates one
+  `RepoRefreshQueue` on the UI thread (so the queue posts its progress there), hands it to every card it creates,
+  queues the folder checks of its adds on it, turns its progress into the strip's "Refreshing repositories ..." and
+  disposes it when the window closes. A card queues its own cheap facts and working-tree checks on it
+  (`RefreshRepoStateAsync`), raises their priority when it is shown (`PrioritizeRepoState`) and gives up its waiting
+  reads when it is retired. The window binds the strip to it and its Cancel
   button to `CancelCommand`; the progress view model knows nothing of repos.
 - *`GroupNameViewModel` and `GroupNameWindow`*: neither the card nor the main view-model creates the prompt; the
   window's code-behind does, when `RepoCardViewModel` raises `NewGroupRequested` (with the card's existing group
@@ -381,18 +391,35 @@ leaves `RepoCards` and forgets its bookkeeping for it.
 **Background work and the global progress strip.** Adding folders, refreshing the cards after a settings save and
 checking the working tree of the cards read the disk and run git for every repo; done on the UI thread for many repos
 they froze the window (`AgentControl-System-ResponsiveRepoListWork`). The rule is: blocking reads run off the UI
-thread through `IBackgroundWorkRunner` (`ThreadPoolBackgroundWorkRunner.Instance` in the application, injected into
-`MainWindowViewModel` and, through it, every `RepoCardViewModel`), they only read and return immutable records
+thread through the shared `RepoRefreshQueue` (owned by `MainWindowViewModel` and handed to every `RepoCardViewModel`),
+which runs at most two of them at a time through `IBackgroundWorkRunner` (`ThreadPoolBackgroundWorkRunner.Instance`
+in the application), they only read and return immutable records
 (`RepoFolderFacts`, `RepoCheapFacts`, a working-tree answer), and every change to view-model state, the settings and
 the list happens on the UI thread in the continuation of the `await` (which resumes on Avalonia's synchronization
 context). The view models never touch the dispatcher and need no locking; the only shared mutable object a worker
 thread touches, the per-card `CommittedAgentFilesCache`, is lock-guarded
 (`AgentControl-GitIntegration-QueriesFromAnyThread`).
 
+- *One shared queue* (`AgentControl-LauncherUI-BoundedRepoReads`): every lazy repo read - an add's folder checks, the
+  cards' refresh after a settings save, the working-tree check of a card shown, a re-added repo's facts and the
+  working-tree check after a Refresh or a Pull - goes through `RepoRefreshQueue` instead of starting its own tasks, so
+  the number of git processes is independent of the number of repos and callers. The limit is two: one read is at
+  most one git process; two keep the work moving when one repo is slow (a network share, a huge tree, a git that hangs
+  until its time limit), more would only compete for the same disk. A read already waiting for the same repo and kind
+  is joined, not queued again; a user action goes before a card on screen, which goes before background work; a card
+  shows that it is refreshing (`RepoCardViewModel.IsRefreshing`) while one of its reads waits or runs. The total
+  process budget without a user action is the queue's two reads plus the upgrade checks' own limit of four source
+  reads (each at most one git process for a Git source); a user action adds at most one process per busy card.
+- *A git that hangs* (`AgentControl-LauncherUI-GitTimeoutShown`): every git command runs under a time limit
+  (`GitClient`, 60 seconds for the local repository); a command past it is stopped and the card's status message says
+  that git did not answer and was stopped, that the repo's Git state is unknown and that Refresh tries again, until a
+  later read gets an answer. Closing the window disposes the queue, which stops the git that is still running.
+
 - *The add pipeline* (`AgentControl-LauncherUI-AddReposResponsive`): `EnqueueAddReposAsync` validates the group name
   at once, then runs `AddReposAsync`: (1) **plan** on the UI thread - blank and repeated paths dropped, which folders
-  are already listed noted, the git executable resolved; (2) **inspect** each folder through the runner, at most four
-  at a time (`InspectFolder`: exists, a file, the top folder of a Git repository and, for a Git root not yet listed,
+  are already listed noted, the git executable resolved; (2) **inspect** each folder through the shared queue (kind
+  `FolderInspection`, priority `Visible`, the add's cancellation as the requester's; `InspectFolder`: exists, a file,
+  the top folder of a Git repository and, for a Git root not yet listed,
   `RepoCardViewModel.ReadCheapFacts` - its pin, branch, `HEAD` and committed agent folders), the strip counting the
   folders checked; (3) **commit** on the UI thread (`PrepareAddCommit` then `ApplyAddCommit`): every folder is checked
   again against the list as it is now - a repo listed meanwhile is not added twice, a repo removed meanwhile is added
@@ -418,14 +445,16 @@ thread touches, the per-card `CommittedAgentFilesCache`, is lock-guarded
   and the file still match, including the group, place and collapsed state of repos the add would have moved.
 - *Settings refresh* (`AgentControl-LauncherUI-SettingsApplyResponsive`): `ApplySettings` saves and adopts the new
   settings synchronously, then cancels the upgrade check and periodic round that were running and starts
-  `RefreshCardsAfterSettingsAsync` as `PendingRefresh`: each card's `RefreshCheapInBackgroundAsync` (at most four at
-  a time) and, for a card whose folder came back or every present card when the git executable changed,
-  `RefreshDirtyStatusInBackgroundAsync`, with "Refreshing repositories..." and the card count in the strip and no
-  Cancel; then one list rebuild and the upgrade check against the new sources. A newer settings save supersedes an
+  `RefreshCardsAfterSettingsAsync` as `PendingRefresh`: each card's cheap facts through the shared queue at background
+  priority, the cards shown first (`RefreshRepoStateAsync` with `reportsProgress`), and, for a card whose folder came
+  back or every present card when the git executable changed, its working tree, with "Refreshing repositories
+  {completed} of {total}..." in the strip (the queue's progress wave) and no Cancel; then one list rebuild and the
+  upgrade check against the new sources. A newer settings save supersedes an
   older refresh, which then neither rebuilds nor starts the upgrade check.
 - *Working-tree checks* (`AgentControl-LauncherUI-GitStatusInBackground`): the first time a card's row is attached
-  to the visual tree, after a Refresh and after a Pull (also a canceled one), the card runs `git status` through the
-  runner (`RefreshDirtyStatusInBackgroundAsync`); until it answers the card keeps its previous state, and a card never
+  to the visual tree (priority `Visible`, and the card's other waiting reads are promoted), after a Refresh and after
+  a Pull (also a canceled one), the card runs `git status` through the shared queue (`RefreshRepoStateAsync`); until it
+  answers the card keeps its previous state, and a card never
   checked shows its Git status as not checked yet, never as having uncommitted changes. Start-up is otherwise
   unchanged: the constructor still runs every card's cheap refresh before the window exists, so no strip is shown at
   start-up; only the on-screen working-tree checks after it run in the background.

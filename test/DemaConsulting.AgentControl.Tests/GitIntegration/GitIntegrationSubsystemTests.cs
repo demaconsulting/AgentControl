@@ -112,7 +112,7 @@ public class GitIntegrationSubsystemTests
         // and every file is still on disk
         Assert.Equal([".github/agents", ".github/templates"], before);
         Assert.Empty(after);
-        Assert.False(client.HasCommittedAgentFiles(fixture.WorkPath));
+        Assert.False(client.HasCommittedAgentFiles(fixture.WorkPath, TestContext.Current.CancellationToken));
         Assert.Equal(
             [".github/workflows/ci.yml", "README.md"],
             fixture.Git(fixture.WorkPath, "ls-files").Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => line.Trim()));
@@ -159,28 +159,28 @@ public class GitIntegrationSubsystemTests
         var client = new GitClient();
         var cache = new CommittedAgentFilesCache();
         var expected = (
-            Branch: client.GetCurrentBranch(fixture.WorkPath),
-            Head: client.GetHeadCommitHash(fixture.WorkPath),
-            Committed: client.HasCommittedAgentFiles(fixture.WorkPath),
+            Branch: client.GetCurrentBranch(fixture.WorkPath, TestContext.Current.CancellationToken),
+            Head: client.GetHeadCommitHash(fixture.WorkPath, TestContext.Current.CancellationToken),
+            Committed: client.HasCommittedAgentFiles(fixture.WorkPath, TestContext.Current.CancellationToken),
             Root: GitClient.IsRepositoryRoot(fixture.WorkPath),
-            Clean: client.IsWorkingTreeClean(fixture.WorkPath));
+            Clean: client.IsWorkingTreeClean(fixture.WorkPath, TestContext.Current.CancellationToken));
 
         // Act: the same queries on eight worker threads at once, sharing the cache
         var answers = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
         {
-            var head = client.GetHeadCommitHash(fixture.WorkPath);
+            var head = client.GetHeadCommitHash(fixture.WorkPath, TestContext.Current.CancellationToken);
             if (!cache.TryGetCached(fixture.WorkPath, head, out var committed))
             {
-                committed = client.HasCommittedAgentFiles(fixture.WorkPath);
+                committed = client.HasCommittedAgentFiles(fixture.WorkPath, TestContext.Current.CancellationToken);
                 cache.Set(fixture.WorkPath, head, committed);
             }
 
             return (
-                Branch: client.GetCurrentBranch(fixture.WorkPath),
+                Branch: client.GetCurrentBranch(fixture.WorkPath, TestContext.Current.CancellationToken),
                 Head: head,
                 Committed: committed,
                 Root: GitClient.IsRepositoryRoot(fixture.WorkPath),
-                Clean: client.IsWorkingTreeClean(fixture.WorkPath));
+                Clean: client.IsWorkingTreeClean(fixture.WorkPath, TestContext.Current.CancellationToken));
         }, TestContext.Current.CancellationToken)));
 
         // Assert: every thread got the one-at-a-time answers, and the cache holds the answer
@@ -340,6 +340,44 @@ public class GitIntegrationSubsystemTests
         finally
         {
             old.Delete();
+            hung.Delete();
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test, with a stub standing in for git, that a local git query that hangs is stopped at the
+    ///     time limit and reported as timed out without ever finishing, and that a hung command whose
+    ///     caller gives up (the window closes) is stopped as well.
+    /// </summary>
+    [Fact]
+    public async Task GitIntegrationSubsystem_LocalGitHangs_IsStoppedAndReportedAsTimedOut()
+    {
+        // Arrange: a git whose working-tree query and HEAD query hang, and a one-second local limit
+        var folder = CreateTempDirectory();
+        var hung = GitStub.Create(statusSleepSeconds: GitStub.HangSeconds, revParseHeadSleepSeconds: GitStub.HangSeconds);
+        try
+        {
+            var client = new GitClient(
+                hung.Path,
+                timeouts: new GitClientTimeouts(TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(10)));
+
+            // Act: the working-tree query runs into the limit; the HEAD query is abandoned by its caller
+            // half a second after it started
+            var timedOut = Record.Exception(() => client.IsWorkingTreeClean(folder, TestContext.Current.CancellationToken));
+            using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            shutdown.CancelAfter(TimeSpan.FromMilliseconds(500));
+            var canceled = Record.Exception(() => client.GetHeadCommitHash(folder, shutdown.Token));
+            var hungRanToTheEnd = await hung.RanToTheEndOfItsHangAsync();
+
+            // Assert: a timeout naming the limit, a cancellation, and neither process finished
+            Assert.Multiple(
+                () => Assert.Equal(TimeSpan.FromSeconds(1), Assert.IsType<GitCommandTimeoutException>(timedOut).Timeout),
+                () => Assert.IsAssignableFrom<OperationCanceledException>(canceled),
+                () => Assert.False(hungRanToTheEnd));
+        }
+        finally
+        {
             hung.Delete();
             Directory.Delete(folder, recursive: true);
         }

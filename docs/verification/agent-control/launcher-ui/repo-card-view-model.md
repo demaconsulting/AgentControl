@@ -139,6 +139,20 @@ its check is held applies nothing - still not checked and cannot pull
 (`RepoCardViewModel_RefreshDirtyStatusInBackgroundAsync_Retired_AppliesNothing`). These cover
 `AgentControl-RepoCardViewModel-GitStatusInBackground`.
 
+**RepoCardViewModel_RefreshingState_WhileReadsWaitOrRun**: A card's cheap facts and working tree are refreshed at
+user-action priority with the reads held at the gate; the card says it is refreshing and has applied nothing (no
+branch, not checked); once released both answers are applied, the card no longer says it is refreshing, and the change
+was announced exactly twice - on, then off
+(`RepoCardViewModel_RefreshRepoStateAsync_WhileQueued_ShowsRefreshingAndClearsAfter`). This covers
+`AgentControl-RepoCardViewModel-RefreshingState`.
+
+**RepoCardViewModel_GitTimeoutShown_MessageUntilGitAnswers**: A card with a one-second git limit refreshes a repo whose
+stub git hangs on `rev-parse HEAD`; its status message says that git did not answer within 1 seconds and was stopped
+and to use Refresh to try again, and no branch is shown; after the git executable is changed to one that answers and
+the card is refreshed again, the message is gone and the branch is shown
+(`RepoCardViewModel_RefreshRepoStateAsync_GitTimesOut_ShowsGitProblemOnCard`). This covers
+`AgentControl-RepoCardViewModel-GitTimeoutShown`.
+
 **RepoCardViewModel_DisplayInfo_ExposesFolderNameAndPackageChip**: The card's display name
 resolves to the repo's leaf folder name, a `Refresh` after a pin file is written populates the
 pinned package name/version fields, and the package chip text and tooltip name the package, its

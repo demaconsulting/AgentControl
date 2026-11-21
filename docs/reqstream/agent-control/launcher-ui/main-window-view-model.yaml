@@ -413,7 +413,9 @@ sections:
         title: >-
           The MainWindowViewModel class shall return from applying settings once they are saved,
           before the cards' refresh has read the disk and git, show that refresh in the global
-          progress (without a cancel) while it runs, and clear the progress when it has finished.
+          progress with how many of the cards were refreshed out of how many (for example
+          "Refreshing repositories 0 of 1...", without a cancel) while it runs, and clear the
+          progress when it has finished.
         justification: |
           Refreshing every card after a settings save reads git for each repo; the window that
           saved the settings must not wait for it.
@@ -972,3 +974,15 @@ sections:
           - MainWindowViewModel_RecheckAfterSettingsClosed_RoundRecordedFailureBeforeSignIn_RoundReadsTheSourceAgain
           - MainWindowViewModel_RecheckAfterSettingsClosed_CardCheckInFlight_OldFailureIsNotShown
           - MainWindowViewModel_RecheckAfterSettingsClosed_SignedInDuringConnectionTest_UsesTheSignInWithoutAsking
+
+      - id: AgentControl-MainWindowViewModel-SharedRepoReads
+        title: >-
+          The MainWindowViewModel class shall read the folders of an add and refresh the cards after
+          a settings save under one limit of two repo reads at a time, shared with the cards' own
+          reads, so adds and refreshes that run at the same time never read more repos at once.
+        justification: |
+          Each of these used to have its own limit of four, so overlapping work multiplied the number
+          of git processes.
+        tests:
+          - MainWindowViewModel_AddReposAsync_ManyFolders_AtMostTwoInspectedAtOnce
+          - MainWindowViewModel_ApplySettings_RefreshUsesSharedQueueLimit

@@ -18,4 +18,7 @@ package AgentControl {
 
     // Adds and the card refresh after a settings save report their progress (and an add its Cancel) through the strip
     dependency MainWindowViewModel to GlobalProgressViewModel;
+
+    // Owns the one repo refresh queue: an add's folder checks go through it, it is handed to every card, and its progress wave is shown in the strip
+    dependency MainWindowViewModel to RepoRefreshQueue;
 }
