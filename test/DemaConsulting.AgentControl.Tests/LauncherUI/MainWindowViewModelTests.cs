@@ -280,6 +280,93 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that the same folder given with and without a trailing directory separator in one
+    ///     multi-folder add is handled once and gives one card, stored without the separator.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_AddRepos_SameFolderWithAndWithoutTrailingSeparator_AddsOneCard()
+    {
+        // Arrange: one repository, written both ways
+        var repo = CreateRepoDirectory();
+        var withSeparator = repo + Path.DirectorySeparatorChar;
+        var configDir = CreateTempDirectory();
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: configDir);
+
+        // Act
+        var outcomes = viewModel.AddRepos([withSeparator, repo], null);
+
+        // Assert: one outcome, one card and one saved entry, all for the folder without the separator
+        Assert.Equal(AddRepoResult.Added, Assert.Single(outcomes).Result);
+        Assert.Equal(repo, Assert.Single(viewModel.RepoCards).RepoPath);
+        Assert.Equal(repo, Assert.Single(SettingsStore.Load(configDir).RecentRepos).Path);
+    }
+
+    /// <summary>
+    ///     Test that a listed folder added again with a trailing directory separator is reported as
+    ///     already listed and not added twice.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_AddRepos_ListedFolderWithTrailingSeparator_IsAlreadyListed()
+    {
+        // Arrange: a repository already in the list
+        var repo = CreateRepoDirectory();
+        var settings = new AppSettings { RecentRepos = [new RecentRepo { Path = repo }] };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+
+        // Act
+        var outcomes = viewModel.AddRepos([repo + Path.DirectorySeparatorChar], null);
+        var added = viewModel.AddRepo(repo + Path.DirectorySeparatorChar);
+
+        // Assert
+        Assert.Equal(AddRepoResult.AlreadyListed, Assert.Single(outcomes).Result);
+        Assert.False(added);
+        Assert.Single(viewModel.RepoCards);
+    }
+
+    /// <summary>
+    ///     Test that a folder stored before paths were normalized, with a trailing directory separator,
+    ///     is kept as stored and still recognized when the folder is added again without it.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_AddRepo_StoredWithTrailingSeparator_IsAlreadyListed()
+    {
+        // Arrange: an entry saved in the old form, with a trailing separator
+        var repo = CreateRepoDirectory();
+        var stored = repo + Path.DirectorySeparatorChar;
+        var settings = new AppSettings { RecentRepos = [new RecentRepo { Path = stored }] };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+
+        // Act
+        var added = viewModel.AddRepo(repo);
+
+        // Assert: not added again, and the stored entry is left as it was
+        Assert.False(added);
+        Assert.Equal(stored, Assert.Single(viewModel.RepoCards).RepoPath);
+    }
+
+    /// <summary>
+    ///     Test that the repo-path identity ignores a trailing directory separator and letter case but
+    ///     keeps a file-system root valid.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_NormalizeRepoPath_TrailingSeparatorAndRoot_TrimsOnlyTheSeparator()
+    {
+        // Arrange
+        var folder = Path.Combine(Path.GetTempPath(), "agentcontrol_identity_" + Guid.NewGuid());
+        var root = Path.GetPathRoot(Path.GetTempPath())!;
+
+        // Act
+        var trimmed = MainWindowViewModel.NormalizeRepoPath(folder + Path.DirectorySeparatorChar);
+        var normalizedRoot = MainWindowViewModel.NormalizeRepoPath(root);
+        var same = MainWindowViewModel.IsSameRepoPath(folder.ToUpperInvariant(), folder + Path.DirectorySeparatorChar);
+
+        // Assert
+        Assert.Equal(Path.GetFullPath(folder), trimmed);
+        Assert.Equal(Path.GetFullPath(root), normalizedRoot);
+        Assert.True(same);
+    }
+
+    /// <summary>
     ///     Test that adding several folders into a collapsed group adds them all to the group, moves a
     ///     listed repo into it, and opens the group once so the repos can be seen.
     /// </summary>

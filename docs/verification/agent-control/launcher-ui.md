@@ -207,14 +207,14 @@ window with no repo yet they are added (`MainWindow_DropFolders_OnEmptyStatePane
 the copy effect, the header of the group they would join is tinted and the list area is outlined where they would be
 added ungrouped, and the feedback is cleared when the drag leaves and after the drop
 (`MainWindow_DropFolders_ShowsCopyFeedbackAndClearsIt`); and a dropped file and a dropped folder that is not a Git
-repository are skipped and reported in one message while the repository dropped with them is added
+repository are not added but reported, by name, in one message while the repository dropped with them is added
 (`MainWindow_DropFile_IsSkippedAsNotARepository`). These cover `AgentControl-LauncherUI-AddRepoDropFolders` (child
 `AgentControl-MainWindowViewModel-AddRepos`).
 
 **LauncherUI_AddRepoGitRootOnly_FolderThatIsNotARepositoryIsRefused**: The app bar's Add with a picked folder that is
 not the top folder of a Git repository adds nothing and shows a message that says why
 (`MainWindow_AddRepoButton_FolderThatIsNotAGitRepository_IsRefusedWithAMessage`), and a dropped file or plain folder is
-skipped as not a repository (`MainWindow_DropFile_IsSkippedAsNotARepository`). These cover
+not added and is reported as not a repository (`MainWindow_DropFile_IsSkippedAsNotARepository`). These cover
 `AgentControl-LauncherUI-AddRepoGitRootOnly` (child `AgentControl-MainWindowViewModel-AddGitReposOnly`, whose unit
 tests include the subfolder, the `.git` file and the repos already listed).
 

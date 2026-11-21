@@ -85,10 +85,16 @@ launch). This scenario is tested by
 **MainWindowViewModel_AddRepo_ValidatesExistenceDuplicationAndGitRoot**: `AddRepo` is called with a
 valid new existing path (inserted and persisted), a nonexistent path (rejected, returns
 false), an already-tracked path (rejected, returns false), and a folder without a `.git` folder or file and a
-subfolder of a repository (rejected as not a Git repository). This scenario is tested by
+subfolder of a repository (rejected as not a Git repository). A listed folder added again with a trailing directory
+separator is reported as already listed, an entry saved in the old form with a trailing separator is kept as it was and
+still recognized, and the repo-path identity trims only the trailing separator, keeps a root valid and ignores letter
+case. This scenario is tested by
 `MainWindowViewModel_AddRepo_ValidNewPath_InsertsCardAndPersistsSettings`,
 `MainWindowViewModel_AddRepo_PathDoesNotExist_ReturnsFalse`,
 `MainWindowViewModel_AddRepo_DuplicatePath_ReturnsFalse`,
+`MainWindowViewModel_AddRepos_ListedFolderWithTrailingSeparator_IsAlreadyListed`,
+`MainWindowViewModel_AddRepo_StoredWithTrailingSeparator_IsAlreadyListed`,
+`MainWindowViewModel_NormalizeRepoPath_TrailingSeparatorAndRoot_TrimsOnlyTheSeparator`,
 `MainWindowViewModel_AddRepo_FolderWithoutGit_IsRefusedAsNotAGitRepository` and
 `MainWindowViewModel_AddRepo_SubfolderOfARepository_IsRefused`, covering
 `AgentControl-MainWindowViewModel-AddRepo`.
@@ -122,7 +128,10 @@ added (`MainWindowViewModel_Constructor_ListedFolderWithoutGit_IsKept`). These c
 **MainWindowViewModel_AddRepos_SeveralFoldersEachHandledOnTheirOwn**: Several folders - repositories, a folder that is
 not a repository, a missing one, one already listed and one given twice - give one outcome per distinct folder, in
 order: the repositories are added and saved and the others are skipped with their reasons
-(`MainWindowViewModel_AddRepos_MixedPaths_ReportsAnOutcomePerPath`); several folders added into a collapsed group all
+(`MainWindowViewModel_AddRepos_MixedPaths_ReportsAnOutcomePerPath`); the same folder given with and without a trailing
+directory separator is handled once and gives one card, saved without the separator
+(`MainWindowViewModel_AddRepos_SameFolderWithAndWithoutTrailingSeparator_AddsOneCard`); several folders added into a
+collapsed group all
 join it, a listed repo is moved into it, and the group is opened once
 (`MainWindowViewModel_AddRepos_IntoCollapsedGroup_OpensItOnce`); and when the save of one folder fails that folder is
 reported as not saved with the reason and the folders after it are added once saving works

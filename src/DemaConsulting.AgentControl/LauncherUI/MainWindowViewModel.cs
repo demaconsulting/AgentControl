@@ -543,8 +543,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="repoPath">Absolute path to the repository root to add.</param>
     /// <returns>
     ///     <see langword="true"/> if the repo was added; <see langword="false"/> if
-    ///     <paramref name="repoPath"/> does not exist, is already present in the list (compared
-    ///     case-insensitively, since Windows filesystem paths are case-insensitive), or is not the top
+    ///     <paramref name="repoPath"/> does not exist, is already present in the list (see
+    ///     <see cref="IsSameRepoPath"/>), or is not the top
     ///     folder of a Git repository (see <see cref="GitClient.IsRepositoryRoot"/>).
     /// </returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="repoPath"/> is null,
@@ -593,8 +593,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     /// <remarks>
     ///     Every folder is checked and added on its own: one that is missing, not a Git repository
-    ///     root, already listed or that cannot be saved does not stop the others. A path that appears
-    ///     more than once (ignoring letter case) is handled once; blank entries are ignored. With a
+    ///     root, already listed or that cannot be saved does not stop the others. A folder that appears
+    ///     more than once (see <see cref="IsSameRepoPath"/>) is handled once; blank entries are ignored. With a
     ///     group, a repo that is already listed is moved into it, and a collapsed group is opened once
     ///     at the end when anything was added to or moved into it. Each new repo is saved as it is
     ///     added (so the list, the cards and the file stay in step whatever fails), and its upgrade
@@ -617,7 +617,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var outcomes = new List<AddRepoOutcome>();
         foreach (var path in repoPaths
                      .Where(path => !string.IsNullOrWhiteSpace(path))
-                     .Distinct(StringComparer.OrdinalIgnoreCase))
+                     .DistinctBy(NormalizeRepoPath, StringComparer.OrdinalIgnoreCase))
         {
             try
             {
@@ -787,6 +787,48 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    ///     Gets the form of a repo path that identifies its folder: the full path without a trailing
+    ///     directory separator, while a root (such as <c>C:\</c> or <c>/</c>) keeps the separator it
+    ///     needs.
+    /// </summary>
+    /// <remarks>
+    ///     New entries are stored in this form; entries saved before are left as they were and are
+    ///     matched through <see cref="IsSameRepoPath"/>. Performs no file-system I/O. A path the
+    ///     platform cannot make full (an invalid path) is returned as given, so it is still compared
+    ///     and later reported as missing rather than throwing.
+    /// </remarks>
+    /// <param name="path">The repo path.</param>
+    /// <returns>The normalized path.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="path"/> is
+    ///     <see langword="null"/>.</exception>
+    internal static string NormalizeRepoPath(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        try
+        {
+            return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return path;
+        }
+    }
+
+    /// <summary>
+    ///     Tells whether two repo paths name the same folder: their normalized forms (see
+    ///     <see cref="NormalizeRepoPath"/>) are equal ignoring letter case, so a folder written with
+    ///     and without a trailing directory separator, or in another letter case, is one repo.
+    /// </summary>
+    /// <param name="first">One repo path.</param>
+    /// <param name="second">The other repo path.</param>
+    /// <returns><see langword="true"/> when both paths name the same folder.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when either path is
+    ///     <see langword="null"/>.</exception>
+    internal static bool IsSameRepoPath(string first, string second) =>
+        string.Equals(NormalizeRepoPath(first), NormalizeRepoPath(second), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     ///     The shared add: checks the folder, then either adds a new entry (in
     ///     <paramref name="groupName"/> when given) or, for a repo already listed, moves its entry
     ///     into <paramref name="groupName"/> when given.
@@ -794,10 +836,12 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <remarks>
     ///     The checks, in order: a path that is not a folder is <see cref="AddRepoResult.Missing"/>, or
     ///     <see cref="AddRepoResult.NotAGitRepository"/> when it is a file (a dropped file); a repo
-    ///     that is already listed is <see cref="AddRepoResult.AlreadyListed"/> or moved into the group -
+    ///     that is already listed (see <see cref="IsSameRepoPath"/>) is
+    ///     <see cref="AddRepoResult.AlreadyListed"/> or moved into the group -
     ///     it is never subject to the Git check, so the repos already in the list are left as they are;
     ///     a folder that is not the top folder of a Git repository (see
     ///     <see cref="GitClient.IsRepositoryRoot"/>) is <see cref="AddRepoResult.NotAGitRepository"/>.
+    ///     A new entry stores the path in its normalized form (see <see cref="NormalizeRepoPath"/>).
     /// </remarks>
     /// <param name="repoPath">Absolute path to the repository root.</param>
     /// <param name="groupName">The already validated and canonical group to put the repo in, or
@@ -815,10 +859,10 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return File.Exists(repoPath) ? AddRepoResult.NotAGitRepository : AddRepoResult.Missing;
         }
 
-        // A repo that is already listed is not added twice; the group flow moves it instead
-        var existing = RepoCards.FirstOrDefault(
-            card => string.Equals(card.RepoPath, repoPath, StringComparison.OrdinalIgnoreCase));
-        if (existing is not null || _settings.RecentRepos.Any(r => string.Equals(r.Path, repoPath, StringComparison.OrdinalIgnoreCase)))
+        // A repo that is already listed is not added twice, however either path is written; the
+        // group flow moves it instead
+        var existing = RepoCards.FirstOrDefault(card => IsSameRepoPath(card.RepoPath, repoPath));
+        if (existing is not null || _settings.RecentRepos.Any(r => IsSameRepoPath(r.Path, repoPath)))
         {
             if (groupName is null || existing is null)
             {
@@ -846,7 +890,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var pin = TryLoadPin(repoPath);
         var recentRepo = new RecentRepo
         {
-            Path = repoPath,
+            Path = NormalizeRepoPath(repoPath),
             GroupName = groupName,
             PinnedPackageName = pin?.PackageName,
             PinnedPackageVersion = pin?.Version

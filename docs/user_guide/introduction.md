@@ -94,11 +94,13 @@ You can also drag one or more folders from File Explorer onto the repo list:
   on the message shown while the list is empty, they are added without a group (a drop on **Favorites** does not
   make them favorites).
 - While you drag, the group's header is tinted, or the whole list area is outlined when the folders would be added
-  without a group. Dropped files are skipped.
+  without a group. A dropped file is not added: it is named in the message that follows the drop as not the top
+  folder of a Git repository, so a drop never passes without a word.
 
 Only the top folder of a Git repository can be added: the folder that holds the repository's `.git` folder, or its
 `.git` file as in a Git worktree or submodule. A subfolder of a repository or a plain folder is refused, and a repo
-that is already in the list stays as it is.
+that is already in the list stays as it is (the same folder written in another letter case or with a trailing `\` is
+already in the list).
 
 When you add one folder that cannot be added, a message says why, for example that it is not the top folder of a
 Git repository (it has no `.git` folder or file). When you add several folders, nothing is shown if all of them

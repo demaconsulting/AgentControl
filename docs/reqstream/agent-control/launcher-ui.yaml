@@ -837,13 +837,15 @@ sections:
           list - into the group whose header or section they are dropped on, otherwise (Favorites,
           Ungrouped, the list without sections, empty space or the empty-state panel) without a
           group - answering the drag as a copy, showing where they would go and clearing that when
-          the drag leaves or ends, skipping dropped files as not repositories, and never taking a
-          drop from the file manager for a move of a card or a group.
+          the drag leaves or ends, not adding dropped files but reporting each one in the message as
+          not a repository (never ignoring it silently), and never taking a drop from the file
+          manager for a move of a card or a group.
         justification: |
           Dragging folders from the file manager is the quickest way to add many repos, and the
           drop target is the natural way to say where they belong; a favorite is a mark on a repo,
           not a place to add to. The drag must not be confused with the list's own drag and drop,
-          which moves cards and groups.
+          which moves cards and groups. A dropped file is reported rather than ignored so that a
+          drop that adds nothing never looks as if nothing happened.
         children:
           - AgentControl-MainWindowViewModel-AddRepos
         tests:

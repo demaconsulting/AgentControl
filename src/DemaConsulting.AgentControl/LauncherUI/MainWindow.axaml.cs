@@ -1140,8 +1140,7 @@ internal sealed partial class MainWindow : Window
             return false;
         }
 
-        card = viewModel.RepoCards.FirstOrDefault(
-            other => string.Equals(other.RepoPath, path, StringComparison.OrdinalIgnoreCase));
+        card = viewModel.RepoCards.FirstOrDefault(other => MainWindowViewModel.IsSameRepoPath(other.RepoPath, path));
         return card is not null;
     }
 

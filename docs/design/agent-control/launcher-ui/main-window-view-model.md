@@ -345,7 +345,8 @@ failed upgrade check, once the Settings window has closed
   reaches the caller and the list, the cards and the file are exactly as they were.
 
 Returns `false` without persisting when `repoPath` does not exist on disk, is already
-present (case-insensitive comparison, matching Windows path semantics), or is not the top folder of a Git repository.
+present (`IsSameRepoPath`: the same folder ignoring letter case and a trailing directory separator), or is not the top
+folder of a Git repository.
 Attempts to load an
 existing pin via `RepoPinStore.Load`, tolerating (returning `null` for) a repo that has never
 been synced.
@@ -353,14 +354,30 @@ been synced.
 **AddRepoCore** (private, shared by every add path): the checks, in order:
 
 1. A path that is not a folder is `Missing`, or `NotAGitRepository` when it is an existing file (a dropped file).
-2. A repo that is already listed (path compared ignoring case) is `AlreadyListed` for a plain add, or is moved into the
+2. A repo that is already listed (`IsSameRepoPath` against every card and every saved entry, whatever form the saved
+   path has) is `AlreadyListed` for a plain add, or is moved into the
    requested group (`MovedExisting` / `MoveFailed`). A listed repo is never subject to the Git check, so the repos
    already in the list are left as they are, whatever their folders hold.
 3. A folder for which `GitClient.IsRepositoryRoot` is `false` - no `.git` folder or file directly in it, for example a
    subfolder of a repository - is `NotAGitRepository` and nothing is added
    (`AgentControl-MainWindowViewModel-AddGitReposOnly`).
-4. Otherwise the new card is prepared and its entry saved through `CommitSettingsChange` (`Added`); a failed save
-   retires the prepared card and throws `InvalidOperationException`.
+4. Otherwise the new card is prepared and its entry, with the path in its `NormalizeRepoPath` form, saved through
+   `CommitSettingsChange` (`Added`); a failed save retires the prepared card and throws `InvalidOperationException`.
+
+**NormalizeRepoPath** (internal, static): Gets the form of a repo path that identifies its folder.
+
+- *Parameters*: `string path` (not null, `ArgumentNullException`).
+- *Returns*: `string` - `Path.GetFullPath` of the path with any trailing directory separator removed by
+  `Path.TrimEndingDirectorySeparator`, which keeps a root such as `C:\` or `/` valid; a path the platform cannot make
+  full (`ArgumentException`, `NotSupportedException`, `PathTooLongException`) is returned as given, so the add reports
+  it as missing instead of throwing.
+- *Postconditions*: no file-system I/O. New entries are stored in this form; entries saved by earlier versions are
+  never rewritten and are matched through `IsSameRepoPath`.
+
+**IsSameRepoPath** (internal, static): Tells whether two repo paths name the same folder - their `NormalizeRepoPath`
+forms are equal by ordinal comparison ignoring letter case - so a folder written with and without a trailing directory
+separator, or in another letter case, is one repo. Used by `AddRepoCore`'s already-listed check, by `AddRepos` to handle
+a folder given twice once, and by `MainWindow` to find the card a card drag carries.
 
 **AddRepoToGroup**: Adds a repository straight into one of the user's groups, or moves an already listed repo into it.
 
@@ -387,7 +404,8 @@ file manager - each as `AddRepo` (or, with a group, `AddRepoToGroup`) would, and
 - *Returns*: `IReadOnlyList<AddRepoOutcome>` — one outcome per distinct, non-blank path, in the order given.
 - *Preconditions*: `repoPaths` is not null (`ArgumentNullException`); a given `groupName` is a valid group name, checked
   and spelled like an existing group once, before anything is added (`ArgumentException`, nothing added).
-- *Postconditions*: Blank paths are ignored and a path given more than once (ignoring letter case) is handled once.
+- *Postconditions*: Blank paths are ignored and a folder given more than once (`IsSameRepoPath`: ignoring letter case
+  and a trailing directory separator) is handled once, under the first spelling given.
   Every folder goes through `AddRepoCore` on its own and is saved as it is added, so the list, the cards and the file
   stay in step whatever fails; one folder that is missing, not a Git repository, already listed or cannot be saved does
   not stop the others - a failed save (`InvalidOperationException`) becomes that folder's `SaveFailed` outcome with
