@@ -1,7 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="640" viewBox="0 0 1600 640">
   <!-- The README hero banner. Versioned agent packages, the repo's .agentcontrol.json version pin, package
        signature checks, and the Git repository flow into the AgentControl desktop app, which syncs the repo's .github
-       agent folders, launches the agentic CLI, shows release notes, and offers an AGENTS.md template.
+       agent folders, launches the agentic CLI, shows the package's notes for a newer version, and offers the
+       package's AGENTS.md template.
        The definitions and the left panel follow the shared DEMA Consulting hero (CanvasNet and BuildMark).
        This file is docs/images/hero.svg, beside its rendered docs/images/hero.png (matching base names, per the
        diagram documentation standard); the files it embeds are in docs/images/hero/. -->
@@ -9,7 +10,7 @@
     <style>
       .word { font: bold 92px sans-serif; fill: #ffffff; }
       .eyebrow { font: bold 25px sans-serif; fill: #a5b4fc; }
-      .tag { font: bold 40px sans-serif; fill: #f8fafc; }
+      .tag { font: bold 36px sans-serif; fill: #f8fafc; }
       .body { font: 25px sans-serif; fill: #cbd5e1; }
       .cmd { font: 25px monospace; fill: #e2e8f0; }
       .prompt { fill: #5eead4; }
@@ -117,11 +118,11 @@
   <text class="word" x="52" y="176" style="font-size:76px">Agent</text>
   <text class="word brandText" x="267.3" y="176" style="font-size:76px">Control</text>
   <rect x="58" y="200" width="132" height="6" rx="3" fill="url(#brand)"/>
-  <text class="tag" x="56" y="266">Agent files, pinned.</text>
-  <text class="tag brandText" x="56" y="316">One click to launch.</text>
-  <text class="body" x="58" y="368">Syncs versioned agent packages into</text>
-  <text class="body" x="58" y="402">each repo's .github folders, verifies</text>
-  <text class="body" x="58" y="436">them, then launches your agentic CLI.</text>
+  <text class="tag" x="56" y="266">Versioned agent folders</text>
+  <text class="tag" x="56" y="314" style="fill: #a5b4fc">synced into each repo.</text>
+  <text class="body" x="58" y="368">Reads each repo's .agentcontrol.json</text>
+  <text class="body" x="58" y="402">pin, syncs its four .github folders,</text>
+  <text class="body" x="58" y="436">then starts your agentic CLI there.</text>
   <rect x="56" y="468" width="480" height="90" rx="12" fill="#0a1022" fill-opacity="0.8" stroke="#a78bfa" stroke-opacity="0.45" stroke-width="1.5"/>
   <text class="cmd" x="78" y="503">{ "PackageName":</text>
   <text class="cmd file" x="333" y="503">"Acme.AI"</text>
@@ -129,7 +130,7 @@
   <text class="cmd" x="108" y="539">"Version":</text>
   <text class="cmd file" x="273" y="539">"2.1.0"</text>
   <text class="cmd" x="393" y="539">}</text>
-  <text class="note" x="58" y="604">Pinned in .agentcontrol.json.</text>
+  <text class="note" x="58" y="604">Windows desktop app &#183; MSI installer</text>
 
 
   <!-- Input cards -->
@@ -270,9 +271,9 @@
     <text class="miniMono" x="925" y="474" fill="#5eead4">&gt;</text>
     <text class="miniMono" x="945" y="474" fill="#f8fafc">copilot</text>
     <rect x="925" y="494" width="13" height="22" fill="#5eead4"/>
-    <text class="label" x="999" y="585">Agentic CLI</text>
+    <text class="label" x="999" y="585">Launched CLI</text>
 
-    <!-- Output three: release notes of a newer version -->
+    <!-- Output three: the release notes of a newer version, written by the package publisher and shown by AgentControl -->
     <rect class="card" x="1122" y="390" width="220" height="210" rx="16"/>
     <rect class="panel" x="1130" y="398" width="204" height="152" rx="10"/>
     <text class="miniMono" x="1146" y="436" fill="#f8fafc">2.2.0</text>
@@ -285,7 +286,7 @@
     <rect class="bar" x="1166" y="500" width="104" height="8" rx="4" fill-opacity="0.75"/>
     <circle cx="1152" cy="530" r="5" fill="#22d3ee"/>
     <rect class="bar" x="1166" y="526" width="118" height="8" rx="4" fill-opacity="0.75"/>
-    <text class="label" x="1232" y="585">Release notes</text>
+    <text class="label" x="1232" y="585">Package notes</text>
 
     <!-- Output four: the offered AGENTS.md template -->
     <rect class="card" x="1355" y="390" width="205" height="210" rx="16"/>

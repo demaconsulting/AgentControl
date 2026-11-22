@@ -58,7 +58,7 @@ internal sealed partial class AboutWindow : Window
     /// </summary>
     private const string Tagline =
         "Distribute proprietary AI-agent configuration alongside public repositories, "
-        + "without ever committing that proprietary content to source control.";
+        + "without committing that proprietary content to source control.";
 
     /// <summary>
     ///     The project's tagline, shown under the name in the banner.
