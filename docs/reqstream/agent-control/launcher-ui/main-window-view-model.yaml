@@ -909,23 +909,28 @@ sections:
 
       - id: AgentControl-MainWindowViewModel-SettingsFlushedOnClose
         title: >-
-          The MainWindowViewModel class shall, when the window closes, write the settings changes that
-          are not written yet, the write running off the closing thread with a bounded wait; when a
-          confirmed save (an add) is still running at the close, it shall wait for it within the same
-          bounded wait and write the changes made meanwhile together with that save's change once it
-          was written, and shall not write the changes made meanwhile when that save's write is still
-          running after the wait. A confirmed save (an add, the Settings window's settings) that ends
-          after the close shall change nothing of the closed view model.
+          The MainWindowViewModel class shall, when the window closes, write every settings change made
+          in the window that is not written yet, the write running off the closing thread with a
+          bounded wait; when a confirmed save (an add, the Settings window's settings) is still running
+          at the close, it shall write those changes after that save's write has ended - together with
+          that save's change when its write succeeded and without it when its write failed - even when
+          that write ends after the wait, and shall never write them before that write. A confirmed save
+          that ends after the close shall change nothing of the closed view model.
         justification: |
-          A change made just before closing must still be kept, and the close must neither hang on a
-          busy file nor make a blocking call on the UI thread. Written over a running add without
-          its change, the close would take the add out of the file again; when the add's write is
-          still running after the wait, the change made meanwhile is the lesser loss. A save that
-          ends after the close must not rebuild cards or start reads for a window that is gone.
+          Changes made before closing must be kept, and the close must neither hang on a busy file nor
+          make a blocking call on the UI thread. Written before a running add's write, or without its
+          change, the close's snapshot would be overwritten by the add or take the add out of the file
+          again; an add whose write failed cannot be retried once the window is gone, so it is
+          discarded while the other changes are kept. When the wait runs out the close must still let
+          the application exit, and what is not on disk yet is logged, because nobody can be told any
+          more. A save that ends after the close must not rebuild cards or start reads for a window
+          that is gone.
         tests:
           - MainWindowViewModel_Dispose_OnGuardedThread_WritesPendingChangeWithoutBlockingCall
           - MainWindowViewModel_Dispose_WhileAddSavingAfterAnotherChange_WritesAddAndChange
-          - MainWindowViewModel_Dispose_AddWriteStillRunningAfterTheWait_AddNotOverwritten
+          - MainWindowViewModel_Dispose_AddWriteRunningPastTheWait_ChangeWrittenAfterTheAdd
+          - MainWindowViewModel_Dispose_AddWriteFailsDuringTheClose_ChangeWrittenWithoutTheAdd
+          - MainWindowViewModel_Dispose_AddWriteHeld_CloseWriteIsTheLastWrite
           - MainWindowViewModel_Dispose_WhileAddSaving_AddCompletionChangesNothingAfterTheClose
           - MainWindowViewModel_Dispose_WhileSettingsSaving_SettingsCompletionAdoptsNothingAfterTheClose
 

@@ -12,6 +12,14 @@ through the real `SettingsStore.Save` into a temporary directory, on a thread th
 (`BlockingCallGuard`), to show that neither scheduling nor the bounded flush makes a blocking call on the caller's
 thread.
 
+The window's close relies on two of these guarantees - a confirmed save asked for after the writes it waits for have
+ended is written after them and after a scheduled write already waiting for its turn
+(`SettingsWriter_Writes_NeverOverlapAndScheduleNeverWaits`), and a confirmed save that succeeds drops an older waiting
+snapshot (`SettingsWriter_SaveNowAsync_Success_DropsOlderWaitingSnapshot`) - and is verified with the writer it owns
+by the `MainWindowViewModel` tests `MainWindowViewModel_Dispose_AddWriteRunningPastTheWait_ChangeWrittenAfterTheAdd`,
+`MainWindowViewModel_Dispose_AddWriteFailsDuringTheClose_ChangeWrittenWithoutTheAdd` and
+`MainWindowViewModel_Dispose_AddWriteHeld_CloseWriteIsTheLastWrite` (see the `MainWindowViewModel` verification).
+
 #### Test Environment
 
 N/A - standard test environment. The one test that writes the real settings file uses its own temporary directory and

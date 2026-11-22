@@ -228,7 +228,8 @@ after the last change, one write at a time, through `SettingsStore.Save` on a wo
 retry therefore never reach the UI thread. A confirmed write (`SaveNowAsync`) serves the changes that must be on disk
 before they are applied - an add and the Settings window's values. A background write that fails is reported once per
 failure streak and its snapshot is kept: the change stays in effect and is written with the next change, the next
-flush or the window's close, which flushes with a bounded wait. `SettingsStore.Save` asks the `Utilities` subsystem's
+flush or the window's close, whose write follows every write still running and is waited for with a bounded wait.
+`SettingsStore.Save` asks the `Utilities` subsystem's
 `BlockingCallGuard` first, so a save that slips back onto the UI thread fails the headless tests
 (`AgentControl-Settings-BackgroundWriter`). The order of the writes, the debounce and the failure streak are
 `SettingsWriter`'s; which changes are scheduled and which are confirmed is the `LauncherUI` subsystem's

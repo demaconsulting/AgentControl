@@ -751,7 +751,8 @@ sections:
           group, the order of the repos, removing a repo) at once, without making the window wait for
           the settings file, and save it to the user's settings in the background, keeping a change
           made while an add or the Settings window's settings are saved, and writing what is not
-          written yet when the window closes; an add shall be applied only once it has been saved.
+          written yet when the window closes, after any save still running, so that no change made
+          before the close is lost; an add shall be applied only once it has been saved.
         justification: |
           The settings file can be held by another process for up to a second; a window that waited
           for it on every click would freeze. What the window shows must still reach the settings,
