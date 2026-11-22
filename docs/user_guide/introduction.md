@@ -95,6 +95,13 @@ a card has been read it does not show anything it does not know yet as a fact:
 - the **No agent package** chip and the **committed agent files** warning are not shown yet, and **Git Pull** says
   the Git status has not been checked yet.
 
+The picture below shows the window a moment after it opened: the first two cards have been read, and the other two
+are still being read.
+
+![The main window while AgentControl starts: the progress strip under the app bar reads "Refreshing repositories 2 of
+4..."; payments-api and docs-site have been read and show their branch main, while web-portal and mobile-app still
+show an italic refreshing..., a dimmed "..." branch chip and a grey status bar](images/startup-refreshing.png)
+
 The upgrade check of a card follows once it has been read. A repo on a slow or offline network share, or one with a
 very large working tree, only keeps its own card waiting: the window stays usable, and the other cards keep being
 read meanwhile.
@@ -144,7 +151,12 @@ the check has got, for example "Adding 7 of 20 repositories...", and the new car
 has been checked. A repo that you add in another way while the check runs is not added twice. If you remove a group
 while repositories are being added to it, the add creates the group again, because that is where you asked to put
 them. Likewise, a repository you remove while it is being added is added again, and a group you collapse while
-repositories are being added to it is opened so you can see them.
+repositories are being added to it is opened so you can see them. The picture below shows an add of 20 folders in
+progress.
+
+![The top of the main window while 20 folders are being added: directly under the app bar, the progress strip shows a
+partly filled bar, the text "Adding 6 of 20 repositories..." and a Cancel button, and the cards below stay as they
+were](images/global-progress.png)
 
 - **Cancel.** Click **Cancel** in the progress strip to stop the add: nothing of it is added, and no message is shown.
   Once the add has started saving ("Saving..."), Cancel is no longer offered and the add completes. If the cards are
@@ -157,6 +169,12 @@ repositories are being added to it is opened so you can see them.
   save again - and if that fails too, you are asked again, as often as needed, until the add is saved or you choose
   **Discard**. **Discard** (also the answer to **Escape** and to closing the question) gives up the add and leaves the
   list exactly as it was saved, and the message that follows names the folders that were not added.
+
+The question looks like this, with the reason that the settings could not be saved:
+
+![The question shown when an add cannot be saved: "The repositories could not be added because the settings could
+not be saved.", followed by the reason (here, access to the settings folder was denied) and "Retry to save again, or
+Discard to leave the list as it is.", with the buttons Discard (the default) and Retry](images/add-save-failed.png)
 
 A new card's Git status (whether it has uncommitted changes) is checked in the background once the card is shown;
 until then the card does not show the **uncommitted-changes** warning and **Git Pull** says the status has not been
