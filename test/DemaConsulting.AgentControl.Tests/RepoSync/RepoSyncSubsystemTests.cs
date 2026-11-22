@@ -23,6 +23,7 @@ using System.Security.Cryptography;
 using System.Text;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.RepoSync;
+using DemaConsulting.AgentControl.Utilities;
 
 namespace DemaConsulting.AgentControl.Tests.RepoSync;
 
@@ -307,6 +308,37 @@ public sealed class RepoSyncSubsystemTests : IDisposable
         Assert.Equal(["payload.md"], Directory.GetFiles(outside).Select(Path.GetFileName));
     }
 
+    /// <summary>
+    ///     Test that a package is never extracted into a repo on a thread guarded against blocking calls (as
+    ///     the window's UI thread is in the tests): the extraction is refused and recorded before the repo is
+    ///     touched, and the same extraction works on an ordinary thread.
+    /// </summary>
+    [Fact]
+    public void RepoSyncSubsystem_Extract_OnGuardedThread_IsRefusedBeforeTheRepoIsTouched()
+    {
+        // Arrange
+        var zipPath = Path.Combine(CreateTempDirectory(), "contoso-agents-1.0.0.zip");
+        WriteZip(zipPath, "v1");
+        var repo = CreateTempDirectory();
+        BlockingCallGuard.TakeViolations();
+
+        // Act
+        Exception? refused;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            refused = Record.Exception(() => PackageZipExtractor.Extract(zipPath, repo));
+        }
+
+        var violations = BlockingCallGuard.TakeViolations();
+        var touched = Directory.EnumerateFileSystemEntries(repo).Any();
+        PackageZipExtractor.Extract(zipPath, repo);
+
+        // Assert
+        Assert.IsType<BlockingCallOnGuardedThreadException>(refused);
+        Assert.Single(violations);
+        Assert.False(touched);
+        Assert.Equal("v1", File.ReadAllText(Path.Combine(repo, ".github", "agents", "copilot.md")));
+    }
     /// <summary>
     ///     Writes a minimal agent package zip whose agents file holds the given text.
     /// </summary>

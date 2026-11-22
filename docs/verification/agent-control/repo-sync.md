@@ -57,6 +57,10 @@ account may not create them).
   read, a repo root reached through a link is accepted), and an untouched extraction of a zip, an unpacked package
   folder or a layout folder is indistinguishable from the package by its identity; a repo with no file below the
   managed folders is reported as having no installed files.
+- A package is never extracted on a thread guarded against blocking calls: the extraction is refused and recorded
+  before the repo is touched.
+- The default opener of a release-notes link starts the system shell off the UI thread, as a shell start of exactly
+  the address.
 
 ### Test Scenarios
 
@@ -223,3 +227,16 @@ This scenario is tested by `RepoSync_LayoutRoot_LinkInTheLayoutIsRefusedWhileLin
 `AgentControl-RepoSync-LayoutRootRefusesLinks` (children: `RefuseLinkInManagedFolder`, `RefuseLinkInPlaceOfGitHub`,
 `RefuseLinkInPlaceOfManagedFolder` and `RefuseLinkAsRootFile`) and `AgentControl-RepoSync-LayoutRootIgnoresOtherLinks`
 (child: `IgnoreLinksOutsideLayout`; each child prefixed `AgentControl-PackageContentExtractor-`).
+
+**RepoSyncSubsystem_Extract_OnGuardedThread_IsRefusedBeforeTheRepoIsTouched**: On a guarded thread, extracting a
+zip package into an empty repo throws `BlockingCallOnGuardedThreadException`, is recorded once and leaves the repo
+empty; the same extraction on an ordinary thread writes the agent file. This scenario is tested by
+`RepoSyncSubsystem_Extract_OnGuardedThread_IsRefusedBeforeTheRepoIsTouched`, covering
+`AgentControl-RepoSync-RefusesGuardedThread` (child: `AgentControl-PackageContentExtractor-RefusesGuardedThread`).
+
+**ReleaseNotesViewer_OpenInBrowserAsync_StartsTheShellOffTheUiThread**: Run on the headless UI thread (guarded),
+the default opener hands its start to a test delegate that records whether its thread is guarded and asks the guard:
+the start ran on another thread, nothing was refused, and the start information is a shell start
+(`UseShellExecute`) of exactly the address. This scenario is tested by
+`ReleaseNotesViewer_OpenInBrowserAsync_StartsTheShellOffTheUiThread`, covering `AgentControl-RepoSync-ReleaseNotesLinks`
+(the link opens without the window waiting for the browser).

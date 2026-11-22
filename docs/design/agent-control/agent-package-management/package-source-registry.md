@@ -15,8 +15,9 @@ that names a different one (`AgentControl-System-SourcePinIntegrity`). It satisf
 `AgentControl-PackageSourceRegistry-InvalidAliasesRejected`,
 `AgentControl-PackageSourceRegistry-NullDefinitionRejected`,
 `AgentControl-PackageSourceRegistry-PlainHttpServerSourceRefused`,
-`AgentControl-PackageSourceRegistry-DefinitionsAreASnapshot` and
-`AgentControl-PackageSourceRegistry-NoCrossSourceFallback`.
+`AgentControl-PackageSourceRegistry-DefinitionsAreASnapshot`,
+`AgentControl-PackageSourceRegistry-NoCrossSourceFallback` and
+`AgentControl-PackageSourceRegistry-ReadsOffCallerThread`.
 
 #### Data Model
 
@@ -34,6 +35,10 @@ providers), tests supply fakes.
 
 **UnknownSourceException** (same file): an `InvalidOperationException` subtype carrying the
 missing `Alias`, with a message that names it and says how to fix it.
+
+**BackgroundPackageSourceProvider** (supporting type, `BackgroundPackageSourceProvider.cs`): an
+`IPackageSourceProvider` decorator that `Create` wraps around every built-in provider. It holds the decorated
+provider (`Inner`) and nothing else, and is safe to call from any thread.
 
 An instance is a genuine snapshot of the definitions it was built from: changing a definition, or
 the list it was built from, afterwards does not change which source an alias resolves to; callers
@@ -56,7 +61,24 @@ build a new one when settings change. All members are thread-safe.
 the base folder under which NuGet sources keep their private caches, the optional
 `PackageCredentialContext` that NuGet server sources use to sign in (a context without a prompt gives work
 that must not open a dialog, such as the background upgrade check) and the optional `GitSourceOptions` that Git
-sources are built with (`PackageSourceType.Git` to `GitSourceProvider`).
+sources are built with (`PackageSourceType.Git` to `GitSourceProvider`). Each built-in provider is wrapped in a
+`BackgroundPackageSourceProvider` (`AgentControl-PackageSourceRegistry-ReadsOffCallerThread`). Registries built with
+the constructor and a custom factory (the tests' fakes) are not wrapped.
+
+**BackgroundPackageSourceProvider**: Runs every call of the decorated provider on the thread pool, so a caller on the
+UI thread never runs a source's synchronous work: the Git provider's cache checks, folder creation and git start, the
+NuGet provider's configuration load, cache-folder checks and library calls (whose synchronous parts and continuations
+then run on the pool, which has no synchronization context), and the zip provider's folder scan and zip open.
+
+- `ListPackageIdsAsync` / `ListVersionsAsync`: `Task.Run(() => Inner.X(...), cancellationToken)`.
+- `AcquireAsync`: `Task.Run` of an async step that awaits `Inner.AcquireAsync` (with `ConfigureAwait(false)`) and
+  then reads the reader's `ContentIdentity` on the worker before returning it. Readers remember the identity, so the
+  caller's later reads cost nothing and never hash on the UI thread. A reader whose identity cannot be read is
+  disposed and the failure is thrown.
+- *Postconditions*: The answers, exceptions and cancellation are those of the decorated provider; a token that is
+  already canceled cancels the call before the provider is reached. `Alias` is the decorated provider's.
+- The source editor's connection test does not use the registry: it creates its providers itself (it needs the Git
+  provider's tag preview) and runs their calls on a worker of its own (see *SourceEditorViewModel*).
 
 **Resolve**: Returns the provider that serves exactly the named source
 (`AgentControl-PackageSourceRegistry-ResolveAlias`).
@@ -98,12 +120,14 @@ duplicate alias, or a missing entry). Callers turn these into user-visible messa
   it is built from.
 - **PackageCredentialContext** (`PackageCredentials` subsystem) — handed to NuGet server providers by
   `Create`.
-- **ZipFolderSourceProvider**, **NuGetSourceProvider**, **GitSourceProvider** — constructed by `Create`;
+- **ZipFolderSourceProvider**, **NuGetSourceProvider**, **GitSourceProvider** — constructed by `Create` and wrapped
+  in the `BackgroundPackageSourceProvider` decorator;
   **GitSourceOptions** (same subsystem) — the optional Git settings `Create` hands to every Git provider.
 
 #### Callers
 
 - **PackageVersionCache** — resolves an alias to a provider on a cache miss.
 - **RepoCardViewModel** — builds a registry from the current settings for every source
-  operation, and resolves the pin's alias.
+  operation, and resolves the pin's alias; it calls the providers from the UI thread, which the decorator keeps
+  free.
 - **SelectPackageWindowViewModel** — receives a registry for the dialog's source.

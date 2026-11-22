@@ -21,6 +21,7 @@
 using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.Tests.PackageCredentials;
+using DemaConsulting.AgentControl.Utilities;
 using DemaConsulting.NuGet.Caching;
 
 namespace DemaConsulting.AgentControl.Tests.GitIntegration;
@@ -75,6 +76,43 @@ public class GitCredentialClientTests
         }
     }
 
+    /// <summary>
+    ///     Test that a credential request made from a thread that is guarded against blocking calls (as
+    ///     the UI thread is in the headless tests: the source editor and a sign-in ask from there)
+    ///     starts git on another thread: nothing is refused on the guarded thread and the answer is
+    ///     the helper's.
+    /// </summary>
+    [Fact]
+    public async Task GitCredentialClient_IsAvailable_FromGuardedThread_StartsGitOffThatThread()
+    {
+        // Arrange
+        var stub = GitCredentialStub.Create(configOutput: "manager");
+        var folder = CreateTempDirectory();
+        try
+        {
+            var client = new GitCredentialClient(stub.Path, workingDirectory: folder);
+
+            // Act: the record of refused calls is per thread, so it is read before the await
+            Task<bool> asking;
+            using (BlockingCallGuard.GuardCurrentThread())
+            {
+                asking = client.IsAvailableAsync(Origin, TestContext.Current.CancellationToken);
+            }
+
+            var violations = BlockingCallGuard.TakeViolations();
+            var available = await asking;
+
+            // Assert
+            Assert.Empty(violations);
+            Assert.True(available);
+            Assert.Single(stub.ReadInvocations());
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(folder, recursive: true);
+        }
+    }
     /// <summary>
     ///     Test that no helper (empty answer, or git failing) means "not available".
     /// </summary>

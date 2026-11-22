@@ -117,6 +117,12 @@ tells the user to update AgentControl.
   beside it and moved over the pin file, so a failure never leaves a half-written pin, and a
   leftover temporary file is removed.
 
+**Guard**: `Load` and `Save` read or write a file in the repo, which can be on a slow or offline share, so they must
+never run on the UI thread. Their first step (after the null checks) is `BlockingCallGuard.ThrowIfGuarded("pin read")`
+or `("pin write")`: on a thread a test has guarded the call is recorded and refused with
+`BlockingCallOnGuardedThreadException` before the file is touched (`AgentControl-RepoPinStore-RefusesGuardedThread`);
+on any other thread it costs two thread-local reads.
+
 #### Error Handling
 
 `Load` and `Save` throw `ArgumentNullException` for a null `repoRoot` (and `Save` also for a
@@ -135,13 +141,17 @@ propagate.
   constants and extension-data dictionary.
 - **PathHelpers** (`Utilities` subsystem) — `SafePathCombine` resolves the pin file path so a
   malformed repo root cannot escape the intended directory.
+- **BlockingCallGuard** (`Utilities` subsystem) — asked before every read and write.
 - **.NET BCL** — `System.Text.Json`.
 
 #### Callers
 
-- **RepoCardViewModel** — calls `Load` during `RefreshPin`, before applying a package and when restoring missing
-  agent files before launch (to compare the recorded content identity and to find the configured source that delivers
-  it), and
-  `Save` inside `ApplyPackageAndShowReleaseNotes` after a successful extraction - never from the restore at launch,
-  which must not rewrite a file under version control.
-- **MainWindowViewModel** — calls `Load` when a repo is added, to cache its pin.
+All callers run on a worker thread:
+
+- **RepoCardViewModel** — calls `Load` in its background read of the card's cheap facts, before applying a package,
+  after applying it (to show the new pin), for the AGENTS.md offer and decline, and when restoring missing agent
+  files before launch (to compare the recorded content identity and to find the configured source that delivers it),
+  and `Save` after a successful extraction of an apply and for an AGENTS.md decline - never from the restore at
+  launch, which must not rewrite a file under version control.
+- **MainWindowViewModel** — calls `Load` (through the card's cheap-facts read) when a repo is added, to cache its
+  pin.

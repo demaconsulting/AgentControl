@@ -21,6 +21,7 @@
 using System.Diagnostics;
 using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.Tests.PackageCredentials;
+using DemaConsulting.AgentControl.Utilities;
 
 namespace DemaConsulting.AgentControl.Tests.GitIntegration;
 
@@ -337,6 +338,37 @@ public sealed class GitRemoteClientTests : IDisposable
         Assert.Equal(Sha, tags[1].CommitSha);
     }
 
+    /// <summary>
+    ///     Test that a listing started from a thread that is guarded against blocking calls (as the UI
+    ///     thread is in the headless tests: a connection test or an upgrade starts there) creates its
+    ///     work folders and starts git on another thread: nothing is refused on the guarded thread and
+    ///     the tags are listed.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_ListTags_FromGuardedThread_StartsGitOffThatThread()
+    {
+        // Arrange
+        var (client, stub, workRoot) = CreateClient();
+        stub.Respond("ls-remote", $"{Sha}\trefs/tags/v1.0.0\n");
+
+        // Act: the record of refused calls is per thread, so it is read before the await
+        Task<IReadOnlyList<GitRemoteTag>> listing;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            listing = client.ListTagsAsync(
+                new GitRemoteTarget("https://example.invalid/r.git", GitTransport.Https), "refs/tags/v*",
+                TestContext.Current.CancellationToken);
+        }
+
+        var violations = BlockingCallGuard.TakeViolations();
+        var tags = await listing;
+
+        // Assert: nothing blocking ran on the guarded thread; git ran and its work folders exist
+        Assert.Empty(violations);
+        Assert.Equal(["v1.0.0"], tags.Select(tag => tag.Name));
+        Assert.Single(stub.ReadInvocations());
+        Assert.True(Directory.Exists(workRoot));
+    }
     /// <summary>
     ///     Test that a tag glob that could carry anything but tag-name characters is refused before
     ///     git runs.

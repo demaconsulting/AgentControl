@@ -27,6 +27,7 @@ using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Tests.GitIntegration;
 using DemaConsulting.AgentControl.Tests.PackageCredentials;
+using DemaConsulting.AgentControl.Utilities;
 using DemaConsulting.NuGet.Caching;
 
 namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
@@ -1088,7 +1089,8 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
         fixture.Tag("v1.1.0");
         fixture.Push();
         var registry = PackageSourceRegistry.Create([fixture.CreateDefinition()], git: fixture.CreateOptions());
-        var provider = (GitSourceProvider)registry.Resolve("Repo");
+        var provider = registry.Resolve("Repo");
+        var cacheFolder = ((GitSourceProvider)((BackgroundPackageSourceProvider)provider).Inner).RepositoryCacheFolder;
         var packages = (await provider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken))
             .ToDictionary(package => package.Version.ToString());
 
@@ -1100,8 +1102,8 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
         // Assert: refused for the right reason with nothing of the hostile tag in the cache, the ordinary tag supplied
         Assert.Multiple(
             () => Assert.Contains(expected, refusal.Message, StringComparison.Ordinal),
-            () => Assert.False(Directory.Exists(Path.Combine(provider.RepositoryCacheFolder, packages["1.1.0"].Revision!))),
-            () => Assert.Empty(Directory.EnumerateDirectories(provider.RepositoryCacheFolder, ".tmp-*")),
+            () => Assert.False(Directory.Exists(Path.Combine(cacheFolder, packages["1.1.0"].Revision!))),
+            () => Assert.Empty(Directory.EnumerateDirectories(cacheFolder, ".tmp-*")),
             () => Assert.Equal("good", ordinary.ReadText(".github/agents/copilot.md")));
     }
 
@@ -1268,6 +1270,84 @@ public sealed class AgentPackageManagementSubsystemTests : IDisposable, IAsyncLi
         PackageIds = ["contoso-agents"]
     };
 
+    /// <summary>
+    ///     Test that the configured sources never make the thread that asks wait: listing and acquiring a
+    ///     package through the registry from a thread guarded against blocking calls (as the window's UI
+    ///     thread is in the tests) refuses nothing there, and the acquired package's identity is already
+    ///     known, so reading it there hashes nothing.
+    /// </summary>
+    [Fact]
+    public async Task AgentPackageManagementSubsystem_ConfiguredSources_FromGuardedThread_NeverBlockTheCaller()
+    {
+        // Arrange: a zip source with one package
+        var folder = CreateTempDirectory();
+        WriteZip(Path.Combine(folder, "contoso-agents-1.0.0.zip"), "v1");
+        var registry = PackageSourceRegistry.Create(
+            [new PackageSourceDefinition { Alias = "Zips", Type = PackageSourceType.Zip, Location = folder }]);
+        var provider = registry.Resolve("Zips");
+
+        // Act: each call starts on a guarded thread; the per-thread record is read before each await
+        Task<IReadOnlyList<DiscoveredPackage>> listing;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            listing = provider.ListVersionsAsync("contoso-agents", TestContext.Current.CancellationToken);
+        }
+
+        var violations = BlockingCallGuard.TakeViolations().ToList();
+        var package = Assert.Single(await listing);
+        Task<IPackageContentReader> acquiring;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            acquiring = provider.AcquireAsync(package, TestContext.Current.CancellationToken);
+        }
+
+        violations.AddRange(BlockingCallGuard.TakeViolations());
+        using var reader = await acquiring;
+        string? identity;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            identity = reader.ContentIdentity;
+        }
+
+        violations.AddRange(BlockingCallGuard.TakeViolations());
+
+        // Assert
+        Assert.Empty(violations);
+        Assert.Equal(FilesIdentity(AgentFiles("v1")), identity);
+    }
+
+    /// <summary>
+    ///     Test that the files of a package or of a repo are never hashed on a thread guarded against
+    ///     blocking calls (as the window's UI thread is in the tests): the hash is refused and recorded,
+    ///     never reported as a package whose content cannot be identified.
+    /// </summary>
+    [Fact]
+    public void AgentPackageManagementSubsystem_PackageHash_OnGuardedThread_IsRefused()
+    {
+        // Arrange
+        var zipPath = Path.Combine(CreateTempDirectory(), "contoso-agents-1.0.0.zip");
+        WriteZip(zipPath, "v1");
+        var repo = CreateTempDirectory();
+        using var reader = ZipPackageContentReader.Open(zipPath);
+        BlockingCallGuard.TakeViolations();
+
+        // Act
+        Exception? packageHash;
+        Exception? installedHash;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            packageHash = Record.Exception(() => reader.ContentIdentity);
+            installedHash = Record.Exception(() => PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken));
+        }
+
+        var violations = BlockingCallGuard.TakeViolations();
+
+        // Assert: both refused, and the package is identified on an ordinary thread
+        Assert.IsType<BlockingCallOnGuardedThreadException>(packageHash);
+        Assert.IsType<BlockingCallOnGuardedThreadException>(installedHash);
+        Assert.Equal(2, violations.Count);
+        Assert.Equal(FilesIdentity(AgentFiles("v1")), reader.ContentIdentity);
+    }
     /// <summary>
     ///     Creates a unique temporary directory removed when the test ends.
     /// </summary>

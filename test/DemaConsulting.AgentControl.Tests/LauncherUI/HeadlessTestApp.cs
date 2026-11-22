@@ -177,6 +177,34 @@ public static class HeadlessTestApp
     }
 
     /// <summary>
+    ///     Runs blocking test work - an arrange step that writes a pin or hashes a package, or an assertion
+    ///     that reads a pin - on a worker thread and waits for it, for a test body that runs on the guarded
+    ///     UI thread.
+    /// </summary>
+    /// <remarks>
+    ///     The guard refuses such calls on the UI thread because the application must never make them
+    ///     there; a test's own preparation and checks are not the application, so they run on a worker.
+    ///     Waiting for the worker cannot deadlock: the work never needs the UI thread. The work runs on a
+    ///     thread of its own (a long-running task), which a wait never runs inline on the waiting thread,
+    ///     as it may a thread-pool task that has not started yet.
+    /// </remarks>
+    /// <param name="work">The blocking work.</param>
+    internal static void RunOffUiThread(Action work) =>
+        Task.Factory.StartNew(work, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)
+            .GetAwaiter().GetResult();
+
+    /// <summary>
+    ///     Runs blocking test work that produces a value on a worker thread and waits for it (see
+    ///     <see cref="RunOffUiThread(Action)"/>).
+    /// </summary>
+    /// <typeparam name="T">The type of the value.</typeparam>
+    /// <param name="work">The blocking work.</param>
+    /// <returns>The value the work produced.</returns>
+    internal static T RunOffUiThread<T>(Func<T> work) =>
+        Task.Factory.StartNew(work, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)
+            .GetAwaiter().GetResult();
+
+    /// <summary>
     ///     Fails the running test when a guarded blocking call (a git command, for example) was made on
     ///     the UI thread since the record was last drained, clearing the record.
     /// </summary>

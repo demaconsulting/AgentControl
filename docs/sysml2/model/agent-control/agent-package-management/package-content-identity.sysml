@@ -12,4 +12,7 @@ package AgentControl {
             requirementFiles = ("docs/reqstream/agent-control/agent-package-management/package-content-identity.yaml");
         }
     }
+
+    // Asks the blocking-call guard before every hash, so the tests catch one made on the UI thread
+    dependency PackageContentIdentity to BlockingCallGuard;
 }

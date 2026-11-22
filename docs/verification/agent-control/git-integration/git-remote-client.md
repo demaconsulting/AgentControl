@@ -62,6 +62,8 @@ stub (a unique executable path) and the real-git version test uses the full path
   failures are classified; a missing git is explained.
 - Real git lists, fetches one tag shallow, lists the tree, reads a blob's raw bytes, creates a repository without hooks
   and refuses other transports.
+- A listing asked from a thread guarded against blocking calls creates the work folders and starts git on another
+  thread: nothing is refused on the guarded thread and the tags are listed.
 
 #### Test Scenarios
 
@@ -234,3 +236,9 @@ repository the client creates holds no hook. This scenario is tested by
 `AgentControl-GitRemoteClient-FetchIntoHooklessRepository` and `AgentControl-GitRemoteClient-NoHooks`. That no hook runs
 while a package is fetched and written is proven at the provider by
 `GitSourceProvider_Acquire_HostileHooksAndTemplate_NeverRun`.
+
+**GitRemoteClient_ListTags_FromGuardedThread_StartsGitOffThatThread**: With a stub git that lists one tag, a listing
+is started inside a guard scope of `BlockingCallGuard` and the record of refused calls is read before the `await`: it
+is empty, the tag is listed, git ran once and the work folders exist. This scenario is tested by
+`GitRemoteClient_ListTags_FromGuardedThread_StartsGitOffThatThread`, covering
+`AgentControl-GitRemoteClient-StartsOffCallerThread`.

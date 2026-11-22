@@ -474,3 +474,14 @@ sections:
         tests:
           - GitRemoteClient_EnsureSupportedVersion_NewGit_PassesAndRunsOncePerExecutable
           - GitRemoteClient_EnsureSupportedVersion_ConcurrentCallers_RunGitVersionOnce
+
+      - id: AgentControl-GitRemoteClient-StartsOffCallerThread
+        title: >-
+          The GitRemoteClient class shall create its work folders and start git on a worker thread,
+          so that the thread that asks for a listing, a fetch or a read never waits for them.
+        justification: |
+          A connection test, an upgrade and a version listing are asked from the window's UI thread;
+          creating folders and starting a process there freezes the window, and antivirus can make a
+          process start take a long time.
+        tests:
+          - GitRemoteClient_ListTags_FromGuardedThread_StartsGitOffThatThread

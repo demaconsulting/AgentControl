@@ -221,3 +221,15 @@ sections:
           - PackageContentIdentity_ComputeInstalledFilesIdentity_CanceledToken_ThrowsOperationCanceledException
           - PackageContentIdentity_ComputeInstalledFilesIdentity_NullRepoRoot_ThrowsArgumentNullException
           - PackageContentIdentity_ComputeInstalledFilesIdentity_MissingRepoRoot_ThrowsInvalidOperationException
+
+      - id: AgentControl-PackageContentIdentity-RefusesGuardedThread
+        title: >-
+          The PackageContentIdentity class shall refuse to hash a package's files or a repo's
+          installed agent files on a thread that is guarded against blocking calls, recording the
+          refusal, and shall never report such a refusal as content that cannot be identified.
+        justification: |
+          A hash reads every file of a package; made on the window's UI thread it freezes the window.
+          The tests guard that thread, so a hash that slips back onto it fails them at once instead
+          of passing silently as "no identity".
+        tests:
+          - PackageContentIdentity_Hash_OnGuardedThread_IsRefusedAndRecorded

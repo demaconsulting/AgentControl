@@ -58,6 +58,8 @@ the test's isolated git configuration.
   stopped at the time limit.
 - A local git command that hangs past its time limit, or whose caller gives up, is stopped before it finishes and
   reported as timed out or canceled.
+- The git of package sources and of credential helpers is started off the thread that asks: a tag listing and a
+  credential-helper question asked from a thread guarded against blocking calls are answered with nothing refused.
 
 ### Test Scenarios
 
@@ -187,3 +189,11 @@ up half a second after it started is stopped and reported as canceled, and neith
 tested by `GitIntegrationSubsystem_LocalGitHangs_IsStoppedAndReportedAsTimedOut`, covering
 `AgentControl-GitIntegration-LocalGitTimeout` (children: `AgentControl-GitClient-TimeoutStopsGit` and
 `AgentControl-GitClient-CancelStopsGit`).
+
+**GitIntegrationSubsystem_RemoteAndCredentialGit_FromGuardedThread_StartOffThatThread**: With stubs standing in for
+git, a `GitRemoteClient` tag listing and a `GitCredentialClient` helper question are both started from inside a guard
+scope of `BlockingCallGuard`, the record of refused calls read before the `await`s: it is empty, the tag is listed and
+the helper is reported available. This scenario is tested by
+`GitIntegrationSubsystem_RemoteAndCredentialGit_FromGuardedThread_StartOffThatThread`, covering
+`AgentControl-GitIntegration-NoBlockingStart` (children: `AgentControl-GitRemoteClient-StartsOffCallerThread`,
+`AgentControl-GitCredentialClient-StartsOffCallerThread`).

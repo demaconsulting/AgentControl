@@ -118,6 +118,10 @@ on, and the tests that reach no launch assert that the starter was not called.
 - The background cheap refresh and the background working-tree check return while their read is held, keep the
   previous state (a card never checked stays "not checked yet", never dirty) until the read has run, then apply it,
   and apply nothing when a newer refresh started or the card was retired meanwhile.
+- The disk, hashing and process work of a launch, an upgrade and the AGENTS.md answer runs on the card's
+  background-work runner: while that work is held at a gate nothing is applied (no process started, the pin on disk
+  unchanged, no release notes, no `AGENTS.md`, no recorded decline) and the calling thread made no blocking call;
+  once released the action completes.
 
 #### Test Scenarios
 
@@ -1069,3 +1073,16 @@ tested by `RepoCardViewModel_CreateSourceRegistry_GitSource_RunsTheConfiguredOrO
 `RepoCardViewModel_CreateSourceRegistry_GitSource_PromptsOnlyForUserStartedWork` and
 `RepoCardViewModel_GetGitCacheRoot_UsesConfigDirectoryWhenGiven`, covering
 `AgentControl-RepoCardViewModel-GitSourceOptions`, `-GitSourcePrompts` and `-GitSourceCacheRoot`.
+
+**RepoCardViewModel_ActionIo_RunsInBackground**: Each card is built with a `GatedBackgroundWorkRunner` (released for
+the card's first state read, then closed), and the action is started inside a guard scope of `BlockingCallGuard`,
+the record of refused calls read before any `await`. A launch: nothing is started while the work is held and the card
+is busy; once released the tool is started once, "Launched." is shown and the launch recorded. An upgrade from 1.0.0 to
+2.0.0 from a zip folder: while held, the pin on disk still names 1.0.0 and no release notes were raised; once released
+the pin names 2.0.0, the card shows it, the release notes were raised and the `.gitignore` exists. Accepting the
+AGENTS.md template: while held the file does not exist; once released it holds the template and the status says so.
+Declining it: while held the pin does not record the decline; once released it does, keeping the package name. This
+scenario is tested by `RepoCardViewModel_Launch_ShellAndStartRunInBackground`,
+`RepoCardViewModel_Upgrade_ApplyIoRunsInBackground`, `RepoCardViewModel_AgentsMdAccept_WritesInBackground` and
+`RepoCardViewModel_AgentsMdDecline_SavesPinInBackground`, covering
+`AgentControl-RepoCardViewModel-ActionIoInBackground`.

@@ -4069,6 +4069,305 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a launch finds the shell and starts the agent tool on a worker: with that work held
+    ///     at a gate, the launch makes no blocking call on the calling (UI) thread and nothing is started,
+    ///     and once released the tool is started and the launch recorded.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Launch_ShellAndStartRunInBackground()
+    {
+        // Arrange: a card whose repo state was read, and whose further background work is held
+        var stub = GitStub.Create();
+        _tempPaths.Add(stub.Path);
+        var settings = new AppSettings
+        {
+            GitExecutablePath = stub.Path,
+            AgentTool = AgentToolKind.Custom,
+            CustomAgentCommand = "my-agent",
+            ShellPreference = "pwsh"
+        };
+        var starter = new FakeAgentToolProcessStarter();
+        var gate = new GatedBackgroundWorkRunner();
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = CreateTempDirectory() }, () => settings, new PackageVersionCache(),
+            processStarter: starter, shellDetector: FakeAgentToolProcessStarter.CreateShellDetector(), backgroundWork: gate);
+        gate.Release();
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
+        gate.Close();
+
+        // Act: launch from a guarded thread, the record of refused calls read before any await
+        Task launching;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            launching = card.LaunchCommand.ExecuteAsync();
+        }
+
+        var violations = BlockingCallGuard.TakeViolations();
+        await gate.FirstCall;
+        var startedWhileHeld = starter.Started.Count;
+        var busyWhileHeld = card.IsBusy;
+        gate.Release();
+        await launching;
+
+        // Assert: nothing was started while the work was held, then exactly one start
+        Assert.Empty(violations);
+        Assert.Equal(0, startedWhileHeld);
+        Assert.True(busyWhileHeld);
+        Assert.Single(starter.Started);
+        Assert.Equal("Launched.", card.StatusMessage);
+        Assert.NotNull(card.LastLaunchedUtc);
+    }
+
+    /// <summary>
+    ///     Test that an upgrade reads and writes the pin, hashes the package, updates the .gitignore and
+    ///     reads the release notes on a worker: with that work held at a gate, the upgrade makes no
+    ///     blocking call on the calling (UI) thread and the pin on disk is unchanged, and once released
+    ///     the package is applied.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Upgrade_ApplyIoRunsInBackground()
+    {
+        // Arrange: a repo pinned to 1.0.0, a source with 2.0.0, and a card whose state was read
+        var stub = GitStub.Create();
+        _tempPaths.Add(stub.Path);
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0", "## 2.0.0");
+        RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var settings = new AppSettings { PackageSourcePath = sourceDir, GitExecutablePath = stub.Path };
+        var gate = new GatedBackgroundWorkRunner();
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repoRoot, PinnedPackageName = "contoso-agents", PinnedPackageVersion = "1.0.0" },
+            () => settings, new PackageVersionCache(),
+            processStarter: new FakeAgentToolProcessStarter(), shellDetector: FakeAgentToolProcessStarter.CreateShellDetector(),
+            backgroundWork: gate);
+        gate.Release();
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
+        gate.Close();
+        string? releaseNotes = null;
+        card.ReleaseNotesReady += (_, notes) => releaseNotes = notes;
+
+        // Act: upgrade from a guarded thread, the record of refused calls read before any await
+        Task upgrading;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            upgrading = card.UpgradeCommand.ExecuteAsync();
+        }
+
+        var violations = BlockingCallGuard.TakeViolations();
+        await gate.FirstCall;
+        var versionWhileHeld = RepoPinStore.Load(repoRoot)?.Version;
+        var notesWhileHeld = releaseNotes;
+        gate.Release();
+        await upgrading;
+
+        // Assert: nothing was applied while the work was held, then the upgrade completed
+        Assert.Empty(violations);
+        Assert.Equal("1.0.0", versionWhileHeld);
+        Assert.Null(notesWhileHeld);
+        Assert.Equal("2.0.0", RepoPinStore.Load(repoRoot)?.Version);
+        Assert.Equal("2.0.0", card.PinnedPackageVersion);
+        Assert.Equal("## 2.0.0", releaseNotes);
+        Assert.True(File.Exists(Path.Combine(repoRoot, ".gitignore")));
+    }
+
+    /// <summary>
+    ///     Test that accepting the AGENTS.md template writes the file on a worker: while that work is held
+    ///     the file does not exist yet and the calling (UI) thread made no blocking call; once released
+    ///     the template is written.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_AgentsMdAccept_WritesInBackground()
+    {
+        // Arrange
+        var repoRoot = CreateTempDirectory();
+        var gate = new GatedBackgroundWorkRunner();
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repoRoot }, () => new AppSettings(), new PackageVersionCache(), backgroundWork: gate);
+
+        // Act
+        Task accepting;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            accepting = card.AcceptAgentsMdTemplateAsync("# AGENTS");
+        }
+
+        var violations = BlockingCallGuard.TakeViolations();
+        await gate.FirstCall;
+        var existedWhileHeld = File.Exists(Path.Combine(repoRoot, "AGENTS.md"));
+        gate.Release();
+        await accepting;
+
+        // Assert
+        Assert.Empty(violations);
+        Assert.False(existedWhileHeld);
+        Assert.Equal("# AGENTS", await File.ReadAllTextAsync(Path.Combine(repoRoot, "AGENTS.md"), TestContext.Current.CancellationToken));
+        Assert.Contains("AGENTS.md template", card.StatusMessage, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Test that declining the AGENTS.md template reads and writes the pin on a worker: while that work
+    ///     is held the pin does not record the decline yet and the calling (UI) thread made no blocking
+    ///     call; once released the decline is recorded.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_AgentsMdDecline_SavesPinInBackground()
+    {
+        // Arrange: a pinned repo
+        var repoRoot = CreateTempDirectory();
+        RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var gate = new GatedBackgroundWorkRunner();
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repoRoot, PinnedPackageName = "contoso-agents", PinnedPackageVersion = "1.0.0" },
+            () => new AppSettings(), new PackageVersionCache(), backgroundWork: gate);
+
+        // Act
+        Task declining;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            declining = card.DeclineAgentsMdTemplateAsync();
+        }
+
+        var violations = BlockingCallGuard.TakeViolations();
+        await gate.FirstCall;
+        var declinedWhileHeld = RepoPinStore.Load(repoRoot)?.AgentsMdTemplateDeclined;
+        gate.Release();
+        await declining;
+
+        // Assert
+        Assert.Empty(violations);
+        Assert.False(declinedWhileHeld);
+        var pin = RepoPinStore.Load(repoRoot);
+        Assert.NotNull(pin);
+        Assert.True(pin.AgentsMdTemplateDeclined);
+        Assert.Equal("contoso-agents", pin.PackageName);
+    }
+
+    /// <summary>
+    ///     Test that the background upgrade check hashes a candidate source's package off the UI thread
+    ///     even when the source's provider computes the identity only when it is first read (a provider
+    ///     that is not one of the registry's built-in ones): run on the headless UI thread, which is
+    ///     guarded, the check makes no blocking call there and finds the source whose files match.
+    /// </summary>
+    [Fact]
+    public void RepoCard_UpgradeCheck_PackageHashedOffTheUiThread()
+    {
+        // Arrange (off the UI thread): a repo pinned to 1.0.0 with the identity of the package's files,
+        // a zip source served by an undecorated provider, and a card that has read its pin
+        var stub = GitStub.Create();
+        _tempPaths.Add(stub.Path);
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        string identity;
+        using (var reader = ZipPackageContentReader.Open(Path.Combine(sourceDir, "contoso-agents-1.0.0.zip")))
+        {
+            identity = PackageContentIdentity.ComputeFilesIdentity(reader);
+        }
+
+        RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0", ContentIdentity = identity });
+        var settings = new AppSettings { Sources = [ZipSource("Zips", sourceDir)], GitExecutablePath = stub.Path };
+        var registry = new PackageSourceRegistry(settings.Sources, definition => new ZipFolderSourceProvider(definition));
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repoRoot, PinnedPackageName = "contoso-agents", PinnedPackageVersion = "1.0.0" },
+            () => settings, new PackageVersionCache(), registryFactory: _ => registry);
+        card.RefreshCheap();
+
+        // Act: the check runs on the guarded UI thread, its continuations back on it
+        HeadlessTestApp.RunAsync(() => card.RefreshUpgradeStatusAsync());
+
+        // Assert: the matching source was found (the guard would have failed the run on a hash there)
+        Assert.Equal("Zips", card.SupplyingSource);
+        Assert.False(card.IsUpgradeStatusUnknown);
+        Assert.Null(card.SourceProblem);
+    }
+
+    /// <summary>
+    ///     Test that an upgrade run on the headless UI thread, which is guarded, makes no blocking call
+    ///     there - no pin read or write, package hash, extraction or git - and applies the package.
+    /// </summary>
+    [Fact]
+    public void RepoCard_Upgrade_NoBlockingCallOnUiThread()
+    {
+        // Arrange (off the UI thread): a repo pinned to 1.0.0, a source with 2.0.0, a card that read its state
+        var stub = GitStub.Create();
+        _tempPaths.Add(stub.Path);
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0", "## 2.0.0", agentsMdTemplate: "# AGENTS");
+        var settings = new AppSettings { PackageSourcePath = sourceDir, GitExecutablePath = stub.Path };
+        var card = CreateCard(repoRoot, "contoso-agents", "1.0.0", settings);
+        card.Refresh();
+        string? template = null;
+        card.AgentsMdTemplateOfferRequested += (_, offered) => template = offered;
+
+        // Act: upgrade and accept the AGENTS.md offer on the guarded UI thread
+        HeadlessTestApp.RunAsync(async () =>
+        {
+            await card.UpgradeCommand.ExecuteAsync();
+            Assert.NotNull(template);
+            await card.AcceptAgentsMdTemplateAsync(template);
+        });
+
+        // Assert
+        Assert.Equal("2.0.0", RepoPinStore.Load(repoRoot)?.Version);
+        Assert.True(File.Exists(Path.Combine(repoRoot, ".github", "agents", "copilot.md")));
+        Assert.True(File.Exists(Path.Combine(repoRoot, "AGENTS.md")));
+    }
+
+    /// <summary>
+    ///     Test that a launch that must first restore the pinned package, run on the headless UI thread
+    ///     which is guarded, makes no blocking call there - the pin read, the source's package hash, the
+    ///     extraction, the AGENTS.md answer, the shell detection and the start all run on workers - and
+    ///     restores the files and starts the tool.
+    /// </summary>
+    [Fact]
+    public void RepoCard_LaunchWithRestore_NoBlockingCallOnUiThread()
+    {
+        // Arrange (off the UI thread): a repo pinned with the package's identity but without its files
+        var stub = GitStub.Create();
+        _tempPaths.Add(stub.Path);
+        var repoRoot = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0", agentsMdTemplate: "# AGENTS");
+        string identity;
+        using (var reader = ZipPackageContentReader.Open(Path.Combine(sourceDir, "contoso-agents-1.0.0.zip")))
+        {
+            identity = PackageContentIdentity.ComputeFilesIdentity(reader);
+        }
+
+        RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0", ContentIdentity = identity });
+        var settings = new AppSettings
+        {
+            PackageSourcePath = sourceDir,
+            GitExecutablePath = stub.Path,
+            AgentTool = AgentToolKind.Custom,
+            CustomAgentCommand = "my-agent"
+        };
+        var starter = new FakeAgentToolProcessStarter();
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = repoRoot, PinnedPackageName = "contoso-agents", PinnedPackageVersion = "1.0.0" },
+            () => settings, new PackageVersionCache(),
+            processStarter: starter, shellDetector: FakeAgentToolProcessStarter.CreateShellDetector());
+        card.RefreshCheap();
+        card.RefreshDirtyStatus();
+        string? template = null;
+        card.AgentsMdTemplateOfferRequested += (_, offered) => template = offered;
+
+        // Act: launch, then decline the AGENTS.md offer the restore raised, on the guarded UI thread
+        HeadlessTestApp.RunAsync(async () =>
+        {
+            await card.LaunchCommand.ExecuteAsync();
+            Assert.NotNull(template);
+            await card.DeclineAgentsMdTemplateAsync();
+        });
+
+        // Assert: the files were restored and the tool started
+        Assert.True(File.Exists(Path.Combine(repoRoot, ".github", "agents", "copilot.md")));
+        Assert.Single(starter.Started);
+    }
+
+    /// <summary>
     ///     Test that a Refresh while the card's state read already waits in the queue joins that read
     ///     instead of queuing a second one.
     /// </summary>

@@ -295,3 +295,17 @@ sections:
           - AgentControl-GitClient-CancelStopsGit
         tests:
           - GitIntegrationSubsystem_LocalGitHangs_IsStoppedAndReportedAsTimedOut
+
+      - id: AgentControl-GitIntegration-NoBlockingStart
+        title: >-
+          The GitIntegration subsystem shall start the git of package sources and of credential
+          helpers on a worker thread, so that the thread that asks never waits for a process start
+          or for git's work folders.
+        justification: |
+          Connection tests, upgrades and the source editor ask from the window's UI thread, and a
+          NuGet sign-in can ask from any thread; starting a process there freezes the window.
+        children:
+          - AgentControl-GitRemoteClient-StartsOffCallerThread
+          - AgentControl-GitCredentialClient-StartsOffCallerThread
+        tests:
+          - GitIntegrationSubsystem_RemoteAndCredentialGit_FromGuardedThread_StartOffThatThread

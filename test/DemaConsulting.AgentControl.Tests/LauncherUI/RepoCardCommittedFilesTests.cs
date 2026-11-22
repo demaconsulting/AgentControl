@@ -466,9 +466,12 @@ public sealed class RepoCardCommittedFilesTests : IDisposable
             Sources = [new PackageSourceDefinition { Alias = "Default", Type = PackageSourceType.Zip, Location = "unused" }]
         };
         var registry = new PackageSourceRegistry(settings.Sources, _ => provider);
+
+        // The runner holds only the card's queued repo-state reads (a queue of the card's own over it);
+        // the disk work of the card's actions runs on the thread pool
         return new RepoCardViewModel(
             new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), null, _ => registry,
-            backgroundWork: backgroundWork);
+            refreshQueue: backgroundWork is null ? null : new RepoRefreshQueue(backgroundWork));
     }
 
     /// <summary>

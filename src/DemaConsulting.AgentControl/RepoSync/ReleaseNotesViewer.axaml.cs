@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Diagnostics;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
@@ -25,6 +26,7 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using DemaConsulting.AgentControl.Logging;
+using DemaConsulting.AgentControl.Utilities;
 using Microsoft.Extensions.Logging;
 
 namespace DemaConsulting.AgentControl.RepoSync;
@@ -58,8 +60,9 @@ internal sealed partial class ReleaseNotesViewer : Window
     private static readonly FontFamily CodeFontFamily = new("Cascadia Mono, Consolas, Menlo, DejaVu Sans Mono, monospace");
 
     /// <summary>
-    ///     Opens an address in the user's browser: the platform launcher in production, a test
-    ///     double in tests. Set by the constructor; never called with an address that failed
+    ///     Opens an address in the user's browser: the system shell, started on a worker thread
+    ///     (<see cref="OpenInBrowserAsync"/>), in production; a test double in tests. Set by the
+    ///     constructor; never called with an address that failed
     ///     <see cref="ReleaseNotesViewerViewModel.IsOpenableUrl"/>.
     /// </summary>
     private readonly Func<string, Task> _openUrl;
@@ -72,7 +75,7 @@ internal sealed partial class ReleaseNotesViewer : Window
     public ReleaseNotesViewer()
     {
         AvaloniaXamlLoader.Load(this);
-        _openUrl = OpenInBrowserAsync;
+        _openUrl = url => OpenInBrowserAsync(url);
     }
 
     /// <summary>
@@ -82,15 +85,16 @@ internal sealed partial class ReleaseNotesViewer : Window
     /// </summary>
     /// <param name="viewModel">The view model supplying the title and release notes content.</param>
     /// <param name="openUrl">Opens an address in the user's default browser; <see langword="null"/>
-    ///     uses the platform launcher. A seam so tests never open a real browser. It is only ever
-    ///     called with an address that passed <see cref="ReleaseNotesViewerViewModel.IsOpenableUrl"/>.</param>
+    ///     uses <see cref="OpenInBrowserAsync"/>. A seam so tests never open a real browser. It is
+    ///     only ever called with an address that passed
+    ///     <see cref="ReleaseNotesViewerViewModel.IsOpenableUrl"/>.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="viewModel"/> is
     ///     <see langword="null"/>.</exception>
     public ReleaseNotesViewer(ReleaseNotesViewerViewModel viewModel, Func<string, Task>? openUrl = null) : this()
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         DataContext = viewModel;
-        _openUrl = openUrl ?? OpenInBrowserAsync;
+        _openUrl = openUrl ?? (url => OpenInBrowserAsync(url));
 
         var panel = this.FindControl<StackPanel>("ReleaseNotesPanel")
                     ?? throw new InvalidOperationException(
@@ -103,19 +107,43 @@ internal sealed partial class ReleaseNotesViewer : Window
     }
 
     /// <summary>
-    ///     Opens <paramref name="url"/> in the user's default browser through the platform launcher
-    ///     (no shell is involved, so only a real URI is ever handed to the system).
+    ///     Opens <paramref name="url"/> in the user's default browser by handing it to the operating
+    ///     system's shell (the default handler of web addresses) on a worker thread, so the window
+    ///     never waits while the browser starts.
     /// </summary>
+    /// <remarks>
+    ///     The address is passed as the file name of a shell start, never as command text, and the
+    ///     caller only passes addresses that passed <see cref="ReleaseNotesViewerViewModel.IsOpenableUrl"/>,
+    ///     so only an absolute http or https address ever reaches the shell. The start runs on the
+    ///     thread pool (Avalonia's launcher starts the shell on the calling thread); a failure to
+    ///     start is thrown to the caller, which reports it.
+    /// </remarks>
     /// <param name="url">The absolute http/https address to open.</param>
-    /// <returns>A task that completes when the launcher has been asked to open the address.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when the system could not open the address.</exception>
-    private async Task OpenInBrowserAsync(string url)
+    /// <param name="start">Hands the start information to the system; <see langword="null"/> uses
+    ///     <see cref="StartWithShell"/>. A seam so tests can see the request (and the thread it runs
+    ///     on) without opening a browser.</param>
+    /// <returns>A task that completes when the system has been asked to open the address.</returns>
+    /// <exception cref="System.ComponentModel.Win32Exception">Thrown when the shell refused the start.</exception>
+    internal static async Task OpenInBrowserAsync(string url, Action<ProcessStartInfo>? start = null)
     {
-        var launched = await Launcher.LaunchUriAsync(new Uri(url));
-        if (!launched)
-        {
-            throw new InvalidOperationException("The system could not open the link.");
-        }
+        var startInfo = new ProcessStartInfo(new Uri(url).AbsoluteUri) { UseShellExecute = true };
+        await Task.Run(() => (start ?? StartWithShell)(startInfo)).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    ///     Starts the shell's handler of a web address; called on a worker thread.
+    /// </summary>
+    /// <remarks>
+    ///     A browser that is already running often takes the address over without a new process, so
+    ///     no process being returned is not a failure; only an exception is.
+    /// </remarks>
+    /// <param name="startInfo">The start information (a shell start of the address).</param>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown on a thread a test has guarded;
+    ///     nothing is started.</exception>
+    private static void StartWithShell(ProcessStartInfo startInfo)
+    {
+        BlockingCallGuard.ThrowIfGuarded("open link");
+        using var process = Process.Start(startInfo);
     }
 
     /// <summary>

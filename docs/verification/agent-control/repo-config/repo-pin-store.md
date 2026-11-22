@@ -27,6 +27,8 @@ N/A - standard test environment.
 - A repo with no pin file returns none rather than throwing.
 - A saved pin's values are returned unchanged by a subsequent load.
 - A null repo root path or a null pin value is rejected.
+- A pin read or write on a thread guarded against blocking calls is refused and recorded, and the pin file is left
+  as it was.
 
 #### Test Scenarios
 
@@ -136,3 +138,9 @@ version 5 is refused on load with a message that names version 5 and the support
 tested by `RepoPinStore_SaveThenLoad_WritesSchemaVersion4AndNeverASource` and
 `RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage`, covering
 `AgentControl-RepoPinStore-SchemaVersion4`.
+
+**RepoPinStore_LoadAndSave_OnGuardedThread_AreRefusedAndTouchNothing**: Inside a guard scope of `BlockingCallGuard`,
+`Load` and `Save` both throw `BlockingCallOnGuardedThreadException`, the record holds `pin read` and `pin write`, and
+the pin file's text is unchanged. This scenario is tested by
+`RepoPinStore_LoadAndSave_OnGuardedThread_AreRefusedAndTouchNothing`, covering
+`AgentControl-RepoPinStore-RefusesGuardedThread`.

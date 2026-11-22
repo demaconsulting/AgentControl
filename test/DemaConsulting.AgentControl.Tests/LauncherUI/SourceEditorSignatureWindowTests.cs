@@ -211,6 +211,7 @@ public class SourceEditorSignatureWindowTests
         usersStore.Save(origin, new NuGetCredential("svc", "pw-forget-window-4422"));
         var editor = CreateServerEditor(credentials: new PackageCredentialContext(new SessionCredentialStore(), null, usersStore));
         editor.Location = FeedAddress;
+        await editor.HelperCheckCompleted;
         var window = new SourceEditorWindow(editor);
         window.Show();
         try
@@ -281,6 +282,7 @@ public class SourceEditorSignatureWindowTests
         var usersStore = new FakeRememberedCredentialStore { Available = false };
         var editor = CreateServerEditor(credentials: new PackageCredentialContext(new SessionCredentialStore(), null, usersStore));
         editor.Location = FeedAddress;
+        HeadlessTestApp.RunJobsUntil(() => editor.HelperCheckCompleted.IsCompleted, "The credential-helper check did not end.");
         var window = new SourceEditorWindow(editor);
         window.Show();
         var button = window.FindControl<Button>("SourceForgetSignInButton")!;

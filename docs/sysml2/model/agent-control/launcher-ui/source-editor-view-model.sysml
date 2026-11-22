@@ -2,7 +2,7 @@ package AgentControl {
     private import SoftwareItemMetadata::*;
 
     part def SourceEditorViewModel {
-        doc /* Package source editor dialog view-model (one class in two files: the general part and the Git part): validates and saves one zip-package folder, NuGet-package folder, NuGet-package server or Git repository source, tests a server's or a Git repository's connection (a Git test lists the repository's tags and previews which ones match the tag pattern), offers the signed-package requirement with an optional publisher fingerprint pin for NuGet sources, explains the Git sign-in, and forgets a server's saved sign-in after confirmation. */
+        doc /* Package source editor dialog view-model (one class in two files: the general part and the Git part): validates and saves one zip-package folder, NuGet-package folder, NuGet-package server or Git repository source, tests a server's or a Git repository's connection (a Git test lists the repository's tags and previews which ones match the tag pattern), offers the signed-package requirement with an optional publisher fingerprint pin for NuGet sources, explains the Git sign-in, and forgets a server's saved sign-in after confirmation; the connection test, the forget and the credential-helper question run off the UI thread, the question only once the typed address has paused for a short delay. */
 
         metadata info : SoftwareInfo {
             sourceFiles = ("src/DemaConsulting.AgentControl/LauncherUI/SourceEditorViewModel.cs", "src/DemaConsulting.AgentControl/LauncherUI/SourceEditorViewModel.Git.cs");

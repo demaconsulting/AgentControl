@@ -633,8 +633,9 @@ internal sealed partial class MainWindow : Window
     /// <summary>
     ///     Shows the <see cref="ConfirmationWindow"/> offering to place the package's optional
     ///     <c>AGENTS.md</c> template at <paramref name="card"/>'s repo root, and calls back into
-    ///     <see cref="RepoCardViewModel.AcceptAgentsMdTemplate"/> or
-    ///     <see cref="RepoCardViewModel.DeclineAgentsMdTemplate"/> depending on the user's choice.
+    ///     <see cref="RepoCardViewModel.AcceptAgentsMdTemplateAsync"/> or
+    ///     <see cref="RepoCardViewModel.DeclineAgentsMdTemplateAsync"/> depending on the user's choice,
+    ///     waiting for the card to write the answer (it does so off the UI thread).
     /// </summary>
     /// <param name="card">The card that just completed a sync offering the template.</param>
     /// <param name="templateContent">The template's text content, as carried by
@@ -651,11 +652,11 @@ internal sealed partial class MainWindow : Window
 
         if (confirmed)
         {
-            card.AcceptAgentsMdTemplate(templateContent);
+            await card.AcceptAgentsMdTemplateAsync(templateContent);
         }
         else
         {
-            card.DeclineAgentsMdTemplate();
+            await card.DeclineAgentsMdTemplateAsync();
         }
     }
 

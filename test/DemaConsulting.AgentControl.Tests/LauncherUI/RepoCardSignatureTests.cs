@@ -212,7 +212,7 @@ public sealed class RepoCardSignatureTests : IDisposable
     private string CreateRepoWithPin()
     {
         var repo = CreateTempDirectory();
-        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        HeadlessTestApp.RunOffUiThread(() => RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" }));
         return repo;
     }
 

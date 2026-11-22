@@ -76,6 +76,9 @@ no network. Otherwise standard test environment, with no external services or ha
   freshly downloaded or already cached - accepts a validly signed one, honors the pinned author fingerprint, is not
   influenced by the user's own trusted-signer settings, reports a refusal as a signature failure and, where the
   platform cannot verify signatures, refuses to list or supply rather than skip the check.
+- The configured sources never make the thread that asks wait: listing and acquiring through the registry from a
+  thread guarded against blocking calls refuses nothing there, and the acquired package's identity is already known.
+- Hashing a package's or a repo's files on a thread guarded against blocking calls is refused and recorded.
 
 ### Test Scenarios
 
@@ -422,3 +425,18 @@ listing is refused with advice before any other command ran. This part is tested
 `AgentControl-AgentPackageManagement-GitSourceFailureReporting` (children: the
 `AgentControl-GitSourceProvider-Failure*`, `-UntrustedHostKeyHint`, `-CancellationObserved` and `-MinimumGitVersion*`
 requirements).
+
+**AgentPackageManagementSubsystem_ConfiguredSources_FromGuardedThread_NeverBlockTheCaller**: A zip folder source made by
+`PackageSourceRegistry.Create` is listed and its package acquired from a thread guarded against blocking calls (the
+per-thread record read before each `await`), and the acquired package's identity is read on that thread: nothing is
+refused, and the identity equals the one computed independently from the package's files. This scenario is tested by
+`AgentPackageManagementSubsystem_ConfiguredSources_FromGuardedThread_NeverBlockTheCaller`, covering
+`AgentControl-AgentPackageManagement-SourcesNeverBlockCaller` (child:
+`AgentControl-PackageSourceRegistry-ReadsOffCallerThread`).
+
+**AgentPackageManagementSubsystem_PackageHash_OnGuardedThread_IsRefused**: On a guarded thread, reading a zip
+package's identity and hashing a repo's installed files both throw `BlockingCallOnGuardedThreadException` and are
+recorded; on an ordinary thread the same package is identified with the independently computed identity. This scenario
+is tested by `AgentPackageManagementSubsystem_PackageHash_OnGuardedThread_IsRefused`, covering
+`AgentControl-AgentPackageManagement-HashRefusedOnGuardedThread` (child:
+`AgentControl-PackageContentIdentity-RefusesGuardedThread`).

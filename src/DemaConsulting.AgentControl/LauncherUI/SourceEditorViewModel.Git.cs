@@ -385,8 +385,12 @@ internal sealed partial class SourceEditorViewModel
         _testInputVersion = _inputVersion;
         try
         {
-            var provider = _providerFactory(BuildDefinition(forTest: true));
-            var preview = await GetTagPreviewAsync(provider, cancellationToken);
+            // The provider is created and asked on a worker: listing tags starts git, which must
+            // never make the window wait
+            var definition = BuildDefinition(forTest: true);
+            var packageId = EffectiveGitPackageId;
+            var preview = await Task.Run(
+                () => GetTagPreviewAsync(_providerFactory(definition), packageId, cancellationToken), cancellationToken);
             ShowTagPreview(preview);
         }
         catch (OperationCanceledException)
@@ -412,17 +416,21 @@ internal sealed partial class SourceEditorViewModel
     ///     Gets the tag preview from a provider: the provider's own when it can preview, otherwise
     ///     one made from its list of versions.
     /// </summary>
+    /// <remarks>Touches no view-model state, so it runs on a worker thread.</remarks>
     /// <param name="provider">The provider the test runs through.</param>
+    /// <param name="packageId">The package name the source's versions are listed for, when the
+    ///     provider cannot preview.</param>
     /// <param name="cancellationToken">Cancels the listing.</param>
     /// <returns>The preview.</returns>
-    private async Task<GitTagPreview> GetTagPreviewAsync(IPackageSourceProvider provider, CancellationToken cancellationToken)
+    private static async Task<GitTagPreview> GetTagPreviewAsync(
+        IPackageSourceProvider provider, string packageId, CancellationToken cancellationToken)
     {
         if (provider is IGitTagPreview previewing)
         {
-            return await previewing.PreviewAsync(cancellationToken);
+            return await previewing.PreviewAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        var versions = await provider.ListVersionsAsync(EffectiveGitPackageId, cancellationToken);
+        var versions = await provider.ListVersionsAsync(packageId, cancellationToken).ConfigureAwait(false);
         return new GitTagPreview(versions.Count, [.. versions.OrderByDescending(package => package.Version)], 0, []);
     }
 

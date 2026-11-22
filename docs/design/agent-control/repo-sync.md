@@ -210,10 +210,21 @@ passes `IsOpenableUrl`; the code-behind checks again) is rendered as an inline `
 (`Button.link` in `AppStyles.axaml`: the theme-aware `LinkForeground`, underlined, a focus ring on keyboard
 focus), so it is focusable and Enter or Space activates it like a click, with the full address as its
 tooltip. Activating it calls `OpenLinkAsync`, which re-checks the address, hands the exact string to an
-injectable opener (the platform launcher, `TopLevel.Launcher`, so no shell is involved; tests pass their own),
-and turns any failure into a logged warning and a message box instead of an exception
-(`AgentControl-RepoSync-ReleaseNotesLinks`). Without a click handler, or for an address that fails the gate,
+injectable opener and turns any failure into a logged warning and a message box instead of an exception
+(`AgentControl-RepoSync-ReleaseNotesLinks`). The default opener, `ReleaseNotesViewer.OpenInBrowserAsync`, hands the
+address (as `Uri.AbsoluteUri`) to the operating system's shell as the file name of a `ProcessStartInfo` with
+`UseShellExecute = true` - the default handler of web addresses, never as command text - inside `Task.Run`, so the
+window never waits while the browser starts; the start asks `BlockingCallGuard` first, so a start that slips back
+onto the UI thread fails the headless tests. A browser that takes the address over without a new process returns no
+process, which is not a failure; only an exception is. It replaces Avalonia's `TopLevel.Launcher`, whose Windows
+implementation starts the shell on the calling (UI) thread. Tests pass their own opener, or their own start
+delegate to `OpenInBrowserAsync`. Without a click handler, or for an address that fails the gate,
 a link run is drawn as ordinary text.
+
+**Never on the UI thread** (`AgentControl-RepoSync-RefusesGuardedThread`). An extraction deletes and writes every
+agent file of a repo, so `RepoCardViewModel` runs it (and the `.gitignore` update, the release-notes and `AGENTS.md`
+template reads that follow) on worker threads. `PackageContentExtractor.Extract` asks `BlockingCallGuard` before it
+does anything, so an extraction that slips back onto a thread the tests guard fails them before the repo is touched.
 
 `GitIgnoreEnsurer` runs from `RepoCardViewModel` rather than from inside
 `PackageZipExtractor.Extract` itself: `Extract` stays a pure file-sync operation with a single

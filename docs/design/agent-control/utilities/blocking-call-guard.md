@@ -66,6 +66,13 @@ The guard points - the code that asks before it blocks:
 
 - **GitClient** (`GitIntegration`) - before every git process it starts, and before the `.git/HEAD` read of
   `GetCurrentBranch`.
+- **SettingsStore** (`Settings`) - before every `Save`.
+- **RepoPinStore** (`RepoConfig`) - before every pin read and write.
+- **PackageContentIdentity** (`AgentPackageManagement`) - before every package or installed-files hash.
+- **PackageContentExtractor** (`RepoSync`) - before every extraction.
+- **GitRemoteClient** and **GitCredentialClient** (`GitIntegration`) - before every git process they start (both
+  start it on a worker, so the guard catches a start that slips back onto the caller's thread).
+- **ReleaseNotesViewer** (`RepoSync`) - before the shell start of a release-notes link (made on a worker).
 
 The tests that enable it:
 
@@ -74,7 +81,9 @@ The tests that enable it:
 - **HeadlessTestApp** (the headless window tests' session) - marks the session's UI thread guarded for the life of the
   test process and, after every `Run`/`RunAsync`, drains the thread's record on that thread and fails the test when it
   holds anything, so a git command made on the UI thread by any headless test fails it.
-- **RepoCardViewModelTests** - a scope around the synchronous part of a Refresh.
+- **RepoCardViewModelTests** - scopes around the synchronous part of a Refresh, a launch, an upgrade and the AGENTS.md
+  answer, and headless runs of an upgrade check, an upgrade and a launch with a restore.
+- The unit and subsystem tests of the guard points above, and the tests of the package source decorator, the source
+  editor and the release-notes link - scopes around a call that must start its blocking work on another thread.
 
-The guard is designed so that later work can add guard points (the settings save, the pin file, package hashing and
-extraction, the remote git and credential helper processes).
+`SettingsStore.Load` is deliberately not a guard point: it runs once, before the window exists.

@@ -147,6 +147,17 @@ plus **PackageVersionCache.Invalidate**.
 
 ### Design
 
+**Never on the caller's thread** (`AgentControl-AgentPackageManagement-SourcesNeverBlockCaller`,
+`AgentControl-AgentPackageManagement-HashRefusedOnGuardedThread`). The launcher asks the sources from its UI thread,
+and every built-in provider does real work before its first true wait (cache checks, folder creation, a git start,
+the NuGet library's configuration load, a zip open), and an acquired package's identity is a hash of every file.
+`PackageSourceRegistry.Create` therefore wraps each built-in provider in `BackgroundPackageSourceProvider`, which runs
+every call on the thread pool and computes an acquired package's `ContentIdentity` there before handing the reader
+over; the readers remember it, so later reads cost nothing. `PackageContentIdentity` asks `BlockingCallGuard` before it
+hashes, so a hash that slips back onto a thread the tests guard fails them instead of passing silently as "no
+identity". The source editor, which needs the Git provider's own tag preview, creates its providers itself and runs
+them on a worker of its own.
+
 **Source model.** A configured source is a `PackageSourceDefinition`: a unique case-insensitive
 `Alias`, a `Type` (`Zip`, `NuGet` or `Git`), a `Location`, the `PackageIds` a NuGet
 source offers, the Git-only `TagPattern` and `Subfolder`, and the trust options

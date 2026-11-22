@@ -12,4 +12,7 @@ package AgentControl {
             requirementFiles = ("docs/reqstream/agent-control/repo-config/repo-pin-store.yaml");
         }
     }
+
+    // Asks the blocking-call guard before every pin read and write, so the tests catch one made on the UI thread
+    dependency RepoPinStore to BlockingCallGuard;
 }

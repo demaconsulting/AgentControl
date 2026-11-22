@@ -125,6 +125,15 @@ answered once per origin (an earlier answer is reused while the address is edite
 address changes again, and a failure to answer counts as "no helper"; ticking or clearing **AllowInsecureHttp**
 re-evaluates the address, so an `http` address becomes available (and the helper is asked) when the option is
 ticked. `HelperCheckCompleted` is the task of the latest question, for the view and tests.
+The question runs git, so it is debounced and kept off the UI thread
+(`AgentControl-SourceEditorViewModel-HelperCheckDebounced`): after an edit of the address or of **AllowInsecureHttp**,
+`CheckHelperAsync` first waits `HelperCheckDelay` (400 ms) with `Task.Delay(HelperCheckDelay, _timeProvider, token)`;
+a later edit cancels the token, which ends the waiting (or running) question without an answer, so a burst of
+keystrokes asks once, for the address the typing stopped at. The question asked when the dialog opens (an existing
+server source) does not wait. The store is then asked with `Task.Run(() => store.IsAvailableAsync(origin, token))`, so
+the git start never runs on the UI thread; the answer is applied back on the UI thread. The clock is the optional
+`TimeProvider` constructor parameter (`TimeProvider.System` by default), so tests move time with a
+`FakeTimeProvider`.
 The command does **not** forget anything: it
 raises `ForgetConfirmationRequested` with a question that names the server and says what is removed, and the view
 calls `ForgetSavedSignInAsync` only after the user agrees. A confirmation comes first because the action removes a
@@ -155,8 +164,9 @@ other tags when they apply) and **HasTagPreview** hold the preview of the last t
 **Constructor**: Prepares the dialog.
 
 - *Parameters*: The source kind, the source to edit (or `null` for a new one), a callback telling
-  whether an alias is already configured, whether a new NuGet source is a server, and the provider
-  factory.
+  whether an alias is already configured, whether a new NuGet source is a server, the provider
+  factory, the credential facilities, the platform's signature-verification answer and the clock of the
+  credential-helper question's delay (`TimeProvider`, the system clock when `null`).
 - *Preconditions*: The alias callback is not null.
 - *Postconditions*: The values are seeded from a copy of the edited source, which is never
   modified; a new editor starts with empty values and `CanSave` false.
@@ -199,6 +209,11 @@ are no longer in the dialog; after the edit the dialog shows no result and the t
 requirements `-TestConnectionAvailability`, `-TestConnection`, `-TestConnectionProgress`, `-TestConnectionCancel`,
 `-TestConnectionSuccess`, `-TestConnectionPackageNotFound`, `-TestConnectionFailureReasons` and
 `-TestConnectionOtherFailures`, each prefixed `AgentControl-SourceEditorViewModel`.
+The definition is built on the UI thread; the provider is then created and asked inside
+`Task.Run(() => _providerFactory(definition).ListVersionsAsync(...))`, so the provider's synchronous work (its
+configuration and cache folders, the NuGet library, a git start) never runs on the UI thread; the outcome is applied
+back on it (`AgentControl-SourceEditorViewModel-TestConnectionOffUiThread`). The editor's providers are not wrapped in
+the registry's `BackgroundPackageSourceProvider`: the Git preview needs the provider's own `IGitTagPreview`.
 
 **Git validation and saving** (`SourceEditorViewModel.Git.cs`): For a Git source the address is first judged by
 `PackageSourceDefinition.GetCredentialProblem` (a password or token in it has its own message) and then by
@@ -228,6 +243,9 @@ of versions and the newest; when none matches, *No matching tags* with the tag n
 safe names only) and a hint to check the prefix and the capitalization, or, when the repository has no tags at all,
 that it has none yet and how to create one (`AgentControl-SourceEditorViewModel-GitTestConnection`, `-GitTestRuns`,
 `-GitTestDefaultProvider`, `-GitTagPreview`, `-GitTagPreviewNoMatch`, `-GitTagPreviewNoTags`).
+As for a NuGet source, the provider is created and the preview obtained inside `Task.Run` (the static
+`GetTagPreviewAsync`, given the package name read on the UI thread), so listing the tags never starts git on the UI
+thread (`AgentControl-SourceEditorViewModel-TestConnectionOffUiThread`).
 The outcome of a failure is chosen from `PackageSourceAccessException.Kind` - *Sign-in needed*, *Repository not
 found*, *Timed out*, otherwise *Repository unreachable* - with the provider's message; a `GitRemoteException` of kind
 `GitTooOld` is *Git is too old* with its message (the minimum supported Git version is required); any other
@@ -261,15 +279,15 @@ preview, so a stale "Connection OK" or tag list never sits beside an edited patt
 `ForgetConfirmationRequested`; does nothing when unavailable, which includes an address that is not acceptable for
 saving the source (`AgentControl-SourceEditorViewModel-ForgetConfirmation`).
 
-**ForgetSavedSignInAsync**: Called by the view after the user confirmed; does nothing when "Forget saved sign-in"
-is not available (an address that is not acceptable for saving the source never reaches the credential helper or
-the store). First clears the last connection-test
-result (it reported a connection made with the sign-in that is about to go). Asks
-`PackageCredentialContext.ForgetSavedSignInAsync` to forget the server's sign-in (the session's copy and the one
-saved in the user's credential store) and reports the outcome in words: "The saved sign-in for {server} was
-forgotten.", "No saved sign-in was found for {server}.", or - when the credential store could not remove it - that
-the credential helper could not remove it and it must be removed with the helper's own tools (for example Windows
-Credential Manager). A failure is reported (with a secret-free message), never thrown
+**ForgetSavedSignInAsync**: Called by the view after the user confirmed; does nothing when "Forget saved sign-in" is not
+available (an address that is not acceptable for saving the source never reaches the credential helper or the store).
+First clears the last connection-test result (it reported a connection made with the sign-in that is about to go). Asks
+`PackageCredentialContext.ForgetSavedSignInAsync`, inside `Task.Run` so the credential helper's git never starts on the
+UI thread (`AgentControl-SourceEditorViewModel-TestConnectionOffUiThread`), to forget the server's sign-in (the
+session's copy and the one saved in the user's credential store) and reports the outcome in words: "The saved sign-in
+for {server} was forgotten.", "No saved sign-in was found for {server}.", or - when the credential store could not
+remove it - that the credential helper could not remove it and it must be removed with the helper's own tools (for
+example Windows Credential Manager). A failure is reported (with a secret-free message), never thrown
 (`AgentControl-SourceEditorViewModel-ForgetResultForgotten`, `-ForgetResultNothingSaved`, `-ForgetResultNotRemoved`;
 availability: `-ForgetSavedSignIn`, `-ForgetAcceptableAddressOnly`, `-ForgetUnavailableExplained`, `-ForgetChecking`).
 
@@ -301,6 +319,7 @@ credential.
   (`PackageCredentials` subsystem) — forgetting a saved sign-in and secret-free messages.
 - **RelayCommand**, **AsyncRelayCommand**, **ConnectionTestResultKind** (`LauncherUI` subsystem, shared
   MVVM support) — back the commands and describe the test outcome.
+- **.NET BCL** — `TimeProvider` (the clock of the helper-question delay) and `Task.Run`.
 
 #### Callers
 

@@ -1362,7 +1362,9 @@ sections:
       - id: AgentControl-System-ResponsiveOperations
         title: >-
           The tool shall never open a sign-in dialog for package-source work the user did not
-          start, telling the user on the repo's card that a sign-in is needed instead.
+          start, telling the user on the repo's card that a sign-in is needed instead, and shall
+          stay usable while package sources are read, packages are applied or verified, an agent
+          tool is launched and a package source is edited or tested.
         tags: [system]
         justification: |
           Package sources are often network shares or servers that can be slow or offline, and
@@ -1381,6 +1383,9 @@ sections:
           - AgentControl-LauncherUI-SourceFailureIsolation
           - AgentControl-LauncherUI-RetryFailedRead
           - AgentControl-LauncherUI-StaleResultsDiscarded
+          - AgentControl-LauncherUI-PackageWorkNeverBlocks
+          - AgentControl-AgentPackageManagement-SourcesNeverBlockCaller
+          - AgentControl-GitIntegration-NoBlockingStart
         tests:
           # End to end: the background upgrade check of a repo pinned to a server that needs a
           # sign-in opens no dialog and the card says a sign-in is needed.

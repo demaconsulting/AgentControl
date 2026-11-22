@@ -30,6 +30,8 @@ N/A - standard test environment; no external services or hardware required.
   an older pin file names is read only as a hint and is not written back, and unknown properties survive.
 - A pin file of a newer schema version than the application writes is never interpreted or overwritten, loading it and
   saving over it both fail with advice to update, and the file is left byte for byte unchanged.
+- A pin is never read or written on a thread guarded against blocking calls: both are refused and recorded and the
+  pin is left as it was.
 
 ### Test Scenarios
 
@@ -92,3 +94,9 @@ tested by `RepoConfig_NewerSchemaPin_IsRefusedWithAdviceAndNeverOverwritten` in 
 `AgentControl-RepoConfig-PinSchemaVersion` (child: `AgentControl-RepoPinStore-SchemaVersion4`). The unit-level tests
 (including a newer-schema file whose known property has another type, and the schema probe) are those of
 `AgentControl-RepoPinStore-RejectNewerSchema`.
+
+**RepoConfigSubsystem_PinOnGuardedThread_IsRefusedAndLeftUntouched**: On a guarded thread, reading and writing a
+repo's pin both throw `BlockingCallOnGuardedThreadException` and are recorded, and the pin read afterwards on an
+ordinary thread still names the original version. This scenario is tested by
+`RepoConfigSubsystem_PinOnGuardedThread_IsRefusedAndLeftUntouched`, covering
+`AgentControl-RepoConfig-RefusesGuardedThread` (child: `AgentControl-RepoPinStore-RefusesGuardedThread`).

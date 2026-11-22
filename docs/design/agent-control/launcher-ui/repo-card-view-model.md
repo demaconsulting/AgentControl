@@ -35,25 +35,24 @@ chips, and upgrade status" otherwise; the other commands stay disabled
 (`AgentControl-RepoCardViewModel-MissingRepoRecheck`). A refresh that finds the folder again clears `IsMissing`
 and the actions become available again (`AgentControl-RepoCardViewModel-MissingRepoCleared`).
 
-**IsFavorite**, **LastLaunchedUtc**, **PinnedPackageName**, **PinnedPackageVersion**,
-**SupplyingSource**: mirror the corresponding fields on the shared `RecentRepo`/pin file
-(`AgentControl-RepoCardViewModel-Favorite`, `AgentControl-RepoCardViewModel-DisplayInfo`). `IsFavorite` decides the
-section the card is listed in (Favorites, the first one); `LastLaunchedUtc` only records when the repo was last
-launched - it no longer orders the list, which is in the user's own order, but it still feeds the one-time seed of that
-order for an older settings file (`AppSettings.EnsureRepoOrder`).
-`IsFavorite` is the *only* owner of the favorite state: the card's star is a `ToggleButton` whose `IsChecked`
-binds to it two-way and the card has no favorite command. (An earlier design also bound a command that toggled
-the property, so one click flipped the state twice - the toggle itself, then the command - and a repo could
-neither be favorited nor unfavorited.) Setting it changes the shared record and raises `FavoriteChanged` exactly
-once per change, but only after the owner saved the change (see *Changes go through the owner* below); the
-owning `MainWindowViewModel` re-sections the list.
-`SupplyingSource` is the alias of the configured source that is known to supply the pinned files on this machine, or
-`null`: a per-user cache kept in the user's settings (`RecentRepo.PinnedSource`, a historical name), never in the pin
-file, because the pin names no source. It is set whenever a source is resolved (the background check, the restore before
-launch) or a package is applied, cleared when that source is no longer configured or when no source offers the
-package, and is where Select Package and Change package start. The card also keeps, read from the pin by
-`RefreshPin`, the pin's `ContentIdentity` (what a source's files are verified against) and `_pinLegacySource`, the
-`Source` an older version recorded in the file (`RepoPin.LegacySource`: a read-time hint, never written back).
+**IsFavorite**, **LastLaunchedUtc**, **PinnedPackageName**, **PinnedPackageVersion**, **SupplyingSource**: mirror the
+corresponding fields on the shared `RecentRepo`/pin file (`AgentControl-RepoCardViewModel-Favorite`,
+`AgentControl-RepoCardViewModel-DisplayInfo`). `IsFavorite` decides the section the card is listed in (Favorites, the
+first one); `LastLaunchedUtc` only records when the repo was last launched - it no longer orders the list, which is in
+the user's own order, but it still feeds the one-time seed of that order for an older settings file
+(`AppSettings.EnsureRepoOrder`). `IsFavorite` is the *only* owner of the favorite state: the card's star is a
+`ToggleButton` whose `IsChecked` binds to it two-way and the card has no favorite command. (An earlier design also bound
+a command that toggled the property, so one click flipped the state twice - the toggle itself, then the command - and a
+repo could neither be favorited nor unfavorited.) Setting it changes the shared record and raises `FavoriteChanged`
+exactly once per change, but only after the owner saved the change (see *Changes go through the owner* below); the
+owning `MainWindowViewModel` re-sections the list. `SupplyingSource` is the alias of the configured source that is known
+to supply the pinned files on this machine, or `null`: a per-user cache kept in the user's settings
+(`RecentRepo.PinnedSource`, a historical name), never in the pin file, because the pin names no source. It is set
+whenever a source is resolved (the background check, the restore before launch) or a package is applied, cleared when
+that source is no longer configured or when no source offers the package, and is where Select Package and Change package
+start. The card also keeps, read from the pin by the background cheap read and after an apply (`ApplyPin`), the pin's
+`ContentIdentity` (what a source's files are verified against) and `_pinLegacySource`, the `Source` an older version
+recorded in the file (`RepoPin.LegacySource`: a read-time hint, never written back).
 
 **Changes go through the owner** (`AgentControl-RepoCardViewModel-ChangeSavedBeforeApplied`): the constructor takes
 an optional `commitChange` callback, `Func<RecentRepo, Action<RecentRepo>, bool>`. The card never assigns to its
@@ -74,6 +73,21 @@ of the entry as well.
 meaning the real ones) to every card it creates. They exist so tests can capture a launch without starting a shell
 (`AgentControl-RepoCardViewModel-KeepShellOpen`).
 
+**Action work off the UI thread** (`AgentControl-RepoCardViewModel-ActionIoInBackground`): **_backgroundWork**
+(`IBackgroundWorkRunner`, from the optional constructor parameter `backgroundWork`; `null` means
+`ThreadPoolBackgroundWorkRunner.Instance`, and `MainWindowViewModel` passes its own) runs the disk, hashing and
+process work of the card's actions: the pin reads of the launch check, the restore and the apply
+(`LoadPinForComparisonAsync`, `LoadExistingPinForApply`), the folder check of an older pin before a launch, the
+content identity of an acquired package (read on the worker after every `AcquireAsync` of the card - free when the
+registry's decorator already computed it, the hash itself when a provider computes it lazily), the
+`.gitignore`/pin/release-notes step of an apply (`WriteAppliedPackage`), the AGENTS.md offer check
+(`FindAgentsMdTemplateToOffer`), the AGENTS.md answer (`WriteAgentsMdTemplate` and the decline's pin write), and the
+shell detection and process start of a launch. Each step is a static method or a closure over values read on the UI
+thread first (the repo path, the settings, the pinned package) that touches no view-model state and returns an
+immutable result; the outcome is applied on the UI thread after the `await`. Tests pass a gated runner to prove
+that nothing is applied while the work is held and that the calling thread made no blocking call. The extraction, the
+pull, the git tracking steps, `HasInstalledFiles` and the installed-files hash keep their own `Task.Run`.
+
 **Refresh queue**: the optional constructor parameter `refreshQueue` (`RepoRefreshQueue`, see its own design) is the
 queue every read of the card's repo state goes through - its cheap facts and its `git status` - so that across all
 cards at most two reads run at once. `MainWindowViewModel` hands its one shared queue to every card; a card created
@@ -92,7 +106,7 @@ constructor parameter `gitTimeouts`, `null` meaning `GitClientTimeouts.Default`)
 last put in `StatusMessage`, so a later read that gets an answer removes it again
 (`AgentControl-RepoCardViewModel-GitTimeoutShown`). **_cheapRefreshGeneration** and
 **_gitStatusGeneration** (`int`) number the most recent cheap read and working-tree check: every synchronous refresh,
-every direct pin re-read (`RefreshPin`, `RefreshGitStatus`), every read queued through the refresh queue,
+every pin applied after an apply, every direct `RefreshGitStatus`, every read queued through the refresh queue,
 `ApplyCheapFacts`, a missing repo (for the Git status) and `Retire` advance them, and a background read applies its
 answer only while its own number is still the current one, so an older, slower read never overwrites what a newer one
 found. **CheapRefreshTask** and **GitStatusRefreshTask** (internal `Task`, never faulting) are the most recent
@@ -611,7 +625,11 @@ is queued or being read (`EnsureCurrentRepoStateAsync` through `RunOperationAsyn
 the pin are current; a folder that turned out missing launches nothing and says "This repo's folder could not be
 found; nothing was done."), then calls `EnsureAgentFilesSyncedBeforeLaunchAsync`, then resolves the shell/agent command
 and starts the process (through the injected
-`IAgentToolProcessStarter`) unless the outcome is `LaunchCanceled`. The shell is detected by the injected
+`IAgentToolProcessStarter`) unless the outcome is `LaunchCanceled`. `LaunchAgentToolAsync` reads the settings and
+resolves the command on the UI thread, then detects the shell, builds the start information and starts the process
+in one `_backgroundWork` step (a `PATH` probe and a process start, neither of which may freeze the window); a
+failure of that step is reported, and the launch recorded, back on the UI thread
+(`AgentControl-RepoCardViewModel-ActionIoInBackground`). The shell is detected by the injected
 `ShellDetector`; the keep-shell-open setting is read from the live settings at that moment and passed to
 `BuildProcessStartInfo`, so a change applies from the next launch (`AgentControl-RepoCardViewModel-KeepShellOpen`).
 The starter and the detector are optional constructor parameters that default to the real ones, which is what the
@@ -646,8 +664,9 @@ them or asks when they are not.
   3. `PackageContentExtractor.HasInstalledFiles` is `false` (the folders are absent, empty or hold only empty
      folders): silent restore of the pinned package (below), because nothing can be lost. Outcome `Restored`, or a
      failure (below).
-  4. The pin records no files identity (an older pin, or a legacy `sha256:` identity): there is nothing to compare.
-     When all four folders exist (`PackageZipExtractor.AllManagedFoldersExist`) the launch proceeds with no package
+  4. The pin records no files identity (an older pin, or a legacy `sha256:` identity; the pin is read on a worker):
+     there is nothing to compare. When all four folders exist (`PackageZipExtractor.AllManagedFoldersExist`, asked on a
+     worker) the launch proceeds with no package
      access and `StatusMessage` says the files cannot be verified (`Skipped`); when a folder is missing the package is
      restored silently (`Restored`, or a failure).
   5. The pin records a files identity: `PackageContentIdentity.ComputeInstalledFilesIdentity` hashes the managed
@@ -684,7 +703,7 @@ them or asks when they are not.
 - *Restore* (`RestorePinnedFilesAsync`): asks the configured sources which offer the *currently pinned* package and
   version (never the latest; `GetVersionsAcrossSourcesAsync` over all sources, the card's last supplier tried first,
   otherwise Settings order), deletes and re-extracts it directly via `PackageContentExtractor.Extract` over the reader
-  the chosen provider returns, without displaying release notes but still calling `MaybeOfferAgentsMdTemplate`.
+  the chosen provider returns, without displaying release notes but still calling `MaybeOfferAgentsMdTemplateAsync`.
   Existing caches are reused; nothing is forced to download again, and a package is obtained only on this path. It
   returns a `RestoreResult` (succeeded, or a plain-language reason plus the passive sentence below). The source is
   chosen by the identity the pin recorded (see *Portable pins*): with a files identity, the candidates are acquired in
@@ -783,35 +802,33 @@ user-selected package at the chosen source and applies it via `ApplyPackageAndSh
   (`AgentControl-RepoCardViewModel-ConfirmChangedContent`, `-ApplyConfirmedContent`). With no subscriber there is nobody
   to ask, so the change is refused with `ErrorOccurred` instead (`-RefuseChangeWithoutAsking`).
 
-**ApplyPackageAndShowReleaseNotesAsync** (private): Shared extract-and-pin sequence reused by
-`Upgrade` and `ApplySelectedPackageAsync`: first loads the repo's existing pin (a newer-schema pin
-aborts here with its actionable message while the repo is still untouched; a corrupt one is
-tolerated and replaced), then - before anything is acquired - asks git which managed folders are tracked and, if
-any are, asks the user (see **Converting committed agent files** below), acquires the package from its provider,
-compares the acquired content's identity with the
-pin's when the pin is for this very package version, from any source (`ContentChangedSincePinned`; the files
-identity does not depend on the source, so the same version from another source is compared too; a different
-version, a pin without an identity and a reader without one are never a change) and, on a change, applies the requested
-`ContentChangeHandling` before anything is touched - `Refuse` (Upgrade: log a warning, `ErrorOccurred` saying the
-package may have been republished, that nothing was changed and that "Change package..." accepts it, without a hash
-or any advice to edit the pin file;
+**ApplyPackageAndShowReleaseNotesAsync** (private): Shared extract-and-pin sequence reused by `Upgrade` and
+`ApplySelectedPackageAsync`: first loads the repo's existing pin (a newer-schema pin aborts here with its actionable
+message while the repo is still untouched; a corrupt one is tolerated and replaced), then - before anything is
+acquired - asks git which managed folders are tracked and, if any are, asks the user (see **Converting committed agent
+files** below), acquires the package from its provider, compares the acquired content's identity with the pin's when the
+pin is for this very package version, from any source (`ContentChangedSincePinned`; the files identity does not depend
+on the source, so the same version from another source is compared too; a different version, a pin without an identity
+and a reader without one are never a change) and, on a change, applies the requested `ContentChangeHandling` before
+anything is touched - `Refuse` (Upgrade: log a warning, `ErrorOccurred` saying the package may have been republished,
+that nothing was changed and that "Change package..." accepts it, without a hash or any advice to edit the pin file;
 `AgentControl-RepoCardViewModel-RefuseChangedContent`, `-RefuseChangedContentMessage`), `Ask` (Select Package / Change
-package: raise
-`ContentChangeConfirmationRequested`, return) or `Accept` (the user already confirmed: log and continue); then, for
-a repo whose managed folders are tracked and whose conversion the user confirmed, stops git tracking them
-immediately before it extracts the package
-(blind-delete-and-replace), proactively ensures the repo's `.gitignore` covers the four managed
-agent folders (via `EnsureGitIgnoreCoversManagedFolders`, its own non-blocking step — see Error
-Handling), updates the loaded pin in place with the package's name, version and content identity (replacing whatever
-was recorded before, including nothing or an older kind of
-identity, `AgentControl-RepoCardViewModel-RecordContentIdentity`) and
-saves it (so `AgentsMdTemplateDeclined` and any unknown fields are preserved; a `Source` or `SourceRevision` an older
-file carried is dropped by the save), makes the applied source the card's supplier, refreshes
-pin/upgrade-status properties, calls `MaybeOfferAgentsMdTemplate` and finally raises
-`ReleaseNotesReady` with the new package's release notes. The offer is raised *before* the release notes so
-the view can show the modal question at once and hold the release notes back until it is answered
-(`MainWindow.ShowReleaseNotesAsync`): the notes window then opens in front as the completion of the upgrade
-instead of being covered by, or lost behind, the question
+package: raise `ContentChangeConfirmationRequested`, return) or `Accept` (the user already confirmed: log and continue);
+then, for a repo whose managed folders are tracked and whose conversion the user confirmed, stops git tracking them
+immediately before it extracts the package (blind-delete-and-replace), updates the loaded pin in place with the
+package's name, version and content identity (replacing whatever was recorded before, including nothing or an older kind
+of identity, `AgentControl-RepoCardViewModel-RecordContentIdentity`), and then, in one worker step
+(`WriteAppliedPackage`), proactively ensures the repo's `.gitignore` covers the four managed agent folders
+(`GitIgnoreEnsurer.Ensure`; a failure is carried back and reported as a non-blocking `ErrorOccurred`, never aborting the
+steps that follow), saves the pin (so `AgentsMdTemplateDeclined` and any unknown fields are preserved; a `Source` or
+`SourceRevision` an older file carried is dropped by the save), reads the release notes and reads the pin back; a
+failure to save the pin or to read the release notes is carried back and rethrown on the UI thread, after the
+`.gitignore` warning. Back on the UI thread it applies the pin read back (`ApplyPin`, after advancing the cheap-read
+generation so an older background read cannot overwrite it), makes the applied source the card's supplier, refreshes the
+upgrade status, calls `MaybeOfferAgentsMdTemplateAsync` and finally raises `ReleaseNotesReady` with the new package's
+release notes. The offer is raised *before* the release notes so the view can show the modal question at once and hold
+the release notes back until it is answered (`MainWindow.ShowReleaseNotesAsync`): the notes window then opens in front
+as the completion of the upgrade instead of being covered by, or lost behind, the question
 (`AgentControl-RepoCardViewModel-AgentsMdOfferBeforeReleaseNotes`). The acquired package reader stays open until the
 sequence ends.
 
@@ -852,69 +869,63 @@ of everything would record a broken mix. The sequence therefore converts such a 
    into git's index with `GitClient.RestoreAgentFolderTracking` (best effort, logged on failure) before the error is
    reported, so a failed apply never leaves the folders' removal staged and no pin is written
    (`-RestoreTrackingWhenApplyFails`).
-5. *Afterwards*: the extraction, `EnsureGitIgnoreCoversManagedFolders`, the pin write and the release notes run as
-   always. Because git's index changed, a `finally` clause on every way out of the apply awaits
-   `RefreshGitStateAfterUntrackAsync`: it invalidates the card's `CommittedAgentFilesCache` entry and re-reads, through
-   the queue at `UserAction` while the card is still busy, git's answers about the branch and the committed agent
-   folders (so the "Committed agent files" chip clears - `git ls-files` reads the index) and the working tree (so the
-   "Uncommitted changes" chip shows, expectedly). On success `StatusMessage` is the usual success message followed by a
-   sentence saying the agent folders are no longer tracked by git and that committing the change (the deletions,
-   `.gitignore` and `.agentcontrol.json`) finishes it (`-ConvertedRepoStatus`).
+5. *Afterwards*: the extraction, the `.gitignore`, the pin write and the release notes run as always. Because git's
+   index changed, a `finally` clause on every way out of the apply awaits `RefreshGitStateAfterUntrackAsync`: it
+   invalidates the card's `CommittedAgentFilesCache` entry and re-reads, through the queue at `UserAction` while the
+   card is still busy, git's answers about the branch and the committed agent folders (so the "Committed agent files"
+   chip clears - `git ls-files` reads the index) and the working tree (so the "Uncommitted changes" chip shows,
+   expectedly). On success `StatusMessage` is the usual success message followed by a sentence saying the agent folders
+   are no longer tracked by git and that committing the change (the deletions, `.gitignore` and `.agentcontrol.json`)
+   finishes it (`-ConvertedRepoStatus`).
 
 Launch behavior is unchanged: `EnsureAgentFilesSyncedBeforeLaunchAsync` still skips the sync for a repo whose badge
 shows committed agent files and never converts anything.
 
-**MaybeOfferAgentsMdTemplate** (private): Decides whether to offer the package's optional
+**MaybeOfferAgentsMdTemplateAsync** (private): Decides whether to offer the package's optional
 root-level `AGENTS.md` template, called immediately after every successful extraction in both
 `ApplyPackageAndShowReleaseNotesAsync` and `RestorePinnedFilesAsync` (the restore or update before launch) —
 never as an independent, standing per-launch poll.
 
-- *Parameters*: `IPackageContentReader reader` — the package just successfully extracted.
-- *Returns*: `void`.
-- *Postconditions*: Does nothing if the repo already has a root-level `AGENTS.md` file, or if
-  the repo's pin records a prior decline (`AgentsMdTemplateDeclined == true`), or if the
-  package has no root-level `AGENTS.md`. Otherwise reads the template via
-  `PackageContentExtractor.ReadAgentsMdTemplate` and raises `AgentsMdTemplateOfferRequested` with
-  its content (`AgentControl-RepoCardViewModel-AgentsMdTemplateOffer`).
-- Wrapped in its own non-blocking try/catch, mirroring `EnsureGitIgnoreCoversManagedFolders`:
-  a failure here (e.g. a transient read error) never aborts the pin write, release-notes
-  display, or launch that precede/follow it.
+- *Parameters*: `IPackageContentReader reader` — the package just successfully extracted; `fromLaunchResync`.
+- *Returns*: `Task`, completed once the offer was raised or found not to apply.
+- *Postconditions*: On a worker (`FindAgentsMdTemplateToOffer`), finds nothing to offer if the repo already has a
+  root-level `AGENTS.md` file, or if the repo's pin records a prior decline (`AgentsMdTemplateDeclined == true`), or if
+  the package has no root-level `AGENTS.md`; otherwise reads the template via
+  `PackageContentExtractor.ReadAgentsMdTemplate`. Back on the UI thread it raises `AgentsMdTemplateOfferRequested` with
+  its content (`AgentControl-RepoCardViewModel-AgentsMdTemplateOffer`, `-ActionIoInBackground`).
+- A failure of the check (e.g. a transient read error) is reported through `ErrorOccurred` and never aborts the pin
+  write, release-notes display, or launch that precede/follow it.
 
-**AcceptAgentsMdTemplate**: Writes the user-accepted `AGENTS.md` template to the repo root,
+**AcceptAgentsMdTemplateAsync**: Writes the user-accepted `AGENTS.md` template to the repo root,
 called by the view layer after the user answers "Yes" to the `AgentsMdTemplateOfferRequested`
 prompt.
 
 - *Parameters*: `string templateContent`.
-- *Returns*: `void`.
-- *Postconditions*: Writes `templateContent` verbatim to `AGENTS.md` at the repo root via a
-  create-new (never-overwrite) file write, never into any of the four managed folders
-  (`AgentControl-RepoCardViewModel-AcceptAgentsMdTemplate`). Race-safe against the gap between
-  `MaybeOfferAgentsMdTemplate`'s existence check and this write: opening the file with
+- *Returns*: `Task`, completed once the outcome is shown.
+- *Postconditions*: On a worker (`WriteAgentsMdTemplate`), writes `templateContent` verbatim to `AGENTS.md` at the
+  repo root via a create-new (never-overwrite) file write, never into any of the four managed folders
+  (`AgentControl-RepoCardViewModel-AcceptAgentsMdTemplate`, `-ActionIoInBackground`). Race-safe against the gap
+  between `MaybeOfferAgentsMdTemplateAsync`'s existence check and this write: opening the file with
   `FileMode.CreateNew` is isolated into its own try/catch, separate from the subsequent write,
   so that only a failure to *create* the file (because it already exists) is ever reported as
   the non-destructive "AGENTS.md already exists" outcome; a failure during the write/flush step
   that follows a successful create is always reported via `ErrorOccurred` as a genuine error,
-  never misclassified as a pre-existing file. On success or the non-destructive outcome, logs
-  at `Information`; on a genuine failure, logs at `Error`.
+  never misclassified as a pre-existing file. The worker returns the outcome (`AgentsMdWriteOutcome`) and the
+  exception behind it; the status, the error and the log line (`Information` on success or the non-destructive
+  outcome, `Error` on a genuine failure) are applied on the UI thread.
 
-**DeclineAgentsMdTemplate**: Persists the user's decision not to adopt the template, called by
+**DeclineAgentsMdTemplateAsync**: Persists the user's decision not to adopt the template, called by
 the view layer after the user answers "No".
 
 - *Parameters*: None.
-- *Returns*: `void`.
-- *Postconditions*: Loads the repo's existing pin (or constructs a minimal one from the
-  card's current `PinnedPackageName`/`PinnedPackageVersion` if none exists yet), sets
+- *Returns*: `Task`, completed once the decline was recorded (or not needed) or the failure reported.
+- *Postconditions*: Does nothing for an offer raised by the launch re-sync (which never writes the pin). Otherwise,
+  on a worker, loads the repo's existing pin (or constructs a minimal one from the card's current
+  `PinnedPackageName`/`PinnedPackageVersion`, read on the UI thread first, if none exists yet), sets
   `AgentsMdTemplateDeclined = true`, and saves it via `RepoPinStore.Save`
-  (`AgentControl-RepoCardViewModel-DeclineAgentsMdTemplate`). Never writes an `AGENTS.md` file.
-  This flag is never reset back to `false` by any code path in this class, per the feature's
+  (`AgentControl-RepoCardViewModel-DeclineAgentsMdTemplate`, `-ActionIoInBackground`). Never writes an `AGENTS.md`
+  file. This flag is never reset back to `false` by any code path in this class, per the feature's
   explicit scope — on failure, raises `ErrorOccurred` rather than throwing.
-
-**EnsureGitIgnoreCoversManagedFolders** (private): Best-effort, non-blocking wrapper around
-`GitIgnoreEnsurer.Ensure` called immediately after every successful extraction in
-`ApplyPackageAndShowReleaseNotesAsync`, before the pin-file write. Deliberately wrapped in its own
-try/catch, separate from `ApplyPackageAndShowReleaseNotesAsync`'s outer catch, so a `.gitignore` I/O
-failure can never abort the pin write or release-notes display that follow it — mirroring the
-non-blocking idiom already established by `EnsureAgentFilesSyncedBeforeLaunchAsync`.
 
 **SelectPackage** (private, bound to `SelectPackageCommand`): Validates at least one package source is configured,
 then raises
@@ -1013,58 +1024,52 @@ presents as "sign-in needed" (`AgentControl-RepoCardViewModel-GitSourceOptions`,
 
 #### Error Handling
 
-`Launch` catches `InvalidOperationException`/`ArgumentException` from
-`AgentToolLauncher.BuildProcessStartInfo` and from the process starter (which reports a process that cannot be
-started as `InvalidOperationException`) and raises `ErrorOccurred`, without recording a launch.
-`EnsureAgentFilesSyncedBeforeLaunchAsync` does not catch the I/O of the hash itself except
-`InvalidOperationException` (a link, an unreadable file or a case collision), which it treats as "the files cannot be
-vouched for" and answers with the Keep/Update question; cancellation propagates as `OperationCanceledException` to
-`Launch`, which launches anyway. `RestorePinnedFilesAsync` catches `InvalidOperationException` (extraction failure, an
-invalid source configuration or a failure of a source), `DirectoryNotFoundException` (unreachable source),
-`IOException` and `UnauthorizedAccessException` (every configured source failing, or the copy into the repo failing)
-and returns a failed `RestoreResult` instead of throwing; `RestoreOrAskAsync` turns that into the "Launch anyway /
-Cancel" question, or - with no subscriber - into a passive `ErrorOccurred` and a launch. `Pull` catches
-`InvalidOperationException` from `GitClient.Pull`
-and reports it via `ErrorOccurred`. `ReadCheapFacts` and `ReadWorkingTreeClean` catch
-`InvalidOperationException` from `GitClient` and degrade to "unknown"/`false` rather than
-propagating, since these run as part of routine, frequent UI refreshes. An action whose promote-and-await step finds
-the card retired, its state still unread (the queue was shut down) or its folder missing does nothing and says so in
-`StatusMessage` rather than raising `ErrorOccurred`: nothing failed, the action no longer applies.
-`ApplyPackageAndShowReleaseNotesAsync` catches `InvalidOperationException` and
+`Launch` catches `InvalidOperationException`/`ArgumentException` from `AgentToolLauncher.BuildProcessStartInfo` and from
+the process starter (which reports a process that cannot be started as `InvalidOperationException`) and raises
+`ErrorOccurred`, without recording a launch. `EnsureAgentFilesSyncedBeforeLaunchAsync` does not catch the I/O of the
+hash itself except `InvalidOperationException` (a link, an unreadable file or a case collision), which it treats as "the
+files cannot be vouched for" and answers with the Keep/Update question; cancellation propagates as
+`OperationCanceledException` to `Launch`, which launches anyway. `RestorePinnedFilesAsync` catches
+`InvalidOperationException` (extraction failure, an invalid source configuration or a failure of a source),
+`DirectoryNotFoundException` (unreachable source), `IOException` and `UnauthorizedAccessException` (every configured
+source failing, or the copy into the repo failing) and returns a failed `RestoreResult` instead of throwing;
+`RestoreOrAskAsync` turns that into the "Launch anyway / Cancel" question, or - with no subscriber - into a passive
+`ErrorOccurred` and a launch. `Pull` catches `InvalidOperationException` from `GitClient.Pull` and reports it via
+`ErrorOccurred`. `ReadCheapFacts` and `ReadWorkingTreeClean` catch `InvalidOperationException` from `GitClient` and
+degrade to "unknown"/`false` rather than propagating, since these run as part of routine, frequent UI refreshes. An
+action whose promote-and-await step finds the card retired, its state still unread (the queue was shut down) or its
+folder missing does nothing and says so in `StatusMessage` rather than raising `ErrorOccurred`: nothing failed, the
+action no longer applies. `ApplyPackageAndShowReleaseNotesAsync` catches `InvalidOperationException` and
 `DirectoryNotFoundException`, raising `ErrorOccurred` without applying a partial pin update (a failure of
-`GitClient.UntrackAgentFolders` is rethrown with an explanation that nothing was changed and so stops the apply
-before any file is replaced; a git that cannot answer the fresh tracking check is treated as "nothing tracked");
-its
-read of a prior pin's `AgentsMdTemplateDeclined` value is guarded by its own inner try/catch that
-treats an `InvalidOperationException` (corrupt/unreadable existing pin file) as "no persisted
-decline" (defaults to `false`) rather than letting it propagate to the outer catch and abort the
-apply after extraction has already succeeded; the subsequent `RepoPinStore.Save` call's own failure
-handling is unchanged. `EnsureGitIgnoreCoversManagedFolders` catches `InvalidOperationException`
-from `GitIgnoreEnsurer.Ensure` separately, in its own nested try/catch, raising `ErrorOccurred` as a
-non-blocking warning without ever propagating — a `.gitignore` I/O failure never aborts the pin
-write or release-notes display. `MaybeOfferAgentsMdTemplate` catches
-`InvalidOperationException`/`ArgumentException`/`NotSupportedException` (covering both
-`PackageZipExtractor.ReadAgentsMdTemplate` and `PathHelpers.SafePathCombine` failure modes) in its
-own non-blocking try/catch, logging nothing further and never propagating. `AcceptAgentsMdTemplate`
-writes via `FileMode.CreateNew` in a step isolated from the subsequent write/flush; only that
-creation step's `IOException` is guarded by a check that the target file now exists (another
-user/process created it after the offer was raised but before this call ran) to report a
-non-destructive, informational `StatusMessage` rather than an error. A failure during the
-write/flush step that follows a successful create is always a genuine error (e.g. disk full) and is
-never misreported as "already exists", since it is handled by a separate, later catch. Any
-`IOException`/`UnauthorizedAccessException`/ `ArgumentException`/`NotSupportedException` from either
-step (other than the guarded create-time "already exists" case) raises `ErrorOccurred` rather than
-throwing (it never calls `RepoPinStore`, so `InvalidOperationException` cannot occur on this path).
-`DeclineAgentsMdTemplate` catches those same four exception types plus `InvalidOperationException`
-from `RepoPinStore.Load`/`Save` and likewise raises `ErrorOccurred` rather than throwing. The
-constructor throws `ArgumentNullException` for a null `recentRepo`, `getSettings`, or
-`packageVersionCache`. `ApplySelectedPackageAsync` throws `ArgumentNullException` for a null
-`selection`. `MoveToGroup` and `SetCardColor` never throw: a name that is not valid, or not a palette color, is
-refused by returning `false` and changing nothing, and stored values that are missing, blank or unknown read as
-"no group" and the automatic color (`GroupName` is sanitized on every read). A change the owner could not save is not
-an exception either: the owner reports it to the user, the callback returns `false`, and the card stays as it was
-(`MoveToGroup` and `SetCardColor` return `false` for it, as for a refused name). The picture refresh never faults the
-background task, and a retired card raises nothing.
+`GitClient.UntrackAgentFolders` is rethrown with an explanation that nothing was changed and so stops the apply before
+any file is replaced; a git that cannot answer the fresh tracking check is treated as "nothing tracked"); its read of a
+prior pin (`LoadExistingPinForApply`, on a worker) treats an `InvalidOperationException` (corrupt/unreadable existing
+pin file) as "no pin, no persisted decline" rather than letting it propagate to the outer catch, while a pin of a newer
+schema (`UnsupportedPinSchemaException`) still stops the apply before the repo is touched; a `RepoPinStore.Save` or
+release-notes read failure in `WriteAppliedPackage` is carried back and rethrown on the UI thread, so its handling is
+unchanged. `WriteAppliedPackage` catches `InvalidOperationException` from `GitIgnoreEnsurer.Ensure` in its own nested
+try/catch and carries the message back, where it is raised through `ErrorOccurred` as a non-blocking warning before a
+pin save failure is rethrown - a `.gitignore` I/O failure never aborts the pin write or release-notes display.
+`MaybeOfferAgentsMdTemplateAsync` catches `InvalidOperationException`/`ArgumentException`/`NotSupportedException`
+(covering both `PackageZipExtractor.ReadAgentsMdTemplate` and `PathHelpers.SafePathCombine` failure modes) from its
+worker step, raising `ErrorOccurred` and never propagating. `AcceptAgentsMdTemplateAsync` writes via
+`FileMode.CreateNew` in a step isolated from the subsequent write/flush; only that creation step's `IOException` is
+guarded by a check that the target file now exists (another user/process created it after the offer was raised but
+before this call ran) to report a non-destructive, informational `StatusMessage` rather than an error. A failure during
+the write/flush step that follows a successful create is always a genuine error (e.g. disk full) and is never
+misreported as "already exists", since it is handled by a separate, later catch. Any
+`IOException`/`UnauthorizedAccessException`/ `ArgumentException`/`NotSupportedException` from either step (other than
+the guarded create-time "already exists" case) raises `ErrorOccurred` rather than throwing (it never calls
+`RepoPinStore`, so `InvalidOperationException` cannot occur on this path). `DeclineAgentsMdTemplateAsync` catches those
+same four exception types plus `InvalidOperationException` from `RepoPinStore.Load`/`Save` and likewise raises
+`ErrorOccurred` rather than throwing. The constructor throws `ArgumentNullException` for a null `recentRepo`,
+`getSettings`, or `packageVersionCache`. `ApplySelectedPackageAsync` throws `ArgumentNullException` for a null
+`selection`. `MoveToGroup` and `SetCardColor` never throw: a name that is not valid, or not a palette color, is refused
+by returning `false` and changing nothing, and stored values that are missing, blank or unknown read as "no group" and
+the automatic color (`GroupName` is sanitized on every read). A change the owner could not save is not an exception
+either: the owner reports it to the user, the callback returns `false`, and the card stays as it was (`MoveToGroup` and
+`SetCardColor` return `false` for it, as for a refused name). The picture refresh never faults the background task, and
+a retired card raises nothing.
 
 #### Dependencies
 
@@ -1095,8 +1100,8 @@ background task, and a retired card raises nothing.
   identity.
 - **GitIgnoreEnsurer** (`RepoSync` subsystem) — proactively ensures the repo's `.gitignore`
   covers the four managed agent folders after a successful extraction.
-- **PathHelpers** (`Utilities` subsystem) — used by `MaybeOfferAgentsMdTemplate` and
-  `AcceptAgentsMdTemplate` to safely combine the repo root with the fixed `AGENTS.md`
+- **PathHelpers** (`Utilities` subsystem) — used by `FindAgentsMdTemplateToOffer` and
+  `WriteAgentsMdTemplate` to safely combine the repo root with the fixed `AGENTS.md`
   filename before any read or write.
 - **GitClient**, **CommittedAgentFilesCache** (`GitIntegration` subsystem) — git status,
   branch, and committed-files queries (made on worker threads by the background reads; the cache is safe for
@@ -1105,7 +1110,8 @@ background task, and a retired card raises nothing.
 - **RepoRefreshQueue** (`LauncherUI`) — the shared queue its cheap facts and working-tree checks go through, two
   reads at a time across all cards.
 - **IBackgroundWorkRunner** / **ThreadPoolBackgroundWorkRunner** (`LauncherUI` supporting type,
-  `BackgroundWorkRunner.cs`) — the runner under a card's private refresh queue (a card created without the shared one).
+  `BackgroundWorkRunner.cs`) — runs the disk, hashing and process work of the card's actions, and is the runner under a
+  card's private refresh queue (a card created without the shared one).
 - **CommittedFilesConversionRequest** (`LauncherUI`, own file) — carries the conversion question to the view layer
   and the answer back to the waiting operation.
 - **AgentFilesChoiceRequest**, **AgentFilesSyncOutcome** (`LauncherUI`, own file `AgentFilesChoiceRequest.cs`) —
@@ -1143,6 +1149,7 @@ background task, and a retired card raises nothing.
   `CommittedFilesConversionRequested` (answered through a modal `ConfirmationWindow`), `AgentFilesChoiceRequested`
   (answered through a modal `ConfirmationWindow` with the request's own button labels), and `ErrorOccurred` to drive
   dialogs/windows (detaching these handlers when a card leaves the list), calling
-  `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the `ConfirmationWindow` shown for the AGENTS.md template
+  and awaiting `AcceptAgentsMdTemplateAsync`/`DeclineAgentsMdTemplateAsync` from the `ConfirmationWindow` shown for
+  the AGENTS.md template
   offer, `MoveToGroup` from the card menu's "Move to group" entries and the name prompt, and `SetCardColor` from the
   color palette pop-up.

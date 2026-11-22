@@ -1655,3 +1655,20 @@ sections:
         tests:
           - RepoCardViewModel_Pull_AfterPull_RefreshEnqueuedAtUserAction
           - RepoCardViewModel_ApplyPackage_UntrackedFolders_RefreshesThroughQueue
+
+      - id: AgentControl-RepoCardViewModel-ActionIoInBackground
+        title: >-
+          The RepoCardViewModel class shall do the disk, hashing and process work of its actions -
+          the pin reads and writes, the identity of an acquired package, the .gitignore and release
+          notes of an apply, the check of the managed folders before a launch, the AGENTS.md offer
+          check, the AGENTS.md answer, the shell detection and the start of the agent tool - off the
+          UI thread, applying the outcome on the UI thread once the work has ended.
+        justification: |
+          Every one of these touches the repo (which can be on a slow or offline share), the package
+          cache or the PATH; done on the window's thread, a slow disk or a large package freezes the
+          window for as long as it takes.
+        tests:
+          - RepoCardViewModel_Launch_ShellAndStartRunInBackground
+          - RepoCardViewModel_Upgrade_ApplyIoRunsInBackground
+          - RepoCardViewModel_AgentsMdAccept_WritesInBackground
+          - RepoCardViewModel_AgentsMdDecline_SavesPinInBackground

@@ -82,7 +82,7 @@ public sealed class MainWindowTests : IDisposable
         var clock = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
         var feed = new Tests.AgentPackageManagement.FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"));
         var repo = CreateTempDirectory();
-        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        HeadlessTestApp.RunOffUiThread(() => RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" }));
         var settings = new AppSettings
         {
             Sources = [new PackageSourceDefinition { Alias = "Feed", Type = PackageSourceType.Zip, Location = "unused" }],
@@ -402,7 +402,7 @@ public sealed class MainWindowTests : IDisposable
         }
 
         var repo = CreateTempDirectory();
-        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        HeadlessTestApp.RunOffUiThread(() => RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" }));
         var settings = new AppSettings
         {
             Sources =
@@ -583,7 +583,7 @@ public sealed class MainWindowTests : IDisposable
     {
         // Arrange: a pinned repo and no package source configured
         var repo = CreateTempDirectory();
-        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        HeadlessTestApp.RunOffUiThread(() => RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" }));
         var settings = new AppSettings { Sources = [], RecentRepos = [new RecentRepo { Path = repo }] };
         var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
 
@@ -1418,7 +1418,7 @@ public sealed class MainWindowTests : IDisposable
         Tests.AgentPackageManagement.FakePackageSourceProvider feed, string sourceFolder, IBackgroundWorkRunner? backgroundWork = null)
     {
         var repo = CreateTempDirectory();
-        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        HeadlessTestApp.RunOffUiThread(() => RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" }));
         var settings = new AppSettings
         {
             Sources = [new PackageSourceDefinition { Alias = "Feed", Type = PackageSourceType.Zip, Location = sourceFolder }],

@@ -192,6 +192,14 @@ tree), so no git is left behind; the timeout is reported as `GitCommandTimeoutEx
 already treat as "git could not tell" and the card shows as a message. Before starting anything `GitClient` asks
 `BlockingCallGuard` whether the calling thread may block, so the tests catch a git call made on the UI thread.
 
+**Package-source and credential git off the caller's thread** (`AgentControl-GitIntegration-NoBlockingStart`).
+`GitRemoteClient` and `GitCredentialClient` are asynchronous and are asked from the UI thread (a connection test, an
+upgrade, the source editor's credential-helper question and "Forget saved sign-in") or from whatever thread the NuGet
+library calls the credential service on. Both start git (and `GitRemoteClient` creates its work folders) inside
+`Task.Run` and await everything with `ConfigureAwait(false)`, so the asking thread never waits for a process start, and
+both ask `BlockingCallGuard` right before `Process.Start`, so a start that slips back onto a thread the tests guard
+fails them.
+
 `GitClient.IsRepositoryRoot` is the one question answered without git at all: it only looks for `.git` (a folder or a
 file) directly in the folder, so the launcher can check every folder of a multi-folder add or a file-manager drop
 cheaply. It deliberately does not walk up to the parent folders as `git` would, because a subfolder of a repository is

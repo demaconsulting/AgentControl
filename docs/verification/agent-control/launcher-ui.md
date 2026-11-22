@@ -227,6 +227,9 @@ refresh queue, which spawn real subprocesses via `GitStub` or the system git exe
 - A drag held near the list's top or bottom edge, over the app bar or below the list keeps the list scrolling, faster
   the deeper the pointer is, redraws the drop feedback as the list moves and stops when the drag leaves, drops or
   ends.
+- An upgrade check, an upgrade (with the AGENTS.md answer) and a launch that restores the pinned package, each run on
+  the headless UI thread (guarded), make no pin read or write, package hash, extraction or git start there, and
+  complete: the matching source is found, the package applied and the tool started.
 
 ### Test Scenarios
 
@@ -1542,3 +1545,15 @@ requirements: `-PreselectCurrentPackage`, `-PreselectNewestWhenVersionGone`, `-P
 `-PreselectNothingWhenNotOffered`, `-PreselectNothingWhenSourceUnknown`, `-PreselectKeepsUserChoice` and
 `-PreselectCancelled`) and `MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed` (the
 confirmation, covered above).
+
+**RepoCard_PackageWork_NoBlockingCallOnUiThread**: Arranged off the UI thread (pins written, identities computed, cheap
+facts read), each action is then run on the headless UI thread, which is guarded, so any guarded call there fails the
+test. The background upgrade check of a card whose source is served by a provider that computes the identity only when
+it is first read finds that source as the supplier with no problem (the card computed the identity on a worker); an
+upgrade from 1.0.0 to 2.0.0 applies the package and, accepting the offered AGENTS.md template, writes it; and a launch
+of a repo whose agent files are missing restores them from the source whose files match the pin, declines the AGENTS.md
+offer and starts the tool. This scenario is tested by `RepoCard_UpgradeCheck_PackageHashedOffTheUiThread`,
+`RepoCard_Upgrade_NoBlockingCallOnUiThread` and `RepoCard_LaunchWithRestore_NoBlockingCallOnUiThread`, covering
+`AgentControl-LauncherUI-PackageWorkNeverBlocks` (children: `AgentControl-RepoCardViewModel-ActionIoInBackground`,
+`AgentControl-SourceEditorViewModel-HelperCheckDebounced`,
+`AgentControl-SourceEditorViewModel-TestConnectionOffUiThread`).

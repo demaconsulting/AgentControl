@@ -51,6 +51,11 @@ contains one unit: `RepoPinStore`.
 
 ### Design
 
+**Never on the UI thread** (`AgentControl-RepoConfig-RefusesGuardedThread`). A pin lives in the repo, which can be on a
+slow or offline network share, so every read and write of it runs on a worker thread (the card's background reads,
+apply and AGENTS.md steps). `RepoPinStore` asks `BlockingCallGuard` before it touches the file, so a pin read or
+write that slips back onto a thread the tests guard fails them before anything is read or written.
+
 The `RepoConfig` subsystem contains only the `RepoPinStore` unit; `RepoPin` is a plain,
 mutable data record with `SchemaVersion`, `PackageName`, `Version`,
 `AgentsMdTemplateDeclined` and `ContentIdentity` properties, a read-only-hint `LegacySource` (never serialized), plus

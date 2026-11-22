@@ -23,6 +23,7 @@ using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.Tests.PackageCredentials;
 using DemaConsulting.NuGet.Caching;
+using Microsoft.Extensions.Time.Testing;
 
 namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 
@@ -317,7 +318,7 @@ public class SourceEditorSignatureViewModelTests
     ///     tooltip that says why.
     /// </summary>
     [Fact]
-    public void SourceEditorViewModel_ForgetSavedSignIn_AvailableOnlyForAUsableServerWithACredentialStore()
+    public async Task SourceEditorViewModel_ForgetSavedSignIn_AvailableOnlyForAUsableServerWithACredentialStore()
     {
         // Arrange
         var context = new PackageCredentialContext(new SessionCredentialStore(), null, new FakeRememberedCredentialStore());
@@ -333,6 +334,7 @@ public class SourceEditorSignatureViewModelTests
         {
             Location = Path.GetTempPath()
         };
+        await usable.HelperCheckCompleted;
 
         // Assert
         Assert.True(usable.CanForgetSavedSignIn);
@@ -358,6 +360,7 @@ public class SourceEditorSignatureViewModelTests
         usersStore.Save(origin, new NuGetCredential("svc", "pw-forget-editor-4420"));
         var editor = CreateServerEditor(credentials: new PackageCredentialContext(new SessionCredentialStore(), null, usersStore));
         editor.Location = FeedAddress;
+        await editor.HelperCheckCompleted;
         var questions = new List<string>();
         editor.ForgetConfirmationRequested += (_, question) => questions.Add(question);
 
@@ -392,6 +395,7 @@ public class SourceEditorSignatureViewModelTests
         var usersStore = new FakeRememberedCredentialStore();
         var editor = CreateServerEditor(credentials: new PackageCredentialContext(new SessionCredentialStore(), null, usersStore));
         editor.Location = FeedAddress;
+        await editor.HelperCheckCompleted;
 
         // Act / Assert: nothing saved
         await editor.ForgetSavedSignInAsync();
@@ -434,6 +438,7 @@ public class SourceEditorSignatureViewModelTests
         };
         editor.NewPackageId = "contoso-agents";
         editor.AddPackageIdCommand.Execute(null);
+        await editor.HelperCheckCompleted;
         await editor.TestConnectionCommand.ExecuteAsync();
         Assert.True(editor.HasTestResult);
 
@@ -507,6 +512,74 @@ public class SourceEditorSignatureViewModelTests
         Assert.Equal(SourceEditorViewModel.NoHelperForgetTooltip, editor.ForgetTooltip);
     }
 
+    /// <summary>
+    ///     Test that typing an address asks git about a credential helper once, for the address the
+    ///     typing stopped at, and only after the address stayed unchanged for the delay: the checks for
+    ///     the addresses typed on the way are canceled without asking.
+    /// </summary>
+    [Fact]
+    public async Task SourceEditorViewModel_LocationTyped_HelperCheckedOnceAfterDelay()
+    {
+        // Arrange: a clock the test moves itself
+        var clock = new FakeTimeProvider();
+        var usersStore = new FakeRememberedCredentialStore();
+        var editor = CreateServerEditor(
+            credentials: new PackageCredentialContext(new SessionCredentialStore(), null, usersStore), timeProvider: clock);
+
+        // Act: three servers typed in a burst, each sooner after the last than the delay
+        editor.Location = "https://a.example.com/v3/index.json";
+        var staleCheck = editor.HelperCheckCompleted;
+        clock.Advance(SourceEditorViewModel.HelperCheckDelay / 2);
+        editor.Location = "https://b.example.com/v3/index.json";
+        clock.Advance(SourceEditorViewModel.HelperCheckDelay / 2);
+        editor.Location = "https://c.example.com/v3/index.json";
+        await staleCheck;
+        var askedDuringBurst = usersStore.Calls.Count;
+        var lastCheck = editor.HelperCheckCompleted;
+        var answeredBeforeTheDelay = lastCheck.IsCompleted;
+        clock.Advance(SourceEditorViewModel.HelperCheckDelay);
+        await lastCheck;
+
+        // Assert: nothing was asked while typing, then exactly one question, about the last server
+        Assert.Equal(0, askedDuringBurst);
+        Assert.False(answeredBeforeTheDelay);
+        var call = Assert.Single(usersStore.Calls);
+        Assert.StartsWith("available ", call, StringComparison.Ordinal);
+        Assert.Contains("c.example.com", call, StringComparison.Ordinal);
+        Assert.True(editor.CanForgetSavedSignIn);
+    }
+
+    /// <summary>
+    ///     Test that opening the editor on a saved server asks about a credential helper at once,
+    ///     without waiting for the typing delay.
+    /// </summary>
+    [Fact]
+    public async Task SourceEditorViewModel_EditorOpened_HelperCheckedWithoutDelay()
+    {
+        // Arrange
+        var clock = new FakeTimeProvider();
+        var usersStore = new FakeRememberedCredentialStore();
+        var existing = new PackageSourceDefinition
+        {
+            Alias = "Feed",
+            Type = PackageSourceType.NuGet,
+            Location = FeedAddress,
+            PackageIds = ["contoso-agents"]
+        };
+
+        // Act: the clock never moves
+        var editor = new SourceEditorViewModel(
+            PackageSourceType.NuGet,
+            existing,
+            _ => false,
+            credentials: new PackageCredentialContext(new SessionCredentialStore(), null, usersStore),
+            timeProvider: clock);
+        await editor.HelperCheckCompleted;
+
+        // Assert
+        Assert.Equal(1, usersStore.CountOf("available"));
+        Assert.True(editor.CanForgetSavedSignIn);
+    }
     /// <summary>
     ///     Test that the helper is asked once per server origin however the rest of the address is
     ///     edited, and again for a different origin.
@@ -656,16 +729,19 @@ public class SourceEditorSignatureViewModelTests
     /// <param name="signaturesSupported">Whether the platform is taken to support signature
     ///     verification.</param>
     /// <param name="credentials">The credential facilities, or <see langword="null"/>.</param>
+    /// <param name="timeProvider">The clock of the wait before a credential-helper check, or
+    ///     <see langword="null"/> for the system clock.</param>
     /// <returns>The editor.</returns>
     private static SourceEditorViewModel CreateServerEditor(
-        bool signaturesSupported = true, PackageCredentialContext? credentials = null) =>
+        bool signaturesSupported = true, PackageCredentialContext? credentials = null, TimeProvider? timeProvider = null) =>
         new(
             PackageSourceType.NuGet,
             null,
             _ => false,
             isServer: true,
             credentials: credentials,
-            signatureVerificationSupported: signaturesSupported);
+            signatureVerificationSupported: signaturesSupported,
+            timeProvider: timeProvider);
 
     /// <summary>
     ///     Creates a server editor that is otherwise ready to save.

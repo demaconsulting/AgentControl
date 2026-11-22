@@ -442,3 +442,14 @@ sections:
         tests:
           - DirectoryPackageContentReader_OpenLayoutRoot_ListsOnlyLayout
           - DirectoryPackageContentReader_OpenLayoutRoot_PathOutsideLayout_IsRefused
+
+      - id: AgentControl-PackageContentExtractor-RefusesGuardedThread
+        title: >-
+          The PackageContentExtractor class shall refuse to extract a package on a thread that is
+          guarded against blocking calls, before the repo is touched, recording the refusal.
+        justification: |
+          An extraction deletes and writes every agent file of a repo; made on the window's UI
+          thread it freezes the window. The tests guard that thread, so an extraction that slips
+          back onto it fails them at once.
+        tests:
+          - PackageContentExtractor_Extract_OnGuardedThread_IsRefusedAndChangesNothing

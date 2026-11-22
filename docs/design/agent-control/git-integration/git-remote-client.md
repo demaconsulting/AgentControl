@@ -183,6 +183,17 @@ the arguments or git's output (`-SecretFreeLogs`). Values that come from outside
 checked before they reach a command line (`-RefuseUnsafeCommandLineValues`). A git that cannot be started is
 `GitNotFound` with a message that points to Settings (`-MissingGitExplained`).
 
+**Start off the caller's thread**: Every run (`RunAsync` and the `cat-file` reader of `ReadBlobsAsync`) creates the
+work folders and starts git through `StartOffCallerThreadAsync`, a `Task.Run` of `EnsureWorkFolders` and
+`StartProcess`, and every `await` in the class uses `ConfigureAwait(false)`. A caller on the UI thread (a connection
+test, an upgrade, a version listing) therefore never creates a folder or starts a process itself, and the reading,
+parsing and the `openDestination` callbacks of `ReadBlobsAsync` run on the pool too
+(`AgentControl-GitRemoteClient-StartsOffCallerThread`). `StartProcess` asks `BlockingCallGuard.ThrowIfGuarded` first
+(the operation `git <command>`), so a start that slips back onto a thread the tests guard fails them. A token that is
+already cancelled stops the run before git starts. The `core.sshCommand` lookup is cached per client, not for the
+application's lifetime: it runs off the UI thread like every other run, and a lifetime cache would miss a change the
+user makes while the application runs.
+
 #### Error Handling
 
 `GitRemoteException` for everything about git (including `GitTooOld`, `OutputTooLarge` and `ProcessNotStopped`);
@@ -194,6 +205,7 @@ ended.
 #### Dependencies
 
 - **SecretRedactor**, **SecretRedactingLogger** (PackageCredentials) - redaction of error text and logs.
+- **BlockingCallGuard** (`Utilities` subsystem) - asked before every git start.
 - **.NET BCL** - `Process`, `Regex`.
 
 #### Test Support

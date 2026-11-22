@@ -278,6 +278,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private readonly ShellDetector _shellDetector;
 
     /// <summary>
+    ///     Runs the disk, hashing and process work of the card's actions (launch, upgrade, select
+    ///     package, the AGENTS.md answer) off the UI thread; see the constructor.
+    /// </summary>
+    private readonly IBackgroundWorkRunner _backgroundWork;
+
+    /// <summary>
     ///     Whether <see cref="Retire"/> was called: the card was removed from the list, so nothing it
     ///     still has running may report back or publish a result.
     /// </summary>
@@ -374,10 +380,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     without starting a shell.</param>
     /// <param name="shellDetector">Detects the shell the agent tool runs in; <see langword="null"/>
     ///     uses a real <see cref="ShellDetector"/>. Supplied so tests get a deterministic shell.</param>
-    /// <param name="backgroundWork">Runs the card's repo-state reads off the UI thread when the card has
-    ///     a refresh queue of its own (<paramref name="refreshQueue"/> is <see langword="null"/>);
-    ///     <see langword="null"/> uses the thread pool. Supplied so tests can hold the reads at a
-    ///     gate.</param>
+    /// <param name="backgroundWork">Runs the disk, hashing and process work of the card's actions
+    ///     (the pin reads and writes, the content identity of an acquired package, the
+    ///     <c>.gitignore</c> and release notes of an apply, the AGENTS.md check and answer, the shell
+    ///     detection and the start of the agent tool) off the UI thread, and the card's repo-state
+    ///     reads when the card has a refresh queue of its own (<paramref name="refreshQueue"/> is
+    ///     <see langword="null"/>); <see langword="null"/> uses the thread pool. Supplied so tests can
+    ///     hold the work at a gate.</param>
     /// <param name="refreshQueue">The queue the card's repo-state reads go through, shared by every
     ///     card of the window so only a few run at once; <see langword="null"/> gives the card a queue
     ///     of its own over <paramref name="backgroundWork"/> (a card used on its own, as in tests),
@@ -417,6 +426,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         _commitChange = commitChange;
         _processStarter = processStarter ?? new AgentToolProcessStarter();
         _shellDetector = shellDetector ?? new ShellDetector();
+        _backgroundWork = backgroundWork ?? ThreadPoolBackgroundWorkRunner.Instance;
         _ownsRefreshQueue = refreshQueue is null;
         _refreshQueue = refreshQueue ?? new RepoRefreshQueue(backgroundWork);
         _retiredToken = _retiredCancellation.Token;
@@ -2151,8 +2161,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     so the view layer can show a modal Yes/No prompt. Does not itself show any dialog -
     ///     that is a view-layer concern handled by <c>MainWindow</c>'s code-behind via the
     ///     <see cref="ConfirmationWindow"/> pattern, exactly like <see cref="RemoveRequested"/>.
-    ///     The user's choice is reported back via <see cref="AcceptAgentsMdTemplate"/> or
-    ///     <see cref="DeclineAgentsMdTemplate"/>.
+    ///     The user's choice is reported back via <see cref="AcceptAgentsMdTemplateAsync"/> or
+    ///     <see cref="DeclineAgentsMdTemplateAsync"/>.
     /// </summary>
     public event EventHandler<string>? AgentsMdTemplateOfferRequested;
 
@@ -3013,14 +3023,22 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 return;
             }
 
-            LaunchAgentTool();
+            await LaunchAgentToolAsync();
         }, cancellationToken, NoFurtherStateCheck);
 
     /// <summary>
     ///     Resolves the configured agent tool and shell and starts the tool in this repo's
     ///     working directory, recording the launch on success and reporting any failure.
     /// </summary>
-    private void LaunchAgentTool()
+    /// <remarks>
+    ///     The settings and the command are read on the UI thread; finding the shell (a probe of
+    ///     every <c>PATH</c> folder and the well-known install folders) and starting the process run
+    ///     on a worker, so a slow or offline <c>PATH</c> entry never freezes the window. Once handed
+    ///     over the start is not canceled. The launch is recorded, and a failure reported, back on
+    ///     the UI thread.
+    /// </remarks>
+    /// <returns>A task that completes when the tool has been started or the failure reported.</returns>
+    private async Task LaunchAgentToolAsync()
     {
         try
         {
@@ -3039,9 +3057,18 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     RepoName, RepoPath, command);
             }
 
-            var shell = _shellDetector.Detect(settings.ShellPreference);
-            var startInfo = AgentLauncher.BuildProcessStartInfo(shell, command, RepoPath, settings.KeepShellOpen);
-            _processStarter.Start(startInfo);
+            var shellPreference = settings.ShellPreference;
+            var keepShellOpen = settings.KeepShellOpen;
+            var repoPath = RepoPath;
+            await _backgroundWork.RunAsync(
+                () =>
+                {
+                    var shell = _shellDetector.Detect(shellPreference);
+                    var startInfo = AgentLauncher.BuildProcessStartInfo(shell, command, repoPath, keepShellOpen);
+                    _processStarter.Start(startInfo);
+                    return true;
+                },
+                CancellationToken.None);
             StatusMessage = "Launched.";
             RecordLaunched();
         }
@@ -3142,7 +3169,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
 
         // Check 4: a pin without a files identity cannot be verified against the disk
-        var recordedIdentity = LoadPinForComparison()?.ContentIdentity;
+        var recordedIdentity = (await LoadPinForComparisonAsync(cancellationToken))?.ContentIdentity;
         if (!PackageContentIdentity.IsFilesIdentity(recordedIdentity))
         {
             return await EnsureUnverifiablePinFoldersAsync(pinnedPackageName, cancellationToken);
@@ -3204,8 +3231,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private async Task<AgentFilesSyncOutcome> EnsureUnverifiablePinFoldersAsync(
         string pinnedPackageName, CancellationToken cancellationToken)
     {
-        // Folder presence is a metadata-only check, so it needs no worker thread
-        if (PackageZipExtractor.AllManagedFoldersExist(RepoPath))
+        // Folder presence is a metadata-only check, but on a network repo even that can take a
+        // while, so it runs on a worker like every other look at the disk
+        var repoPath = RepoPath;
+        if (await _backgroundWork.RunAsync(() => PackageZipExtractor.AllManagedFoldersExist(repoPath), cancellationToken))
         {
             if (_logger.IsEnabled(LogLevel.Information))
             {
@@ -3407,7 +3436,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // source an older version recorded in the file, else the first that offers it, and is
             // never refused.
             var pinnedVersion = PinnedPackageVersion;
-            var recordedPin = LoadPinForComparison();
+            var recordedPin = await LoadPinForComparisonAsync(cancellationToken);
             var (offering, firstFailure, listingAccessDenied) = await FindOfferingSourcesAsync(
                 registry, pinnedPackageName, pinnedVersion, cancellationToken);
             if (offering.Count == 0)
@@ -3466,7 +3495,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // files is remembered in the user's own settings, never in the pin.
             await Task.Run(() => PackageContentExtractor.Extract(reader, RepoPath), CancellationToken.None);
             SupplyingSource = pinnedPackage.SourceAlias;
-            MaybeOfferAgentsMdTemplate(reader, fromLaunchResync: true);
+            await MaybeOfferAgentsMdTemplateAsync(reader, fromLaunchResync: true);
             return new RestoreResult(true);
         }
         catch (InvalidOperationException ex)
@@ -3922,17 +3951,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
         var untracked = false;
         try
         {
-            // Read the existing pin first: a newer-schema pin must stop the apply before the repo
-            // is touched; a corrupt one is simply replaced
-            RepoPin? existingPin;
-            try
-            {
-                existingPin = RepoPinStore.Load(RepoPath);
-            }
-            catch (InvalidOperationException ex) when (ex is not UnsupportedPinSchemaException)
-            {
-                existingPin = null;
-            }
+            // Read the existing pin first (on a worker, like all of the apply's disk work): a
+            // newer-schema pin must stop the apply before the repo is touched; a corrupt one is
+            // simply replaced
+            var repoPath = RepoPath;
+            var existingPin = await _backgroundWork.RunAsync(() => LoadExistingPinForApply(repoPath), cancellationToken);
 
             // Managed folders tracked by git must be converted (taken out of git) for the package to
             // manage them, and only with the user's consent: ask before anything is downloaded, and
@@ -3948,9 +3971,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
             using var reader = await provider.AcquireAsync(package, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
 
+            // The identity of the acquired files is a hash of every file: computed on a worker (the
+            // configured sources already did it there, and the reader remembers it)
+            var contentIdentity = await _backgroundWork.RunAsync(() => reader.ContentIdentity, cancellationToken);
+
             // A republished version must be noticed before anything in the repo is touched
-            if (ContentChangedSincePinned(existingPin, package, reader) &&
-                !ResolveContentChange(existingPin, package, reader, contentChange, failureVerb))
+            if (ContentChangedSincePinned(existingPin, package, contentIdentity) &&
+                !ResolveContentChange(existingPin, package, contentIdentity, contentChange, failureVerb))
             {
                 return;
             }
@@ -3977,8 +4004,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 throw;
             }
 
-            EnsureGitIgnoreCoversManagedFolders();
-
             // Preserve a prior AGENTS.md template decline (and any unknown fields) across
             // re-pinning by updating the loaded pin in place: those fields are orthogonal to the
             // selected package/version and must never be silently reset. The content identity is
@@ -3989,15 +4014,27 @@ internal sealed class RepoCardViewModel : ViewModelBase
             var pin = existingPin ?? new RepoPin();
             pin.PackageName = package.PackageName;
             pin.Version = package.Version.ToString();
-            pin.ContentIdentity = reader.ContentIdentity;
-            RepoPinStore.Save(RepoPath, pin);
+            pin.ContentIdentity = contentIdentity;
 
-            var releaseNotes = PackageContentExtractor.ReadReleaseNotes(reader) ?? string.Empty;
+            // The .gitignore, the pin, the release notes and the re-read of the pin all touch the
+            // disk: one step on a worker, whose outcome is applied here
+            var written = await _backgroundWork.RunAsync(() => WriteAppliedPackage(repoPath, pin, reader), CancellationToken.None);
+            if (written.GitIgnoreError is not null)
+            {
+                ErrorOccurred?.Invoke(this, written.GitIgnoreError);
+            }
+
+            if (written.Failure is not null)
+            {
+                ExceptionDispatchInfo.Capture(written.Failure).Throw();
+            }
 
             // The package is applied; the follow-up status refresh is no longer cancelable so
             // the card never shows the old pin's upgrade state next to the new pin. The source it
-            // came from is remembered in the user's own settings (never in the pin)
-            RefreshPin();
+            // came from is remembered in the user's own settings (never in the pin). The pin just
+            // read is newer than any background cheap read still in flight.
+            _cheapRefreshGeneration++;
+            ApplyPin(written.Pin, written.PinLoadError);
             SupplyingSource = package.SourceAlias;
             EvaluatePinnedSource();
             await RefreshUpgradeStatusAsync(CancellationToken.None);
@@ -4021,8 +4058,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // modal question) at once and holds the release notes back until it is answered, so the
             // question never covers the notes (and the notes window, being non-modal, is not lost
             // behind it); the notes then appear in front as the completion of the upgrade.
-            MaybeOfferAgentsMdTemplate(reader);
-            ReleaseNotesReady?.Invoke(this, releaseNotes);
+            await MaybeOfferAgentsMdTemplateAsync(reader);
+            ReleaseNotesReady?.Invoke(this, written.ReleaseNotes);
         }
         catch (InvalidOperationException ex)
         {
@@ -4057,6 +4094,97 @@ internal sealed class RepoCardViewModel : ViewModelBase
             }
         }
     }
+
+    /// <summary>
+    ///     Reads the pin an apply updates; reads the disk, so it runs on a worker.
+    /// </summary>
+    /// <param name="repoPath">The repo's root folder.</param>
+    /// <returns>The pin, or <see langword="null"/> when there is none or it cannot be read (a
+    ///     corrupt pin is simply replaced).</returns>
+    /// <exception cref="UnsupportedPinSchemaException">Thrown when the pin was written by a newer
+    ///     AgentControl; the apply must then stop before the repo is touched.</exception>
+    private static RepoPin? LoadExistingPinForApply(string repoPath)
+    {
+        try
+        {
+            return RepoPinStore.Load(repoPath);
+        }
+        catch (InvalidOperationException ex) when (ex is not UnsupportedPinSchemaException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    ///     Does the disk work that follows a successful extraction: makes the <c>.gitignore</c> cover
+    ///     the managed folders, writes the new pin, reads the package's release notes and reads the
+    ///     pin back for the card. Runs on a worker; touches no view-model state.
+    /// </summary>
+    /// <param name="repoPath">The repo's root folder.</param>
+    /// <param name="pin">The pin to write.</param>
+    /// <param name="reader">The applied package.</param>
+    /// <returns>What happened; a <c>.gitignore</c> failure, and a pin that cannot be written or release
+    ///     notes that cannot be read, are carried in the result rather than thrown, so the caller reports
+    ///     them in order.</returns>
+    private static AppliedPackageWrite WriteAppliedPackage(string repoPath, RepoPin pin, IPackageContentReader reader)
+    {
+        // A .gitignore failure never aborts the pin write or the release notes that follow it
+        string? gitIgnoreError = null;
+        try
+        {
+            GitIgnoreEnsurer.Ensure(repoPath);
+        }
+        catch (InvalidOperationException ex)
+        {
+            gitIgnoreError = ex.Message;
+        }
+
+        try
+        {
+            RepoPinStore.Save(repoPath, pin);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new AppliedPackageWrite(gitIgnoreError, ex, null, null, string.Empty);
+        }
+
+        string releaseNotes;
+        try
+        {
+            releaseNotes = PackageContentExtractor.ReadReleaseNotes(reader) ?? string.Empty;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new AppliedPackageWrite(gitIgnoreError, ex, null, null, string.Empty);
+        }
+
+        RepoPin? written = null;
+        string? loadError = null;
+        try
+        {
+            written = RepoPinStore.Load(repoPath);
+        }
+        catch (InvalidOperationException ex)
+        {
+            loadError = ex.Message;
+        }
+
+        return new AppliedPackageWrite(gitIgnoreError, null, written, loadError, releaseNotes);
+    }
+
+    /// <summary>
+    ///     The outcome of <see cref="WriteAppliedPackage"/>; immutable, so it can be handed from the
+    ///     worker to the UI thread.
+    /// </summary>
+    /// <param name="GitIgnoreError">Why the <c>.gitignore</c> could not be updated, or
+    ///     <see langword="null"/>.</param>
+    /// <param name="Failure">Why the pin could not be written or the release notes could not be read,
+    ///     or <see langword="null"/>; when set, nothing after the failed step was done.</param>
+    /// <param name="Pin">The pin read back after the write, or <see langword="null"/>.</param>
+    /// <param name="PinLoadError">Why the pin could not be read back, or <see langword="null"/>.</param>
+    /// <param name="ReleaseNotes">The package's release notes; empty when it has none.</param>
+    private sealed record AppliedPackageWrite(
+        string? GitIgnoreError, InvalidOperationException? Failure, RepoPin? Pin, string? PinLoadError, string ReleaseNotes);
 
     /// <summary>
     ///     Asks git, right now, which of the managed agent folders have files tracked by git.
@@ -4324,7 +4452,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
             {
                 var provider = registry.Resolve(offer.SourceAlias);
                 reader = await provider.AcquireAsync(offer, cancellationToken);
-                if (PackageContentIdentity.Compare(pinnedIdentity, reader.ContentIdentity) == ContentIdentityComparison.Same)
+
+                // The identity is a hash of every file: computed on a worker (the configured
+                // sources already did it there, and the reader remembers it)
+                var acquired = reader;
+                var identity = await _backgroundWork.RunAsync(() => acquired.ContentIdentity, cancellationToken);
+                if (PackageContentIdentity.Compare(pinnedIdentity, identity) == ContentIdentityComparison.Same)
                 {
                     var verified = new VerifiedSource(offer, reader);
                     reader = null;
@@ -4336,7 +4469,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     _logger.LogInformation(
                         "Source '{Source}' offers '{PackageName} {Version}' but its files differ from the pin of repo '{RepoName}' ({Pinned} vs {Actual}); not used",
                         offer.SourceAlias, offer.PackageName, offer.Version, RepoName,
-                        PackageContentIdentity.Describe(pinnedIdentity), PackageContentIdentity.Describe(reader.ContentIdentity));
+                        PackageContentIdentity.Describe(pinnedIdentity), PackageContentIdentity.Describe(identity));
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
@@ -4393,15 +4526,31 @@ internal sealed class RepoCardViewModel : ViewModelBase
         "same. The package may have been republished.";
 
     /// <summary>
-    ///     Reads the repo's pin for a content-identity comparison, tolerating an unreadable file.
+    ///     Reads the repo's pin for a content-identity comparison on a worker thread, tolerating an
+    ///     unreadable file.
     /// </summary>
+    /// <param name="cancellationToken">Cancels the read before it starts.</param>
     /// <returns>The pin, or <see langword="null"/> when there is none or it cannot be read (in
     ///     which case there is no recorded identity to compare against).</returns>
-    private RepoPin? LoadPinForComparison()
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
+    ///     was canceled before the read started.</exception>
+    private Task<RepoPin?> LoadPinForComparisonAsync(CancellationToken cancellationToken)
+    {
+        var repoPath = RepoPath;
+        return _backgroundWork.RunAsync(() => LoadPinForComparison(repoPath), cancellationToken);
+    }
+
+    /// <summary>
+    ///     Reads a repo's pin for a content-identity comparison, tolerating an unreadable file;
+    ///     reads the disk, so it runs on a worker.
+    /// </summary>
+    /// <param name="repoPath">The repo's root folder.</param>
+    /// <returns>The pin, or <see langword="null"/> when there is none or it cannot be read.</returns>
+    private static RepoPin? LoadPinForComparison(string repoPath)
     {
         try
         {
-            return RepoPinStore.Load(RepoPath);
+            return RepoPinStore.Load(repoPath);
         }
         catch (InvalidOperationException)
         {
@@ -4416,16 +4565,16 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     /// <param name="pin">The repo's current pin, or <see langword="null"/> when there is none.</param>
     /// <param name="package">The package that was acquired.</param>
-    /// <param name="reader">The acquired package's content, which names its identity.</param>
+    /// <param name="contentIdentity">The identity of the acquired package's files.</param>
     /// <returns><see langword="true"/> only when the pin names the same package and version (from any
     ///     source: the identity describes the delivered files, not the source) and both identities are
     ///     known and differ. A different version, a pin without a files identity (a pin made before
     ///     files identities were recorded) and a source that reports no identity are never a change.</returns>
-    private static bool ContentChangedSincePinned(RepoPin? pin, DiscoveredPackage package, IPackageContentReader reader) =>
+    private static bool ContentChangedSincePinned(RepoPin? pin, DiscoveredPackage package, string? contentIdentity) =>
         pin is not null &&
         string.Equals(pin.PackageName, package.PackageName, StringComparison.OrdinalIgnoreCase) &&
         IsVersion(package, pin.Version) &&
-        PackageContentIdentity.Compare(pin.ContentIdentity, reader.ContentIdentity) == ContentIdentityComparison.Changed;
+        PackageContentIdentity.Compare(pin.ContentIdentity, contentIdentity) == ContentIdentityComparison.Changed;
 
     /// <summary>
     ///     Describes, for the user, that a package version now delivers different content than the
@@ -4445,7 +4594,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     /// <param name="pin">The repo's current pin (carries the identity that was recorded).</param>
     /// <param name="package">The package that was acquired.</param>
-    /// <param name="reader">The acquired package's content.</param>
+    /// <param name="contentIdentity">The identity of the acquired package's files.</param>
     /// <param name="contentChange">The policy requested by the caller.</param>
     /// <param name="failureVerb">The action name used in the refusal message.</param>
     /// <returns><see langword="true"/> when the package may be applied; <see langword="false"/>
@@ -4459,7 +4608,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private bool ResolveContentChange(
         RepoPin? pin,
         DiscoveredPackage package,
-        IPackageContentReader reader,
+        string? contentIdentity,
         ContentChangeHandling contentChange,
         string failureVerb)
     {
@@ -4469,7 +4618,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 "Package '{PackageName} {Version}' from source '{SourceAlias}' changed content for repo '{RepoName}' ({Pinned} -> {Actual}); handling: {Handling}",
                 package.PackageName, package.Version, package.SourceAlias, RepoName,
                 PackageContentIdentity.Describe(pin?.ContentIdentity),
-                PackageContentIdentity.Describe(reader.ContentIdentity),
+                PackageContentIdentity.Describe(contentIdentity),
                 contentChange);
         }
 
@@ -4511,47 +4660,67 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     (extracted) to this repo.</param>
     /// <param name="fromLaunchResync"><see langword="true"/> when the offer follows the re-sync
     ///     that runs before a launch, which never writes the pin: a decline of such an offer is
-    ///     then not persisted (see <see cref="DeclineAgentsMdTemplate"/>).</param>
+    ///     then not persisted (see <see cref="DeclineAgentsMdTemplateAsync"/>).</param>
+    /// <returns>A task that completes once the offer was raised or found not to apply.</returns>
     /// <remarks>
     ///     Called only from call sites that already have a <paramref name="reader"/> in hand
     ///     immediately after a successful <see cref="PackageContentExtractor.Extract"/> call
     ///     (<see cref="ApplyPackageAndShowReleaseNotesAsync"/> and the re-extraction branch of
     ///     <see cref="EnsureAgentFilesSyncedBeforeLaunchAsync"/>) - never as an independent, standing
     ///     per-launch check, so the offer only ever fires when a sync genuinely just happened.
-    ///     Wrapped in its own non-blocking try/catch, mirroring
-    ///     <see cref="EnsureGitIgnoreCoversManagedFolders"/>'s precedent, so a pin-read or
-    ///     package-read failure here can never disrupt an already-successful sync.
+    ///     The three checks read the disk and the package, so they run on a worker; the offer is
+    ///     raised back on the UI thread. A pin-read or package-read failure is reported and never
+    ///     disrupts the already-successful sync, as a <c>.gitignore</c> failure does not.
     /// </remarks>
-    private void MaybeOfferAgentsMdTemplate(IPackageContentReader reader, bool fromLaunchResync = false)
+    private async Task MaybeOfferAgentsMdTemplateAsync(IPackageContentReader reader, bool fromLaunchResync = false)
     {
+        string? template;
         try
         {
-            if (File.Exists(PathHelpers.SafePathCombine(RepoPath, AgentsMdFileName)))
-            {
-                return;
-            }
-
-            var pin = RepoPinStore.Load(RepoPath);
-            if (pin is { AgentsMdTemplateDeclined: true })
-            {
-                return;
-            }
-
-            var template = PackageContentExtractor.ReadAgentsMdTemplate(reader);
-            if (template is null)
-            {
-                return;
-            }
-
-            // Remembered so that a decline of this offer does not write the pin (the launch re-sync
-            // never does); set just before the handlers run, replaced by every later offer
-            _agentsMdOfferFromLaunchResync = fromLaunchResync;
-            AgentsMdTemplateOfferRequested?.Invoke(this, template);
+            var repoPath = RepoPath;
+            template = await _backgroundWork.RunAsync(
+                () => FindAgentsMdTemplateToOffer(repoPath, reader), CancellationToken.None);
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException)
         {
             ErrorOccurred?.Invoke(this, ex.Message);
+            return;
         }
+
+        if (template is null)
+        {
+            return;
+        }
+
+        // Remembered so that a decline of this offer does not write the pin (the launch re-sync
+        // never does); set just before the handlers run, replaced by every later offer
+        _agentsMdOfferFromLaunchResync = fromLaunchResync;
+        AgentsMdTemplateOfferRequested?.Invoke(this, template);
+    }
+
+    /// <summary>
+    ///     Finds the <c>AGENTS.md</c> template to offer: none when the repo has an <c>AGENTS.md</c>,
+    ///     the pin records that the offer was declined, or the package has no template. Reads the
+    ///     disk and the package, so it runs on a worker; touches no view-model state.
+    /// </summary>
+    /// <param name="repoPath">The repo's root folder.</param>
+    /// <param name="reader">The package that was just applied.</param>
+    /// <returns>The template's text, or <see langword="null"/> when nothing is to be offered.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the pin or the package cannot be read.</exception>
+    private static string? FindAgentsMdTemplateToOffer(string repoPath, IPackageContentReader reader)
+    {
+        if (File.Exists(PathHelpers.SafePathCombine(repoPath, AgentsMdFileName)))
+        {
+            return null;
+        }
+
+        var pin = RepoPinStore.Load(repoPath);
+        if (pin is { AgentsMdTemplateDeclined: true })
+        {
+            return null;
+        }
+
+        return PackageContentExtractor.ReadAgentsMdTemplate(reader);
     }
 
     /// <summary>
@@ -4560,16 +4729,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     /// <param name="templateContent">The template's text content, as previously carried by
     ///     <see cref="AgentsMdTemplateOfferRequested"/>.</param>
+    /// <returns>A task that completes once the file was written, found to exist already, or the
+    ///     failure was reported.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="templateContent"/> is
     ///     <see langword="null"/>.</exception>
     /// <remarks>
     ///     <para>
     ///     Writes directly to the repo root - never into any of the four managed folders - since
     ///     a root-level <c>AGENTS.md</c> is a starting point the user is expected to customize
-    ///     themselves, not a file blind-deleted/replaced on every subsequent sync.
+    ///     themselves, not a file blind-deleted/replaced on every subsequent sync. The write runs on
+    ///     a worker; the outcome is reported back on the UI thread.
     ///     </para>
     ///     <para>
-    ///     Race-safe against the gap between <see cref="MaybeOfferAgentsMdTemplate"/>'s
+    ///     Race-safe against the gap between <see cref="MaybeOfferAgentsMdTemplateAsync"/>'s
     ///     <c>File.Exists</c> check (which runs before the modal offer is shown) and the user
     ///     actually accepting the offer: this writes via <see cref="FileMode.CreateNew"/> rather
     ///     than an unconditional overwrite, so if a user or another process creates
@@ -4580,12 +4752,66 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     informational outcomes from genuine errors.
     ///     </para>
     /// </remarks>
-    public void AcceptAgentsMdTemplate(string templateContent)
+    public async Task AcceptAgentsMdTemplateAsync(string templateContent)
     {
         ArgumentNullException.ThrowIfNull(templateContent);
 
-        var agentsMdPath = PathHelpers.SafePathCombine(RepoPath, AgentsMdFileName);
+        var repoPath = RepoPath;
+        var (outcome, failure) = await _backgroundWork.RunAsync(
+            () => WriteAgentsMdTemplate(repoPath, templateContent), CancellationToken.None);
+        switch (outcome)
+        {
+            case AgentsMdWriteOutcome.Written:
+                StatusMessage = "Added a starting AGENTS.md template - please review and customize it for this repo.";
+                if (_logger.IsEnabled(LogLevel.Information))
+                {
+                    _logger.LogInformation("Wrote a starting AGENTS.md template to repo '{RepoName}'", RepoName);
+                }
 
+                break;
+
+            case AgentsMdWriteOutcome.AlreadyExists:
+                // Another user/process created AGENTS.md after the offer was raised but before the
+                // write ran - it was never overwritten; this is a non-destructive, informational
+                // outcome, not a failure.
+                StatusMessage = "AGENTS.md already exists for this repo - nothing was written.";
+                if (_logger.IsEnabled(LogLevel.Information))
+                {
+                    _logger.LogInformation(
+                        failure,
+                        "AGENTS.md was created concurrently for repo '{RepoName}'; the offered template was not written",
+                        RepoName);
+                }
+
+                break;
+
+            default:
+                if (_logger.IsEnabled(LogLevel.Error))
+                {
+                    _logger.LogError(
+                        failure,
+                        outcome == AgentsMdWriteOutcome.CreateFailed
+                            ? "Failed to create AGENTS.md template for repo '{RepoName}'"
+                            : "Failed to write AGENTS.md template for repo '{RepoName}'",
+                        RepoName);
+                }
+
+                ErrorOccurred?.Invoke(this, $"Failed to write AGENTS.md: {failure?.Message}");
+                break;
+        }
+    }
+
+    /// <summary>
+    ///     Creates the repo's <c>AGENTS.md</c> with the template's text, never overwriting one that
+    ///     exists. Writes the disk, so it runs on a worker; touches no view-model state.
+    /// </summary>
+    /// <param name="repoPath">The repo's root folder.</param>
+    /// <param name="templateContent">The template's text.</param>
+    /// <returns>The outcome, with the exception behind any outcome other than
+    ///     <see cref="AgentsMdWriteOutcome.Written"/>.</returns>
+    private static (AgentsMdWriteOutcome Outcome, Exception? Failure) WriteAgentsMdTemplate(
+        string repoPath, string templateContent)
+    {
         // Opening with FileMode.CreateNew is the atomic, race-safe check for "does AGENTS.md
         // already exist" - but only *this* step can mean "another process created it concurrently
         // between the offer being raised and now". It is deliberately isolated from the write
@@ -4593,6 +4819,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         // AGENTS.md now exists only because this call just created it, and that failure must be
         // reported as a genuine error - not misreported as the benign "already exists" outcome,
         // which would otherwise happen if both steps shared one File.Exists-guarded catch.
+        var agentsMdPath = PathHelpers.SafePathCombine(repoPath, AgentsMdFileName);
         FileStream stream;
         try
         {
@@ -4600,30 +4827,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
         catch (IOException ex) when (File.Exists(agentsMdPath))
         {
-            // Another user/process created AGENTS.md after the offer was raised but before this
-            // open ran - never overwrite it; this is a non-destructive, informational outcome,
-            // not a failure.
-            StatusMessage = "AGENTS.md already exists for this repo - nothing was written.";
-
-            if (_logger.IsEnabled(LogLevel.Information))
-            {
-                _logger.LogInformation(
-                    ex,
-                    "AGENTS.md was created concurrently for repo '{RepoName}'; the offered template was not written",
-                    RepoName);
-            }
-
-            return;
+            return (AgentsMdWriteOutcome.AlreadyExists, ex);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            if (_logger.IsEnabled(LogLevel.Error))
-            {
-                _logger.LogError(ex, "Failed to create AGENTS.md template for repo '{RepoName}'", RepoName);
-            }
-
-            ErrorOccurred?.Invoke(this, $"Failed to write AGENTS.md: {ex.Message}");
-            return;
+            return (AgentsMdWriteOutcome.CreateFailed, ex);
         }
 
         try
@@ -4634,36 +4842,46 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 writer.Write(templateContent);
             }
 
-            StatusMessage = "Added a starting AGENTS.md template - please review and customize it for this repo.";
-
-            if (_logger.IsEnabled(LogLevel.Information))
-            {
-                _logger.LogInformation("Wrote a starting AGENTS.md template to repo '{RepoName}'", RepoName);
-            }
+            return (AgentsMdWriteOutcome.Written, null);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            if (_logger.IsEnabled(LogLevel.Error))
-            {
-                _logger.LogError(ex, "Failed to write AGENTS.md template for repo '{RepoName}'", RepoName);
-            }
-
-            ErrorOccurred?.Invoke(this, $"Failed to write AGENTS.md: {ex.Message}");
+            return (AgentsMdWriteOutcome.WriteFailed, ex);
         }
     }
 
     /// <summary>
+    ///     What writing the offered <c>AGENTS.md</c> template did.
+    /// </summary>
+    private enum AgentsMdWriteOutcome
+    {
+        /// <summary>The template was written.</summary>
+        Written,
+
+        /// <summary>An <c>AGENTS.md</c> appeared after the offer; nothing was written.</summary>
+        AlreadyExists,
+
+        /// <summary>The file could not be created.</summary>
+        CreateFailed,
+
+        /// <summary>The file was created but the text could not be written.</summary>
+        WriteFailed
+    }
+
+    /// <summary>
     ///     Persists that the user declined the <c>AGENTS.md</c> template offer for this repo, so
-    ///     <see cref="MaybeOfferAgentsMdTemplate"/> never raises
+    ///     <see cref="MaybeOfferAgentsMdTemplateAsync"/> never raises
     ///     <see cref="AgentsMdTemplateOfferRequested"/> again for it.
     /// </summary>
+    /// <returns>A task that completes once the decline was recorded (or not needed), or the
+    ///     failure was reported.</returns>
     /// <remarks>
     ///     Loads the existing pin (if any) rather than constructing a fresh one, so the repo's
     ///     already-persisted package name/version are preserved alongside the new decline flag.
-    ///     There is deliberately no corresponding "reset" method - the decision is sticky for this
-    ///     repo, per the feature's explicit scope.
+    ///     The pin is read and written on a worker. There is deliberately no corresponding "reset"
+    ///     method - the decision is sticky for this repo, per the feature's explicit scope.
     /// </remarks>
-    public void DeclineAgentsMdTemplate()
+    public async Task DeclineAgentsMdTemplateAsync()
     {
         // The launch re-sync never writes the pin (a write would dirty the working tree on a
         // launch), so a decline of the offer that re-sync raised is not remembered; the offer
@@ -4680,15 +4898,20 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return;
         }
 
+        var repoPath = RepoPath;
+        var packageName = PinnedPackageName ?? string.Empty;
+        var version = PinnedPackageVersion ?? string.Empty;
         try
         {
-            var pin = RepoPinStore.Load(RepoPath) ?? new RepoPin
-            {
-                PackageName = PinnedPackageName ?? string.Empty,
-                Version = PinnedPackageVersion ?? string.Empty
-            };
-            pin.AgentsMdTemplateDeclined = true;
-            RepoPinStore.Save(RepoPath, pin);
+            await _backgroundWork.RunAsync(
+                () =>
+                {
+                    var pin = RepoPinStore.Load(repoPath) ?? new RepoPin { PackageName = packageName, Version = version };
+                    pin.AgentsMdTemplateDeclined = true;
+                    RepoPinStore.Save(repoPath, pin);
+                    return true;
+                },
+                CancellationToken.None);
 
             if (_logger.IsEnabled(LogLevel.Information))
             {
@@ -4703,35 +4926,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
             }
 
             ErrorOccurred?.Invoke(this, $"Failed to record your AGENTS.md decision: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    ///     Proactively ensures this repo's root <c>.gitignore</c> covers the four managed agent
-    ///     folders immediately after a successful extraction, so they are far less likely to be
-    ///     accidentally committed. Purely a non-blocking, best-effort side effect: deliberately
-    ///     wrapped in its own try/catch, separate from <see cref="ApplyPackageAndShowReleaseNotesAsync"/>'s
-    ///     outer catch, so a <c>.gitignore</c> I/O failure can never abort the pin write or
-    ///     release-notes display that follow it.
-    /// </summary>
-    /// <remarks>
-    ///     Never touches git tracking state itself and never invokes git - see
-    ///     <see cref="GitIgnoreEnsurer"/>'s remarks for the marker-comment-only idempotency
-    ///     rationale. Ignoring a folder only hides untracked files, which is why
-    ///     <see cref="ApplyPackageAndShowReleaseNotesAsync"/> first stops git tracking any
-    ///     managed folder that is tracked (with the user's consent) - a step this method never
-    ///     takes. The "Committed agent files" badge remains purely advisory and unaffected by this
-    ///     method.
-    /// </remarks>
-    private void EnsureGitIgnoreCoversManagedFolders()
-    {
-        try
-        {
-            GitIgnoreEnsurer.Ensure(RepoPath);
-        }
-        catch (InvalidOperationException ex)
-        {
-            ErrorOccurred?.Invoke(this, ex.Message);
         }
     }
 
@@ -4764,30 +4958,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
 
         SelectPackageRequested?.Invoke(this, EventArgs.Empty);
-    }
-
-    /// <summary>
-    ///     Re-reads the repo's <c>.agentcontrol.json</c> pin file, updating
-    ///     <see cref="PinnedPackageName"/> and <see cref="PinnedPackageVersion"/> (and the recorded
-    ///     content identity and the legacy source hint the card keeps).
-    /// </summary>
-    private void RefreshPin()
-    {
-        // A direct re-read is newer than any background cheap read still in flight
-        _cheapRefreshGeneration++;
-
-        RepoPin? pin = null;
-        string? loadError = null;
-        try
-        {
-            pin = RepoPinStore.Load(RepoPath);
-        }
-        catch (InvalidOperationException ex)
-        {
-            loadError = ex.Message;
-        }
-
-        ApplyPin(pin, loadError);
     }
 
     /// <summary>

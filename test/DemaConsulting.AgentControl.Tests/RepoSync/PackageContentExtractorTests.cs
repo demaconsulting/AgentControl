@@ -20,6 +20,7 @@
 
 using System.IO.Compression;
 using DemaConsulting.AgentControl.RepoSync;
+using DemaConsulting.AgentControl.Utilities;
 
 namespace DemaConsulting.AgentControl.Tests.RepoSync;
 
@@ -65,6 +66,37 @@ public sealed class PackageContentExtractorTests : IDisposable
         Assert.Equal([".github"], Directory.GetFileSystemEntries(repo).Select(Path.GetFileName));
     }
 
+    /// <summary>
+    ///     Test that an extraction made on a thread guarded against blocking calls (as the window's UI
+    ///     thread is in the tests) is refused and recorded before the repo is touched.
+    /// </summary>
+    [Fact]
+    public void PackageContentExtractor_Extract_OnGuardedThread_IsRefusedAndChangesNothing()
+    {
+        // Arrange: a repo with an existing managed file
+        var package = CreatePackageFolder((".github/agents/copilot.md", "agents v2"));
+        var repo = CreateTempDirectory();
+        var agents = Path.Combine(repo, ".github", "agents");
+        Directory.CreateDirectory(agents);
+        File.WriteAllText(Path.Combine(agents, "old-agent.md"), "kept");
+        using var reader = DirectoryPackageContentReader.Open(package);
+        BlockingCallGuard.TakeViolations();
+
+        // Act
+        Exception? thrown;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            thrown = Record.Exception(() => PackageContentExtractor.Extract(reader, repo));
+        }
+
+        var violations = BlockingCallGuard.TakeViolations();
+
+        // Assert
+        Assert.IsType<BlockingCallOnGuardedThreadException>(thrown);
+        Assert.Equal(["package extract"], violations);
+        Assert.Equal("kept", File.ReadAllText(Path.Combine(agents, "old-agent.md")));
+        Assert.False(File.Exists(Path.Combine(agents, "copilot.md")));
+    }
     /// <summary>
     ///     Test that extracting from a package folder blind-deletes a managed folder's old contents
     ///     before copying the new ones.

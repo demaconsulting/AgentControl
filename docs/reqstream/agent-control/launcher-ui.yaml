@@ -2601,3 +2601,23 @@ sections:
           - AgentControl-RepoCardViewModel-PostPullRefreshQueued
         tests:
           - MainWindow_SignInChip_RefreshesThroughQueue
+
+      - id: AgentControl-LauncherUI-PackageWorkNeverBlocks
+        title: >-
+          The LauncherUI subsystem shall read package sources, hash and apply packages, read and
+          write repos' pin files, check and answer the AGENTS.md offer, find the shell and start the
+          agent tool, test a source's connection and check a typed feed address for a credential
+          helper without making the window wait for the disk, a process or a package hash, and shall
+          check a typed feed address only once the typing has paused.
+        justification: |
+          Package sources and repos can be on slow or offline shares, packages can be large and a
+          process start can take long under antivirus; any of these done on the window's thread
+          freezes the window, and one git run per keystroke floods the machine.
+        children:
+          - AgentControl-RepoCardViewModel-ActionIoInBackground
+          - AgentControl-SourceEditorViewModel-HelperCheckDebounced
+          - AgentControl-SourceEditorViewModel-TestConnectionOffUiThread
+        tests:
+          - RepoCard_Upgrade_NoBlockingCallOnUiThread
+          - RepoCard_LaunchWithRestore_NoBlockingCallOnUiThread
+          - RepoCard_UpgradeCheck_PackageHashedOffTheUiThread

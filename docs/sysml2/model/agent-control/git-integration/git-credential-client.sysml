@@ -12,4 +12,7 @@ package AgentControl {
             requirementFiles = ("docs/reqstream/agent-control/git-integration/git-credential-client.yaml");
         }
     }
+
+    // Starts git on a worker and asks the blocking-call guard first, so the tests catch a start made on the caller's (UI) thread
+    dependency GitCredentialClient to BlockingCallGuard;
 }

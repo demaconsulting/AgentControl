@@ -500,7 +500,9 @@ reviews:
       - "docs/design/agent-control/agent-package-management/package-source-registry.md"
       - "docs/verification/agent-control/agent-package-management/package-source-registry.md"
       - "src/**/AgentPackageManagement/PackageSourceRegistry.cs"
+      - "src/**/AgentPackageManagement/BackgroundPackageSourceProvider.cs"
       - "test/**/AgentPackageManagement/PackageSourceRegistryTests.cs"
+      - "test/**/AgentPackageManagement/BackgroundPackageSourceProviderTests.cs"
       - "test/**/AgentPackageManagement/FakePackageSourceProvider.cs"
 
   - id: AgentControl-AgentPackageManagement-ZipFolderSourceProvider

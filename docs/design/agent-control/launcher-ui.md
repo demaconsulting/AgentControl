@@ -507,6 +507,16 @@ thread touches, the per-card `CommittedAgentFilesCache`, is lock-guarded
   a Pull (also a canceled one), the card runs `git status` through the shared queue (`RefreshRepoStateAsync`); until it
   answers the card keeps its previous state, and a card never
   checked shows its Git status as not checked yet, never as having uncommitted changes.
+- *Package work* (`AgentControl-LauncherUI-PackageWorkNeverBlocks`): a card's actions never wait for the disk, a process
+  or a package hash on the UI thread. The sources the cards and the Select Package dialog ask come from
+  `PackageSourceRegistry.Create`, whose providers run on the thread pool and hand over packages whose identity is
+  already computed; the card computes the identity on a worker itself for a source that does not. The pin reads and
+  writes, the `.gitignore` and release notes of an apply, the managed-folder check before a launch, the AGENTS.md
+  check and answer, and the shell detection and start of the agent tool run through the card's background-work runner
+  (see the `RepoCardViewModel` design). The source editor runs its connection test, its "Forget saved sign-in" and its
+  credential-helper question on workers and asks that question only once the typed address has stayed unchanged for a
+  short delay (see the `SourceEditorViewModel` design). The headless tests guard the UI thread, so a pin read, a hash,
+  an extraction or a git start that slips back onto it fails them.
 - *The strip*: `GlobalProgressViewModel` (see its design) shows one operation at a time - the most recently begun one
   still running - so an add started while the cards refresh is shown, and the refresh again when the add ends.
 
@@ -634,7 +644,8 @@ are not literally Yes and No, keeping the AutomationIds, the focus on the declin
 to offer a package's optional root-level `AGENTS.md` template
 when the repo has none of its own: `MainWindow` subscribes to
 `AgentsMdTemplateOfferRequested`, shows `ConfirmationWindow` with explanatory text, and calls
-back into `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` depending on the user's answer
+back into `AcceptAgentsMdTemplateAsync`/`DeclineAgentsMdTemplateAsync` (which write off the UI thread) depending on
+the user's answer
 (`AgentControl-LauncherUI-AgentsMdTemplateOffer`). This mirrors the non-modal
 `ReleaseNotesViewer` pattern's event-raise/subscribe structure but intentionally uses a
 *modal* dialog instead, since this prompt requires an explicit yes/no decision before
@@ -1030,7 +1041,7 @@ it owns dialog-orchestration, view-layer plumbing that requires a live Avalonia 
 `RepoCardViewModel` event (`RemoveRequested`, `SelectPackageRequested`, `ReleaseNotesReady`,
 `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`, `CommittedFilesConversionRequested`,
 `AgentFilesChoiceRequested`, `ErrorOccurred`) and deciding which dialog/window to show and how to route the user's
-response back into the view model (e.g. calling `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the
+response back into the view model (e.g. awaiting `AcceptAgentsMdTemplateAsync`/`DeclineAgentsMdTemplateAsync` from the
 `ConfirmationWindow` shown for the AGENTS.md template offer, or answering `MainWindowViewModel.AddSaveFailed` from the
 Retry/Discard `ConfirmationWindow`). `AboutWindow` (opened via a toolbar command with no
 dedicated view model, as a modal dialog over the main window) is 600 wide, sizes its height to its content up to a

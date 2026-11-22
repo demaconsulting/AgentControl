@@ -16,7 +16,9 @@ directly and observe its validation messages, test results and `Saved` event, wi
 callback supplied by the test. The platform answer for signature verification is injected, so both the supported
 and the unsupported platform are tested on any machine; the user's credential store is a
 `FakeRememberedCredentialStore` inside a real `PackageCredentialContext`, so forgetting a saved sign-in is observed
-through what the fake received. The connection test runs against a `FakePackageSourceProvider` supplied
+through what the fake received. The delay before the credential-helper question is measured on an injected clock, so
+the debounce is tested with a `FakeTimeProvider` and no wall-clock wait; tests that only need the answer await
+`HelperCheckCompleted`. The connection test runs against a `FakePackageSourceProvider` supplied
 through the provider factory: it can be gated (to hold a test in the "running" state while cancel and the
 change-while-running rules are checked), return versions, return none, or throw a
 `PackageSourceAccessException` of a given failure kind or another exception, so every outcome of the test is
@@ -66,6 +68,11 @@ N/A - standard test environment.
   does (or says the repository has no tags yet), reports each failure with its own headline (including "Git is too
   old"), can be cancelled as a neutral result, and never shows the result - or keeps the preview - of inputs that
   changed.
+- After the address or the insecure-HTTP choice is edited, the credential helper is asked once, only after the
+  typing paused for the delay and only for the last address; the questions for the addresses typed on the way are
+  canceled without asking. Opening the editor on a saved server asks at once.
+- A connection test (NuGet or Git) started on a thread guarded against blocking calls creates the provider and reads
+  the source on another thread, and shows its result.
 
 #### Test Scenarios
 
@@ -284,3 +291,21 @@ covering
 that the default is interactive and enforces the minimum git version is the factory's design (`CreateDefaultProvider`)
 and is not asserted by this unit's tests; the owner-supplied equivalent is verified in the `MainWindowViewModel`
 tests.
+
+**SourceEditorViewModel_HelperCheck_DebouncedAndCanceled**: With a `FakeTimeProvider` as the clock, three server
+addresses are typed, each sooner after the last than the delay: nothing is asked meanwhile, the question for the first
+address ends without asking, the question for the last is still waiting until the clock passes the delay, and then the
+helper is asked exactly once, about the last server, and "Forget saved sign-in" becomes available. An editor opened on
+a saved server asks at once although the clock never moves. This scenario is tested by
+`SourceEditorViewModel_LocationTyped_HelperCheckedOnceAfterDelay`,
+`SourceEditorViewModel_EditorOpened_HelperCheckedWithoutDelay` and
+`SourceEditorViewModel_ForgetSavedSignIn_AddressEdits_AskTheHelperOncePerOrigin`, covering
+`AgentControl-SourceEditorViewModel-HelperCheckDebounced`.
+
+**SourceEditorViewModel_TestConnection_RunsOffTheCallingThread**: A NuGet server editor whose provider factory and
+listing make a guarded call, and a Git editor whose provider factory does, run their connection test from inside a
+guard scope of `BlockingCallGuard`, the record of refused calls read before the `await`: it is empty, and the test
+shows *Connection OK* (one version; the Git preview was asked once). This scenario is tested by
+`SourceEditorViewModel_TestConnection_FromGuardedThread_NoBlockingCall` and
+`SourceEditorViewModel_TestConnection_Git_FromGuardedThread_NoBlockingCall`, covering
+`AgentControl-SourceEditorViewModel-TestConnectionOffUiThread`.

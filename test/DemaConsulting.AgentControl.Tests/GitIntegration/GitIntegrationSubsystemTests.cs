@@ -22,6 +22,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.PackageCredentials;
+using DemaConsulting.AgentControl.Utilities;
 using DemaConsulting.NuGet.Caching;
 
 namespace DemaConsulting.AgentControl.Tests.GitIntegration;
@@ -587,6 +588,51 @@ public class GitIntegrationSubsystemTests
         AgentPackageManagement.GitRepositoryFixture.SkipOrFail("git is not installed, so the credential protocol cannot be exercised.");
     }
 
+    /// <summary>
+    ///     Test, with stubs standing in for git, that the git of package sources and of credential helpers
+    ///     is started off the thread that asks: a tag listing and a credential-helper question asked from a
+    ///     thread guarded against blocking calls (as the window's UI thread is in the tests) are answered,
+    ///     and nothing was refused on that thread.
+    /// </summary>
+    [Fact]
+    public async Task GitIntegrationSubsystem_RemoteAndCredentialGit_FromGuardedThread_StartOffThatThread()
+    {
+        // Arrange
+        var folder = CreateTempDirectory();
+        var remoteStub = GitRemoteStub.Create().Respond("ls-remote", "0123456789abcdef0123456789abcdef01234567\trefs/tags/v1.0.0\n");
+        var credentialStub = GitCredentialStub.Create(configOutput: "manager");
+        try
+        {
+            var remote = new GitRemoteClient(new GitRemoteOptions(() => remoteStub.Path, Path.Combine(folder, "remote")));
+            var credentials = new GitCredentialClient(credentialStub.Path, workingDirectory: folder);
+            var target = new GitRemoteTarget("https://example.invalid/org/agents.git", GitTransport.Https);
+            var origin = FeedOrigin.Create(new Uri("https://feeds.example.com/v3/index.json"));
+
+            // Act: both asked from a guarded thread; the per-thread record is read before any await
+            Task<IReadOnlyList<GitRemoteTag>> listing;
+            Task<bool> asking;
+            using (BlockingCallGuard.GuardCurrentThread())
+            {
+                listing = remote.ListTagsAsync(target, "refs/tags/*", TestContext.Current.CancellationToken);
+                asking = credentials.IsAvailableAsync(origin, TestContext.Current.CancellationToken);
+            }
+
+            var violations = BlockingCallGuard.TakeViolations();
+            var tags = await listing;
+            var available = await asking;
+
+            // Assert
+            Assert.Empty(violations);
+            Assert.Equal("v1.0.0", Assert.Single(tags).Name);
+            Assert.True(available);
+        }
+        finally
+        {
+            remoteStub.Delete();
+            credentialStub.Delete();
+            Directory.Delete(folder, recursive: true);
+        }
+    }
     /// <summary>
     ///     Creates a fresh temporary directory.
     /// </summary>

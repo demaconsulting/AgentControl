@@ -680,8 +680,8 @@ an unwanted or repeated file write.
    background by `SettingsWriter` through `SettingsStore.Save`, the newest state a moment after the last change
    (`AgentControl-System-ListChangesKept`); and, after a Select Package, Upgrade, or Launch-time restore or update
    genuinely occurs, `RepoCardViewModel` decides whether to offer the package's optional root-level `AGENTS.md` template
-   (`PackageContentExtractor.ReadAgentsMdTemplate`), writes it via `AcceptAgentsMdTemplate`, or persists a decline via
-   `RepoPinStore.Save` (`AgentControl-System-AgentsMdTemplate`).
+   (`PackageContentExtractor.ReadAgentsMdTemplate`), writes it via `AcceptAgentsMdTemplateAsync`, or persists a decline
+   via `RepoPinStore.Save` (`AgentControl-System-AgentsMdTemplate`).
 5. **Git repository source.** The normal flow of a Git source (`AgentControl-System-GitSources`) is: (a) the user adds
    the source in Settings; `SourceEditorViewModel` validates the address, tag pattern, sub-folder and package name
    (`GitRepositoryAddress`, `GitTagPattern`) and its Test connection lists the remote's tags through

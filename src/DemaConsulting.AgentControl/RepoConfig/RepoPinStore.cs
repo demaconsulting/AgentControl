@@ -141,9 +141,12 @@ internal static class RepoPinStore
     ///     version newer than <see cref="RepoPin.CurrentSchemaVersion"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the pin file exists but cannot be
     ///     read or contains invalid JSON.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread a test
+    ///     has guarded (see <see cref="BlockingCallGuard"/>); nothing is read or written.</exception>
     public static RepoPin? Load(string repoRoot)
     {
         ArgumentNullException.ThrowIfNull(repoRoot);
+        BlockingCallGuard.ThrowIfGuarded("pin read");
 
         var filePath = PathHelpers.SafePathCombine(repoRoot, PinFileName);
         if (!File.Exists(filePath))
@@ -265,10 +268,13 @@ internal static class RepoPinStore
     /// <exception cref="UnsupportedPinSchemaException">Thrown when the existing file declares a
     ///     newer schema; the file is left untouched.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the pin file cannot be written.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread a test
+    ///     has guarded (see <see cref="BlockingCallGuard"/>); nothing is read or written.</exception>
     public static void Save(string repoRoot, RepoPin pin)
     {
         ArgumentNullException.ThrowIfNull(repoRoot);
         ArgumentNullException.ThrowIfNull(pin);
+        BlockingCallGuard.ThrowIfGuarded("pin write");
 
         var filePath = PathHelpers.SafePathCombine(repoRoot, PinFileName);
         var temporaryPath = filePath + "." + Guid.NewGuid().ToString("N") + ".tmp";

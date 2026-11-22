@@ -744,3 +744,28 @@ sections:
         tests:
           - AgentPackageManagementSubsystem_GitSource_FailuresAreClassifiedAndNeverRepeatTheAddress
           - AgentPackageManagementSubsystem_GitSource_TooOldGitIsRefusedWithAdviceBeforeAnyTagIsListed
+
+      - id: AgentControl-AgentPackageManagement-SourcesNeverBlockCaller
+        title: >-
+          The AgentPackageManagement subsystem shall read the configured package sources and acquire
+          their packages without making the calling thread wait for the disk, a process or a package
+          hash, handing over an acquired package whose content identity is already known.
+        justification: |
+          The window asks the sources from its UI thread; a source that starts git, reads a share or
+          a cache, or hashes a whole package there freezes the window.
+        children:
+          - AgentControl-PackageSourceRegistry-ReadsOffCallerThread
+        tests:
+          - AgentPackageManagementSubsystem_ConfiguredSources_FromGuardedThread_NeverBlockTheCaller
+
+      - id: AgentControl-AgentPackageManagement-HashRefusedOnGuardedThread
+        title: >-
+          The AgentPackageManagement subsystem shall refuse to hash the files of a package or of a
+          repo on a thread that is guarded against blocking calls, recording the refusal.
+        justification: |
+          A hash that slips back onto the window's UI thread freezes it; the tests guard that thread
+          so that such a hash fails them at once.
+        children:
+          - AgentControl-PackageContentIdentity-RefusesGuardedThread
+        tests:
+          - AgentPackageManagementSubsystem_PackageHash_OnGuardedThread_IsRefused

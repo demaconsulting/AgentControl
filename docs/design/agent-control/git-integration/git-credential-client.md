@@ -111,6 +111,12 @@ cancellation by the caller propagates as `OperationCanceledException`
   only through the redacting logger, so an unforeseen path cannot put it into a log line; the request and the
   response are never logged at all, and a credential returned by `fill` is registered for as long as the session
   store that takes it over keeps it.
+- *Never on the caller's thread.* `RunAsync` starts git with `Task.Run(() => StartGit(...))` and awaits everything
+  with `ConfigureAwait(false)`, so a caller on the UI thread (the source editor's helper check and "Forget saved
+  sign-in") or on whatever thread the NuGet library calls the credential service on never waits for the process
+  start (`AgentControl-GitCredentialClient-StartsOffCallerThread`). `StartGit` asks
+  `BlockingCallGuard.ThrowIfGuarded` first (the operation `git credential <operation>`), so a start that slips back
+  onto a thread the tests guard fails them. A token that is already cancelled stops the run before git starts.
 
 #### Error Handling
 
@@ -126,6 +132,7 @@ exceptions: `IsAvailableAsync` yields `false`, `FillAsync` yields `null`, `Appro
 - **IRememberedCredentialStore**, **FeedOrigin**, **SecretRedactor** (`PackageCredentials` subsystem) — the
   interface implemented, the origin described to git, and the redaction leases.
 - **AppLogging** (`Logging` subsystem) — the fallback logger factory.
+- **BlockingCallGuard** (`Utilities` subsystem) — asked before every git start.
 - **NuGetCaching** (OTS) — the `NuGetCredential` type.
 - **.NET BCL** — `System.Diagnostics.Process`.
 - **The user's git executable and credential helper** — an external program, not a software item of this system.
