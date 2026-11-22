@@ -204,7 +204,12 @@ public sealed class RememberedSignInTests
         // Assert: the choice is there but disabled, and nothing is saved beyond the session
         Assert.False(Find(signIn, "CredentialPromptRememberCheckBox").AsCheckBox().IsEnabled);
         Assert.Contains("session only", Find(signIn, "CredentialPromptSessionNoteText").Name, StringComparison.Ordinal);
-        Assert.False(Find(editor, "SourceForgetSignInButton").AsButton().IsEnabled);
+
+        // The editor checks the typed address for a credential helper in the background a moment after the typing
+        // stops, and the button is disabled while it checks: watch it for a while, well past that check, so a
+        // button that the check (wrongly) enabled would be seen
+        var forget = Find(editor, "SourceForgetSignInButton").AsButton();
+        Assert.False(Retry.WhileFalse(() => forget.IsEnabled, TimeSpan.FromSeconds(2), TimeSpan.FromMilliseconds(200)).Result);
 
         // Act: leave without signing in
         Find(signIn, "CredentialPromptCancelButton").AsButton().Invoke();

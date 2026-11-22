@@ -101,7 +101,7 @@ caught: the owner's cancel action (`MainWindowViewModel.CancelAddRepos`) only si
 - **MainWindowViewModel** (`LauncherUI`) - creates the one instance (`GlobalProgress`), begins one cancelable
   operation per session of adds (`Adding repositories...`, then `Adding {completed} of {total} repositories...`,
   `Saving...` with `AllowCancel` off) and one operation without a cancel action for each wave of counted reads of the
-  shared refresh queue, such as the card refresh after a settings save (`Refreshing repositories {completed} of
-  {total}...`), and disposes them when the work ends.
+  shared refresh queue, such as the cards' reads at start-up and their refresh after a settings save (`Refreshing
+  repositories {completed} of {total}...`), and disposes them when the work ends.
 - **MainWindow** (view) - binds the strip (`GlobalProgressStrip`), its bar (`GlobalProgressBar`), its text
   (`GlobalProgressText`) and its Cancel button (`GlobalProgressCancelButton`) to the properties and `CancelCommand`.

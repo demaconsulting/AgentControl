@@ -23,9 +23,10 @@ document and review set: `RepoImageLocator` (finds and decodes a repo's untruste
 `RepoGroupHeaderViewModel` (with `RepoGroupKind`; the header row of a repo-list section), `GroupNameViewModel` (the
 validating view model of the group-name prompt), `DialogBehavior` (the keyboard behavior every dialog shares) and
 `GlobalProgressViewModel` (with `GlobalProgressOperation`; the progress strip under the app bar that shows bulk work -
-adding repositories, refreshing the cards after Settings are saved - with Cancel for an add) and `RepoRefreshQueue`
-(the one queue every lazy read of a repo's state goes through - the folder checks of an add, the cards' refresh after
-a settings save and the working-tree checks of the cards shown - so at most two run at once across all of them).
+adding repositories, and refreshing the cards at start-up and after Settings are saved - with Cancel for an add) and
+`RepoRefreshQueue` (the one queue every lazy read of a repo's state goes through - the cards' start-up reads, the
+folder checks of an add, the cards' refresh after a settings save, the working-tree checks of the cards shown, and the
+reads of Refresh, Pull and the card actions - so at most two run at once across all of them).
 
 **Supporting types.** The remaining types are documented here, as supporting types of the subsystem, rather than as
 units: the `RelayCommand`/`ViewModelBase`/`PackageSourceItemViewModel`-style MVVM plumbing and the `.axaml` Views are
@@ -195,8 +196,8 @@ a NuGet source's editor and the "Forget saved sign-in" action of a server source
 - *Constraints*: The fingerprint is saved normalized, and only while signatures are required.
 
 **Global progress strip** (`MainWindowViewModel.GlobalProgress`, a `GlobalProgressViewModel`): the strip directly under
-the app bar that shows bulk work not tied to one card - adding repositories, and refreshing the cards after Settings
-are saved.
+the app bar that shows bulk work not tied to one card - adding repositories, and refreshing the cards at start-up and
+after Settings are saved.
 
 - *Type*: In-process .NET bindable properties and an `ICommand`, bound by `MainWindow.axaml` to a `Border`
   (AutomationId `GlobalProgressStrip`, visible only while `IsActive`), a 3-pixel `ProgressBar` (`GlobalProgressBar`,
@@ -207,7 +208,8 @@ are saved.
 - *Contract*: Shows the most recently begun bulk operation that is still running: "Adding repositories..." while the
   folders of an add are counted, "Adding {completed} of {total} repositories..." as each folder has been checked,
   "Saving..." while the add saves (no Cancel then), and "Refreshing repositories {completed} of {total}..." while the
-  shared refresh queue reads the cards after a settings save (no Cancel). Cancel stops the running add and every queued
+  shared refresh queue reads the cards at start-up or after a settings save (no Cancel). A single card's Refresh,
+  Pull or action shows on its card, not in the strip. Cancel stops the running add and every queued
   add before anything is saved or added, with no message afterwards (`AgentControl-LauncherUI-GlobalProgress`,
   `AgentControl-LauncherUI-AddCancel`).
 - *Constraints*: Fully collapsed when idle, so the idle window is unchanged; the strip, its text and its bar use
@@ -389,17 +391,17 @@ repo is removed, `RemoveRepo` applies and schedules the removal and then calls `
 cancels its running operation, ignores the results of upgrade checks and picture loads still in flight, clears all its
 events (so nothing it still does can show an error box, release notes or a prompt), and disposes its picture;
 `MainWindow` detaches its per-card handlers when a card leaves `RepoCards` and forgets its bookkeeping for it.
-**Background work and the global progress strip.** Adding folders, refreshing the cards after a settings save and
-checking the working tree of the cards read the disk and run git for every repo; done on the UI thread for many repos
-they froze the window (`AgentControl-System-ResponsiveRepoListWork`). The rule is: blocking reads run off the UI
-thread through the shared `RepoRefreshQueue` (owned by `MainWindowViewModel` and handed to every `RepoCardViewModel`),
-which runs at most two of them at a time through `IBackgroundWorkRunner` (`ThreadPoolBackgroundWorkRunner.Instance`
-in the application), they only read and return immutable records
-(`RepoFolderFacts`, `RepoCheapFacts`, a working-tree answer), and every change to view-model state, the settings and
-the list happens on the UI thread in the continuation of the `await` (which resumes on Avalonia's synchronization
-context). The view models never touch the dispatcher and need no locking; the only shared mutable object a worker
-thread touches, the per-card `CommittedAgentFilesCache`, is lock-guarded
-(`AgentControl-GitIntegration-QueriesFromAnyThread`).
+
+**Background work and the global progress strip.** Reading the cards at start-up, adding folders, refreshing the cards
+after a settings save and checking the working tree of the cards read the disk and run git for every repo; done on the
+UI thread for many repos they froze the window (`AgentControl-System-ResponsiveRepoListWork`). The rule is: blocking
+reads run off the UI thread through the shared `RepoRefreshQueue` (owned by `MainWindowViewModel` and handed to every
+`RepoCardViewModel`), which runs at most two of them at a time through `IBackgroundWorkRunner`
+(`ThreadPoolBackgroundWorkRunner.Instance` in the application), they only read and return immutable records
+(`RepoFolderFacts`, `RepoCheapFacts`, a working-tree answer), and every change to view-model state, the settings and the
+list happens on the UI thread in the continuation of the `await` (which resumes on Avalonia's synchronization context).
+The view models never touch the dispatcher and need no locking; the only shared mutable object a worker thread touches,
+the per-card `CommittedAgentFilesCache`, is lock-guarded (`AgentControl-GitIntegration-QueriesFromAnyThread`).
 
 - *One shared queue* (`AgentControl-LauncherUI-BoundedRepoReads`): every lazy repo read - the cards' startup reads, an
   add's folder checks, the cards' refresh after a settings save, the working-tree check of a card shown, a re-added
@@ -1182,3 +1184,74 @@ supplies the repo's files (when known), its package and version; choosing the pi
 before the changed content replaces the files (`AgentControl-LauncherUI-ChangePackage`,
 `AgentControl-LauncherUI-ContentChangeConfirmation`). The Select Package dialog never replaces a choice the user made
 while the sources were loading with the repo's own source and package.
+
+### Design Constraints
+
+**Never block the UI thread** (`AgentControl-System-ResponsiveOperations`, `AgentControl-System-ResponsiveRepoListWork`,
+`AgentControl-LauncherUI-PackageWorkNeverBlocks`). Once the main window exists, the UI thread does no disk, process or
+network work of its own. It only changes view-model state, the settings in memory and the list, in the continuations of
+work that ran elsewhere. A slow disk, an offline network share, a hung git or a slow package server can therefore make
+a card wait, but never the window. The rule is met as follows:
+
+- *Repo state*: every read of a repo's folder, pin, branch, committed agent folders and working tree goes through the
+  one shared `RepoRefreshQueue` (`AgentControl-LauncherUI-BoundedRepoReads`). See *Background work and the global
+  progress strip* and the queue's own design.
+  - **Limit: two reads at a time** across all callers. One read is at most one git process or one burst of
+    file-system metadata reads. Two slots, not one, so that one slow repo (a network share, a huge working tree, a git
+    that hangs until its time limit) cannot stall the whole wave, or a user action that was moved up behind it. Two,
+    not more, because the reads compete for the same disk and the antivirus scan at each process start: more parallel
+    `git status` runs gain little and make the computer sluggish, the opposite of the goal.
+  - **Priorities**: `UserAction` (Refresh, the "Sign-in needed" chip, Pull, the re-read after an untrack, and the
+    read an action waits for) before `Visible` (a card the list realizes, an add's folder checks) before `Background`
+    (start-up and the refresh after Settings, in display order). First in, first out within a priority. A read
+    already waiting for the same repo and kind is joined, not queued again; `Promote` raises a waiting read's
+    priority.
+  - **Shutdown**: closing the window disposes the queue, which cancels the waiting reads and stops the running git.
+- *Git*: every `GitClient` command runs under a time limit (60 seconds for the local repository, 10 minutes for a
+  pull, then 10 seconds for the stopped process tree to exit). A command past its limit is stopped with its process
+  tree, and the card's status message says so (`AgentControl-LauncherUI-GitTimeoutShown`).
+- *Network upgrade checks* keep their own limiter: one `SemaphoreSlim` of four slots that every check shares
+  (start-up, added repos, after Settings, the periodic round), so overlapping checks do not multiply. A Git source
+  runs at most one git at a time per check. A check waits for its card's pending cheap-facts read before it takes a
+  slot.
+- *Process budget*: without a user action, at most the queue's 2 reads plus the 4 upgrade-check slots, so at most 6
+  processes, typically 2. A user action adds at most one process at a time per busy card, the settings writer one
+  write, and the dialogs' own work (listing a source, Test connection, the sign-in helper check) is paced by the user.
+- *No periodic local re-check*: there is no timer that re-reads local git state. The periodic round (every five
+  minutes, the package-version cache lifetime) runs the network upgrade checks only, through the shared limiter.
+- *Settings*: every save goes through the `Settings` subsystem's `SettingsWriter`
+  (`AgentControl-System-ListChangesKept`; see *Background persistence* and the writer's own design). A gesture's change
+  is applied at once and scheduled: the writer keeps only the newest snapshot (`AppSettings.CreateSnapshot`, a deep copy
+  taken on the UI thread) and writes it on a worker thread 300 ms after the last change, one write at a time. An add and
+  the Settings window's Save are confirmed writes (`SaveNowAsync`), applied only once written. A failed background write
+  is reported once per failure streak through a message box the window does not wait for, and the change is written
+  again with the next change and at the close. `MainWindowViewModel.Dispose` flushes what is not written yet, waiting at
+  most five seconds.
+- *Packages and sources*: every built-in provider that `PackageSourceRegistry.Create` builds is wrapped in
+  `BackgroundPackageSourceProvider`, which runs each call on the thread pool and computes a delivered package's
+  content identity there. `GitRemoteClient` and `GitCredentialClient` start git off the caller's thread. The card's
+  pin reads and writes, the extraction, the `.gitignore`, the release notes, the AGENTS.md offer and its answer, and
+  the launch (shell detection and the process start) run through `IBackgroundWorkRunner`. The source editor runs Test
+  connection and Forget saved sign-in in `Task.Run`, and checks a feed address for a Git credential helper 400 ms
+  after the typing stops, off the UI thread. A release-notes link is opened by a shell start on a worker thread.
+- *Exceptions*, each justified:
+  - Before the window exists: `SettingsStore.Load` (plus a one-time order-seeding save of an older file), creating
+    the log folder and the credential profile probe. Each is one small local file or folder, needed to build the
+    window.
+  - At the close: the bounded settings flush (at most five seconds, after the window has closed).
+  - Serilog's synchronous file sink, for the few lines a user action logs on the UI thread.
+  - `Path.GetFullPath` in path normalization, which is lexical (no I/O).
+  - The synchronous `RepoCardViewModel.RefreshCheap`/`RefreshDirtyStatus` and `MainWindowViewModel.AddRepo`,
+    `AddRepoToGroup` and `AddRepos` remain for tests and callers off the UI thread; no production code calls them on
+    the UI thread.
+- *Regression guard* (`Quality-UiThreadRegressionGuard`): `BlockingCallGuard` is a no-op in the application. The
+  headless test session marks its UI thread as guarded, so a guarded call made there fails the test that made it. The
+  guard points are:
+  - `GitClient` (every git command, and the `.git/HEAD` read of the current branch)
+  - `SettingsStore.Save`
+  - `RepoPinStore.Load` and `Save`
+  - `PackageContentIdentity` (the package hash and the installed-files hash)
+  - `PackageContentExtractor.Extract`
+  - `GitRemoteClient` (its process start)
+  - `GitCredentialClient` (its process start)
+  - the release-notes link's shell start

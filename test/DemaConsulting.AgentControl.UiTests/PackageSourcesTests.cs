@@ -341,6 +341,7 @@ public sealed class PackageSourcesTests
             // Assert: package chip, then the upgrade chip once the background check has run
             Assert.True(WaitForText(mainWindow, "RepoPinnedVersionText", $"{packageName} 1.0.0"));
             Assert.True(WaitForText(mainWindow, "UpgradeChipText", "1.1.0"));
+            Assert.True(CardRefreshWait.WaitUntilCardsAreRead(mainWindow, TimeSpan.FromSeconds(30)));
             Assert.Null(mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("NoPackageChip")));
 
             // Assert: the Launch button carries its label (the arg-logger stub's name is too long to

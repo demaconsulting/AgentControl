@@ -160,16 +160,22 @@ public sealed class LoggingSetupTests
 
         var dateAfter = DateTime.Now;
 
-        // Assert: one of the rolling log files for those date(s) under the documented "logs"
-        // subfolder (earlier days' files may linger in the build output from previous runs, so
-        // only these are considered) contains the entry, proving it was actually captured to
-        // disk. Files are opened with FileShare.ReadWrite because Serilog's File sink keeps its
-        // own write handle open for the lifetime of the process - a plain File.ReadAllText call
+        // Assert: one of the log files for those date(s) under the documented "logs" subfolder
+        // contains the entry, proving it was actually captured to disk. Serilog's rolling File sink
+        // writes to agentcontrol-{date}.log, but rolls over to agentcontrol-{date}_001.log (and so on)
+        // when that day's file cannot be opened - for example when an earlier test run that is still
+        // exiting holds it - so every file of the date(s) is searched, not just the first name.
+        // Earlier days' files may linger in the build output from previous runs, so only these dates
+        // are considered. Files are opened with FileShare.ReadWrite because Serilog's File sink keeps
+        // its own write handle open for the lifetime of the process - a plain File.ReadAllText call
         // (which requests only FileShare.Read) is denied access while that handle remains open.
         var logFiles = new[] { dateBefore, dateAfter }
-            .Select(date => Path.Combine(logsDirectory, $"agentcontrol-{date:yyyyMMdd}.log"))
+            .Select(date => $"agentcontrol-{date:yyyyMMdd}*.log")
             .Distinct()
-            .Where(File.Exists)
+            .SelectMany(pattern => Directory.Exists(logsDirectory)
+                ? Directory.EnumerateFiles(logsDirectory, pattern)
+                : [])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         Assert.NotEmpty(logFiles);
 

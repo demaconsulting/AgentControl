@@ -90,9 +90,10 @@
 
         <!-- Global progress strip, directly under the app bar: a thin bar and one compact line of
              status text (with Cancel when the operation can be stopped) shown only while a bulk
-             operation runs - adding several repositories, or refreshing the cards after Settings
-             were saved. Fully collapsed (no space reserved) when idle, so the idle layout is
-             unchanged. The bar is indeterminate until the amount of work is known. -->
+             operation runs - reading the cards at start-up, adding several repositories, or
+             refreshing the cards after Settings were saved. Fully collapsed (no space reserved) when
+             idle, so the idle layout is unchanged. The bar is indeterminate until the amount of work
+             is known. -->
         <Border DockPanel.Dock="Top"
                 Name="GlobalProgressStrip"
                 AutomationProperties.AutomationId="GlobalProgressStrip"

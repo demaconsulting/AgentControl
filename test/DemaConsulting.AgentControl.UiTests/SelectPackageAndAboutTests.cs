@@ -56,6 +56,10 @@ public sealed class SelectPackageAndAboutTests
             using var context = new AgentControlTestContext(packageSourcePath: sourceDirectory);
             var mainWindow = context.Launch();
 
+            // The card's state is read in the background after start-up; wait for it, so the absence of
+            // "Upgrade" below is checked on a card whose state is known
+            Assert.True(CardRefreshWait.WaitUntilCardsAreRead(mainWindow, TimeSpan.FromSeconds(30)));
+
             var moreActionsButton = mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("MoreActionsButton"))?.AsButton();
             Assert.NotNull(moreActionsButton);
             moreActionsButton.Invoke();

@@ -18,8 +18,9 @@ The unit uses three independently documented `LauncherUI` units: `RepoGroupHeade
 starts a section, with `RepoGroupKind`, which kind of section a header introduces - see its own design),
 `GroupNameViewModel` (the validating view model of the group-name prompt window `GroupNameWindow` - see its own
 design) and `GlobalProgressViewModel` (the progress strip under the app bar, in which this view model shows its bulk
-work - adding repositories and refreshing the cards after a settings save - see its own design). It owns the one
-`RepoRefreshQueue` (see its own design) through which the folders of an add, the cards' refresh after a settings save
+work - adding repositories, and reading the cards at start-up and after a settings save - see its own design). It
+owns the one `RepoRefreshQueue` (see its own design) through which the cards' start-up reads, the folders of an add,
+the cards' refresh after a settings save
 and the cards' own reads are read off the UI thread, at most two at a time across all of them
 (`AgentControl-MainWindowViewModel-SharedRepoReads`), and every add is saved once for the whole batch. It owns a
 `SettingsWriter` (`Settings` subsystem, see its own design) through which every settings save is written in the

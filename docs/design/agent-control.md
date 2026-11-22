@@ -248,9 +248,10 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   only the top folder of a Git repository (`GitClient.IsRepositoryRoot`: a `.git` folder or file directly in it, no
   git process) and leaves the repos already in the list as they are; `DescribeAddOutcomes` turns the outcomes into one
   message (nothing when all were added, nothing after a cancel).
-- *Responsive repo-list work* (`AgentControl-System-ResponsiveRepoListWork`): adding folders and refreshing the cards
-  after Settings are saved read the disk and run git for every repo, so that work never runs on the UI thread. Every
-  such read - each folder of an add, each card's refresh after a settings save, the working-tree check of each card
+- *Responsive repo-list work* (`AgentControl-System-ResponsiveRepoListWork`): reading the cards at start-up, adding
+  folders and refreshing the cards after Settings are saved read the disk and run git for every repo, so that work
+  never runs on the UI thread. Every such read - each card's start-up read, each folder of an add, each card's refresh
+  after a settings save, the working-tree check of each card
   shown - goes through one shared queue (`RepoRefreshQueue`, over the `IBackgroundWorkRunner` seam, the thread pool in
   the application) that runs at most two at a time across all of them, joins a read already waiting for the same repo
   and puts the cards on screen first; every git command runs under a time limit and a git that does not answer is
@@ -347,8 +348,8 @@ longer raise an error box, release notes or a prompt, and the window releases it
   a user group's header menu adds repositories, moves the group up or down, colors it, renames or removes it; the
   toolbar-level app bar holds the
   filter, Add (one or several folders), Settings and About; folders can also be dropped onto the list; while repos are
-  added or the cards are refreshed after Settings are saved, a progress strip directly under the app bar shows a thin
-  bar, a short status text and (for an add) Cancel (`AgentControl-System-ResponsiveRepoListWork`)
+  added or the cards are read at start-up or refreshed after Settings are saved, a progress strip directly under the
+  app bar shows a thin bar, a short status text and (for an add) Cancel (`AgentControl-System-ResponsiveRepoListWork`)
   (`AgentControl-System-RecentRepos`, `AgentControl-System-AddRemoveRepo`, `AgentControl-System-SearchFilter`,
   `AgentControl-System-RepoOrder`, `AgentControl-System-RepoReorder`, `AgentControl-System-RepoOrderRemembered`,
   `AgentControl-System-Favorites`, `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
@@ -770,14 +771,38 @@ an unwanted or repeated file write.
   worker thread), so the window never waits for the settings file; a failed write is reported once per failure streak
   and the change stays in effect and is written with the next change or when the window closes; an add and the
   Settings window's values are confirmed writes, applied only once saved (`AgentControl-System-ListChangesKept`).
-- Responsiveness: blocking file-system and git reads made for many repos at once (adding folders, refreshing the
-  cards after a settings save, the working-tree check of shown cards) run off the UI thread through an injectable
-  background runner and hand back immutable results; every change to view-model state, the settings and the list is
-  made on the UI thread in the continuation, so view models need no locking and no dispatcher. Bulk work shows its
-  progress in one global strip under the app bar (`AgentControl-System-ResponsiveRepoListWork`). At start-up the
-  cards are built from the settings alone and shown at once (`AgentControl-System-Startup`); every read of
-  a repo's state - at start-up, after an add or a settings save, for a card coming on screen, and for Refresh, Pull and
-  the card actions - goes through the one shared `RepoRefreshQueue`, which runs at most 2 reads at a time.
+- Responsiveness - never block the UI thread (`AgentControl-System-ResponsiveOperations`,
+  `AgentControl-System-ResponsiveRepoListWork`): once the window exists, the UI thread does no disk, process or network
+  work of its own; it only changes view-model state, the settings in memory and the list, in the continuation of work
+  that ran elsewhere and handed back immutable results, so view models need no locking and no dispatcher. A slow disk,
+  an offline share, a hung git or a slow server can make a card wait, never the window. Bulk work shows its progress in
+  one global strip under the app bar.
+  - Start-up: the cards are built from the settings alone and shown at once (`AgentControl-System-Startup`).
+  - Repo state: every read of a repo's state - at start-up, after an add or a settings save, for a card coming on
+    screen, and for Refresh, Pull and the card actions - goes through the one shared `RepoRefreshQueue`, which runs at
+    most 2 reads at a time (two, so one slow repo cannot stall the rest; not more, because the reads compete for the
+    same disk), user actions first, then the cards on screen, then background work. An action waits for its card's
+    pending read without blocking the window.
+  - Git: every command runs under a time limit (60 seconds for the local repository, 10 minutes for a pull); a git
+    that does not answer is stopped with its process tree and reported on its card.
+  - Network upgrade checks keep their own limiter of 4 concurrent checks shared by all of them, so without a user
+    action at most 6 processes run (typically 2).
+  - Settings: `SettingsWriter` writes the newest snapshot on a worker thread, one write at a time (see the personal
+    choices constraint above).
+  - Packages and sources: every built-in provider of `PackageSourceRegistry.Create` is wrapped in
+    `BackgroundPackageSourceProvider`, which runs it on the thread pool and computes the content identity there; the
+    clients that run git against remotes and the credential helper start it off the caller's thread; the card's pin,
+    extraction, AGENTS.md and launch work, the source editor's connection test and debounced helper check, and opening
+    a release-notes link run on worker threads.
+  - Exceptions (justified): before the window exists, loading the settings file (with a one-time seeding save),
+    creating the log folder and the credential profile probe; at the close, a settings flush the UI thread waits for at
+    most 5 seconds; Serilog's synchronous file sink for the few lines logged on the UI thread; and lexical path
+    normalization.
+  - Regression guard (`Quality-UiThreadRegressionGuard`): `BlockingCallGuard` refuses a guarded call on the headless
+    tests' UI thread (it does nothing in the application). The guard points are `GitClient` (every git command and the
+    `.git/HEAD` read), `SettingsStore.Save`, `RepoPinStore.Load`/`Save`, `PackageContentIdentity` (both hashes),
+    `PackageContentExtractor.Extract`, `GitRemoteClient` and `GitCredentialClient` (their process starts) and the
+    release-notes link's shell start. See `docs/design/agent-control/launcher-ui.md`, *Design Constraints*.
 - Only Git repositories are tracked: a folder is added as a repo only when it is the top folder of a Git repository
   (a `.git` folder or file directly in it), because a tracked repo is synced, pulled and launched as a Git working tree
   and the agent folders must go to its top (`AgentControl-System-AddGitReposOnly`).
