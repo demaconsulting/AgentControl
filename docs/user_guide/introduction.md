@@ -4,7 +4,7 @@
 
 Agent Control is a Windows desktop launcher application that lets a company distribute
 proprietary AI-agent configuration (Copilot/agentic-CLI instruction files, standards,
-templates, and skills) alongside public source repositories, without ever committing that
+templates, and skills) alongside public source repositories, without committing that
 proprietary content to source control. A developer opens a repo from a repo list,
 has AgentControl ensure the repo's `.github/agents`, `.github/standards`,
 `.github/templates`, and `.github/skills` folders match the version pinned in that repo's
