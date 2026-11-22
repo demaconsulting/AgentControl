@@ -6,7 +6,10 @@
 Source providers are replaced by an in-memory fake (`FakePackageSourceProvider`) that serves a
 fixed list of packages and counts every call made to it, so the tests can prove not only which
 provider was returned but also which sources were never contacted. The default provider factory
-is verified with real definitions pointing at temporary paths (no provider operation is invoked).
+is verified with real definitions pointing at temporary paths (no provider operation is invoked), and with a real
+zip folder for the test that the built-in sources run off the calling thread. The supporting decorator
+`BackgroundPackageSourceProvider` is verified in `BackgroundPackageSourceProviderTests.cs` over a scripted provider and
+reader whose calls block until released or ask `BlockingCallGuard` as real disk and process work would.
 
 #### Test Environment
 
@@ -26,6 +29,10 @@ N/A - standard test environment.
 - Changing a definition, or the list it was built from, after construction - or changing a definition
   obtained from `Definitions` - does not change which source an alias resolves to.
 - With the same package ID at two sources, resolving the chosen source contacts only that source.
+- The built-in sources of a registry made by `Create` are called on a worker thread: a listing and an acquire
+  started on a thread guarded against blocking calls refuse nothing there, a source that blocks before its first
+  wait does not hold the caller, and an acquired package's identity is already known when it is handed over; the
+  answers, failures and cancellation are the source's own, and a reader whose identity cannot be read is disposed.
 
 #### Test Scenarios
 
@@ -96,3 +103,21 @@ a remote-helper form fails with an `InvalidOperationException` when it is resolv
 the valid Git source beside it still resolves, and an alias that is not configured is still an error. This scenario is
 tested by `PackageSourceRegistry_Create_GitSourceWithInvalidSettings_FailsWhenResolvedNotWhenBuilt`, covering
 `AgentControl-PackageSourceRegistry-GitSourceInvalidFailsWhenResolved`.
+
+**PackageSourceRegistry_BuiltInSources_RunOffTheCallingThread**: A registry made by `Create` over a zip folder with
+one package is listed and acquired from a thread guarded against blocking calls (the record of refused calls read
+before each `await`): nothing is refused, and reading the acquired reader's `ContentIdentity` on the guarded thread
+hashes nothing because it was computed already; each built-in provider is wrapped in the decorator. The decorator on its
+own: an acquire whose provider blocks its calling thread returns a pending task at once and completes with the
+provider's reader once released; the identity is computed exactly once, before the reader is returned; a listing whose
+provider makes a guarded call is answered with nothing refused on the guarded thread; a token that is already canceled
+cancels the call without reaching the provider, and a provider's failure passes through unchanged; a reader whose
+identity cannot be read is disposed and its failure thrown. This scenario is tested by
+`PackageSourceRegistry_Create_BuiltInProviders_ReadOffCallerThread`,
+`PackageSourceRegistry_Create_ZipAndNuGetDefinitions_ResolvesMatchingProviderKinds`,
+`BackgroundPackageSourceProvider_AcquireAsync_InnerBlocksSynchronously_ReturnsPendingTask`,
+`BackgroundPackageSourceProvider_AcquireAsync_ComputesContentIdentityBeforeReturning`,
+`BackgroundPackageSourceProvider_ListVersionsAsync_OnGuardedThread_RunsInnerOffThread`,
+`BackgroundPackageSourceProvider_Canceled_PropagatesCancellation` and
+`BackgroundPackageSourceProvider_AcquireAsync_IdentityFails_DisposesReaderAndThrows`, covering
+`AgentControl-PackageSourceRegistry-ReadsOffCallerThread`.

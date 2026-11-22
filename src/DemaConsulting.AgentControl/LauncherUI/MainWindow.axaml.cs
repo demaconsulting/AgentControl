@@ -55,16 +55,20 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 ///     without this window ever being constructed in a unit test. That includes the reordering
 ///     rules: this class also owns the drag-and-drop plumbing (starting a drag from a card or a group
 ///     header, translating the pointer position into a <see cref="RepoDropTarget"/> or a
-///     <see cref="GroupDropTarget"/>, drawing the insertion line and the header tint, auto-scrolling,
-///     and accepting folders dropped from the file manager), the color palette pop-ups of cards and
-///     groups, the folder picker (several folders at once) and the enabling of the card menu's Move
-///     items, while <see cref="MainWindowViewModel"/> decides what is allowed and does it.
+///     <see cref="GroupDropTarget"/>, drawing the insertion line and the header tint, the timer-driven
+///     auto-scroll near and beyond the list's edges, and accepting folders dropped from the file
+///     manager), the color palette pop-ups of cards and groups, the folder picker (several folders at
+///     once), the Retry/Discard question when an add could not be saved, and the enabling of the card
+///     menu's Move items, while <see cref="MainWindowViewModel"/> decides what is allowed and does it.
+///     Adds run in the background through <see cref="MainWindowViewModel.EnqueueAddReposAsync"/>, with
+///     their progress in the global progress strip under the app bar (bound to
+///     <see cref="MainWindowViewModel.GlobalProgress"/>), so the window stays usable meanwhile.
 /// </remarks>
 internal sealed partial class MainWindow : Window
 {
     /// <summary>
-    ///     Tracks which repo cards have already had their (lazy, non-cacheable)
-    ///     <see cref="RepoCardViewModel.RefreshDirtyStatus"/> triggered by this window, so the
+    ///     Tracks which repo cards have already had their (lazy, non-cacheable) working-tree check
+    ///     (<see cref="RepoCardViewModel.RefreshRepoStateAsync"/>) triggered by this window, so the
     ///     first-attach trigger (see remarks on <see cref="RepoCard_AttachedToVisualTree"/>) does
     ///     not repeatedly re-run the working-tree check every time a virtualized list container
     ///     is recycled/reattached for the same card.
@@ -100,10 +104,16 @@ internal sealed partial class MainWindow : Window
     public MainWindow()
     {
         AvaloniaXamlLoader.Load(this);
+        _autoScrollTimer = new DispatcherTimer { Interval = AutoScrollInterval };
+        _autoScrollTimer.Tick += (_, _) => AutoScrollTick();
         WireRepoListDragAndDrop();
         DataContextChanged += OnDataContextChanged;
         Closing += MainWindow_Closing;
-        Closed += (_, _) => (DataContext as MainWindowViewModel)?.Dispose();
+        Closed += (_, _) =>
+        {
+            StopAutoScroll();
+            (DataContext as MainWindowViewModel)?.Dispose();
+        };
         // Remember which card's favorite star has the keyboard focus (see RestoreStarFocus)
         AddHandler(GotFocusEvent, OnAnyGotFocus, RoutingStrategies.Bubble);
         Deactivated += (_, _) => _focusedStarCard = null;
@@ -253,10 +263,13 @@ internal sealed partial class MainWindow : Window
         }
 
         viewModel.RepoCards.CollectionChanged += OnRepoCardsChanged;
+        // A change that could not be saved in the background is told once per failure streak; the
+        // message box is not awaited, so the window keeps working behind it
         viewModel.SettingsSaveFailed += (_, message) => new MessageBoxWindow(message).ShowDialog(this);
         viewModel.GroupRenameRequested += async (_, name) => await ShowRenameGroupPrompt(viewModel, name);
         viewModel.GroupRemoveRequested += async (_, name) => await ConfirmAndRemoveGroup(viewModel, name);
         viewModel.GroupAddRepoRequested += async (_, name) => await ShowNoticeAsync(await AddRepoAsync(viewModel, name));
+        viewModel.AddSaveFailed += async (_, request) => await AskAddSaveRetryAsync(request);
 
         // The upgrade check reads package sources, which may be slow or unreachable, so it starts
         // in the background now that the window has its data rather than delaying the window
@@ -522,15 +535,9 @@ internal sealed partial class MainWindow : Window
 
         if (confirmed)
         {
-            try
-            {
-                viewModel.RemoveRepo(card);
-            }
-            catch (InvalidOperationException ex)
-            {
-                // The removal was not saved, so the repo is still listed; say why
-                await new MessageBoxWindow($"The repo was not removed. {SecretRedactor.SafeMessage(ex)}").ShowDialog(this);
-            }
+            // Applied at once and saved in the background; a failed save is reported once through
+            // SettingsSaveFailed
+            viewModel.RemoveRepo(card);
         }
     }
 
@@ -626,8 +633,9 @@ internal sealed partial class MainWindow : Window
     /// <summary>
     ///     Shows the <see cref="ConfirmationWindow"/> offering to place the package's optional
     ///     <c>AGENTS.md</c> template at <paramref name="card"/>'s repo root, and calls back into
-    ///     <see cref="RepoCardViewModel.AcceptAgentsMdTemplate"/> or
-    ///     <see cref="RepoCardViewModel.DeclineAgentsMdTemplate"/> depending on the user's choice.
+    ///     <see cref="RepoCardViewModel.AcceptAgentsMdTemplateAsync"/> or
+    ///     <see cref="RepoCardViewModel.DeclineAgentsMdTemplateAsync"/> depending on the user's choice,
+    ///     waiting for the card to write the answer (it does so off the UI thread).
     /// </summary>
     /// <param name="card">The card that just completed a sync offering the template.</param>
     /// <param name="templateContent">The template's text content, as carried by
@@ -644,11 +652,11 @@ internal sealed partial class MainWindow : Window
 
         if (confirmed)
         {
-            card.AcceptAgentsMdTemplate(templateContent);
+            await card.AcceptAgentsMdTemplateAsync(templateContent);
         }
         else
         {
-            card.DeclineAgentsMdTemplate();
+            await card.DeclineAgentsMdTemplateAsync();
         }
     }
 
@@ -688,20 +696,24 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Triggers a newly-realized repo card's lazy <see cref="RepoCardViewModel.RefreshDirtyStatus"/>
-    ///     check the first time its list container attaches to the visual tree.
+    ///     Starts a newly-realized repo card's lazy working-tree check through the shared refresh queue
+    ///     (<see cref="RepoCardViewModel.RefreshRepoStateAsync"/> at the priority of a visible card,
+    ///     which runs git off the UI thread) the first time its list container attaches to the visual
+    ///     tree, and moves any of the card's reads that still wait in the queue ahead of the background
+    ///     ones.
     /// </summary>
     /// <remarks>
-    ///     <b>Simplification note:</b> this is a "first-attach" trigger, not true
-    ///     viewport-visibility tracking - it fires once per card shortly after the card's
-    ///     container is realized (which, since <see cref="ListBox"/> here is not virtualizing a
-    ///     huge list, is effectively "shortly after window load" for all initially-visible
-    ///     cards). It intentionally does not re-fire if a card scrolls out of and back into view,
-    ///     nor does it defer work for off-screen cards in a long list. Per the plan's own
-    ///     guidance, literal viewport-visibility tracking is not required for this feature; this
-    ///     approximation keeps the working-tree dirty check lazy (never run during the
-    ///     cheap/eager startup pass) while still populating it for the user shortly after
-    ///     launch, without the added complexity of scroll-position-aware virtualization tracking.
+    ///     <b>Simplification note:</b> this is a "first-realization" trigger, not true
+    ///     viewport-visibility tracking. The list is virtualized: its default
+    ///     <see cref="VirtualizingStackPanel"/> realizes only the rows in and near the viewport, and a
+    ///     recycled container's content is cleared and rebuilt, so the trigger fires for the cards
+    ///     realized when the window loads and later for cards as they are scrolled into view.
+    ///     <see cref="_dirtyStatusRefreshedCards"/> keeps it to once per card, so a card scrolled out of
+    ///     and back into view is not checked again. Per the plan's own guidance, literal
+    ///     viewport-visibility tracking is not required for this feature; this approximation keeps the
+    ///     working-tree dirty check lazy (never run during the cheap/eager startup pass) while still
+    ///     populating it for the user shortly after a card is first shown, without the added
+    ///     complexity of scroll-position-aware tracking.
     /// </remarks>
     /// <param name="sender">The card's container <see cref="Border"/>.</param>
     /// <param name="e">Event arguments (unused).</param>
@@ -713,7 +725,12 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        card.RefreshDirtyStatus();
+        // The check runs in the background through the shared queue, a couple of repos at a time:
+        // showing many cards at once (startup, or a batch of repos just added) never waits for git and
+        // never starts a git per card at once; each card shows "not checked yet" until it answers. A
+        // card on screen goes ahead of the cards nobody sees yet.
+        card.PrioritizeRepoState(RepoRefreshPriority.Visible);
+        _ = card.RefreshRepoStateAsync(RepoRefreshPriority.Visible, cheapFacts: false, workingTree: true);
     }
 
     /// <summary>
@@ -854,7 +871,7 @@ internal sealed partial class MainWindow : Window
     {
         if (sender is MenuItem { DataContext: RepoCardViewModel card } && DataContext is MainWindowViewModel viewModel)
         {
-            // A failed save is reported to the user by the view model
+            // Applied at once and saved in the background; a failed save is reported by the view model
             viewModel.MoveCard(card, move);
         }
     }
@@ -910,10 +927,61 @@ internal sealed partial class MainWindow : Window
     private const double DragThreshold = 6;
 
     /// <summary>
-    ///     How close to the top or bottom edge of the list (in device-independent pixels) a dragged card
-    ///     makes the list scroll, and by how much it scrolls per drag event.
+    ///     How close to the top or bottom edge of the list (in device-independent pixels) a drag must be
+    ///     for the list to scroll; the zone also extends beyond the edge (over the app bar above the
+    ///     list, the margins below it).
     /// </summary>
-    private const double AutoScrollEdge = 24;
+    internal const double AutoScrollEdge = 32;
+
+    /// <summary>
+    ///     How far past the inner edge of the scroll zone (in device-independent pixels, measured from
+    ///     the zone's inner edge) the pointer must be for the scroll to reach its top speed: the edge
+    ///     zone plus this much beyond the list's edge.
+    /// </summary>
+    internal const double AutoScrollOvershoot = 96;
+
+    /// <summary>
+    ///     How far the list scrolls per tick (in device-independent pixels) when the pointer has just
+    ///     entered the scroll zone: slow enough to place a card precisely.
+    /// </summary>
+    internal const double AutoScrollMinStep = 4;
+
+    /// <summary>
+    ///     How far the list scrolls per tick at most (in device-independent pixels): with
+    ///     <see cref="AutoScrollInterval"/>, 900 DIP a second - fast enough to cross a long list,
+    ///     slow enough to keep track of it.
+    /// </summary>
+    internal const double AutoScrollMaxStep = 36;
+
+    /// <summary>
+    ///     How often the list scrolls while a drag is held in the scroll zone (25 ticks a second, so the
+    ///     movement looks smooth without redrawing the list needlessly often).
+    /// </summary>
+    private static readonly TimeSpan AutoScrollInterval = TimeSpan.FromMilliseconds(40);
+
+    /// <summary>
+    ///     The smallest scroll (in device-independent pixels) worth making; anything less means the
+    ///     pointer is outside the scroll zones or the list is already at its top or bottom.
+    /// </summary>
+    private const double MinimumScrollDistance = 0.5;
+
+    /// <summary>
+    ///     Scrolls the list while a drag is held in the scroll zone, even when the pointer does not
+    ///     move (the drag only reports the pointer when it moves).
+    /// </summary>
+    private readonly DispatcherTimer _autoScrollTimer;
+
+    /// <summary>
+    ///     What is being dragged and where the pointer was last reported (relative to this window),
+    ///     for the auto-scroll ticks; <see langword="null"/> when no auto-scroll is running.
+    /// </summary>
+    private (IDataTransfer Data, Point PointInWindow)? _autoScrollPointer;
+
+    /// <summary>
+    ///     Gets a value indicating whether the list is auto-scrolling for a drag now (its timer runs), so
+    ///     tests can tell when it starts and stops.
+    /// </summary>
+    internal bool IsAutoScrolling => _autoScrollTimer.IsEnabled;
 
     /// <summary>
     ///     Starts the operating system's drag-and-drop for a card or a group header;
@@ -950,12 +1018,13 @@ internal sealed partial class MainWindow : Window
     ///     Every business rule - what may be dropped where, and what a drop does - is the view model's
     ///     (<see cref="MainWindowViewModel.CanDrop"/>/<see cref="MainWindowViewModel.DropCard"/> for
     ///     cards, <see cref="MainWindowViewModel.CanDropGroup"/>/<see cref="MainWindowViewModel.DropGroup"/>
-    ///     for groups, <see cref="MainWindowViewModel.AddRepos"/> for folders); this class only
+    ///     for groups, <see cref="MainWindowViewModel.EnqueueAddReposAsync"/> for folders); this class only
     ///     translates pointer positions into targets and shows the feedback. A drag is told apart by its
     ///     data, always in the same order - a card, then a group, then files - so folders from the file
     ///     manager are never taken for a card move, and a card or a group is never taken for folders.
     ///     The list handles every drag over it; the list area's handlers only see the drags the list did
-    ///     not handle (over the empty-state panel or the margins).
+    ///     not handle (over the empty-state panel or the margins). The app bar refuses every drop but
+    ///     keeps the list scrolling up while a drag is held over it.
     /// </remarks>
     private void WireRepoListDragAndDrop()
     {
@@ -981,6 +1050,16 @@ internal sealed partial class MainWindow : Window
             DragDrop.AddDragOverHandler(area, RepoListArea_DragOver);
             DragDrop.AddDragLeaveHandler(area, RepoListArea_DragLeave);
             DragDrop.AddDropHandler(area, RepoListArea_Drop);
+        }
+
+        // Above the list: holding a drag over the app bar scrolls the list up; nothing drops there
+        var appBar = this.FindControl<Border>("AppBar");
+        if (appBar is not null)
+        {
+            DragDrop.AddDragEnterHandler(appBar, AppBar_DragOver);
+            DragDrop.AddDragOverHandler(appBar, AppBar_DragOver);
+            DragDrop.AddDragLeaveHandler(appBar, AppBar_DragLeave);
+            DragDrop.AddDropHandler(appBar, AppBar_Drop);
         }
     }
 
@@ -1124,18 +1203,18 @@ internal sealed partial class MainWindow : Window
     /// <summary>
     ///     Gets the card that is being dragged over the list, from the data of the drag.
     /// </summary>
-    /// <param name="e">The drag event.</param>
+    /// <param name="data">The data of the drag.</param>
     /// <param name="viewModel">The window's view model.</param>
     /// <param name="card">The dragged card when this returns <see langword="true"/>.</param>
     /// <returns><see langword="true"/> when the drag carries a repo card that is in the list.</returns>
     private bool TryGetDraggedCard(
-        DragEventArgs e,
+        IDataTransfer data,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out MainWindowViewModel? viewModel,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out RepoCardViewModel? card)
     {
         viewModel = DataContext as MainWindowViewModel;
         card = null;
-        if (viewModel is null || e.DataTransfer.TryGetValue(RepoCardDataFormat) is not { } path)
+        if (viewModel is null || data.TryGetValue(RepoCardDataFormat) is not { } path)
         {
             return false;
         }
@@ -1147,18 +1226,18 @@ internal sealed partial class MainWindow : Window
     /// <summary>
     ///     Gets the group whose header is being dragged over the list, from the data of the drag.
     /// </summary>
-    /// <param name="e">The drag event.</param>
+    /// <param name="data">The data of the drag.</param>
     /// <param name="viewModel">The window's view model.</param>
     /// <param name="groupName">The dragged group's name when this returns <see langword="true"/>.</param>
     /// <returns><see langword="true"/> when the drag carries a group name and the window has its view
     ///     model.</returns>
     private bool TryGetDraggedGroup(
-        DragEventArgs e,
+        IDataTransfer data,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out MainWindowViewModel? viewModel,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? groupName)
     {
         viewModel = DataContext as MainWindowViewModel;
-        groupName = viewModel is null ? null : e.DataTransfer.TryGetValue(RepoGroupDataFormat);
+        groupName = viewModel is null ? null : data.TryGetValue(RepoGroupDataFormat);
         return viewModel is not null && !string.IsNullOrWhiteSpace(groupName);
     }
 
@@ -1173,32 +1252,50 @@ internal sealed partial class MainWindow : Window
     internal static bool IsUpperHalf(double y, double height) => y < height / 2;
 
     /// <summary>
-    ///     Gets the list row the pointer of a drag is over.
+    ///     Gets the list row at a point of this window (where the pointer of a drag is).
     /// </summary>
-    /// <param name="e">The drag event.</param>
-    /// <returns>The row, or <see langword="null"/> when the pointer is not over one (or the list is
+    /// <remarks>
+    ///     Found from the realized rows' layout bounds rather than a renderer hit test, so it is right
+    ///     straight after an auto-scroll moved the rows (before the next frame is drawn).
+    /// </remarks>
+    /// <param name="pointInWindow">The point, relative to this window.</param>
+    /// <returns>The row, or <see langword="null"/> when the point is not over one (or the list is
     ///     hidden).</returns>
-    private ListBoxItem? GetRowUnderPointer(DragEventArgs e)
+    private ListBoxItem? GetRowAt(Point pointInWindow)
     {
         var list = this.FindControl<ListBox>("RepoListBox");
-        if (list is null || !list.IsVisible)
+        if (list is null || !list.IsVisible ||
+            this.TranslatePoint(pointInWindow, list) is not { } point ||
+            !new Rect(list.Bounds.Size).Contains(point))
         {
             return null;
         }
 
-        var hit = list.InputHitTest(e.GetPosition(list)) as Visual;
-        return hit?.GetSelfAndVisualAncestors().OfType<ListBoxItem>().FirstOrDefault();
+        return list.GetRealizedContainers()
+            .OfType<ListBoxItem>()
+            .FirstOrDefault(row => row.IsVisible &&
+                                   this.TranslatePoint(pointInWindow, row) is { } inRow &&
+                                   new Rect(row.Bounds.Size).Contains(inRow));
     }
+
+    /// <summary>
+    ///     Gets the height of a point of this window within a control, for the upper/lower half rule.
+    /// </summary>
+    /// <param name="pointInWindow">The point, relative to this window.</param>
+    /// <param name="control">The control.</param>
+    /// <returns>The point's vertical position relative to the control.</returns>
+    private double GetYWithin(Point pointInWindow, Visual control) =>
+        (this.TranslatePoint(pointInWindow, control) ?? default).Y;
 
     /// <summary>
     ///     Works out where a drop at the pointer's position would put a card.
     /// </summary>
-    /// <param name="e">The drag event.</param>
+    /// <param name="pointInWindow">The pointer's position, relative to this window.</param>
     /// <returns>The place and the row it was worked out from, or <see langword="null"/> when the pointer
     ///     is not over a card or a section header.</returns>
-    private (RepoDropTarget Target, ListBoxItem Container)? GetDropTarget(DragEventArgs e)
+    private (RepoDropTarget Target, ListBoxItem Container)? GetDropTarget(Point pointInWindow)
     {
-        var container = GetRowUnderPointer(e);
+        var container = GetRowAt(pointInWindow);
         switch (container?.DataContext)
         {
             case RepoGroupHeaderViewModel header:
@@ -1206,9 +1303,9 @@ internal sealed partial class MainWindow : Window
 
             case RepoCardViewModel anchor:
                 var section = MainWindowViewModel.GetSectionOf(anchor);
-                var position = e.GetPosition(container);
+                var y = GetYWithin(pointInWindow, container);
                 return (RepoDropTarget.ForCard(
-                    anchor, IsUpperHalf(position.Y, container.Bounds.Height), section.Kind, section.Name), container);
+                    anchor, IsUpperHalf(y, container.Bounds.Height), section.Kind, section.Name), container);
 
             default:
                 return null;
@@ -1219,19 +1316,19 @@ internal sealed partial class MainWindow : Window
     ///     Works out where a drop at the pointer's position would put a dragged group: before or after
     ///     the user's group whose header the pointer is over.
     /// </summary>
-    /// <param name="e">The drag event.</param>
+    /// <param name="pointInWindow">The pointer's position, relative to this window.</param>
     /// <returns>The place and the header's row, or <see langword="null"/> when the pointer is not over
     ///     the header of one of the user's groups (a card, Favorites, Ungrouped or empty space).</returns>
-    private (GroupDropTarget Target, ListBoxItem Container)? GetGroupDropTarget(DragEventArgs e)
+    private (GroupDropTarget Target, ListBoxItem Container)? GetGroupDropTarget(Point pointInWindow)
     {
-        var container = GetRowUnderPointer(e);
+        var container = GetRowAt(pointInWindow);
         if (container is not { DataContext: RepoGroupHeaderViewModel { IsUserGroup: true } header })
         {
             return null;
         }
 
-        var position = e.GetPosition(container);
-        return (new GroupDropTarget(header.Name, IsUpperHalf(position.Y, container.Bounds.Height)), container);
+        var y = GetYWithin(pointInWindow, container);
+        return (new GroupDropTarget(header.Name, IsUpperHalf(y, container.Bounds.Height)), container);
     }
 
     /// <summary>
@@ -1258,20 +1355,34 @@ internal sealed partial class MainWindow : Window
 
     /// <summary>
     ///     Answers a card dragged over the list: says whether a drop here is possible, shows where the
-    ///     card would land and scrolls the list when the pointer is near its top or bottom edge.
+    ///     card would land and keeps the list scrolling while the pointer is near its top or bottom edge.
     /// </summary>
     /// <param name="e">The drag event.</param>
     private void CardDragOver(DragEventArgs e)
     {
-        if (!TryGetDraggedCard(e, out var viewModel, out var card))
+        if (!TryGetDraggedCard(e.DataTransfer, out var viewModel, out var card))
         {
             return;
         }
 
         e.Handled = true;
-        var found = GetDropTarget(e);
+        var point = e.GetPosition(this);
+        e.DragEffects = ShowCardDropFeedback(viewModel, card, point) ? DragDropEffects.Move : DragDropEffects.None;
+        UpdateAutoScroll(e.DataTransfer, point);
+    }
+
+    /// <summary>
+    ///     Shows where a dragged card would land at a point (the insertion line or the header tint), or
+    ///     hides the feedback when it cannot be dropped there.
+    /// </summary>
+    /// <param name="viewModel">The window's view model.</param>
+    /// <param name="card">The dragged card.</param>
+    /// <param name="pointInWindow">The pointer's position, relative to this window.</param>
+    /// <returns><see langword="true"/> when the card can be dropped there.</returns>
+    private bool ShowCardDropFeedback(MainWindowViewModel viewModel, RepoCardViewModel card, Point pointInWindow)
+    {
+        var found = GetDropTarget(pointInWindow);
         var allowed = found is { } target && viewModel.CanDrop(card, target.Target);
-        e.DragEffects = allowed ? DragDropEffects.Move : DragDropEffects.None;
 
         // Nothing is shown next to the dragged card itself: dropping it there changes nothing
         if (allowed && found is { } shown && !ReferenceEquals(shown.Target.Anchor, card))
@@ -1280,47 +1391,72 @@ internal sealed partial class MainWindow : Window
         }
         else
         {
-            ClearDropFeedback();
+            HideDropFeedback();
         }
 
-        AutoScrollList(e);
+        return allowed;
     }
 
     /// <summary>
     ///     Answers a group header dragged over the list: says whether a drop here is possible (only on
-    ///     another of the user's group headers), shows the line above or below that header and scrolls
-    ///     the list near its edges.
+    ///     another of the user's group headers), shows the line above or below that header and keeps the
+    ///     list scrolling near its edges.
     /// </summary>
     /// <param name="e">The drag event.</param>
     private void GroupDragOver(DragEventArgs e)
     {
-        if (!TryGetDraggedGroup(e, out var viewModel, out var groupName))
+        if (!TryGetDraggedGroup(e.DataTransfer, out var viewModel, out var groupName))
         {
             return;
         }
 
         e.Handled = true;
-        var found = GetGroupDropTarget(e);
+        var point = e.GetPosition(this);
+        e.DragEffects = ShowGroupDropFeedback(viewModel, groupName, point) ? DragDropEffects.Move : DragDropEffects.None;
+        UpdateAutoScroll(e.DataTransfer, point);
+    }
+
+    /// <summary>
+    ///     Shows where a dragged group header would land at a point (the line above or below another
+    ///     group's header), or hides the feedback when it cannot be dropped there.
+    /// </summary>
+    /// <param name="viewModel">The window's view model.</param>
+    /// <param name="groupName">The dragged group's name.</param>
+    /// <param name="pointInWindow">The pointer's position, relative to this window.</param>
+    /// <returns><see langword="true"/> when the group can be dropped there.</returns>
+    private bool ShowGroupDropFeedback(MainWindowViewModel viewModel, string groupName, Point pointInWindow)
+    {
+        var found = GetGroupDropTarget(pointInWindow);
         var allowed = found is { } target && viewModel.CanDropGroup(groupName, target.Target);
-        e.DragEffects = allowed ? DragDropEffects.Move : DragDropEffects.None;
         if (allowed && found is { } shown)
         {
             ShowDropFeedback(shown.Container, shown.Target.InsertBefore ? "dropAbove" : "dropBelow");
         }
         else
         {
-            ClearDropFeedback();
+            HideDropFeedback();
         }
 
-        AutoScrollList(e);
+        return allowed;
     }
 
     /// <summary>
-    ///     Removes the drop feedback when the drag leaves the list.
+    ///     Removes the drop feedback when the drag leaves the list, and stops the auto-scroll when the
+    ///     pointer really left it (not when it only moved from one row to the next).
     /// </summary>
-    /// <param name="sender">The list (unused).</param>
-    /// <param name="e">The drag event (unused).</param>
-    private void RepoList_DragLeave(object? sender, DragEventArgs e) => ClearDropFeedback();
+    /// <param name="sender">The list.</param>
+    /// <param name="e">The drag event.</param>
+    private void RepoList_DragLeave(object? sender, DragEventArgs e)
+    {
+        if (sender is Visual list && IsInside(list, e))
+        {
+            HideDropFeedback();
+        }
+        else
+        {
+            ClearDropFeedback();
+        }
+    }
 
     /// <summary>
     ///     Drops what is dragged where the pointer is: a card or a group header through the view model's
@@ -1351,13 +1487,13 @@ internal sealed partial class MainWindow : Window
     /// <param name="e">The drag event.</param>
     private void CardDrop(DragEventArgs e)
     {
-        if (!TryGetDraggedCard(e, out var viewModel, out var card))
+        if (!TryGetDraggedCard(e.DataTransfer, out var viewModel, out var card))
         {
             return;
         }
 
         e.Handled = true;
-        if (GetDropTarget(e) is { } found && viewModel.DropCard(card, found.Target))
+        if (GetDropTarget(e.GetPosition(this)) is { } found && viewModel.DropCard(card, found.Target))
         {
             e.DragEffects = DragDropEffects.Move;
         }
@@ -1374,13 +1510,13 @@ internal sealed partial class MainWindow : Window
     /// <param name="e">The drag event.</param>
     private void GroupDrop(DragEventArgs e)
     {
-        if (!TryGetDraggedGroup(e, out var viewModel, out var groupName))
+        if (!TryGetDraggedGroup(e.DataTransfer, out var viewModel, out var groupName))
         {
             return;
         }
 
         e.Handled = true;
-        e.DragEffects = GetGroupDropTarget(e) is { } found && viewModel.DropGroup(groupName, found.Target)
+        e.DragEffects = GetGroupDropTarget(e.GetPosition(this)) is { } found && viewModel.DropGroup(groupName, found.Target)
             ? DragDropEffects.Move
             : DragDropEffects.None;
     }
@@ -1388,13 +1524,13 @@ internal sealed partial class MainWindow : Window
     /// <summary>
     ///     Answers a drag over the list area that the list did not handle (the empty-state panel or the
     ///     margins): folders from the file manager would be added ungrouped; anything else cannot be
-    ///     dropped there.
+    ///     dropped there, but a card or a group header held below the list keeps it scrolling down.
     /// </summary>
     /// <param name="sender">The list area.</param>
     /// <param name="e">The drag event.</param>
     private void RepoListArea_DragOver(object? sender, DragEventArgs e)
     {
-        if (IsExternalFileDrag(e))
+        if (IsExternalFileDrag(e.DataTransfer))
         {
             ExternalDragOver(e, overList: false);
         }
@@ -1402,15 +1538,29 @@ internal sealed partial class MainWindow : Window
         {
             e.Handled = true;
             e.DragEffects = DragDropEffects.None;
+            HideDropFeedback();
+            UpdateAutoScroll(e.DataTransfer, e.GetPosition(this));
         }
     }
 
     /// <summary>
-    ///     Removes every drop feedback when the drag leaves the list area.
+    ///     Removes every drop feedback when the drag leaves the list area, and stops the auto-scroll
+    ///     when the pointer really left it.
     /// </summary>
-    /// <param name="sender">The list area (unused).</param>
-    /// <param name="e">The drag event (unused).</param>
-    private void RepoListArea_DragLeave(object? sender, DragEventArgs e) => ClearExternalDropFeedback();
+    /// <param name="sender">The list area.</param>
+    /// <param name="e">The drag event.</param>
+    private void RepoListArea_DragLeave(object? sender, DragEventArgs e)
+    {
+        if (sender is Visual area && IsInside(area, e))
+        {
+            ShowExternalDropOverlay(false);
+            HideDropFeedback();
+        }
+        else
+        {
+            ClearExternalDropFeedback();
+        }
+    }
 
     /// <summary>
     ///     Adds the folders dropped on the list area outside the list (the empty-state panel or the
@@ -1421,22 +1571,73 @@ internal sealed partial class MainWindow : Window
     private void RepoListArea_Drop(object? sender, DragEventArgs e)
     {
         ClearExternalDropFeedback();
-        if (IsExternalFileDrag(e))
+        if (IsExternalFileDrag(e.DataTransfer))
         {
             ExternalDrop(e, overList: false);
         }
     }
 
     /// <summary>
+    ///     Answers a drag held over the app bar, above the list: nothing can be dropped there, but the
+    ///     list keeps scrolling up, faster the higher the pointer is.
+    /// </summary>
+    /// <param name="sender">The app bar (unused).</param>
+    /// <param name="e">The drag event.</param>
+    private void AppBar_DragOver(object? sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        e.DragEffects = DragDropEffects.None;
+        ShowExternalDropOverlay(false);
+        HideDropFeedback();
+        UpdateAutoScroll(e.DataTransfer, e.GetPosition(this));
+    }
+
+    /// <summary>
+    ///     Stops the auto-scroll when a drag leaves the app bar (unless it only moved between the app
+    ///     bar's own controls).
+    /// </summary>
+    /// <param name="sender">The app bar.</param>
+    /// <param name="e">The drag event.</param>
+    private void AppBar_DragLeave(object? sender, DragEventArgs e)
+    {
+        if (sender is not Visual appBar || !IsInside(appBar, e))
+        {
+            ClearDropFeedback();
+        }
+    }
+
+    /// <summary>
+    ///     Refuses a drop on the app bar and stops the auto-scroll.
+    /// </summary>
+    /// <param name="sender">The app bar (unused).</param>
+    /// <param name="e">The drag event.</param>
+    private void AppBar_Drop(object? sender, DragEventArgs e)
+    {
+        ClearExternalDropFeedback();
+        e.Handled = true;
+        e.DragEffects = DragDropEffects.None;
+    }
+
+    /// <summary>
+    ///     Gets whether the pointer of a drag is still within a control's bounds: a drag-leave raised
+    ///     while it is, only moved from one of the control's children to another.
+    /// </summary>
+    /// <param name="control">The control.</param>
+    /// <param name="e">The drag event.</param>
+    /// <returns><see langword="true"/> when the pointer is inside the control.</returns>
+    private static bool IsInside(Visual control, DragEventArgs e) =>
+        new Rect(control.Bounds.Size).Contains(e.GetPosition(control));
+
+    /// <summary>
     ///     Gets whether a drag carries files or folders from outside the application (and not a card or
     ///     a group header of this window).
     /// </summary>
-    /// <param name="e">The drag event.</param>
+    /// <param name="data">The data of the drag.</param>
     /// <returns><see langword="true"/> for files or folders from the file manager.</returns>
-    private static bool IsExternalFileDrag(DragEventArgs e) =>
-        !e.DataTransfer.Contains(RepoCardDataFormat) &&
-        !e.DataTransfer.Contains(RepoGroupDataFormat) &&
-        e.DataTransfer.Contains(DataFormat.File);
+    private static bool IsExternalFileDrag(IDataTransfer data) =>
+        !data.Contains(RepoCardDataFormat) &&
+        !data.Contains(RepoGroupDataFormat) &&
+        data.Contains(DataFormat.File);
 
     /// <summary>
     ///     Works out which group folders dropped at the pointer's position would join.
@@ -1447,12 +1648,12 @@ internal sealed partial class MainWindow : Window
     ///     Everywhere else - Favorites (a favorite is a per-repo mark, not a place to add to), Ungrouped,
     ///     the flat list and empty space - they are added ungrouped.
     /// </remarks>
-    /// <param name="e">The drag event.</param>
+    /// <param name="pointInWindow">The pointer's position, relative to this window.</param>
     /// <returns>The group (or <see langword="null"/> for none) and the row of its header to tint (or
     ///     <see langword="null"/>).</returns>
-    private (string? GroupName, ListBoxItem? HeaderContainer) GetExternalDropGroup(DragEventArgs e)
+    private (string? GroupName, ListBoxItem? HeaderContainer) GetExternalDropGroup(Point pointInWindow)
     {
-        var container = GetRowUnderPointer(e);
+        var container = GetRowAt(pointInWindow);
         switch (container?.DataContext)
         {
             case RepoGroupHeaderViewModel { IsUserGroup: true } header:
@@ -1475,7 +1676,8 @@ internal sealed partial class MainWindow : Window
     /// <summary>
     ///     Answers folders from the file manager dragged over the list or the list area: they can be
     ///     added (a copy - nothing is moved on disk) and the feedback shows where - the tinted header of
-    ///     the group they would join, or the outlined list area when they would be added ungrouped.
+    ///     the group they would join, or the outlined list area when they would be added ungrouped. The
+    ///     list keeps scrolling while the pointer is near its top or bottom edge.
     /// </summary>
     /// <param name="e">The drag event.</param>
     /// <param name="overList">Whether the drag is over the list (where the row under the pointer can
@@ -1495,10 +1697,24 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        var (groupName, headerContainer) = overList ? GetExternalDropGroup(e) : (null, null);
+        var point = e.GetPosition(this);
+        ShowExternalDropFeedback(point, overList);
+        UpdateAutoScroll(e.DataTransfer, point);
+    }
+
+    /// <summary>
+    ///     Shows where dropped folders would go: the tinted header of the group they would join, or the
+    ///     outlined list area when they would be added ungrouped.
+    /// </summary>
+    /// <param name="pointInWindow">The pointer's position, relative to this window.</param>
+    /// <param name="overList">Whether the pointer is over the list (where the row under it can name a
+    ///     group).</param>
+    private void ShowExternalDropFeedback(Point pointInWindow, bool overList)
+    {
+        var (groupName, headerContainer) = overList ? GetExternalDropGroup(pointInWindow) : (null, null);
         if (groupName is null)
         {
-            ClearDropFeedback();
+            HideDropFeedback();
             ShowExternalDropOverlay(true);
         }
         else
@@ -1510,24 +1726,21 @@ internal sealed partial class MainWindow : Window
             }
             else
             {
-                ClearDropFeedback();
+                HideDropFeedback();
             }
-        }
-
-        if (overList)
-        {
-            AutoScrollList(e);
         }
     }
 
     /// <summary>
-    ///     Adds the folders dropped from the file manager - into the group they were dropped on, or
-    ///     ungrouped - and then tells the user, in one message, what was not added and why.
+    ///     Accepts folders dropped from the file manager - into the group they were dropped on, or
+    ///     ungrouped - and adds them in the background.
     /// </summary>
     /// <remarks>
-    ///     The folders are added at once; the message (if any) is shown afterwards, posted to the UI
-    ///     thread, so no dialog opens inside the operating system's drag-and-drop loop. Dropped files
-    ///     are not repositories and are reported as such.
+    ///     The drop is answered at once and the add is posted to the UI thread, so neither the add nor
+    ///     any dialog runs inside the operating system's drag-and-drop loop. The add is queued after
+    ///     any add that is still running (see <see cref="MainWindowViewModel.EnqueueAddReposAsync"/>):
+    ///     its progress shows in the strip under the app bar and the window stays usable meanwhile.
+    ///     Dropped files are not repositories and are reported as such.
     /// </remarks>
     /// <param name="e">The drag event.</param>
     /// <param name="overList">Whether the drop is on the list (where the row under the pointer can name
@@ -1548,14 +1761,33 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        var groupName = overList ? GetExternalDropGroup(e).GroupName : null;
-        var outcomes = viewModel.AddRepos(paths, groupName);
+        var groupName = overList ? GetExternalDropGroup(e.GetPosition(this)).GroupName : null;
         e.DragEffects = DragDropEffects.Copy;
+        Dispatcher.UIThread.Post(() => _ = AddDroppedFoldersAsync(viewModel, paths, groupName));
+    }
 
-        var notice = MainWindowViewModel.DescribeAddOutcomes(outcomes, groupName);
-        if (notice is not null)
+    /// <summary>
+    ///     Adds dropped folders through the view model's queued background add and then tells the user,
+    ///     in one message, what was not added and why (nothing after a cancel).
+    /// </summary>
+    /// <param name="viewModel">The window's view model.</param>
+    /// <param name="paths">The dropped paths.</param>
+    /// <param name="groupName">The group they were dropped on, or <see langword="null"/>.</param>
+    /// <returns>A task that completes when the add has ended and its message (if any) was closed.</returns>
+    private async Task AddDroppedFoldersAsync(MainWindowViewModel viewModel, IReadOnlyList<string> paths, string? groupName)
+    {
+        try
         {
-            Dispatcher.UIThread.Post(() => _ = ShowNoticeAsync(notice));
+            var result = await viewModel.EnqueueAddReposAsync(paths, groupName);
+            if (!result.Canceled)
+            {
+                await ShowNoticeAsync(MainWindowViewModel.DescribeAddOutcomes(result.Outcomes, groupName));
+            }
+        }
+        catch (Exception ex)
+        {
+            // Nobody awaits this posted task: an unexpected failure is logged rather than lost
+            _logger.LogError(ex, "Adding the dropped folders failed");
         }
     }
 
@@ -1581,7 +1813,8 @@ internal sealed partial class MainWindow : Window
         this.FindControl<Grid>("RepoListArea")?.Classes.Set("externalDrop", show);
 
     /// <summary>
-    ///     Removes every feedback of a drag from the file manager: the area outline and a header tint.
+    ///     Removes every feedback of a drag from the file manager (the area outline and a header tint)
+    ///     and stops the auto-scroll.
     /// </summary>
     private void ClearExternalDropFeedback()
     {
@@ -1619,15 +1852,15 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        ClearDropFeedback();
+        HideDropFeedback();
         container.Classes.Add(feedbackClass);
         _dropFeedback = (container, feedbackClass);
     }
 
     /// <summary>
-    ///     Removes the drop feedback, if any is shown.
+    ///     Removes the drop feedback, if any is shown, leaving the auto-scroll running (the drag goes on).
     /// </summary>
-    private void ClearDropFeedback()
+    private void HideDropFeedback()
     {
         if (_dropFeedback is { } current)
         {
@@ -1637,28 +1870,198 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Scrolls the list a little when the dragged card is near its top or bottom edge, so a long list
-    ///     can be reordered without dropping first (best effort: it moves when the drag reports
-    ///     the pointer).
+    ///     Ends a drag's feedback: removes the drop feedback and stops the auto-scroll. Called when the
+    ///     drag leaves, drops or ends.
     /// </summary>
-    /// <param name="e">The drag event.</param>
-    private void AutoScrollList(DragEventArgs e)
+    private void ClearDropFeedback()
+    {
+        HideDropFeedback();
+        StopAutoScroll();
+    }
+
+    /// <summary>
+    ///     Works out how far the list scrolls per auto-scroll tick for a pointer at a height relative to
+    ///     the list's viewport: nothing in the middle, slowly just inside the top or bottom edge zone,
+    ///     faster the deeper the pointer is into the zone and beyond the edge (over the app bar above the
+    ///     list, the margins below it), up to <see cref="AutoScrollMaxStep"/>.
+    /// </summary>
+    /// <remarks>
+    ///     The zone is <see cref="AutoScrollEdge"/> deep inside each edge (half the viewport when the
+    ///     viewport is shorter than two zones, so the nearer edge always wins). The depth is measured
+    ///     from the zone's inner boundary; the step grows linearly from <see cref="AutoScrollMinStep"/>
+    ///     to <see cref="AutoScrollMaxStep"/>, which is reached <see cref="AutoScrollEdge"/> +
+    ///     <see cref="AutoScrollOvershoot"/> deep. Pure.
+    /// </remarks>
+    /// <param name="pointerY">The pointer's height relative to the top of the list's viewport;
+    ///     negative above it, beyond <paramref name="viewportHeight"/> below it.</param>
+    /// <param name="viewportHeight">The viewport's height.</param>
+    /// <returns>The step in device-independent pixels: negative to scroll up, positive to scroll down,
+    ///     0 for no scroll (also for a non-positive or unknown height, or an unknown position).</returns>
+    internal static double ComputeAutoScrollStep(double pointerY, double viewportHeight)
+    {
+        if (double.IsNaN(pointerY) || double.IsNaN(viewportHeight) || viewportHeight <= 0)
+        {
+            return 0;
+        }
+
+        // The zones never overlap: a short viewport splits in two halves
+        var edge = Math.Min(AutoScrollEdge, viewportHeight / 2);
+        double depth;
+        double direction;
+        if (pointerY < edge)
+        {
+            depth = edge - pointerY;
+            direction = -1;
+        }
+        else if (pointerY > viewportHeight - edge)
+        {
+            depth = pointerY - (viewportHeight - edge);
+            direction = 1;
+        }
+        else
+        {
+            return 0;
+        }
+
+        // Linear ramp with the depth, capped
+        var ramp = Math.Clamp(depth / (AutoScrollEdge + AutoScrollOvershoot), 0, 1);
+        return direction * (AutoScrollMinStep + ((AutoScrollMaxStep - AutoScrollMinStep) * ramp));
+    }
+
+    /// <summary>
+    ///     Gets the scroll viewer of the repo list, or <see langword="null"/> when it is not there (the
+    ///     list is hidden, or not laid out yet).
+    /// </summary>
+    /// <returns>The scroll viewer.</returns>
+    private ScrollViewer? GetRepoListScroller()
     {
         var list = this.FindControl<ListBox>("RepoListBox");
-        var scroller = list?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
-        if (scroller is null)
+        return list is { IsVisible: true } ? list.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault() : null;
+    }
+
+    /// <summary>
+    ///     Computes the auto-scroll step for a pointer position of this window (see
+    ///     <see cref="ComputeAutoScrollStep"/>).
+    /// </summary>
+    /// <param name="scroller">The list's scroll viewer.</param>
+    /// <param name="pointInWindow">The pointer's position, relative to this window.</param>
+    /// <returns>The step; 0 when there is nothing to scroll.</returns>
+    private double GetAutoScrollStep(ScrollViewer scroller, Point pointInWindow)
+    {
+        if (this.TranslatePoint(pointInWindow, scroller) is not { } point)
         {
+            return 0;
+        }
+
+        // Before the first layout the viewport is unknown; the scroller's own height stands in
+        var height = scroller.Viewport.Height > 0 ? scroller.Viewport.Height : scroller.Bounds.Height;
+        return ComputeAutoScrollStep(point.Y, height);
+    }
+
+    /// <summary>
+    ///     Remembers where a drag's pointer is and starts the auto-scroll timer when the pointer is in a
+    ///     scroll zone (or stops it when it left the zones). Called from every drag-over of the list, the
+    ///     list area and the app bar.
+    /// </summary>
+    /// <remarks>
+    ///     A running timer is not restarted, so frequent drag-over events never delay its ticks.
+    /// </remarks>
+    /// <param name="data">The data of the drag, so a tick can redraw the drop feedback.</param>
+    /// <param name="pointInWindow">The pointer's position, relative to this window.</param>
+    private void UpdateAutoScroll(IDataTransfer data, Point pointInWindow)
+    {
+        if (GetRepoListScroller() is not { } scroller || Math.Abs(GetAutoScrollStep(scroller, pointInWindow)) < MinimumScrollDistance)
+        {
+            StopAutoScroll();
             return;
         }
 
-        var y = e.GetPosition(scroller).Y;
-        if (y < AutoScrollEdge)
+        _autoScrollPointer = (data, pointInWindow);
+        if (!_autoScrollTimer.IsEnabled)
         {
-            scroller.Offset = new Vector(scroller.Offset.X, Math.Max(0, scroller.Offset.Y - AutoScrollEdge));
+            _autoScrollTimer.Start();
         }
-        else if (y > scroller.Bounds.Height - AutoScrollEdge)
+    }
+
+    /// <summary>
+    ///     Stops the auto-scroll and forgets the pointer.
+    /// </summary>
+    private void StopAutoScroll()
+    {
+        _autoScrollTimer.Stop();
+        _autoScrollPointer = null;
+    }
+
+    /// <summary>
+    ///     One auto-scroll tick (the timer's handler): scrolls the list by the step for the last known
+    ///     pointer position, then redraws the drop feedback for what is now under the pointer.
+    /// </summary>
+    /// <remarks>
+    ///     The list moves under a pointer that may not move, so the row under it changes: the feedback
+    ///     (the insertion line, the tint, the overlay) is worked out again after the scroll, exactly as a
+    ///     drag-over would. The scroll stops at the top or the bottom of the list, and when the pointer
+    ///     is no longer in a zone.
+    /// </remarks>
+    internal void AutoScrollTick()
+    {
+        if (_autoScrollPointer is not { } pointer || GetRepoListScroller() is not { } scroller)
         {
-            scroller.Offset = new Vector(scroller.Offset.X, scroller.Offset.Y + AutoScrollEdge);
+            StopAutoScroll();
+            return;
+        }
+
+        // Scroll by the step, within the list's extent; nothing left to scroll ends the auto-scroll
+        var step = GetAutoScrollStep(scroller, pointer.PointInWindow);
+        var limit = Math.Max(0, scroller.Extent.Height - scroller.Viewport.Height);
+        var offset = Math.Clamp(scroller.Offset.Y + step, 0, limit);
+        if (Math.Abs(offset - scroller.Offset.Y) < MinimumScrollDistance)
+        {
+            StopAutoScroll();
+            return;
+        }
+
+        scroller.Offset = new Vector(scroller.Offset.X, offset);
+        scroller.UpdateLayout();
+
+        // What is under the pointer changed: show the feedback for it
+        UpdateDragFeedback(pointer.Data, pointer.PointInWindow);
+    }
+
+    /// <summary>
+    ///     Redraws the drop feedback of a drag for a pointer position, as the drag-over of the element
+    ///     under the pointer would.
+    /// </summary>
+    /// <param name="data">The data of the drag.</param>
+    /// <param name="pointInWindow">The pointer's position, relative to this window.</param>
+    private void UpdateDragFeedback(IDataTransfer data, Point pointInWindow)
+    {
+        var list = this.FindControl<ListBox>("RepoListBox");
+        var overList = list is { IsVisible: true } &&
+                       this.TranslatePoint(pointInWindow, list) is { } point &&
+                       new Rect(list.Bounds.Size).Contains(point);
+        if (!overList)
+        {
+            // Over the app bar or the margins nothing drops (folders in the area are added ungrouped)
+            HideDropFeedback();
+            var area = this.FindControl<Grid>("RepoListArea");
+            var overArea = area is not null &&
+                           this.TranslatePoint(pointInWindow, area) is { } areaPoint &&
+                           new Rect(area.Bounds.Size).Contains(areaPoint);
+            ShowExternalDropOverlay(overArea && IsExternalFileDrag(data));
+            return;
+        }
+
+        if (TryGetDraggedCard(data, out var viewModel, out var card))
+        {
+            ShowCardDropFeedback(viewModel, card, pointInWindow);
+        }
+        else if (TryGetDraggedGroup(data, out viewModel, out var groupName))
+        {
+            ShowGroupDropFeedback(viewModel, groupName, pointInWindow);
+        }
+        else if (IsExternalFileDrag(data))
+        {
+            ShowExternalDropFeedback(pointInWindow, overList: true);
         }
     }
 
@@ -1765,7 +2168,7 @@ internal sealed partial class MainWindow : Window
     /// <param name="e">The chosen color's name, or <see langword="null"/> for None.</param>
     private void GroupColorPalette_ColorChosen(object? sender, ColorChosenEventArgs e)
     {
-        // A failed save is reported to the user by the view model
+        // Applied at once and saved in the background; a failed save is reported by the view model
         if (_paletteHeader is { } header && DataContext is MainWindowViewModel viewModel)
         {
             viewModel.SetGroupColor(header.Name, e.ColorName);
@@ -1829,14 +2232,9 @@ internal sealed partial class MainWindow : Window
         var name = await new GroupNameWindow(prompt).ShowDialog<string?>(this);
         if (name is not null)
         {
-            try
-            {
-                viewModel.RenameGroup(groupName, name);
-            }
-            catch (InvalidOperationException ex)
-            {
-                await new MessageBoxWindow($"The group was not renamed. {SecretRedactor.SafeMessage(ex)}").ShowDialog(this);
-            }
+            // The prompt allows only a usable name; the rename is applied at once and saved in the
+            // background
+            viewModel.RenameGroup(groupName, name);
         }
     }
 
@@ -1857,14 +2255,8 @@ internal sealed partial class MainWindow : Window
 
         if (confirmed)
         {
-            try
-            {
-                viewModel.RemoveGroup(groupName);
-            }
-            catch (InvalidOperationException ex)
-            {
-                await new MessageBoxWindow($"The group was not removed. {SecretRedactor.SafeMessage(ex)}").ShowDialog(this);
-            }
+            // Applied at once and saved in the background
+            viewModel.RemoveGroup(groupName);
         }
     }
 
@@ -1911,8 +2303,10 @@ internal sealed partial class MainWindow : Window
     ///     view model, and says what the user needs to know about the outcome.
     /// </summary>
     /// <remarks>
-    ///     A cancelled picker changes nothing and says nothing. Each folder is handled as a single add
-    ///     would handle it (see <see cref="MainWindowViewModel.AddRepos"/>): with a group, a repo that
+    ///     A cancelled picker changes nothing and says nothing. The folders are added in the background
+    ///     after any add still running (see <see cref="MainWindowViewModel.EnqueueAddReposAsync"/>), with
+    ///     progress in the strip under the app bar; an add the user cancels there says nothing. Each
+    ///     folder is handled as a single add would handle it: with a group, a repo that
     ///     is already listed is moved into the group; without one it is refused; a folder that is not
     ///     the top folder of a Git repository is refused. One folder gets the single-add message,
     ///     several get one combined summary (see <see cref="MainWindowViewModel.DescribeAddOutcomes"/>).
@@ -1921,7 +2315,7 @@ internal sealed partial class MainWindow : Window
     /// <param name="groupName">The group to put the repos in, or <see langword="null"/> for the plain
     ///     add.</param>
     /// <returns>A message for the user, or <see langword="null"/> when everything was added (or the
-    ///     picker was cancelled, or the failure was already reported).</returns>
+    ///     picker or the add was cancelled, or the failure was already reported).</returns>
     internal async Task<string?> AddRepoAsync(MainWindowViewModel viewModel, string? groupName)
     {
         var paths = await (RepoFolderPicker ?? BrowseForRepoPathsAsync)();
@@ -1930,8 +2324,42 @@ internal sealed partial class MainWindow : Window
             return null;
         }
 
-        var outcomes = viewModel.AddRepos(paths, groupName);
-        return MainWindowViewModel.DescribeAddOutcomes(outcomes, groupName);
+        // Added in the background, after any add still running; a cancel tells nothing
+        var result = await viewModel.EnqueueAddReposAsync(paths, groupName);
+        return result.Canceled ? null : MainWindowViewModel.DescribeAddOutcomes(result.Outcomes, groupName);
+    }
+
+    /// <summary>
+    ///     Asks the user, when an add could not be saved, whether to try saving again or to discard the
+    ///     add, and reports the answer to the waiting add.
+    /// </summary>
+    /// <remarks>
+    ///     A modal <see cref="ConfirmationWindow"/> with Retry and Discard; Discard is the default
+    ///     (focused) answer and Escape or closing the dialog also discards, so nothing is ever retried
+    ///     without the user asking for it. The request is always answered - a failure to show the
+    ///     dialog counts as Discard - because the add (and every add queued after it) would otherwise
+    ///     wait for ever.
+    /// </remarks>
+    /// <param name="request">The question and the way to answer it, as carried by
+    ///     <see cref="MainWindowViewModel.AddSaveFailed"/>.</param>
+    /// <returns>A task that completes when the request was answered.</returns>
+    private async Task AskAddSaveRetryAsync(SettingsSaveRetryRequest request)
+    {
+        var retry = false;
+        try
+        {
+            retry = await new ConfirmationWindow(request.Message, "Retry", "Discard").ShowDialog<bool>(this);
+        }
+        catch (Exception ex)
+        {
+            // This runs from an async void handler: an escaping exception would be unhandled on the
+            // UI thread, so a failure to show the dialog is logged and counts as Discard
+            _logger.LogError(ex, "Could not show the question about the add that could not be saved");
+        }
+        finally
+        {
+            request.Respond(retry);
+        }
     }
 
     /// <summary>
@@ -1975,7 +2403,7 @@ internal sealed partial class MainWindow : Window
 
         var settingsViewModel = new SettingsWindowViewModel(
             viewModel.Settings,
-            viewModel.ApplySettings,
+            viewModel.ApplySettingsAsync,
             providerFactory: viewModel.CreateConnectionTestProvider,
             credentials: viewModel.Credentials);
 

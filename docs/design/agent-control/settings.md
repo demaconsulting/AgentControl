@@ -19,9 +19,13 @@ card colors, collapsed sections, the order of the repo list, and the color and o
 (`AgentControl-Settings-Persistence`,
 `AgentControl-Settings-PackageSources`, `AgentControl-Settings-GitSourcePersistence`,
 `AgentControl-Settings-Appearance`, `AgentControl-Settings-KeepShellOpen`,
-`AgentControl-Settings-RepoOrganization`, `AgentControl-Settings-RepoOrder`, `AgentControl-Settings-GroupOrganization`).
-The subsystem contains two units:
-`SettingsStore` and `RepoGroupName`.
+`AgentControl-Settings-RepoOrganization`, `AgentControl-Settings-RepoOrder`, `AgentControl-Settings-GroupOrganization`),
+and of writing them in the background so the window never waits for the settings file
+(`AgentControl-Settings-BackgroundWriter`). The subsystem contains three units:
+`SettingsStore`, `SettingsWriter` and `RepoGroupName`. `SettingsWriter`
+(`docs/design/agent-control/settings/settings-writer.md`) writes settings snapshots one at a time on a worker thread,
+the newest state of a burst of changes winning; it calls the save delegate its owner gives it, `SettingsStore.Save`
+in the application.
 
 ### Interfaces
 
@@ -50,7 +54,24 @@ The subsystem contains two units:
   and replaces the file atomically (`AgentControl-SettingsStore-AtomicSave`,
   `AgentControl-SettingsStore-SourcesRoundTrip`), retrying the replace while another process briefly
   holds the file (`AgentControl-SettingsStore-LockedFileTolerance`).
-- *Constraints*: Rejects a null `AppSettings` value with `ArgumentNullException`.
+- *Constraints*: Rejects a null `AppSettings` value with `ArgumentNullException`. It writes the disk and can wait for a
+  locked file, so it must not run on the UI thread: it refuses the call, before anything is written, on a thread the
+  tests have guarded (`BlockingCallGuard`, `AgentControl-SettingsStore-RefusesGuardedThread`).
+
+**SettingsWriter**: Writes settings snapshots in the background.
+
+- *Type*: In-process .NET class (`Schedule`, `SaveNowAsync`, `FlushAsync`, `Flush(TimeSpan)`, `HasUnsavedChanges`,
+  the `WriteFailed` event).
+- *Role*: Provider.
+- *Contract*: `Schedule` accepts a snapshot at once and writes the newest one once no newer one came for the debounce
+  delay (`AgentControl-SettingsWriter-Debounce`); writes never overlap and never run on the caller's thread
+  (`AgentControl-SettingsWriter-Serialize`); `SaveNowAsync` is a confirmed write that tells its caller whether it
+  reached the disk, dropping an older waiting snapshot only when it did (`AgentControl-SettingsWriter-ConfirmedSave`); a
+  background write that fails is reported once per failure streak and its snapshot is kept for the next write
+  (`AgentControl-SettingsWriter-FailureReportedOnce`); `FlushAsync` writes what is waiting at once and `Flush` does so
+  with a bounded wait (`AgentControl-SettingsWriter-Flush`).
+- *Constraints*: The snapshots must be copies nobody changes any more (`AppSettings.CreateSnapshot`). `WriteFailed` is
+  posted to the synchronization context current when the writer was created.
 
 **SettingsStore.GetDefaultConfigDirectory**: Resolves the default configuration directory.
 
@@ -174,8 +195,9 @@ would throw on those and `SettingsStore.Load` would report the whole file as cor
 (`AgentControl-Settings-KeepShellOpen`, `AgentControl-SettingsStore-KeepShellOpen`).
 
 `SettingsStore` is a static class with no persistent state of its own; it is called once at
-startup (`App.OnFrameworkInitializationCompleted`) to load settings, and again whenever
-`SettingsWindowViewModel` reports a save. It shares its configuration-directory resolution
+startup (`App.OnFrameworkInitializationCompleted`) to load settings, before the window exists, and its `Save` is then
+called only by the main window's `SettingsWriter`, on a worker thread, for every change made in the window and for the
+`SettingsWindowViewModel`'s save. It shares its configuration-directory resolution
 with the `Logging` subsystem's `LoggingSetup.Initialize` so a `--config-dir` startup override
 (used by FlaUI end-to-end tests for hermetic isolation) redirects both settings and log
 files consistently rather than duplicating path-resolution logic.
@@ -196,3 +218,18 @@ Settings window refuse to save a source that breaks them - and again when a prov
 hand-edited source that breaks them from being used instead of reaching git
 (`AgentControl-SettingsStore-GitSourceRoundTrip`, `AgentControl-SettingsStore-GitSourceRefusesCredential`, within
 `AgentControl-Settings-GitSourcePersistence`; `AgentControl-System-GitSourceSettings`).
+
+**Background writing.** The main window changes its live `AppSettings` at once and hands the writer a snapshot made by
+`AppSettings.CreateSnapshot` (internal): the persisted copy (effective sources, no legacy path) with the repos and the
+sources copied entry by entry (`RecentRepo.Clone`, `PackageSourceDefinition.Clone`) and the collapsed sections, group
+colors and group order copied, so the snapshot shares nothing mutable with the live settings and can be serialized on a
+worker thread while the window keeps changing them. `SettingsWriter` writes the newest snapshot a short delay (300 ms)
+after the last change, one write at a time, through `SettingsStore.Save` on a worker thread; the waits of the replace
+retry therefore never reach the UI thread. A confirmed write (`SaveNowAsync`) serves the changes that must be on disk
+before they are applied - an add and the Settings window's values. A background write that fails is reported once per
+failure streak and its snapshot is kept: the change stays in effect and is written with the next change, the next
+flush or the window's close, which flushes with a bounded wait. `SettingsStore.Save` asks the `Utilities` subsystem's
+`BlockingCallGuard` first, so a save that slips back onto the UI thread fails the headless tests
+(`AgentControl-Settings-BackgroundWriter`). The order of the writes, the debounce and the failure streak are
+`SettingsWriter`'s; which changes are scheduled and which are confirmed is the `LauncherUI` subsystem's
+(`MainWindowViewModel`).

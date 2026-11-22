@@ -63,17 +63,104 @@ sections:
           The MainWindowViewModel class shall add several folders in one request, with or without a
           group, handling each folder as a single add would, reporting what became of each (added,
           moved into the group, already listed, missing, not a Git repository, not saved) in the
-          order given, going on with the next folder when one cannot be saved, handling a folder
-          given twice (in another letter case or with a trailing directory separator) once, and
-          opening a collapsed target group once.
+          order given, handling a folder given twice (in another letter case or with a trailing
+          directory separator) once, opening a collapsed target group, and saving the whole
+          request once and rebuilding the list once - changing nothing when that save fails, and
+          then reporting every folder that would have been added or moved as not saved, with the
+          reason.
         justification: |
           A multi-folder pick or a drop of many folders must not stop at the first folder that
           cannot be added, and the caller needs every outcome to tell the user what happened.
+          Saving and redrawing once per folder made large adds slow; saving once keeps memory,
+          the list and the file in step whatever happens.
         tests:
           - MainWindowViewModel_AddRepos_MixedPaths_ReportsAnOutcomePerPath
           - MainWindowViewModel_AddRepos_SameFolderWithAndWithoutTrailingSeparator_AddsOneCard
-          - MainWindowViewModel_AddRepos_SaveFailsForOne_ContinuesWithTheRest
+          - MainWindowViewModel_AddRepos_SaveFails_NothingAddedAndEveryFolderReportedNotSaved
           - MainWindowViewModel_AddRepos_IntoCollapsedGroup_OpensItOnce
+          - MainWindowViewModel_AddReposAsync_SeveralFolders_SavesOnceAndUpdatesTheListOnce
+
+      - id: AgentControl-MainWindowViewModel-AddReposInBackground
+        title: >-
+          The MainWindowViewModel class shall check the folders of an add without making its caller
+          wait for the file system or git, add nothing until every folder was checked, check each
+          folder again against the list when it adds - so a repo listed meanwhile is not added
+          twice, a repo removed meanwhile is added again (its card's pin and branch read in the
+          background), a target group removed meanwhile is created again and a target group
+          collapsed meanwhile is opened - and not check the working tree of a repo it adds (its Git
+          status stays not checked until the card asks for it).
+        justification: |
+          The window's thread must stay free while many folders are read; the list may change
+          meanwhile; and the working-tree check is deferred to when a card is shown, so an add does
+          not run git status for every repo.
+        tests:
+          - MainWindowViewModel_AddReposAsync_WhileFoldersAreChecked_ReturnsAndAddsNothingYet
+          - MainWindowViewModel_AddReposAsync_RepoListedMeanwhile_IsAlreadyListed
+          - MainWindowViewModel_AddReposAsync_ListedRepoAndTargetGroupRemovedMeanwhile_AddsBothToRecreatedGroupWithOneSave
+          - MainWindowViewModel_AddReposAsync_TargetGroupCollapsedMeanwhile_OpensItWithTheNewRepo
+          - MainWindowViewModel_AddReposAsync_NewRepo_GitStatusNotCheckedAndNoStatusRun
+
+      - id: AgentControl-MainWindowViewModel-AddReposProgress
+        title: >-
+          The MainWindowViewModel class shall report the progress of an add - how many of its
+          folders have been checked out of how many - and show it in the global progress while the
+          add runs, clearing it when the add has ended.
+        justification: |
+          The user must see that an add is running and how far it has got.
+        tests:
+          - MainWindowViewModel_AddReposAsync_ReportsProgressCounts
+          - MainWindowViewModel_EnqueueAddRepos_ShowsAndClearsGlobalProgress
+
+      - id: AgentControl-MainWindowViewModel-AddReposCancel
+        title: >-
+          The MainWindowViewModel class shall stop an add, and every add queued after it, when it is
+          canceled before it saves, saving nothing and adding nothing, and shall keep offering that
+          cancel in the global progress strip also while the cards are refreshed at the same time.
+        justification: |
+          A canceled add must leave no trace in the list or the settings, and a refresh of the cards
+          that starts during an add (after a settings save) must not take the add's Cancel away.
+        tests:
+          - MainWindowViewModel_EnqueueAddRepos_Canceled_SavesNothingAndAddsNothing
+          - MainWindowViewModel_EnqueueAddRepos_SettingsRefreshStartsDuringAdd_StripKeepsAddCancel
+
+      - id: AgentControl-MainWindowViewModel-AddReposQueued
+        title: >-
+          The MainWindowViewModel class shall run an add requested while another add runs after that
+          add has ended, never at the same time, without adding a folder twice.
+        justification: |
+          Two adds changing the list and the settings at once could add a repo twice or lose one
+          add's changes.
+        tests:
+          - MainWindowViewModel_EnqueueAddRepos_SecondBatchWhileFirstRuns_RunsAfterItWithoutDuplicates
+
+      - id: AgentControl-MainWindowViewModel-AddReposSaveFailure
+        title: >-
+          The MainWindowViewModel class shall, when the save at the end of an add fails, ask whether
+          to retry (with the reason) and wait for the answer, saving the add again on Retry and asking
+          again each time that save fails, and, on Discard or when nobody can be asked, reporting the
+          folders as not saved while the settings, the cards and the list - including the group, the
+          place and the collapsed state of repos the add would have moved - stay as they were before
+          the add.
+        justification: |
+          A failed save must not lose the user's add without a choice, a retry that fails again must
+          not give up on its own, and giving up must never leave the add half applied.
+        tests:
+          - MainWindowViewModel_EnqueueAddRepos_SaveFailsThenRetry_AddsTheBatch
+          - MainWindowViewModel_EnqueueAddRepos_RetryFailsAgain_AsksAgainUntilSaved
+          - MainWindowViewModel_EnqueueAddRepos_SaveFailsThenDiscard_LeavesEverythingAsBeforeTheAddIncludingMovedRepos
+          - MainWindowViewModel_EnqueueAddRepos_SaveFailsWithNoOneToAsk_Discards
+
+      - id: AgentControl-MainWindowViewModel-AddKeepsOtherChanges
+        title: >-
+          The MainWindowViewModel class shall keep, and write, a change the user makes in the window
+          before an add is saved, while it is saved or while its failed save is being answered: with
+          the add when the add is saved, and without it when the add is discarded.
+        justification: |
+          The window stays usable while an add is saved; a change made meanwhile must neither be lost
+          when the add is discarded nor take the add out of the file when it is written.
+        tests:
+          - MainWindowViewModel_EnqueueAddRepos_ChangeWhileSaving_WrittenWithTheAdd
+          - MainWindowViewModel_EnqueueAddRepos_SaveFailsThenDiscard_KeepsChangesMadeBeforeAndDuringTheAdd
 
       - id: AgentControl-MainWindowViewModel-AddGitReposOnly
         title: >-
@@ -202,15 +289,16 @@ sections:
         title: >-
           The MainWindowViewModel class shall move a card to the top, one up, one down or to the bottom
           of its section, leaving the order of the other sections' cards unchanged, refuse a move that
-          leads nowhere without saving, and change nothing when the order cannot be saved.
+          leads nowhere without saving, and keep a move whose save fails, writing it with the next
+          change.
         justification: |
           The Move items work within the section the user sees, although the cards of the sections are
-          interleaved in the stored list, and a failed save must not leave the display ahead of the file.
+          interleaved in the stored list; a move the file could not take at once must not be lost.
         tests:
           - MainWindowViewModel_MoveCard_TopUpDownBottom_ReordersWithinTheSection
           - MainWindowViewModel_MoveCard_AtBoundary_IsRefusedAndChangesNothing
           - MainWindowViewModel_MoveCard_SectionsInterleavedInTheList_KeepsOtherSectionsOrder
-          - MainWindowViewModel_MoveCard_SaveFails_ChangesNothingAndReports
+          - MainWindowViewModel_MoveCard_SaveFails_KeptReportedOnceAndSavedWithNextChange
 
       - id: AgentControl-MainWindowViewModel-MoveAvailability
         title: >-
@@ -247,17 +335,17 @@ sections:
           card's group or favorite state through the card's own group and favorite operations - a group
           sets the group, Ungrouped removes it, Favorites marks the repo a favorite and keeps its group,
           and leaving Favorites clears the favorite state - and then put the card at the drop position,
-          changing nothing further when the section change cannot be saved.
+          keeping both changes, with one report, when they cannot be saved.
         justification: |
-          A drag and the menu or the star must give the same result, so the same operations are used,
-          and a failed save of the first change must not be followed by a move.
+          A drag and the menu or the star must give the same result, so the same operations are used;
+          the drop is one gesture, so a disk that cannot be written is reported once for it.
         tests:
           - MainWindowViewModel_DropCard_IntoAnotherGroup_SetsTheGroupAtTheDropPosition
           - MainWindowViewModel_DropCard_IntoUngrouped_RemovesTheGroup
           - MainWindowViewModel_DropCard_IntoFavorites_MarksFavoriteAndKeepsTheGroup
           - MainWindowViewModel_DropCard_OutOfFavoritesIntoGroup_ClearsFavoriteAndSetsTheGroup
           - MainWindowViewModel_DropCard_OutOfFavoritesIntoUngrouped_ClearsFavoriteAndGroup
-          - MainWindowViewModel_DropCard_SectionChangeSaveFails_ChangesNothingAndReports
+          - MainWindowViewModel_DropCard_SaveFails_KeptAtTheDropPlaceAndReportedOnce
 
       - id: AgentControl-MainWindowViewModel-DropOnHeader
         title: >-
@@ -316,7 +404,8 @@ sections:
           "not yet checked", or wrong-executable Pull-disabled state, without re-checking the
           Git status of every other already-present, unchanged-executable repo. It shall
           refuse, leaving the current settings unchanged, updated settings whose package source
-          location embeds a credential, and updated settings that cannot be saved to disk.
+          location embeds a credential, and updated settings that cannot be saved to disk, reporting
+          the failure to its caller.
         justification: |
           A settings change (e.g. a new package source path) must take effect immediately for
           subsequent upgrade checks, without discarding the developer's tracked repos. Because
@@ -327,10 +416,9 @@ sections:
           Likewise, a cached clean/dirty result computed against the previously configured Git
           executable must not keep being shown once the user has pointed AgentControl at a
           different executable, since subsequent Pull operations will use the new one. However,
-          GitClient's git status check is synchronous and un-timed, so eagerly re-checking
-          every tracked repo's status on every settings save (rather than only the repos that
-          actually need a recheck) could block the UI thread for a large or slow/networked repo
-          list.
+          GitClient's git status check is un-timed, so eagerly re-checking every tracked repo's
+          status on every settings save (rather than only the repos that actually need a recheck)
+          could take long for a large or slow/networked repo list.
         tests:
           - MainWindowViewModel_ApplySettings_PreservesRecentReposAndPersistsUpdatedFields
           - MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache
@@ -339,6 +427,19 @@ sections:
           - MainWindowViewModel_ApplySettings_GitExecutablePathChanged_RefreshesGitStatus
           - MainWindowViewModel_ApplySettings_SourceLocationWithEmbeddedCredential_ThrowsAndKeepsCurrentSettings
           - MainWindowViewModel_ApplySettings_SaveFails_KeepsPreviousSettingsLive
+
+      - id: AgentControl-MainWindowViewModel-ApplySettingsInBackground
+        title: >-
+          The MainWindowViewModel class shall return from applying settings once they are saved,
+          before the cards' refresh has read the disk and git, show that refresh in the global
+          progress with how many of the cards were refreshed out of how many (for example
+          "Refreshing repositories 0 of 1...", without a cancel) while it runs, and clear the
+          progress when it has finished.
+        justification: |
+          Refreshing every card after a settings save reads git for each repo; the window that
+          saved the settings must not wait for it.
+        tests:
+          - MainWindowViewModel_ApplySettings_CardRefreshHeld_ReturnsAndShowsRefreshingProgress
 
       - id: AgentControl-MainWindowViewModel-InvalidateChangedSources
         title: >-
@@ -357,20 +458,27 @@ sections:
         title: >-
           The MainWindowViewModel class shall not read any package source while it is being
           constructed, shall check every card's upgrade availability in the background when
-          asked, when a repo is added and after settings are applied - a few cards at a time,
-          with a source that cannot be read hiding nothing the readable sources offer, and
-          skipping a card that is busy with an action of its own when its turn comes.
+          asked, when a repo is added and after settings are applied - each card once its queued
+          or running repo-state read was applied, at most four source reads at a time across all
+          of these checks, with a source that cannot be read hiding nothing the readable sources
+          offer, and skipping a card that is busy with an action of its own when its turn comes.
         justification: |
           Starting the window must not wait for package sources, which may be slow network
           locations; one offline source must not hide the upgrade state of repos served by
           other sources. A background check running beside an action the user started on the
           card would break the card's one-action-at-a-time rule and could replace the action's
-          result with its own.
+          result with its own. A card's repo state is read in the background, and applying it
+          makes a check started against the older state irrelevant, so a check started before the
+          read landed would be lost. Checks that overlap (startup, an add, Settings, the periodic
+          round) must not multiply the number of sources read at once.
         tests:
           - MainWindowViewModel_Constructor_DoesNotReadSourcesUntilUpgradeRefreshBegins
           - MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_ReadableSourceStillOffersUpgrades
           - MainWindowViewModel_AddRepo_PinnedRepo_UpgradeCheckRunsInBackground
           - MainWindowViewModel_LaunchCheck_WaitingCardBecomesBusy_IsNotChecked
+          - MainWindowViewModel_Startup_UpgradeCheckWaitsForCardState
+          - MainWindowViewModel_Startup_BusyCardSkippedByUpgradeCheck
+          - MainWindowViewModel_UpgradeChecks_OverlappingChecks_ShareOneLimit
 
       - id: AgentControl-MainWindowViewModel-ConnectionTestProvider
         title: >-
@@ -465,7 +573,7 @@ sections:
           that had no stored place yet.
         tests:
           - MainWindowViewModel_MoveGroup_UpAndDown_SwapsWithNeighborAndStoresTheFullOrder
-          - MainWindowViewModel_MoveGroup_SaveFails_ChangesNothingAndReports
+          - MainWindowViewModel_MoveGroup_SaveFails_KeptAndReported
 
       - id: AgentControl-MainWindowViewModel-MoveGroupAvailability
         title: >-
@@ -504,14 +612,14 @@ sections:
           The MainWindowViewModel class shall store a color from the card color palette, or none,
           for one of the user's groups under the group's own spelling, saving it only in the user's
           settings, and shall refuse an unknown color, an unknown group and the built-in sections,
-          changing nothing when the choice cannot be saved and reporting that.
+          keeping the choice when it cannot be saved and reporting that.
         justification: |
           The group color is a personal choice that must be kept like the other organizing choices,
           and only a known color for an existing group of the user's own makes sense.
         tests:
           - MainWindowViewModel_SetGroupColor_StoresColorAndNoneClears
           - MainWindowViewModel_SetGroupColor_UnknownColorGroupOrBuiltInSection_ChangesNothing
-          - MainWindowViewModel_SetGroupColor_SaveFails_ChangesNothingAndReports
+          - MainWindowViewModel_SetGroupColorSaveFails_KeptAndReported
 
       - id: AgentControl-MainWindowViewModel-GroupColorShown
         title: >-
@@ -729,79 +837,101 @@ sections:
       - id: AgentControl-MainWindowViewModel-ChangeAppliedWhenSaved
         title: >-
           The MainWindowViewModel class shall, for every change the user makes to a repo or a section
-          (favorite, group, card color, launch time, collapse, rename or removal of a group, adding
-          or removing a repo), apply the change and write it to the settings file when the save
-          succeeds.
+          (favorite, group, card color, launch time, collapse, rename, removal, color or order of a
+          group, the order of the repos, removing a repo), apply the change at once, without waiting
+          for the settings file, and write it to the settings file in the background.
         justification: |
-          A change the user makes must be there the next time the application starts.
+          A change the user makes must be there the next time the application starts, and the window
+          must not freeze while a busy settings file is written.
         tests:
           - MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten
+          - MainWindowViewModel_Favorite_SaveHeld_AppliedAtOnceAndWrittenAfterFlush
 
       - id: AgentControl-MainWindowViewModel-FailedSaveChangesNothing
         title: >-
-          The MainWindowViewModel class shall, when a change the user makes cannot be saved, leave
-          the settings in memory, the repo cards, the displayed list and the settings file as they
-          were.
+          The MainWindowViewModel class shall, when a change the user makes in the window cannot be
+          written, keep the change in effect - in the settings in memory, the repo cards and the
+          displayed list - and write it with the next change or when the window closes.
         justification: |
-          A list that shows a change the file does not have would be lost at the next start without
-          the user knowing; applying a change only after it was saved keeps what the user sees equal
-          to what is kept.
+          A change the user sees taking effect must not be undone behind their back because the file
+          was busy for a moment; written with the next change or at the close, it is kept as soon as
+          the file can be written again.
         tests:
-          - MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt
-          - MainWindowViewModel_MoveToGroupSaveFails_ChangesNothingAndReports
-          - MainWindowViewModel_CardColorSaveFails_ChangesNothingAndReports
-          - MainWindowViewModel_LaunchRecordSaveFails_StampNotRecordedAndReports
-          - MainWindowViewModel_CollapseSaveFails_SectionStaysExpanded
-          - MainWindowViewModel_RenameGroupSaveFails_GroupUnchanged
-          - MainWindowViewModel_RemoveGroupSaveFails_GroupUnchanged
-          - MainWindowViewModel_AddRepoSaveFails_NothingAdded
-          - MainWindowViewModel_RemoveRepoSaveFails_RepoStaysListedAndWorking
-
-      - id: AgentControl-MainWindowViewModel-FailedSaveNotPersistedLater
-        title: >-
-          The MainWindowViewModel class shall never write a change whose save failed with a later,
-          unrelated save.
-        justification: |
-          A change the user was told was not applied must not reappear in the file because of
-          something else they did afterwards.
-        tests:
-          - MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt
-          - MainWindowViewModel_AddRepoSaveFails_NothingAdded
-          - MainWindowViewModel_RemoveRepoSaveFails_RepoStaysListedAndWorking
+          - MainWindowViewModel_FavoriteSaveFails_KeptReportedOnceAndSavedWithNextChange
+          - MainWindowViewModel_MoveToGroupSaveFails_KeptAndReported
+          - MainWindowViewModel_CardColorSaveFails_KeptAndReported
+          - MainWindowViewModel_LaunchRecordSaveFails_StampKeptAndReported
+          - MainWindowViewModel_CollapseSaveFails_SectionCollapsedAndReported
+          - MainWindowViewModel_RenameGroupSaveFails_RenamedAndReported
+          - MainWindowViewModel_RemoveGroupSaveFails_RemovedAndReported
+          - MainWindowViewModel_RemoveRepoSaveFails_RemovedReportedAndSavedWithNextChange
 
       - id: AgentControl-MainWindowViewModel-SaveFailureReported
         title: >-
           The MainWindowViewModel class shall tell the user, through a notice to the window with a
-          message, when a favorite, group, card color, launch time or collapse request from a card
-          or a header button could not be saved.
+          message, when the changes made in the window could not be written - once per failure
+          streak, not for every change that fails in a row, saying that the changes stay in effect -
+          and shall tell nothing once the window has closed.
         justification: |
-          The user pressed a button and nothing visible happened; without a message they cannot
-          tell that the change was refused or why.
+          Without a message the user cannot tell that the file is not being written or why; a
+          message for every click while the disk stays unwritable would make the window unusable.
         tests:
-          - MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt
-          - MainWindowViewModel_MoveToGroupSaveFails_ChangesNothingAndReports
-          - MainWindowViewModel_CardColorSaveFails_ChangesNothingAndReports
-          - MainWindowViewModel_LaunchRecordSaveFails_StampNotRecordedAndReports
-          - MainWindowViewModel_CollapseSaveFails_SectionStaysExpanded
+          - MainWindowViewModel_FavoriteSaveFails_KeptReportedOnceAndSavedWithNextChange
+          - MainWindowViewModel_MoveToGroupSaveFails_KeptAndReported
+          - MainWindowViewModel_CardColorSaveFails_KeptAndReported
+          - MainWindowViewModel_LaunchRecordSaveFails_StampKeptAndReported
+          - MainWindowViewModel_CollapseSaveFails_SectionCollapsedAndReported
 
       - id: AgentControl-MainWindowViewModel-SaveFailureRefusesOperation
         title: >-
-          The MainWindowViewModel class shall refuse the collapse of a section, the rename or removal
-          of a group and the adding or removing of a repo whose save failed, by reporting the failure
-          to the caller instead of returning normally.
+          The MainWindowViewModel class shall refuse an add and a save of the Settings window's
+          settings whose save failed, applying nothing and reporting the failure to the caller
+          instead of returning normally.
         justification: |
-          The window that called the operation tells the user; an operation that failed to save must
-          not look as if it had succeeded.
+          An add and the Settings window's values are applied only once they are on disk; the caller
+          tells the user, and an operation that failed to save must not look as if it had succeeded.
         tests:
-          - MainWindowViewModel_CollapseSaveFails_SectionStaysExpanded
-          - MainWindowViewModel_RenameGroupSaveFails_GroupUnchanged
-          - MainWindowViewModel_RemoveGroupSaveFails_GroupUnchanged
           - MainWindowViewModel_AddRepoSaveFails_NothingAdded
-          - MainWindowViewModel_RemoveRepoSaveFails_RepoStaysListedAndWorking
+          - MainWindowViewModel_AddRepos_SaveFails_NothingAddedAndEveryFolderReportedNotSaved
+          - MainWindowViewModel_ApplySettingsAsync_SaveFails_NothingAdoptedAndThrows
+
+      - id: AgentControl-MainWindowViewModel-ApplySettingsSaveInBackground
+        title: >-
+          The MainWindowViewModel class shall save the Settings window's settings without making the
+          window wait for the settings file, adopt them only once they were saved, and keep a change
+          the user makes in the main window meanwhile, writing it together with them.
+        justification: |
+          A busy settings file must not freeze the window, and a change made while the settings are
+          saved must not be lost when they are adopted.
+        tests:
+          - MainWindowViewModel_ApplySettingsAsync_SaveHeld_ReturnsPendingAndAdoptsOnceSaved
+          - MainWindowViewModel_ApplySettingsAsync_ChangeDuringSave_KeptAndWrittenAfterFlush
+
+      - id: AgentControl-MainWindowViewModel-SettingsFlushedOnClose
+        title: >-
+          The MainWindowViewModel class shall, when the window closes, write the settings changes that
+          are not written yet, the write running off the closing thread with a bounded wait; when a
+          confirmed save (an add) is still running at the close, it shall wait for it within the same
+          bounded wait and write the changes made meanwhile together with that save's change once it
+          was written, and shall not write the changes made meanwhile when that save's write is still
+          running after the wait. A confirmed save (an add, the Settings window's settings) that ends
+          after the close shall change nothing of the closed view model.
+        justification: |
+          A change made just before closing must still be kept, and the close must neither hang on a
+          busy file nor make a blocking call on the UI thread. Written over a running add without
+          its change, the close would take the add out of the file again; when the add's write is
+          still running after the wait, the change made meanwhile is the lesser loss. A save that
+          ends after the close must not rebuild cards or start reads for a window that is gone.
+        tests:
+          - MainWindowViewModel_Dispose_OnGuardedThread_WritesPendingChangeWithoutBlockingCall
+          - MainWindowViewModel_Dispose_WhileAddSavingAfterAnotherChange_WritesAddAndChange
+          - MainWindowViewModel_Dispose_AddWriteStillRunningAfterTheWait_AddNotOverwritten
+          - MainWindowViewModel_Dispose_WhileAddSaving_AddCompletionChangesNothingAfterTheClose
+          - MainWindowViewModel_Dispose_WhileSettingsSaving_SettingsCompletionAdoptsNothingAfterTheClose
 
       - id: AgentControl-MainWindowViewModel-RemoveRepoRetiresCard
         title: >-
-          The MainWindowViewModel class shall, once a repo's removal was saved, retire its card so
+          The MainWindowViewModel class shall, once a repo was removed, retire its card so
           that nothing the card still has running reports anything afterwards.
         justification: |
           A removed repo's pending upgrade check or running operation must not show an error, release
@@ -892,3 +1022,32 @@ sections:
           - MainWindowViewModel_RecheckAfterSettingsClosed_RoundRecordedFailureBeforeSignIn_RoundReadsTheSourceAgain
           - MainWindowViewModel_RecheckAfterSettingsClosed_CardCheckInFlight_OldFailureIsNotShown
           - MainWindowViewModel_RecheckAfterSettingsClosed_SignedInDuringConnectionTest_UsesTheSignInWithoutAsking
+
+      - id: AgentControl-MainWindowViewModel-SharedRepoReads
+        title: >-
+          The MainWindowViewModel class shall read the folders of an add and refresh the cards after
+          a settings save under one limit of two repo reads at a time, shared with the cards' own
+          reads, so adds and refreshes that run at the same time never read more repos at once.
+        justification: |
+          Each of these used to have its own limit of four, so overlapping work multiplied the number
+          of git processes.
+        tests:
+          - MainWindowViewModel_AddReposAsync_ManyFolders_AtMostTwoInspectedAtOnce
+          - MainWindowViewModel_ApplySettings_RefreshUsesSharedQueueLimit
+
+      - id: AgentControl-MainWindowViewModel-StartupReadsQueued
+        title: >-
+          The MainWindowViewModel class shall build its repo cards from the settings without reading
+          the disk or running git, queue each card's repo-state read through the shared refresh queue
+          in display order (the cards shown first), and report the progress of those reads as
+          "Refreshing repositories {n} of {total}..." without Cancel until they are done, and give up
+          the reads that have not been applied when the window closes.
+        justification: |
+          Reading every repo (a pin file and three git processes each) before the window could show
+          kept the window from appearing for a long list or a slow or offline drive. The window must
+          appear at once and fill the cards in, showing that it is still working. Once the window is
+          closed nothing is shown any more, so its reads must neither start nor be applied.
+        tests:
+          - MainWindowViewModel_Constructor_GitHeld_ReturnsWithCardsRefreshingAndProgressShown
+          - MainWindowViewModel_Constructor_ReadsComplete_CardsFillInAndProgressClears
+          - MainWindowViewModel_Dispose_StartupReadsHeld_GivesThemUpAndAppliesNothing

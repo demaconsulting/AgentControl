@@ -72,6 +72,18 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     private const int MaxPackageIdLength = 100;
 
     /// <summary>
+    ///     How long the address (or the insecure-HTTP choice) must stay unchanged before the dialog
+    ///     asks git whether a credential helper applies to it, so typing an address starts one check
+    ///     rather than one per keystroke.
+    /// </summary>
+    internal static readonly TimeSpan HelperCheckDelay = TimeSpan.FromMilliseconds(400);
+
+    /// <summary>
+    ///     The clock the delay before a helper check is measured on.
+    /// </summary>
+    private readonly TimeProvider _timeProvider;
+
+    /// <summary>
     ///     Tells whether an alias is already used by a configured source; supplied by the owner
     ///     (typically <see cref="SettingsWindowViewModel"/>) so the dialog never needs the whole
     ///     source list.
@@ -237,6 +249,9 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     ///     signatures, or <see langword="null"/> to ask <see cref="SignatureVerificationSupport"/>.
     ///     Where it cannot, "Require signed packages" is shown disabled with an explanation.
     ///     Supplied so tests can exercise both answers.</param>
+    /// <param name="timeProvider">The clock the wait before a credential-helper check (see
+    ///     <see cref="HelperCheckDelay"/>) is measured on; <see langword="null"/> uses the system
+    ///     clock. Supplied so tests can move time on themselves.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="aliasExists"/> is
     ///     <see langword="null"/>.</exception>
     public SourceEditorViewModel(
@@ -246,10 +261,12 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
         bool isServer = false,
         Func<PackageSourceDefinition, IPackageSourceProvider>? providerFactory = null,
         PackageCredentialContext? credentials = null,
-        bool? signatureVerificationSupported = null)
+        bool? signatureVerificationSupported = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(aliasExists);
 
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _existing = existing?.Clone();
         _aliasExists = aliasExists;
         _providerFactory = providerFactory ?? CreateDefaultProvider;
@@ -274,7 +291,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
         CancelTestCommand = new RelayCommand(() => TestConnectionCommand.Cancel(), () => IsTesting);
         ForgetSavedSignInCommand = new RelayCommand(RequestForgetSavedSignIn, () => CanForgetSavedSignIn);
         PackageIds.CollectionChanged += (_, _) => OnPackageIdsChanged();
-        RefreshHelperAvailability();
+        RefreshHelperAvailability(afterEdit: false);
     }
 
     /// <summary>
@@ -398,7 +415,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
             {
                 _locationTouched = true;
                 OnPropertyChanged(nameof(LocationTooltip));
-                RefreshHelperAvailability();
+                RefreshHelperAvailability(afterEdit: true);
                 RaiseValidationChanged();
             }
         }
@@ -429,7 +446,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
 
                 // Whether an http address is acceptable - and so whether a saved sign-in can be
                 // looked up for it - depends on this choice
-                RefreshHelperAvailability();
+                RefreshHelperAvailability(afterEdit: true);
                 RaiseValidationChanged();
             }
         }
@@ -864,7 +881,9 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
         ClearTestResult();
         try
         {
-            var result = await _credentials!.ForgetSavedSignInAsync(origin, CancellationToken.None);
+            // The credential helper is asked by running git: on a worker, never on the UI thread
+            var credentials = _credentials!;
+            var result = await Task.Run(() => credentials.ForgetSavedSignInAsync(origin, CancellationToken.None), CancellationToken.None);
             ForgetResultText = result switch
             {
                 ForgetSignInResult.Removed => $"The saved sign-in for {origin} was forgotten.",
@@ -926,7 +945,15 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     ///     reusing an earlier answer for the same origin. Until the answer is known the "Forget
     ///     saved sign-in" action is unavailable; a failed check counts as "no helper".
     /// </summary>
-    private void RefreshHelperAvailability()
+    /// <remarks>
+    ///     Any check still waiting or running for an earlier address is canceled first, and its
+    ///     answer is never used. After an edit the check waits <see cref="HelperCheckDelay"/> before
+    ///     it asks git, so a burst of keystrokes asks once, for the address the user stopped at; when
+    ///     the dialog opens it asks at once. Git runs on a worker thread either way.
+    /// </remarks>
+    /// <param name="afterEdit">Whether the user just changed the address or the insecure-HTTP
+    ///     choice (the check then waits for the typing to pause).</param>
+    private void RefreshHelperAvailability(bool afterEdit)
     {
         _helperCheckCancellation?.Cancel();
         _helperCheckCancellation = null;
@@ -947,7 +974,7 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
 
         var cancellation = new CancellationTokenSource();
         _helperCheckCancellation = cancellation;
-        _helperCheck = CheckHelperAsync(origin, key, cancellation);
+        _helperCheck = CheckHelperAsync(origin, key, afterEdit, cancellation);
     }
 
     /// <summary>
@@ -956,14 +983,25 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
     /// </summary>
     /// <param name="origin">The feed origin.</param>
     /// <param name="key">The cache key of the origin.</param>
-    /// <param name="cancellation">The cancellation of this check.</param>
+    /// <param name="afterEdit">Whether to wait <see cref="HelperCheckDelay"/> first.</param>
+    /// <param name="cancellation">The cancellation of this check; signaled when the address changes
+    ///     again, which ends the wait (or the check) without an answer.</param>
     /// <returns>A task that completes when the check is over; it never faults.</returns>
-    private async Task CheckHelperAsync(FeedOrigin origin, string key, CancellationTokenSource cancellation)
+    private async Task CheckHelperAsync(
+        FeedOrigin origin, string key, bool afterEdit, CancellationTokenSource cancellation)
     {
+        var remembered = _credentials!.Remembered!;
+        var token = cancellation.Token;
         bool available;
         try
         {
-            available = await _credentials!.Remembered!.IsAvailableAsync(origin, cancellation.Token);
+            if (afterEdit)
+            {
+                await Task.Delay(HelperCheckDelay, _timeProvider, token);
+            }
+
+            // The helper is asked by running git: on a worker, never on the UI thread
+            available = await Task.Run(() => remembered.IsAvailableAsync(origin, token), token);
         }
         catch (OperationCanceledException)
         {
@@ -1087,8 +1125,11 @@ internal sealed partial class SourceEditorViewModel : ViewModelBase
         var packageId = PackageIds[0];
         try
         {
-            var provider = _providerFactory(BuildDefinition(forTest: true));
-            var versions = await provider.ListVersionsAsync(packageId, cancellationToken);
+            // The provider is created and asked on a worker: it may start git, read its cache
+            // folders or drive the NuGet library, none of which may make the window wait
+            var definition = BuildDefinition(forTest: true);
+            var versions = await Task.Run(
+                () => _providerFactory(definition).ListVersionsAsync(packageId, cancellationToken), cancellationToken);
             if (versions.Count == 0)
             {
                 SetTestResult(

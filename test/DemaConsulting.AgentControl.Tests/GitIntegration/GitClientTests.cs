@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 using DemaConsulting.AgentControl.GitIntegration;
+using DemaConsulting.AgentControl.Utilities;
 using Microsoft.Extensions.Logging;
 
 namespace DemaConsulting.AgentControl.Tests.GitIntegration;
@@ -74,7 +75,7 @@ public class GitClientTests
             var client = new GitClient(stub.Path, _logger);
 
             // Act: check working tree cleanliness
-            var isClean = client.IsWorkingTreeClean(repoDir);
+            var isClean = client.IsWorkingTreeClean(repoDir, TestContext.Current.CancellationToken);
 
             // Assert: empty status output means a clean tree
             Assert.True(isClean);
@@ -101,7 +102,7 @@ public class GitClientTests
             var client = new GitClient(stub.Path, _logger);
 
             // Act: check working tree cleanliness
-            var isClean = client.IsWorkingTreeClean(repoDir);
+            var isClean = client.IsWorkingTreeClean(repoDir, TestContext.Current.CancellationToken);
 
             // Assert: non-empty status output means a dirty tree
             Assert.False(isClean);
@@ -128,7 +129,7 @@ public class GitClientTests
             var client = new GitClient(stub.Path, _logger);
 
             // Act / Assert: the failure is surfaced with the captured error text
-            var ex = Assert.Throws<InvalidOperationException>(() => client.IsWorkingTreeClean(repoDir));
+            var ex = Assert.Throws<InvalidOperationException>(() => client.IsWorkingTreeClean(repoDir, TestContext.Current.CancellationToken));
             Assert.Contains("fatal: not a git repository", ex.Message, StringComparison.Ordinal);
         }
         finally
@@ -152,7 +153,7 @@ public class GitClientTests
             var client = new GitClient(stub.Path, _logger);
 
             // Act: pull
-            var result = client.Pull(repoDir);
+            var result = client.Pull(repoDir, TestContext.Current.CancellationToken);
 
             // Assert: success is reported with the captured stdout
             Assert.True(result.Succeeded);
@@ -180,7 +181,7 @@ public class GitClientTests
             var client = new GitClient(stub.Path, _logger);
 
             // Act: pull
-            var result = client.Pull(repoDir);
+            var result = client.Pull(repoDir, TestContext.Current.CancellationToken);
 
             // Assert: the failure is reported via the result, not an exception
             Assert.False(result.Succeeded);
@@ -222,7 +223,7 @@ public class GitClientTests
             var client = new GitClient(missingPath, _logger);
 
             // Act / Assert: a missing executable is surfaced as a clear exception that can be caught
-            Assert.Throws<InvalidOperationException>(() => client.IsWorkingTreeClean(repoDir));
+            Assert.Throws<InvalidOperationException>(() => client.IsWorkingTreeClean(repoDir, TestContext.Current.CancellationToken));
         }
         finally
         {
@@ -255,7 +256,7 @@ public class GitClientTests
             var client = new GitClient(stub.Path, _logger);
 
             // Act
-            var hash = client.GetHeadCommitHash(repoDir);
+            var hash = client.GetHeadCommitHash(repoDir, TestContext.Current.CancellationToken);
 
             // Assert
             Assert.Equal("0123456789abcdef0123456789abcdef01234567", hash);
@@ -281,7 +282,7 @@ public class GitClientTests
             var client = new GitClient(stub.Path, _logger);
 
             // Act / Assert
-            var ex = Assert.Throws<InvalidOperationException>(() => client.GetHeadCommitHash(repoDir));
+            var ex = Assert.Throws<InvalidOperationException>(() => client.GetHeadCommitHash(repoDir, TestContext.Current.CancellationToken));
             Assert.Contains("bad revision", ex.Message, StringComparison.Ordinal);
         }
         finally
@@ -306,7 +307,7 @@ public class GitClientTests
             var client = new GitClient(stub.Path, _logger);
 
             // Act
-            var result = client.HasCommittedAgentFiles(repoDir);
+            var result = client.HasCommittedAgentFiles(repoDir, TestContext.Current.CancellationToken);
 
             // Assert
             Assert.True(result);
@@ -333,7 +334,7 @@ public class GitClientTests
             var client = new GitClient(stub.Path, _logger);
 
             // Act
-            var result = client.HasCommittedAgentFiles(repoDir);
+            var result = client.HasCommittedAgentFiles(repoDir, TestContext.Current.CancellationToken);
 
             // Assert
             Assert.False(result);
@@ -359,7 +360,7 @@ public class GitClientTests
             var client = new GitClient(stub.Path, _logger);
 
             // Act / Assert
-            Assert.Throws<InvalidOperationException>(() => client.HasCommittedAgentFiles(repoDir));
+            Assert.Throws<InvalidOperationException>(() => client.HasCommittedAgentFiles(repoDir, TestContext.Current.CancellationToken));
         }
         finally
         {
@@ -605,7 +606,7 @@ public class GitClientTests
             var client = new GitClient(stub.Path, _logger);
 
             // Act
-            var branch = client.GetCurrentBranch(repoDir);
+            var branch = client.GetCurrentBranch(repoDir, TestContext.Current.CancellationToken);
 
             // Assert: resolved via the fast path (the stub would have failed abbrev-ref)
             Assert.Equal("feature/my-branch", branch);
@@ -634,7 +635,7 @@ public class GitClientTests
             var client = new GitClient(stub.Path, _logger);
 
             // Act
-            var branch = client.GetCurrentBranch(repoDir);
+            var branch = client.GetCurrentBranch(repoDir, TestContext.Current.CancellationToken);
 
             // Assert
             Assert.Equal("(detached)", branch);
@@ -664,7 +665,7 @@ public class GitClientTests
             var client = new GitClient(stub.Path, _logger);
 
             // Act
-            var branch = client.GetCurrentBranch(repoDir);
+            var branch = client.GetCurrentBranch(repoDir, TestContext.Current.CancellationToken);
 
             // Assert
             Assert.Equal("worktree-branch", branch);
@@ -692,7 +693,7 @@ public class GitClientTests
             var client = new GitClient(stub.Path, _logger);
 
             // Act
-            var branch = client.GetCurrentBranch(repoDir);
+            var branch = client.GetCurrentBranch(repoDir, TestContext.Current.CancellationToken);
 
             // Assert: the stub's canned "rev-parse --abbrev-ref HEAD" answer was used
             Assert.Equal("fallback-branch", branch);
@@ -721,7 +722,7 @@ public class GitClientTests
             var client = new GitClient(stub.Path, _logger);
 
             // Act
-            var branch = client.GetCurrentBranch(repoDir);
+            var branch = client.GetCurrentBranch(repoDir, TestContext.Current.CancellationToken);
 
             // Assert
             Assert.Equal("fallback-branch", branch);
@@ -748,7 +749,7 @@ public class GitClientTests
             var client = new GitClient(stub.Path, _logger);
 
             // Act / Assert
-            Assert.Throws<InvalidOperationException>(() => client.GetCurrentBranch(repoDir));
+            Assert.Throws<InvalidOperationException>(() => client.GetCurrentBranch(repoDir, TestContext.Current.CancellationToken));
         }
         finally
         {
@@ -869,5 +870,174 @@ public class GitClientTests
     {
         // Act / Assert
         Assert.ThrowsAny<ArgumentException>(() => GitClient.IsRepositoryRoot(path));
+    }
+
+    /// <summary>
+    ///     Test that a local git command that hangs past its time limit is stopped (the process is
+    ///     killed before it finishes) and reported as timed out, naming the limit.
+    /// </summary>
+    [Fact]
+    public async Task GitClient_IsWorkingTreeClean_GitHangsPastTimeout_StopsItAndThrowsTimedOut()
+    {
+        // Arrange: git status hangs well past a one-second local limit
+        var stub = GitStub.Create(statusSleepSeconds: GitStub.HangSeconds);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(
+                stub.Path,
+                _logger,
+                new GitClientTimeouts(TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(10)));
+
+            // Act
+            var failure = Assert.Throws<GitCommandTimeoutException>(() => client.IsWorkingTreeClean(repoDir, TestContext.Current.CancellationToken));
+
+            // Assert: reported as a timeout of the local limit (still an InvalidOperationException for
+            // existing callers), and the process never got to finish
+            Assert.IsAssignableFrom<InvalidOperationException>(failure);
+            Assert.Equal(TimeSpan.FromSeconds(1), failure.Timeout);
+            Assert.Contains("git status", failure.Message, StringComparison.Ordinal);
+            Assert.False(await stub.RanToTheEndOfItsHangAsync());
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a git command that exited while a process it started still holds its output open
+    ///     is not waited for past its time limit: the wait is stopped and the command reported as timed
+    ///     out, naming the limit.
+    /// </summary>
+    [Fact]
+    public async Task GitClient_IsWorkingTreeClean_HelperHoldsOutputAfterGitExits_StopsWaitingAndThrowsTimedOut()
+    {
+        // Arrange: git status answers and exits at once, but a helper it started keeps its output open
+        // well past a one-second local limit (and a one-second stop time)
+        var stub = GitStub.Create(statusOutputHolderSeconds: GitStub.HangSeconds);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(
+                stub.Path,
+                _logger,
+                new GitClientTimeouts(TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(1)));
+
+            // Act
+            var failure = Assert.Throws<GitCommandTimeoutException>(() => client.IsWorkingTreeClean(repoDir, TestContext.Current.CancellationToken));
+
+            // Assert: reported as a timeout of the local limit rather than waiting for the helper
+            Assert.Equal(TimeSpan.FromSeconds(1), failure.Timeout);
+            Assert.Contains("git status", failure.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            // The helper has ended (killed or run out) before the stub is deleted; whether it was
+            // killed depends on the platform, so it is not asserted
+            _ = await stub.RanToTheEndOfItsHangAsync();
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a pull runs under the pull limit, not the much shorter local-command limit: a pull
+    ///     that takes longer than the local limit completes.
+    /// </summary>
+    [Fact]
+    public void GitClient_Pull_UsesPullTimeoutNotLocalTimeout()
+    {
+        // Arrange: a pull that takes two seconds, a one-second local limit and a generous pull limit
+        var stub = GitStub.Create(pullOutput: "Already up to date.", pullSleepSeconds: 2);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(
+                stub.Path,
+                _logger,
+                new GitClientTimeouts(TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(10)));
+
+            // Act
+            var result = client.Pull(repoDir, TestContext.Current.CancellationToken);
+
+            // Assert: the pull ran to its end and succeeded
+            Assert.True(result.Succeeded);
+            Assert.True(stub.WroteFinishedMarker());
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that canceling a running git command stops the process (it never finishes) and
+    ///     surfaces the cancellation.
+    /// </summary>
+    [Fact]
+    public async Task GitClient_GetHeadCommitHash_Canceled_StopsGitAndThrowsCanceled()
+    {
+        // Arrange: git rev-parse hangs well past the moment the caller cancels
+        var stub = GitStub.Create(revParseHeadSleepSeconds: GitStub.HangSeconds);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            cancellation.CancelAfter(TimeSpan.FromSeconds(1));
+
+            // Act / Assert: the cancellation surfaces, and the process never got to finish
+            Assert.ThrowsAny<OperationCanceledException>(() => client.GetHeadCommitHash(repoDir, cancellation.Token));
+            Assert.False(await stub.RanToTheEndOfItsHangAsync());
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that every git query made on a thread guarded against blocking calls is refused with the
+    ///     guard's exception before git is started.
+    /// </summary>
+    [Fact]
+    public void GitClient_AnyCommand_OnGuardedThread_ThrowsBlockingCallOnGuardedThread()
+    {
+        // Arrange: a stub that logs every invocation
+        var invocationLog = Path.Combine(Path.GetTempPath(), "agentcontrol_guard_invocations_" + Guid.NewGuid() + ".log");
+        var stub = GitStub.Create(invocationLogPath: invocationLog);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+            var refusals = new List<Exception?>();
+
+            // Act: every query, on a guarded thread
+            using (BlockingCallGuard.GuardCurrentThread())
+            {
+                refusals.Add(Record.Exception(() => client.IsWorkingTreeClean(repoDir, TestContext.Current.CancellationToken)));
+                refusals.Add(Record.Exception(() => client.Pull(repoDir, TestContext.Current.CancellationToken)));
+                refusals.Add(Record.Exception(() => client.GetHeadCommitHash(repoDir, TestContext.Current.CancellationToken)));
+                refusals.Add(Record.Exception(() => client.HasCommittedAgentFiles(repoDir, TestContext.Current.CancellationToken)));
+                refusals.Add(Record.Exception(() => client.GetCurrentBranch(repoDir, TestContext.Current.CancellationToken)));
+            }
+
+            var recorded = BlockingCallGuard.TakeViolations();
+
+            // Assert: each refused with the guard's exception and recorded; git never started
+            Assert.All(refusals, refusal => Assert.IsType<BlockingCallOnGuardedThreadException>(refusal));
+            Assert.Equal(5, recorded.Count);
+            Assert.False(File.Exists(invocationLog));
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+            File.Delete(invocationLog);
+        }
     }
 }

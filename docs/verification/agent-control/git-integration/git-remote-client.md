@@ -54,7 +54,8 @@ stub (a unique executable path) and the real-git version test uses the full path
 - Background work cannot prompt (terminal, credential manager, askpass, ssh), even when the user's askpass variables are
   set; user-started work leaves them; trace and redirection variables never reach git; git runs in a neutral folder.
 - ssh gets batch mode and a connect timeout around the user's own OpenSSH command and is left alone for other commands.
-- A hanging command is killed at its limit or on cancellation and the termination is confirmed; a process that cannot be
+- A hanging command is killed at its limit or on cancellation and the termination is confirmed; a cancellation that
+  arrives while the work folders are prepared starts no git process; a process that cannot be
   confirmed to have ended is reported as `ProcessNotStopped`, within the stop timeout, in both cases;
   output over the cap
   is refused, counted in bytes (a multi-byte text over the cap is refused, exactly the cap is accepted); a failure
@@ -62,6 +63,8 @@ stub (a unique executable path) and the real-git version test uses the full path
   failures are classified; a missing git is explained.
 - Real git lists, fetches one tag shallow, lists the tree, reads a blob's raw bytes, creates a repository without hooks
   and refuses other transports.
+- A listing asked from a thread guarded against blocking calls creates the work folders and starts git on another
+  thread: nothing is refused on the guarded thread and the tags are listed.
 
 #### Test Scenarios
 
@@ -201,6 +204,13 @@ test kills the stub itself afterwards. This scenario is tested by
 `Process.Kill(entireProcessTree)`; the tests prove that it is invoked and that its failure is surfaced, and rely on the
 operating system for the descent into children.
 
+**GitRemoteClient_ListTags_CancelledWhilePreparingWorkFolders_StartsNoGit**: the `WorkFoldersPrepared` seam holds the
+start on its worker once the work folders were prepared, the caller cancels meanwhile, and the seam then lets it go
+on: the listing is reported as an `OperationCanceledException`, the `ProcessStarting` seam was never called and the
+stub recorded no invocation - no git process was started for the cancelled operation. This scenario is tested by
+`GitRemoteClient_ListTags_CancelledWhilePreparingWorkFolders_StartsNoGit`, covering
+`AgentControl-GitRemoteClient-TimeoutAndCancel`.
+
 **GitRemoteClient_Output_BytesCapFixedMessagesAndClassification**: more than 8 MB of output is `OutputTooLarge`; 5
 million two-byte characters (under the cap as characters, 10 MB as bytes) is `OutputTooLarge`; exactly the cap in bytes
 is accepted and one byte more is refused; an error text that starts with `password=...`
@@ -234,3 +244,9 @@ repository the client creates holds no hook. This scenario is tested by
 `AgentControl-GitRemoteClient-FetchIntoHooklessRepository` and `AgentControl-GitRemoteClient-NoHooks`. That no hook runs
 while a package is fetched and written is proven at the provider by
 `GitSourceProvider_Acquire_HostileHooksAndTemplate_NeverRun`.
+
+**GitRemoteClient_ListTags_FromGuardedThread_StartsGitOffThatThread**: With a stub git that lists one tag, a listing
+is started inside a guard scope of `BlockingCallGuard` and the record of refused calls is read before the `await`: it
+is empty, the tag is listed, git ran once and the work folders exist. This scenario is tested by
+`GitRemoteClient_ListTags_FromGuardedThread_StartsGitOffThatThread`, covering
+`AgentControl-GitRemoteClient-StartsOffCallerThread`.

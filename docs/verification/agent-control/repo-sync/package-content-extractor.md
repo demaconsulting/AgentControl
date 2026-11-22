@@ -51,6 +51,7 @@ skipped). Junction tests run on Windows only (they skip elsewhere) and need no p
   count; empty folders and files elsewhere do not); a managed folder that cannot be inspected safely (a link) is
   reported as holding files, never as empty; and a repo's managed folders can be opened as a package that lists only
   those folders' files and accepts a repo root reached through a link.
+- An extraction on a thread guarded against blocking calls is refused and recorded before the repo is touched.
 
 #### Test Scenarios
 
@@ -266,3 +267,10 @@ accepted. This scenario is tested by
 `DirectoryPackageContentReader_OpenManagedFolders_RepoRootUnderJunction_IsAccepted` (`windows@`) and
 `DirectoryPackageContentReader_OpenManagedFolders_RepoRootUnderSymlink_IsAccepted` (`ubuntu@`), covering
 `AgentControl-PackageContentExtractor-ReadManagedFoldersOfRepo`.
+
+**PackageContentExtractor_Extract_OnGuardedThread_IsRefusedAndChangesNothing**: Inside a guard scope of
+`BlockingCallGuard`, extracting a folder package into a repo with an existing managed file throws
+`BlockingCallOnGuardedThreadException`, the record holds `package extract`, the existing file is kept and the package's
+file is not written. This scenario is tested by
+`PackageContentExtractor_Extract_OnGuardedThread_IsRefusedAndChangesNothing`, covering
+`AgentControl-PackageContentExtractor-RefusesGuardedThread`.

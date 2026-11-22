@@ -73,6 +73,23 @@ internal static class RepoCardViewModelTestExtensions
         RunToCompletion(() => card.EnsureAgentFilesSyncedBeforeLaunchAsync());
 
     /// <summary>
+    ///     Accepts a card's AGENTS.md template offer and waits until the template was written (or the
+    ///     outcome reported).
+    /// </summary>
+    /// <param name="card">The card that made the offer.</param>
+    /// <param name="templateContent">The template's text.</param>
+    public static void AcceptAgentsMdTemplate(this RepoCardViewModel card, string templateContent) =>
+        RunToCompletion(() => card.AcceptAgentsMdTemplateAsync(templateContent));
+
+    /// <summary>
+    ///     Declines a card's AGENTS.md template offer and waits until the decline was recorded (or the
+    ///     failure reported).
+    /// </summary>
+    /// <param name="card">The card that made the offer.</param>
+    public static void DeclineAgentsMdTemplate(this RepoCardViewModel card) =>
+        RunToCompletion(card.DeclineAgentsMdTemplateAsync);
+
+    /// <summary>
     ///     Determines whether a pre-launch verification ended with the agent files in a usable,
     ///     synced state (as opposed to a failed restore).
     /// </summary>

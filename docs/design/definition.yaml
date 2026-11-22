@@ -34,6 +34,8 @@ input-files:
   - docs/design/agent-control/launcher-ui/repo-group-header-view-model.md
   - docs/design/agent-control/launcher-ui/group-name-view-model.md
   - docs/design/agent-control/launcher-ui/dialog-behavior.md
+  - docs/design/agent-control/launcher-ui/global-progress-view-model.md
+  - docs/design/agent-control/launcher-ui/repo-refresh-queue.md
   - docs/design/agent-control/agent-package-management.md
   - docs/design/agent-control/agent-package-management/package-source.md
   - docs/design/agent-control/agent-package-management/package-source-registry.md
@@ -69,12 +71,14 @@ input-files:
   - docs/design/agent-control/git-integration/git-remote-client.md
   - docs/design/agent-control/settings.md
   - docs/design/agent-control/settings/settings-store.md
+  - docs/design/agent-control/settings/settings-writer.md
   - docs/design/agent-control/settings/repo-group-name.md
   - docs/design/agent-control/logging.md
   - docs/design/agent-control/startup.md
   - docs/design/agent-control/startup/startup-options.md
   - docs/design/agent-control/utilities.md
   - docs/design/agent-control/utilities/path-helpers.md
+  - docs/design/agent-control/utilities/blocking-call-guard.md
   - docs/design/ots.md
   - docs/design/ots/avalonia.md
   - docs/design/ots/buildmark.md

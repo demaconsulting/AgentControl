@@ -39,7 +39,7 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 /// <remarks>
 ///     The view model runs on a <see cref="FakeTimeProvider"/>, so a test moves the clock by hand
 ///     instead of waiting, and on an in-memory source whose reads are counted. Runs in the
-///     <c>RealProcess</c> collection because each card's eager <c>RefreshCheap()</c> may start git.
+///     <c>RealProcess</c> collection because each card's background repo-state read may start git.
 /// </remarks>
 [Collection("RealProcess")]
 public sealed class MainWindowViewModelRecheckTests : IDisposable
@@ -366,6 +366,7 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
         var viewModel = new MainWindowViewModel(
             settings, configDirectory: CreateTempDirectory(), timeProvider: clock,
             registryFactory: _ => new PackageSourceRegistry(settings.Sources, _ => feed));
+        await viewModel.WhenRepoStateSettledAsync();
         Directory.Delete(missing, recursive: true);
         viewModel.RepoCards[1].RefreshCheap();
         Assert.True(viewModel.RepoCards[1].IsMissing);
@@ -394,6 +395,9 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
         feed.ListVersionsGate = gate.Task;
         var refresh = card.RefreshAsync(TestContext.Current.CancellationToken);
         Assert.True(card.IsBusy);
+
+        // The refresh reads the card's repo state in the background first, then its source
+        await feed.WaitForListVersionsCallsAsync(1).WaitAsync(TestContext.Current.CancellationToken);
         Assert.Equal(1, feed.ListVersionsCalls);
 
         // Act: a tick while the card is busy
@@ -747,7 +751,7 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
         };
         var viewModel = CreateViewModel(clock, feed, out var card);
         await viewModel.BeginUpgradeRefresh();
-        viewModel.ApplySettings(viewModel.Settings);
+        await viewModel.ApplySettingsAsync(viewModel.Settings);
         await viewModel.PendingRefresh;
         var callsAfterSave = feed.ListVersionsCalls;
 
@@ -781,8 +785,12 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
         Assert.True(idle.IsUpgradeStatusUnknown);
         var gate = new TaskCompletionSource();
         feed.ListVersionsGate = gate.Task;
+        var readsBeforeRefresh = feed.ListVersionsCalls;
         var refresh = busy.RefreshAsync(TestContext.Current.CancellationToken);
         Assert.True(busy.IsBusy);
+
+        // The refresh reads the card's repo state in the background first, then its source (held)
+        await feed.WaitForListVersionsCallsAsync(readsBeforeRefresh + 1).WaitAsync(TestContext.Current.CancellationToken);
         var callsWhileBusy = feed.ListVersionsCalls;
 
         // Act: Settings closes while the first card is busy; then the source answers
@@ -821,7 +829,7 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
         // Act: Settings closes; the re-check's first cards are held at their reads while the last waits its
         // turn and the user starts refreshing it; the re-check's reads then fail and it finishes, and only
         // after that does the user's refresh read the source
-        var (check, waiting, refresh, refreshGate) = StartCheckAndRefreshTheWaitingCard(
+        var (check, waiting, refresh, refreshGate) = await StartCheckAndRefreshTheWaitingCardAsync(
             viewModel, feed, () => viewModel.RecheckAfterSettingsClosed(settingsSaved: false));
         await check;
         var busyWhenCheckEnded = waiting.IsBusy;
@@ -852,7 +860,7 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
         // Act: the launch check starts; its first cards are held at their reads while the last waits its
         // turn and the user starts refreshing it; the check's reads then fail and it finishes, and only
         // after that does the user's refresh read the source
-        var (check, waiting, refresh, refreshGate) = StartCheckAndRefreshTheWaitingCard(
+        var (check, waiting, refresh, refreshGate) = await StartCheckAndRefreshTheWaitingCardAsync(
             viewModel, feed, viewModel.BeginUpgradeRefresh);
         await check;
         var busyWhenCheckEnded = waiting.IsBusy;
@@ -867,6 +875,123 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
         Assert.Equal("1.1.0", waiting.LatestAvailableVersion);
     }
 
+    /// <summary>
+    ///     Test that the window's upgrade check started while a card's startup read is held waits for that
+    ///     read - reading no source meanwhile - and then checks the card, so the read landing does not
+    ///     throw the check's result away.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_Startup_UpgradeCheckWaitsForCardState()
+    {
+        // Arrange: one pinned repo whose startup read is held, and a source offering a newer version
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"));
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = CreateViewModel(clock, [feed], 1, backgroundWork: gate);
+        var card = viewModel.RepoCards[0];
+
+        // Act: the window starts the upgrade check while the read is held
+        var check = viewModel.BeginUpgradeRefresh();
+        await gate.FirstCall;
+
+        // Assert: the check waits for the card's state; no source read yet
+        Assert.False(check.IsCompleted);
+        Assert.False(card.IsCheckingUpgrade);
+        Assert.Equal(0, feed.ListVersionsCalls);
+
+        // Act
+        gate.Release();
+        await check;
+
+        // Assert: the state was read, then the check ran and its result stands
+        Assert.True(card.HasRepoState);
+        Assert.Equal("1.0.0", card.PinnedPackageVersion);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.Equal("1.1.0", card.LatestAvailableVersion);
+        Assert.Equal(RepoCardStatus.UpgradeAvailable, card.Status);
+    }
+
+    /// <summary>
+    ///     Test that a card the user starts refreshing while the window's upgrade check waits for the card's
+    ///     startup read is skipped by that check when its turn comes (it is busy), so only the user's
+    ///     refresh reads the source for it.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_Startup_BusyCardSkippedByUpgradeCheck()
+    {
+        // Arrange: one pinned repo whose startup read is held, and a source whose listing is held for the
+        // user's refresh
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"));
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = CreateViewModel(clock, [feed], 1, backgroundWork: gate);
+        var card = viewModel.RepoCards[0];
+        var check = viewModel.BeginUpgradeRefresh();
+        await gate.FirstCall;
+        var refreshGate = new TaskCompletionSource();
+        feed.ListVersionsGate = refreshGate.Task;
+
+        // Act: the user refreshes the card; the reads run; the window's check ends
+        var refresh = card.RefreshAsync(TestContext.Current.CancellationToken);
+        gate.Release();
+        await check;
+        var busyWhenCheckEnded = card.IsBusy;
+        var readsWhenCheckEnded = feed.ListVersionsCalls;
+        refreshGate.SetResult();
+        await refresh;
+
+        // Assert: the check ended while the card was busy, without reading the source for it; the user's
+        // refresh read it once and its result is shown
+        Assert.True(busyWhenCheckEnded);
+        Assert.True(readsWhenCheckEnded <= 1);
+        Assert.Equal(1, feed.ListVersionsCalls);
+        Assert.True(card.IsUpgradeAvailable);
+        Assert.False(card.IsBusy);
+    }
+
+    /// <summary>
+    ///     Test that overlapping background upgrade checks share one limit: while the window's check holds
+    ///     four cards at their source reads, the check of two repos added meanwhile starts no read until a
+    ///     slot frees, and every card gets its answer once the source answers.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_UpgradeChecks_OverlappingChecks_ShareOneLimit()
+    {
+        // Arrange: four pinned cards whose source listing is held, and two pinned repos to add
+        var clock = new FakeTimeProvider();
+        var feed = new FakePackageSourceProvider("Feed", ("contoso-agents", "1.0.0"), ("contoso-agents", "1.1.0"));
+        var viewModel = CreateViewModel(clock, feed, repoCount: 4);
+        var listingGate = new TaskCompletionSource();
+        feed.ListVersionsGate = listingGate.Task;
+        var added = Enumerable.Range(0, 2).Select(_ =>
+        {
+            var repo = CreateTempDirectory();
+            Directory.CreateDirectory(Path.Combine(repo, ".git"));
+            File.WriteAllText(Path.Combine(repo, ".git", "HEAD"), "ref: refs/heads/main\n");
+            RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+            return repo;
+        }).ToList();
+
+        // Act: the window's check starts (four cards read at once), then two repos are added
+        var first = viewModel.BeginUpgradeRefresh();
+        var checkingBeforeAdd = viewModel.RepoCards.Count(card => card.IsCheckingUpgrade);
+        await viewModel.EnqueueAddReposAsync(added, null);
+        var addedCards = viewModel.RepoCards.Where(card => added.Contains(card.RepoPath)).ToList();
+
+        // Assert: the added repos' checks wait for one of the four shared slots instead of reading
+        Assert.Equal(4, checkingBeforeAdd);
+        Assert.Equal(2, addedCards.Count);
+        Assert.All(addedCards, card => Assert.False(card.IsCheckingUpgrade));
+
+        // Act
+        feed.ListVersionsGate = null;
+        listingGate.SetResult();
+        await first;
+        await viewModel.PendingRefresh;
+
+        // Assert: every card got its answer
+        Assert.All(viewModel.RepoCards, card => Assert.True(card.IsUpgradeAvailable));
+    }
     /// <summary>
     ///     Test that closing Settings after the main window's view model was disposed checks nothing.
     /// </summary>
@@ -1053,7 +1178,8 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
     ///     Starts a background check of five cards with the source's reads held open, so four cards are
     ///     reading and the fifth waits for its turn; starts the user's refresh of the waiting card, whose read
     ///     is held open by a gate of its own; then makes every later read fail at once and lets the
-    ///     background check's held reads go on (they fail too).
+    ///     background check's held reads go on (they fail too). Returns once the refresh is held at its
+    ///     source read.
     /// </summary>
     /// <remarks>
     ///     A background check started on the busy card when its turn comes would read the source at once,
@@ -1065,8 +1191,8 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
     /// <param name="startCheck">Starts the background check.</param>
     /// <returns>The background check, the waiting card, the user's refresh of it and the gate that holds
     ///     that refresh's read.</returns>
-    private static (Task Check, RepoCardViewModel Waiting, Task Refresh, TaskCompletionSource RefreshGate)
-        StartCheckAndRefreshTheWaitingCard(
+    private static async Task<(Task Check, RepoCardViewModel Waiting, Task Refresh, TaskCompletionSource RefreshGate)>
+        StartCheckAndRefreshTheWaitingCardAsync(
             MainWindowViewModel viewModel, FakePackageSourceProvider feed, Func<Task> startCheck)
     {
         var checkGate = new TaskCompletionSource();
@@ -1076,8 +1202,12 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
 
         var refreshGate = new TaskCompletionSource();
         feed.ListVersionsGate = refreshGate.Task;
+        var readsBeforeRefresh = feed.ListVersionsCalls;
         var refresh = waiting.RefreshAsync(TestContext.Current.CancellationToken);
         Assert.True(waiting.IsBusy);
+
+        // The refresh reads the card's repo state in the background first, then the source (held)
+        await feed.WaitForListVersionsCallsAsync(readsBeforeRefresh + 1).WaitAsync(TestContext.Current.CancellationToken);
 
         feed.ListVersionsGate = null;
         feed.ListVersionsException = new IOException("Feed is unreachable.");
@@ -1122,9 +1252,15 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
     /// <param name="feeds">The feeds that serve the sources, one source per feed (named by its alias).</param>
     /// <param name="repoCount">How many repos are pinned.</param>
     /// <param name="interval">The re-check interval, or <see langword="null"/> for the default.</param>
+    /// <param name="backgroundWork">Runs the cards' repo-state reads, or <see langword="null"/> for the
+    ///     thread pool; with <see langword="null"/> the view model is returned once those reads settled.</param>
     /// <returns>The view model.</returns>
     private MainWindowViewModel CreateViewModel(
-        FakeTimeProvider clock, FakePackageSourceProvider[] feeds, int repoCount, TimeSpan? interval = null)
+        FakeTimeProvider clock,
+        FakePackageSourceProvider[] feeds,
+        int repoCount,
+        TimeSpan? interval = null,
+        IBackgroundWorkRunner? backgroundWork = null)
     {
         var repos = new string[repoCount];
         for (var index = 0; index < repoCount; index++)
@@ -1141,13 +1277,24 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
                 Alias = feed.Alias, Type = PackageSourceType.Zip, Location = "unused"
             })
         ];
-        return new MainWindowViewModel(
+        var viewModel = new MainWindowViewModel(
             settings,
             configDirectory: CreateTempDirectory(),
             timeProvider: clock,
             upgradeRecheckInterval: interval,
             registryFactory: _ => new PackageSourceRegistry(
-                settings.Sources, definition => feeds.Single(feed => feed.Alias == definition.Alias)));
+                settings.Sources, definition => feeds.Single(feed => feed.Alias == definition.Alias)),
+            backgroundWork: backgroundWork);
+
+        // The cards' repo state is read in the background at construction; these tests are about the
+        // upgrade checks, so they start once it has settled (a test that holds the reads does not wait).
+        // Waited for on a pool thread, so no synchronization context is needed.
+        if (backgroundWork is null)
+        {
+            Task.Run(viewModel.WhenRepoStateSettledAsync).GetAwaiter().GetResult();
+        }
+
+        return viewModel;
     }
 
     /// <summary>

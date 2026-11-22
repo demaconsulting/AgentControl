@@ -153,7 +153,13 @@ without it.
 - **Main** (`Agent Control`): `AppLogo` (the logo in the app bar; its name is `AgentControl`), `FilterTextBox`,
   `AddRepoButton`, `OpenSettingsButton`, `OpenAboutButton`, `EmptyStatePanel`, `EmptyStateText`, `RepoListBox`,
   `ExternalDropOverlay` (the outline around the list area, shown only while folders dragged from File Explorer would
-  be added without a group).
+  be added without a group), and - present only while bulk work runs (reading the cards at start-up, adding
+  repositories, or refreshing the cards after Settings are saved) - `GlobalProgressStrip` (the strip under the app
+  bar), `GlobalProgressBar` (its name is the status text), `GlobalProgressText` (for example
+  `Adding 7 of 20 repositories...`, `Saving...` or `Refreshing repositories 3 of 12...`) and
+  `GlobalProgressCancelButton` (only while repositories are being added and not yet saving; it stops the add). To wait
+  until the cards have been read after `launch`, wait until `GlobalProgressStrip` and every `RepoRefreshingText` are
+  gone.
 - **Group header** (repeated, one per section, in `RepoListBox`; only present once a repo is in a group):
   `GroupHeaderToggleButton` (collapses or expands; its name says the section, count and state, for example
   `Work, 2 repos, collapsed`, and so does its list item), `GroupHeaderNameText`, `GroupHeaderCountText`, and, for
@@ -176,9 +182,13 @@ without it.
   files, in the package chip; hidden when no source is known),
   CommittedAgentFilesBadge, DirtyWorkingTreeBadge, MissingRepoBadge, RepoPathText (a text control whose name is the
   full path; the path is shortened to fit, a long folder name in the middle), RepoPinnedVersionText,
-  `CurrentBranchText`, `GroupChipText` (a favorite's group), `FavoriteToggleButton` (accessible name `Favorite`; a
-  toggle: `read` shows `toggle=On|Off`), `UpToDateCue` (the check mark in the package chip of an up-to-date card),
-  `LaunchButton`,
+  `CurrentBranchText` (the branch; a dimmed `...` until the card's Git state has been read), `RepoRefreshingText`
+  (the italic `refreshing...`, present only while one of the card's reads is queued or running, at start-up, after
+  Settings, on Refresh, Pull and the card actions), `UpgradeCheckingText` (`checking for updates...`, present only
+  while the card's upgrade check runs), `RepoStatusMessageText` (the outcome of the last action, or the message that
+  git did not answer and was stopped), `GroupChipText` (a favorite's group), `FavoriteToggleButton` (accessible name
+  `Favorite`; a toggle: `read` shows `toggle=On|Off`), `UpToDateCue` (the check mark in the package chip of an
+  up-to-date card), `LaunchButton`,
   `MoreActionsButton`.
 - **Card menu** (pop-up of `MoreActionsButton`): `PullButton` (Git Pull), `RefreshMenuItem`, `SelectPackageMenuItem`
   (only for a repo that has no package yet), `ChangePackageMenuItem` (Change package..., only for a repo that has a

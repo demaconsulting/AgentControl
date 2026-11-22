@@ -1,0 +1,78 @@
+---
+# Software Unit Requirements for the SettingsWriter Class
+#
+# SettingsWriter writes settings snapshots to disk in the background, one write at a time, so that
+# a change the user makes in the window never waits for the settings file. What is written, and
+# when a change must be confirmed on disk before it is applied, is the MainWindowViewModel unit's;
+# how a snapshot is written is the SettingsStore unit's.
+
+sections:
+  - title: SettingsWriter Unit Requirements
+    requirements:
+      - id: AgentControl-SettingsWriter-Debounce
+        title: >-
+          The SettingsWriter class shall accept a snapshot to write without waiting for any write,
+          and shall write it only once no newer snapshot was scheduled for its delay, writing the
+          newest of the snapshots scheduled in between.
+        justification: |
+          A burst of clicks or a drag makes several changes in quick succession; writing each one
+          would keep the disk busy for nothing, and only the newest state needs to reach the file.
+          The caller is the window's UI thread, which must never wait for the disk.
+        tests:
+          - SettingsWriter_Schedule_SeveralWithinDelay_WritesOnceWithLatest
+          - SettingsWriter_Writes_NeverOverlapAndScheduleNeverWaits
+
+      - id: AgentControl-SettingsWriter-Serialize
+        title: >-
+          The SettingsWriter class shall make one write at a time, in the order the writes were
+          accepted, and shall make every write off the caller's thread.
+        justification: |
+          Two writes of the same file at once could leave the older state on disk; a write made on
+          the caller's thread would make the window wait for the disk after all.
+        tests:
+          - SettingsWriter_Writes_NeverOverlapAndScheduleNeverWaits
+          - SettingsWriter_ScheduleAndFlushOnGuardedThread_WritesWithoutBlockingCall
+
+      - id: AgentControl-SettingsWriter-ConfirmedSave
+        title: >-
+          The SettingsWriter class shall write a confirmed snapshot after the write in progress and
+          tell its caller whether it was written, with the reason when it was not; when it was
+          written, it shall drop a snapshot scheduled before it and keep one scheduled after it, and
+          it shall keep a change waiting to be written when the confirmed save fails.
+        justification: |
+          An add and the Settings window's values are applied only once they are on disk, so their
+          caller must know. The confirmed snapshot was built from settings that already held the
+          older scheduled one, which must not be written over it; a change made after it, or one the
+          failed save did not write, must still be written.
+        tests:
+          - SettingsWriter_SaveNowAsync_Success_CompletesWhenWritten
+          - SettingsWriter_SaveNowAsync_Failure_FaultsWithReason
+          - SettingsWriter_SaveNowAsync_Success_DropsOlderWaitingSnapshot
+          - SettingsWriter_SaveNowAsync_ScheduledWhileSaving_WrittenAfter
+          - SettingsWriter_SaveNowAsync_Failure_KeepsWaitingSnapshotScheduled
+
+      - id: AgentControl-SettingsWriter-FailureReportedOnce
+        title: >-
+          The SettingsWriter class shall report a background write that fails, with the reason, once
+          per failure streak - the first failure after a write that succeeded - and shall keep the
+          snapshot that failed until a later write succeeds.
+        justification: |
+          The user must learn that the file is not being written, but a disk that stays unwritable
+          must not raise a message for every change; the change must not be lost meanwhile.
+        tests:
+          - SettingsWriter_ScheduledWriteFails_RaisesWriteFailedOncePerStreak
+          - SettingsWriter_FailedWrite_KeptAndWrittenByNextFlush
+
+      - id: AgentControl-SettingsWriter-Flush
+        title: >-
+          The SettingsWriter class shall write the snapshot that is waiting at once when asked,
+          without waiting for its delay, and shall offer a flush with a bounded wait that tells
+          whether everything was written in time.
+        justification: |
+          When the window closes, a change made a moment before must still reach the file, and the
+          close must not hang on a file that stays locked.
+        tests:
+          - SettingsWriter_FlushAsync_WritesWaitingSnapshotNow
+          - SettingsWriter_Flush_Timeout_ReturnsFalseWhenWriteHeld
+          - SettingsWriter_FailedWrite_KeptAndWrittenByNextFlush
+          - SettingsWriter_ScheduleAndFlushOnGuardedThread_WritesWithoutBlockingCall

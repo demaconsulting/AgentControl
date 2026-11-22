@@ -25,6 +25,7 @@ flowchart TD
         RepoGroupHeaderViewModel
         GroupNameViewModel
         DialogBehavior
+        GlobalProgressViewModel
     end
     subgraph AgentPackageManagement
         PackageSource
@@ -84,6 +85,7 @@ flowchart TD
     MainWindowViewModel --> RepoCardViewModel
     MainWindowViewModel --> SettingsStore
     MainWindowViewModel --> RepoGroupHeaderViewModel
+    MainWindowViewModel -->|progress strip of bulk work| GlobalProgressViewModel
     MainWindowViewModel --> RepoGroupName
     MainWindowViewModel -->|repository-root check| GitClient
     MainWindowViewModel -.->|MainWindow view shows| GroupNameViewModel
@@ -242,23 +244,36 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   `AgentControl-System-AddGitReposOnly`): the folder picker of the app bar's Add button and of a header's "Add
   repository..." allows several folders, and folders dragged from the file manager onto the list are added too - into
   the group whose header or card they are dropped on, otherwise ungrouped. Every folder goes through
-  `MainWindowViewModel.AddRepos`, which adds only the top folder of a Git repository (`GitClient.IsRepositoryRoot`: a
-  `.git` folder or file directly in it, no git process) and leaves the repos already in the list as they are;
-  `DescribeAddOutcomes` turns the outcomes into one message (nothing when all were added).
+  `MainWindowViewModel.EnqueueAddReposAsync` (the same checks and commit as the synchronous `AddRepos`), which adds
+  only the top folder of a Git repository (`GitClient.IsRepositoryRoot`: a `.git` folder or file directly in it, no
+  git process) and leaves the repos already in the list as they are; `DescribeAddOutcomes` turns the outcomes into one
+  message (nothing when all were added, nothing after a cancel).
+- *Responsive repo-list work* (`AgentControl-System-ResponsiveRepoListWork`): reading the cards at start-up, adding
+  folders and refreshing the cards after Settings are saved read the disk and run git for every repo, so that work
+  never runs on the UI thread. Every such read - each card's start-up read, each folder of an add, each card's refresh
+  after a settings save, the working-tree check of each card
+  shown - goes through one shared queue (`RepoRefreshQueue`, over the `IBackgroundWorkRunner` seam, the thread pool in
+  the application) that runs at most two at a time across all of them, joins a read already waiting for the same repo
+  and puts the cards on screen first; every git command runs under a time limit and a git that does not answer is
+  stopped and reported on its card (`GitClient`). The results are immutable records and the batch is committed on the UI
+  thread with one save and one list rebuild. Adds are queued (a further drop or pick waits for the running add), share
+  one Cancel that stops them before anything is saved, and a failed save asks the user (Retry or Discard; Discard leaves
+  the list as saved). The progress of this bulk work is shown by `GlobalProgressViewModel` in a strip directly under the
+  app bar, collapsed while idle. The working-tree check of a card shown in the window, and after a Refresh or a Pull,
+  also runs in the background through the queue, and the committed-files cache it shares with the UI thread is safe for
+  concurrent use (`AgentControl-GitIntegration-QueriesFromAnyThread`).
 - *Repo order* (`AgentControl-System-RepoOrder`, `AgentControl-System-RepoReorder`,
   `AgentControl-System-RepoOrderRemembered`): the order of the cards is the user's own and is the order of
-  `AppSettings.RecentRepos` itself, so a removed repo leaves the order with no extra bookkeeping. Favorites stay
-  first; within a section the repos show in that order; a new repo is appended (the bottom of its section); and
-  launching, refreshing or any other change never moves a card - `MainWindowViewModel` does not even listen to the
-  card's `LaunchRecorded`. The user reorders from a card's menu (Reorder > Move to top, up, down, bottom) or by
-  dragging a
-  card within a section, into another section (which sets the group or favorite flag as the menu and the star
-  would) or onto a header (the end of that section); `MainWindowViewModel.MoveCard`, `CanDrop` and `DropCard` hold
-  the rules and `MainWindow` only turns pointer input into a drop place and draws the insertion line or header
-  tint. Reordering is off while the filter has text. The order is saved with the other user choices (and, like
-  them, through the transactional change above), kept across restarts, and seeded once for a settings file written
-  before the order existed (favorites first, then most recently launched, by `AppSettings.EnsureRepoOrder`), so
-  nothing jumps on upgrade.
+  `AppSettings.RecentRepos` itself, so a removed repo leaves the order with no extra bookkeeping. Favorites stay first;
+  within a section the repos show in that order; a new repo is appended (the bottom of its section); and launching,
+  refreshing or any other change never moves a card - `MainWindowViewModel` does not even listen to the card's
+  `LaunchRecorded`. The user reorders from a card's menu (Reorder > Move to top, up, down, bottom) or by dragging a card
+  within a section, into another section (which sets the group or favorite flag as the menu and the star would) or onto
+  a header (the end of that section); `MainWindowViewModel.MoveCard`, `CanDrop` and `DropCard` hold the rules and
+  `MainWindow` only turns pointer input into a drop place and draws the insertion line or header tint. Reordering is off
+  while the filter has text. The order is saved with the other user choices (and, like them, applied at once and written
+  in the background), kept across restarts, and seeded once for a settings file written before the order existed
+  (favorites first, then most recently launched, by `AppSettings.EnsureRepoOrder`), so nothing jumps on upgrade.
 - *Card colors* (`AgentControl-System-CardColor`): the palette pop-up offers one swatch per entry of
   `CardColorPalette` (built from the single list of valid names, `RecentRepo.CardColorNames`) plus Automatic;
   `RepoCardViewModel.SetCardColor` records the name, or clears it for Automatic, and the tile - and only the tile -
@@ -273,7 +288,7 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   request before `ReleaseNotesReady`; the main window keeps the open question per card and opens the release notes
   only after it is answered, so the notes never cover the question.
 - *Appearance* (`AgentControl-System-Appearance`): the theme (system default, light or dark) is chosen in Settings
-  and saved with the other settings; after the save succeeded, `MainWindowViewModel.ApplySettings` hands it to the
+  and saved with the other settings; after the save succeeded, `MainWindowViewModel.ApplySettingsAsync` hands it to the
   application through an injected callback (so the view-model does not depend on the UI framework), which sets
   Avalonia's theme variant for every open window at once; the system default follows the operating system. The
   persisted choice is applied before the first window is shown. Every color of the application's own XAML is a
@@ -306,8 +321,10 @@ through a callback the owner supplies to `RepoCardViewModel`. When the save fail
 the cards, the displayed list and the file stay as they were, so a later unrelated save can never write the failed
 change, and the user is told. Card and header changes (including collapsing a section) are reported through the
 view-model's `SettingsSaveFailed` event, which the main window shows in a message box; removing a repo and
-renaming or removing a group fail with an `InvalidOperationException` that the window reports, and adding several
-folders reports a folder that could not be saved in the summary and goes on with the next. Settings edited in the
+renaming or removing a group fail with an `InvalidOperationException` that the window reports, and adding folders
+saves the whole batch once: when that save fails nothing of the batch is applied and the window asks whether to
+retry the save or discard the add (`MainWindowViewModel.AddSaveFailed`); Discard reports every folder that would have
+been added or moved as not saved. Settings edited in the
 Settings window are likewise saved before they are adopted, and the theme is applied only after that. A repo removed
 from the list is saved first and then its card is retired (`RepoCardViewModel.Retire`): its running operation is
 cancelled, its in-flight checks and picture loads are ignored, and its events are cleared, so a removed repo can no
@@ -330,7 +347,9 @@ longer raise an error box, release notes or a prompt, and the window releases it
   group, in the user's own order (a card can also be dragged to reorder it, and a group header to reorder the groups);
   a user group's header menu adds repositories, moves the group up or down, colors it, renames or removes it; the
   toolbar-level app bar holds the
-  filter, Add (one or several folders), Settings and About; folders can also be dropped onto the list
+  filter, Add (one or several folders), Settings and About; folders can also be dropped onto the list; while repos are
+  added or the cards are read at start-up or refreshed after Settings are saved, a progress strip directly under the
+  app bar shows a thin bar, a short status text and (for an add) Cancel (`AgentControl-System-ResponsiveRepoListWork`)
   (`AgentControl-System-RecentRepos`, `AgentControl-System-AddRemoveRepo`, `AgentControl-System-SearchFilter`,
   `AgentControl-System-RepoOrder`, `AgentControl-System-RepoReorder`, `AgentControl-System-RepoOrderRemembered`,
   `AgentControl-System-Favorites`, `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
@@ -351,12 +370,15 @@ window's repo list.
 - *Type*: Operating-system drag and drop, received through Avalonia (`DataFormat.File`; each item an `IStorageItem`
   whose local path is read with `TryGetLocalPath`).
 - *Role*: Consumer (the application is the drop target).
-- *Contract*: Each dropped item with a local path is offered to `MainWindowViewModel.AddRepos`, into the user group
-  whose header or card it is dropped on, otherwise ungrouped; the drag effect is Copy (nothing on disk is moved), and
-  one message afterwards says what was not added and why (`AgentControl-System-AddSeveralRepos`).
+- *Contract*: Each dropped item with a local path is offered to `MainWindowViewModel.EnqueueAddReposAsync`, into the
+  user group whose header or card it is dropped on, otherwise ungrouped; the drag effect is Copy (nothing on disk is
+  moved), the add runs in the background after any add still running, and one message afterwards says what was not
+  added and why (`AgentControl-System-AddSeveralRepos`, `AgentControl-System-ResponsiveRepoListWork`). While a drag is
+  held near the top or bottom edge of the list, over the app bar or below the list, the list keeps scrolling
+  (`AgentControl-LauncherUI-DragAutoScroll`).
 - *Constraints*: Only the top folder of a Git repository is added (a dropped file or a plain folder is reported, not
-  added: `AgentControl-System-AddGitReposOnly`); the message is posted after the drop, never shown inside the
-  operating system's drag loop; the application's own card and group drags use private data formats and are never
+  added: `AgentControl-System-AddGitReposOnly`); the add and its message are posted after the drop, never run inside
+  the operating system's drag loop; the application's own card and group drags use private data formats and are never
   taken for dropped folders.
 
 **Package Sources**: Any number of user-configured sources, each a folder of agent package zip
@@ -617,8 +639,11 @@ an unwanted or repeated file write.
    `App.OnFrameworkInitializationCompleted` loads settings via `SettingsStore.Load` (using
    the parsed configuration-directory override when present) and shows the main window,
    backed by `MainWindowViewModel`, which populates a `RepoCardViewModel` for each recent
-   repo (`AgentControl-System-Startup`).
-3. On each repo card's lightweight refresh, `RepoCardViewModel` reads the pin file
+   repo from the settings alone - no disk access and no git - so the window appears at once; every card's repo state
+   is then read in the background through the shared `RepoRefreshQueue` (two reads at a time, the cards shown first),
+   each card marked as refreshing and the strip under the app bar counting the reads, and each card's upgrade check
+   follows its read (`AgentControl-System-Startup`).
+3. On each repo card's lightweight refresh (a queued read, off the UI thread), `RepoCardViewModel` reads the pin file
    (`RepoPinStore.Load`), resolves the current branch and committed-agent-files badge
    (`GitClient`, `CommittedAgentFilesCache`), and checks upgrade availability
    (`PackageSourceRegistry`/`PackageVersionCache`) by asking the user's configured sources which of them offer the
@@ -630,7 +655,10 @@ an unwanted or repeated file write.
    (`AgentControl-System-ResponsiveOperations`). In the same refresh it asks `RepoImageLocator` on a worker thread for
    the repo's picture (an untrusted file; see *Risk Control Measures*), and a repo whose folder is missing is marked
    so, keeping only the "Check again" refresh available (`AgentControl-System-MissingRepoRecheck`).
-4. User actions on a card dispatch to the relevant subsystem: Pull to `GitClient.Pull` (gated on a clean working tree,
+4. User actions on a card first wait, without blocking the window, for the card's repo-state read that is queued or
+   running (moved to the front of the queue), then dispatch to the relevant subsystem; Refresh reads the card's state
+   through the queue ahead of the background reads and then checks the sources
+   (`AgentControl-System-ResponsiveRepoListWork`): Pull to `GitClient.Pull` (gated on a clean working tree,
    `AgentControl-System-Pull`); Launch to `RepoCardViewModel`'s pre-launch check
    (`PackageContentExtractor.HasInstalledFiles`, then `PackageContentIdentity.ComputeInstalledFilesIdentity` compared
    with the pin's identity - no package access when the files match; a silent install, a keep-or-update question or a
@@ -647,11 +675,14 @@ an unwanted or repeated file write.
    newest version across all the configured sources that offer the package, followed by the same
    extract/pin/`ReleaseNotesViewerViewModel` display sequence (`AgentControl-System-Upgrade`); Settings to
    `SettingsWindowViewModel.Save` (sources are added and edited through `SourceEditorViewModel`, which can test a
-   server's connection before it is saved), applied back through `MainWindowViewModel.ApplySettings`
-   (`AgentControl-System-Settings`); and, after a Select Package, Upgrade, or Launch-time restore or update genuinely
-   occurs, `RepoCardViewModel` decides whether to offer the package's optional root-level `AGENTS.md` template
-   (`PackageContentExtractor.ReadAgentsMdTemplate`), writes it via `AcceptAgentsMdTemplate`, or persists a decline via
-   `RepoPinStore.Save` (`AgentControl-System-AgentsMdTemplate`).
+   server's connection before it is saved), applied back through `MainWindowViewModel.ApplySettingsAsync`, which saves
+   them on a worker thread through `SettingsWriter` (`AgentControl-System-Settings`); every change the user makes to the
+   list (favorite, group, colors, order, collapse, removal, a launch time) is applied at once and written in the
+   background by `SettingsWriter` through `SettingsStore.Save`, the newest state a moment after the last change
+   (`AgentControl-System-ListChangesKept`); and, after a Select Package, Upgrade, or Launch-time restore or update
+   genuinely occurs, `RepoCardViewModel` decides whether to offer the package's optional root-level `AGENTS.md` template
+   (`PackageContentExtractor.ReadAgentsMdTemplate`), writes it via `AcceptAgentsMdTemplateAsync`, or persists a decline
+   via `RepoPinStore.Save` (`AgentControl-System-AgentsMdTemplate`).
 5. **Git repository source.** The normal flow of a Git source (`AgentControl-System-GitSources`) is: (a) the user adds
    the source in Settings; `SourceEditorViewModel` validates the address, tag pattern, sub-folder and package name
    (`GitRepositoryAddress`, `GitTagPattern`) and its Test connection lists the remote's tags through
@@ -686,18 +717,26 @@ an unwanted or repeated file write.
 6. The user's own choices - favorite, group, card color, group color, the order of the groups, collapsed section,
    renaming or removing a group, adding or
    removing a repo, and a launch being recorded - flow from the card or the group header through
-   `MainWindowViewModel`'s transactional change: a candidate copy of the settings is changed and
-   `SettingsStore.Save` writes it; only when that succeeded is the live state changed and `DisplayedItems` rebuilt
+   `MainWindowViewModel.CommitSettingsChange`: the live settings are changed at once and `DisplayedItems` rebuilt
    (sections built from the repos' groups with `RepoGroupName` and arranged in the stored group order, the collapsed
-   ones leaving out their cards; the color and position of a group that no repo is in any more are dropped). A failed
-   save changes nothing and is reported to the user; a removed repo's card is retired after its removal was saved
-   (`AgentControl-System-Favorites`, `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
+   ones leaving out their cards; the color and position of a group that no repo is in any more are dropped), and a
+   snapshot of the settings is handed to `SettingsWriter`, which writes the newest one through `SettingsStore.Save` on
+   a worker thread a moment after the last change. A failed write keeps the change in effect, is reported to the user
+   once per failure streak and is written with the next change or at the close; a removed repo's card is retired once
+   it was removed (`AgentControl-System-ListChangesKept`,
+   `AgentControl-System-Favorites`, `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
    `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`,
    `AgentControl-System-AddRemoveRepo`). Folders to add - picked several at once or dropped from the file manager - are
-   checked one by one (a folder that is not the top folder of a Git repository is not added), each added folder is
-   saved, and one summary of what was not added is shown (`AgentControl-System-AddSeveralRepos`,
-   `AgentControl-System-AddGitReposOnly`). A saved theme is applied to the running application after the save
-   (`AgentControl-System-Appearance`).
+   read off the UI thread (whether each exists, whether it is the top folder of a Git repository and, for a new repo,
+   its pin, branch and committed agent folders), with the count shown in the progress strip; then, on the UI thread,
+   the batch is re-checked against the list as it is at that moment and committed with one confirmed save (written by
+   `SettingsWriter` on a worker thread, the add applied only once it is on disk) and one rebuild of
+   `DisplayedItems` (a folder that is not the top folder of a Git repository is not added), and one summary of what
+   was not added is shown (`AgentControl-System-AddSeveralRepos`, `AgentControl-System-AddGitReposOnly`,
+   `AgentControl-System-ResponsiveRepoListWork`). A saved theme is applied to the running application after the save
+   (`AgentControl-System-Appearance`); the cards are then refreshed in the background (their pin, branch and
+   committed agent folders read off the UI thread, two at a time through the shared refresh queue) with "Refreshing
+   repositories {completed} of {total}..." in the progress strip.
 7. Throughout, `Utilities.PathHelpers.SafePathCombine` validates any caller-supplied path
    component before file-system use, and `Logging` records process-launch and
    git-integration detail to the diagnostic log file.
@@ -726,9 +765,44 @@ an unwanted or repeated file write.
   (`AgentControl-System-PackageAuthenticity`). Signature verification is supported on Windows, Linux and macOS.
 - Personal choices stay personal: favorites, groups, card colors, group colors, the order of the groups, collapsed
   sections and the theme are written only
-  to the per-user settings file, never to a repo; a change is saved before it is applied, so memory, the list and the
-  file never disagree (`AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
-  `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`).
+  to the per-user settings file, never to a repo (`AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
+  `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`). A change is applied at once and written in the
+  background by `SettingsWriter` (the newest snapshot, a short delay after the last change, one write at a time on a
+  worker thread), so the window never waits for the settings file; a failed write is reported once per failure streak
+  and the change stays in effect and is written with the next change or when the window closes; an add and the
+  Settings window's values are confirmed writes, applied only once saved (`AgentControl-System-ListChangesKept`).
+- Responsiveness - never block the UI thread (`AgentControl-System-ResponsiveOperations`,
+  `AgentControl-System-ResponsiveRepoListWork`): once the window exists, the UI thread does no disk, process or network
+  work of its own; it only changes view-model state, the settings in memory and the list, in the continuation of work
+  that ran elsewhere and handed back immutable results, so view models need no locking and no dispatcher. A slow disk,
+  an offline share, a hung git or a slow server can make a card wait, never the window. Bulk work shows its progress in
+  one global strip under the app bar.
+  - Start-up: the cards are built from the settings alone and shown at once (`AgentControl-System-Startup`).
+  - Repo state: every read of a repo's state - at start-up, after an add or a settings save, for a card coming on
+    screen, and for Refresh, Pull and the card actions - goes through the one shared `RepoRefreshQueue`, which runs at
+    most 2 reads at a time (two, so one slow repo cannot stall the rest; not more, because the reads compete for the
+    same disk), user actions first, then the cards on screen, then background work. An action waits for its card's
+    pending read without blocking the window.
+  - Git: every command runs under a time limit (60 seconds for the local repository, 10 minutes for a pull); a git
+    that does not answer is stopped with its process tree and reported on its card.
+  - Network upgrade checks keep their own limiter of 4 concurrent checks shared by all of them, so without a user
+    action at most 6 processes run (typically 2).
+  - Settings: `SettingsWriter` writes the newest snapshot on a worker thread, one write at a time (see the personal
+    choices constraint above).
+  - Packages and sources: every built-in provider of `PackageSourceRegistry.Create` is wrapped in
+    `BackgroundPackageSourceProvider`, which runs it on the thread pool and computes the content identity there; the
+    clients that run git against remotes and the credential helper start it off the caller's thread; the card's pin,
+    extraction, AGENTS.md and launch work, the source editor's connection test and debounced helper check, and opening
+    a release-notes link run on worker threads.
+  - Exceptions (justified): before the window exists, loading the settings file (with a one-time seeding save),
+    creating the log folder and the credential profile probe; at the close, a settings flush the UI thread waits for at
+    most 5 seconds; Serilog's synchronous file sink for the few lines logged on the UI thread; and lexical path
+    normalization.
+  - Regression guard (`Quality-UiThreadRegressionGuard`): `BlockingCallGuard` refuses a guarded call on the headless
+    tests' UI thread (it does nothing in the application). The guard points are `GitClient` (every git command and the
+    `.git/HEAD` read), `SettingsStore.Save`, `RepoPinStore.Load`/`Save`, `PackageContentIdentity` (both hashes),
+    `PackageContentExtractor.Extract`, `GitRemoteClient` and `GitCredentialClient` (their process starts) and the
+    release-notes link's shell start. See `docs/design/agent-control/launcher-ui.md`, *Design Constraints*.
 - Only Git repositories are tracked: a folder is added as a repo only when it is the top folder of a Git repository
   (a `.git` folder or file directly in it), because a tracked repo is synced, pulled and launched as a Git working tree
   and the agent folders must go to its top (`AgentControl-System-AddGitReposOnly`).

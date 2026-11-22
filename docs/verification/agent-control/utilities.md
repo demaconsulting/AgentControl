@@ -5,8 +5,9 @@
 The `Utilities` subsystem is verified by integration tests defined in
 `UtilitiesSubsystemTests.cs`. Each test exercises `PathHelpers` through realistic
 path-combination workflows to confirm that valid paths are resolved correctly, traversal attacks
-are rejected, and the resulting paths can be used for actual directory creation. `PathHelpers`
-has no dependencies on other tool units, so no mocking is required.
+are rejected, and the resulting paths can be used for actual directory creation, and exercises
+`BlockingCallGuard` the way the tests use it - one thread guarded while another works. Neither
+unit has dependencies on other tool units, so no mocking is required.
 
 ### Test Environment
 
@@ -19,6 +20,7 @@ N/A - standard test environment.
 - Path traversal patterns (e.g., `../`) cause `ArgumentException` to be thrown.
 - Absolute paths supplied as the relative argument cause `ArgumentException` to be thrown.
 - Paths produced by `SafePathCombine` can be passed directly to `Directory.CreateDirectory`.
+- A blocking call is refused and recorded only on a guarded thread, and only while it is guarded.
 
 ### Test Scenarios
 
@@ -45,3 +47,10 @@ succeeds. This scenario is tested by
 passed to `Directory.CreateDirectory`; the directory is created at the expected location within
 the base directory. This scenario is tested by
 `UtilitiesSubsystem_DirectoryCreationWorkflow_ValidPaths_CreatesDirectories`.
+
+**UtilitiesSubsystem_BlockingCallGuard_GuardedThreadRefusedOthersUnaffected**: While the test's thread is guarded, a
+blocking call on it is refused with `BlockingCallOnGuardedThreadException` and recorded, the same call made meanwhile
+on a worker thread (started before, synchronized with a `ManualResetEventSlim`) goes through, and once the guard ends
+the call goes through on the test's thread too. This scenario is tested by
+`UtilitiesSubsystem_BlockingCallGuard_GuardedThreadRefusedOthersUnaffected`, covering
+`AgentControl-Utilities-BlockingCallGuard`.

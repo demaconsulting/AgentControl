@@ -57,12 +57,65 @@ internal static class Program
     private const string OutputFileEnvironmentVariable = "ARGLOGGER_OUTPUT_FILE";
 
     /// <summary>
+    ///     Name of the environment variable naming a "hold" file: while that file exists, every
+    ///     invocation waits (after recording itself) before it exits, so a test can observe what the
+    ///     application shows while git has not answered yet - for example the cards' refreshing state
+    ///     at start-up - and release it by deleting the file. Unset (the default), nothing waits.
+    /// </summary>
+    private const string HoldFileEnvironmentVariable = "ARGLOGGER_HOLD_FILE";
+
+    /// <summary>
+    ///     The longest an invocation waits for the hold file to go: below the application's 60-second
+    ///     limit for a local git command, so a test that never releases the hold sees answers, not
+    ///     stopped commands.
+    /// </summary>
+    private static readonly TimeSpan MaximumHold = TimeSpan.FromSeconds(45);
+
+    /// <summary>
+    ///     How often a held invocation checks whether the hold file is still there.
+    /// </summary>
+    private static readonly TimeSpan HoldPollInterval = TimeSpan.FromMilliseconds(50);
+
+    /// <summary>
     ///     Serialization options used for each appended invocation record.
     /// </summary>
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
 
     /// <summary>
-    ///     Entry point: records this invocation and exits successfully.
+    ///     Entry point: records this invocation, waits while a test holds the stub (see
+    ///     <see cref="HoldFileEnvironmentVariable"/>), and exits.
+    /// </summary>
+    /// <param name="args">The command-line arguments this stub was invoked with.</param>
+    /// <returns>The exit code of <see cref="RecordInvocation"/>.</returns>
+    public static int Main(string[] args)
+    {
+        var exitCode = RecordInvocation(args);
+        WaitWhileHeld();
+        return exitCode;
+    }
+
+    /// <summary>
+    ///     Waits, at most <see cref="MaximumHold"/>, while the hold file named by
+    ///     <see cref="HoldFileEnvironmentVariable"/> exists; returns at once when the variable is not
+    ///     set.
+    /// </summary>
+    private static void WaitWhileHeld()
+    {
+        var holdFile = Environment.GetEnvironmentVariable(HoldFileEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(holdFile))
+        {
+            return;
+        }
+
+        var deadline = DateTime.UtcNow + MaximumHold;
+        while (File.Exists(holdFile) && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(HoldPollInterval);
+        }
+    }
+
+    /// <summary>
+    ///     Records this invocation.
     /// </summary>
     /// <param name="args">The command-line arguments this stub was invoked with.</param>
     /// <returns>Always <c>0</c> - per this stub's contract, it never fails, since a spurious
@@ -71,7 +124,7 @@ internal static class Program
     ///     production for reasons unrelated to what is being tested - except when a test opted in
     ///     to the credential-helper emulation (see <see cref="CredentialHelperEmulator"/>), where
     ///     a <c>credential fill</c> that finds nothing fails as git does.</returns>
-    public static int Main(string[] args)
+    private static int RecordInvocation(string[] args)
     {
         var outputFile = Environment.GetEnvironmentVariable(OutputFileEnvironmentVariable);
         var credentialStore = Environment.GetEnvironmentVariable(CredentialHelperEmulator.StoreEnvironmentVariable);

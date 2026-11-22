@@ -85,8 +85,9 @@ sections:
           The RepoSync subsystem shall show a link in the release notes as a keyboard-focusable
           link that shows its full address as a tooltip and opens it in the user's default web
           browser when clicked or activated from the keyboard, only for an absolute http or https
-          address, shall never open any other address, and shall report a failure to open a link
-          to the user without failing.
+          address, shall never open any other address, shall open it without making the window wait
+          for the browser to start, and shall report a failure to open a link to the user without
+          failing.
         justification: |
           A developer reading release notes after an upgrade should reach the linked issue or
           migration guide in one click; but release notes are untrusted package content, so the
@@ -100,6 +101,7 @@ sections:
           - ReleaseNotesViewer_LinkClick_InvokesOpenerWithExactUrl_NonHttpLinkIsNotClickable
           - ReleaseNotesViewer_LinkFocusedEnterKey_InvokesOpener
           - ReleaseNotesViewer_OpenLinkAsync_OpensOnlyHttpAndReportsFailures
+          - ReleaseNotesViewer_OpenInBrowserAsync_StartsTheShellOffTheUiThread
 
       - id: AgentControl-RepoSync-InstalledFiles
         title: >-
@@ -276,3 +278,15 @@ sections:
           - AgentControl-PackageContentExtractor-IgnoreLinksOutsideLayout
         tests:
           - RepoSync_LayoutRoot_LinkInTheLayoutIsRefusedWhileLinkOutsideItIsIgnored
+
+      - id: AgentControl-RepoSync-RefusesGuardedThread
+        title: >-
+          The RepoSync subsystem shall refuse to extract a package into a repo on a thread that is
+          guarded against blocking calls, before the repo is touched, recording the refusal.
+        justification: |
+          An extraction that slips back onto the window's UI thread freezes it for as long as the
+          files take to write; the tests guard that thread so that it fails them at once.
+        children:
+          - AgentControl-PackageContentExtractor-RefusesGuardedThread
+        tests:
+          - RepoSyncSubsystem_Extract_OnGuardedThread_IsRefusedBeforeTheRepoIsTouched

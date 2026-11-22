@@ -37,6 +37,42 @@ using AgentLauncher = DemaConsulting.AgentControl.AgentToolLauncher.AgentToolLau
 namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
+///     What a card's cheap refresh learns from the disk and git about a repo, read on any thread by
+///     <see cref="RepoCardViewModel.ReadCheapFacts"/> and applied to the card on the UI thread by
+///     <see cref="RepoCardViewModel.ApplyCheapFacts"/>.
+/// </summary>
+/// <remarks>
+///     Immutable, so it can be handed from a worker thread to the UI thread without any locking. The
+///     split lets the slow part (three git processes and a file read per repo) run off the UI thread
+///     while every property change still happens on it.
+/// </remarks>
+/// <param name="IsMissing">Whether the repo's folder does not exist; every other value is then its
+///     default.</param>
+/// <param name="Pin">The pin file's content, or <see langword="null"/> when there is none or it could
+///     not be read.</param>
+/// <param name="PinLoadError">Why the pin file could not be read, or <see langword="null"/> when it was
+///     read (or there is none).</param>
+/// <param name="CurrentBranch">The checked-out branch, or <see langword="null"/> when git could not
+///     tell.</param>
+/// <param name="HeadHash">The <c>HEAD</c> commit hash the committed-files answer belongs to, or
+///     <see langword="null"/> when git could not tell.</param>
+/// <param name="HasCommittedAgentFiles">Whether managed agent folders are committed to git.</param>
+/// <param name="GitQueryFailed">Whether git could not answer the branch, <c>HEAD</c> or committed-files
+///     questions (not a repository, git missing, or git hung and was stopped).</param>
+/// <param name="GitProblem">When git did not answer within its time limit and was stopped, what to tell
+///     the user; <see langword="null"/> otherwise (an ordinary git failure is not shown as a
+///     problem).</param>
+internal sealed record RepoCheapFacts(
+    bool IsMissing,
+    RepoPin? Pin,
+    string? PinLoadError,
+    string? CurrentBranch,
+    string? HeadHash,
+    bool HasCommittedAgentFiles,
+    bool GitQueryFailed,
+    string? GitProblem = null);
+
+/// <summary>
 ///     View model for a single card in the main window's recent-repos list: describes the repo
 ///     with a row of chips (agent package and its source, available upgrade, branch, status
 ///     warnings) and exposes the Launch/Git Pull/Upgrade/Select Package actions.
@@ -171,6 +207,75 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private int _upgradeCheckGeneration;
 
     /// <summary>
+    ///     The number handed to the most recent cheap-facts request (a background read, a synchronous
+    ///     refresh, a direct apply or a pin re-read); see <see cref="_appliedCheapGeneration"/>.
+    /// </summary>
+    private int _cheapRefreshGeneration;
+
+    /// <summary>
+    ///     The number of the newest cheap facts applied to the card. A background read's facts are
+    ///     applied only when their number is higher, so the facts of an older read never replace newer
+    ///     ones, while a newer request that was given up (and so applied nothing) never voids an older
+    ///     read.
+    /// </summary>
+    private int _appliedCheapGeneration;
+
+    /// <summary>
+    ///     The number handed to the most recent working-tree request (synchronous or background); see
+    ///     <see cref="_appliedGitStatusGeneration"/>.
+    /// </summary>
+    private int _gitStatusGeneration;
+
+    /// <summary>
+    ///     The number of the newest working-tree answer applied to the card. A background answer is
+    ///     applied only when its number is higher, so an older answer never replaces a newer one, while
+    ///     a newer request that was given up never voids an older check.
+    /// </summary>
+    private int _appliedGitStatusGeneration;
+
+
+    /// <summary>
+    ///     The queue every lazy read of this card's repo state goes through (shared by every card of
+    ///     the window); see the constructor.
+    /// </summary>
+    private readonly RepoRefreshQueue _refreshQueue;
+
+    /// <summary>
+    ///     Whether <see cref="_refreshQueue"/> is the card's own (none was supplied), so the card shuts
+    ///     it down when it is retired.
+    /// </summary>
+    private readonly bool _ownsRefreshQueue;
+
+    /// <summary>
+    ///     Signaled when the card is retired, so its reads that still wait in the queue are given up.
+    /// </summary>
+    private readonly CancellationTokenSource _retiredCancellation = new();
+
+    /// <summary>
+    ///     The token of <see cref="_retiredCancellation"/>, taken once so it stays usable after the
+    ///     source was disposed by <see cref="Retire"/>.
+    /// </summary>
+    private readonly CancellationToken _retiredToken;
+
+    /// <summary>
+    ///     How many of the card's own repo-state reads wait in the queue or run; see
+    ///     <see cref="IsRefreshing"/>.
+    /// </summary>
+    private int _refreshesInFlight;
+
+    /// <summary>
+    ///     The time limits of the card's git commands, or <see langword="null"/> for
+    ///     <see cref="GitClientTimeouts.Default"/>; see the constructor.
+    /// </summary>
+    private readonly GitClientTimeouts? _gitTimeouts;
+
+    /// <summary>
+    ///     The git problem (a timeout) the card last showed as its status message, so a later read that
+    ///     answers clears it again; <see langword="null"/> when none is shown.
+    /// </summary>
+    private string? _shownGitProblem;
+
+    /// <summary>
     ///     Applies a change to this repo's settings entry on behalf of the card, saving it first; see
     ///     the constructor. <see langword="null"/> applies the change directly, without saving.
     /// </summary>
@@ -185,6 +290,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Detects the shell the agent tool runs in; see the constructor.
     /// </summary>
     private readonly ShellDetector _shellDetector;
+
+    /// <summary>
+    ///     Runs the disk, hashing and process work of the card's actions (launch, upgrade, select
+    ///     package, the AGENTS.md answer) off the UI thread; see the constructor.
+    /// </summary>
+    private readonly IBackgroundWorkRunner _backgroundWork;
 
     /// <summary>
     ///     Whether <see cref="Retire"/> was called: the card was removed from the list, so nothing it
@@ -204,6 +315,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private string? _sourceProblem;
     private bool _sourceNeedsSignIn;
     private string? _currentBranch;
+
+    /// <summary>Backing field for <see cref="HasRepoState"/>.</summary>
+    private bool _hasRepoState;
     private bool _hasCommittedAgentFiles;
     private bool _canPull;
     private bool _gitStatusUnavailable;
@@ -270,15 +384,30 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="decodeImage">Decodes the repo's picture file for the avatar tile;
     ///     <see langword="null"/> uses <see cref="RepoImageLocator.Decode"/>. Supplied so tests can
     ///     count decodes or avoid needing a graphics platform.</param>
-    /// <param name="commitChange">Applies a change to this repo's settings entry and saves it,
-    ///     returning whether that succeeded (the owning <see cref="MainWindowViewModel"/> saves a
-    ///     candidate first and changes the live entry only then); <see langword="null"/> applies the
-    ///     change to the entry directly and saves nothing.</param>
+    /// <param name="commitChange">Applies a change to this repo's settings entry and has it saved,
+    ///     returning whether the change was accepted (the owning <see cref="MainWindowViewModel"/>
+    ///     applies it at once and saves it in the background, so it accepts every change; another
+    ///     owner may refuse one); <see langword="null"/> applies the change to the entry directly and
+    ///     saves nothing.</param>
     /// <param name="processStarter">Starts the agent-tool process; <see langword="null"/> uses the
     ///     real <see cref="AgentToolProcessStarter"/>. Supplied so tests can capture the launch
     ///     without starting a shell.</param>
     /// <param name="shellDetector">Detects the shell the agent tool runs in; <see langword="null"/>
     ///     uses a real <see cref="ShellDetector"/>. Supplied so tests get a deterministic shell.</param>
+    /// <param name="backgroundWork">Runs the disk, hashing and process work of the card's actions
+    ///     (the pin reads and writes, the content identity of an acquired package, the
+    ///     <c>.gitignore</c> and release notes of an apply, the AGENTS.md check and answer, the shell
+    ///     detection and the start of the agent tool) off the UI thread, and the card's repo-state
+    ///     reads when the card has a refresh queue of its own (<paramref name="refreshQueue"/> is
+    ///     <see langword="null"/>); <see langword="null"/> uses the thread pool. Supplied so tests can
+    ///     hold the work at a gate.</param>
+    /// <param name="refreshQueue">The queue the card's repo-state reads go through, shared by every
+    ///     card of the window so only a few run at once; <see langword="null"/> gives the card a queue
+    ///     of its own over <paramref name="backgroundWork"/> (a card used on its own, as in tests),
+    ///     which it shuts down when it is retired.</param>
+    /// <param name="gitTimeouts">The time limits of the card's git commands, or
+    ///     <see langword="null"/> for <see cref="GitClientTimeouts.Default"/>. Supplied so tests can use a
+    ///     short limit against a git that hangs.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="recentRepo"/>,
     ///     <paramref name="getSettings"/>, or <paramref name="packageVersionCache"/> is
     ///     <see langword="null"/>.</exception>
@@ -292,7 +421,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
         Func<RepoImageFile, Bitmap?>? decodeImage = null,
         Func<RecentRepo, Action<RecentRepo>, bool>? commitChange = null,
         IAgentToolProcessStarter? processStarter = null,
-        ShellDetector? shellDetector = null)
+        ShellDetector? shellDetector = null,
+        IBackgroundWorkRunner? backgroundWork = null,
+        RepoRefreshQueue? refreshQueue = null,
+        GitClientTimeouts? gitTimeouts = null)
     {
         ArgumentNullException.ThrowIfNull(recentRepo);
         ArgumentNullException.ThrowIfNull(getSettings);
@@ -308,6 +440,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
         _commitChange = commitChange;
         _processStarter = processStarter ?? new AgentToolProcessStarter();
         _shellDetector = shellDetector ?? new ShellDetector();
+        _backgroundWork = backgroundWork ?? ThreadPoolBackgroundWorkRunner.Instance;
+        _ownsRefreshQueue = refreshQueue is null;
+        _refreshQueue = refreshQueue ?? new RepoRefreshQueue(backgroundWork);
+        _retiredToken = _retiredCancellation.Token;
+        _gitTimeouts = gitTimeouts;
 
         LaunchCommand = new AsyncRelayCommand(LaunchAsync, ReportUnexpectedFailure, () => !IsMissing && !IsBusy);
         PullCommand = new AsyncRelayCommand(PullAsync, ReportUnexpectedFailure, () => CanPull && !IsMissing && !IsBusy);
@@ -381,11 +518,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Gets or sets whether the user has pinned/favorited this repo.
     /// </summary>
     /// <remarks>
-    ///     Saved through the owning <see cref="MainWindowViewModel"/> (see the constructor's
-    ///     <c>commitChange</c>) <em>before</em> the shared <see cref="RecentRepo"/> is changed, and
-    ///     only then does the card raise <see cref="FavoriteChanged"/> so the owner can regroup
-    ///     <see cref="MainWindowViewModel.DisplayedRepoCards"/>. When the save fails the value is not
-    ///     changed (the owner tells the user) and the star is told to show the real state again.
+    ///     Changed through the owning <see cref="MainWindowViewModel"/> (see the constructor's
+    ///     <c>commitChange</c>), which applies it to the shared <see cref="RecentRepo"/> and saves it in
+    ///     the background; only once the owner accepted it does the card raise
+    ///     <see cref="FavoriteChanged"/> so the owner can regroup
+    ///     <see cref="MainWindowViewModel.DisplayedRepoCards"/>. When the owner refuses the change the
+    ///     value is not changed and the star is told to show the real state again.
     ///     This property is the <b>only</b> owner of the toggle state: the card's star is a
     ///     <c>ToggleButton</c> whose <c>IsChecked</c> binds here two-way, and it has no command.
     ///     An earlier design also bound a toggling command, so one click flipped the state twice
@@ -403,7 +541,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             if (!CommitChange(repo => repo.IsFavorite = value))
             {
-                // Not saved, so not changed: make the two-way bound star show the real state
+                // Refused, so not changed: make the two-way bound star show the real state
                 OnPropertyChanged();
                 return;
             }
@@ -415,13 +553,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Applies a change to this repo's settings entry through the owner (which saves it first),
-    ///     or directly when the card has no owner.
+    ///     Applies a change to this repo's settings entry through the owner (which has it saved), or
+    ///     directly when the card has no owner.
     /// </summary>
-    /// <param name="change">The change to the entry; it may run more than once (on a candidate copy,
-    ///     then on the live entry), so it must be a plain assignment of fixed values.</param>
-    /// <returns><see langword="true"/> when the change was applied; <see langword="false"/> when it
-    ///     could not be saved and so was not applied.</returns>
+    /// <param name="change">The change to the entry; it must be a plain assignment of fixed values,
+    ///     because an owner may run it on a copy of the entry as well.</param>
+    /// <returns><see langword="true"/> when the change was applied; <see langword="false"/> when the
+    ///     owner refused it and so it was not applied.</returns>
     private bool CommitChange(Action<RecentRepo> change)
     {
         if (_commitChange is null)
@@ -470,8 +608,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <remarks>
     ///     A name that matches an existing group ignoring letter case joins that group under its own
     ///     spelling, so look-alike groups cannot arise. The choice is stored only in the per-user
-    ///     settings (on the shared <see cref="RecentRepo"/>), never in the repository, and is saved
-    ///     before it is applied (see <see cref="IsFavorite"/>). Raises
+    ///     settings (on the shared <see cref="RecentRepo"/>), never in the repository, and goes through
+    ///     the owner (see <see cref="IsFavorite"/>). Raises
     ///     <see cref="GroupChanged"/> when the group actually changed, so the owning
     ///     <see cref="MainWindowViewModel"/> rebuilds the list.
     /// </remarks>
@@ -479,7 +617,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     repo out of its group.</param>
     /// <returns><see langword="true"/> when the repo is now in the requested place (including when
     ///     it already was); <see langword="false"/> when <paramref name="groupName"/> is not a valid
-    ///     group name (too long, or a built-in section's name), or the choice could not be saved,
+    ///     group name (too long, or a built-in section's name), or the owner refused the change,
     ///     and nothing changed.</returns>
     public bool MoveToGroup(string? groupName)
     {
@@ -602,14 +740,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     /// <remarks>
     ///     Only the tile changes: the status accent bar keeps its fixed, meaningful colors. The choice
-    ///     is stored by name in the per-user settings only, saved before it is applied (see
+    ///     is stored by name in the per-user settings only, goes through the owner (see
     ///     <see cref="IsFavorite"/>), and raises <see cref="CardColorChanged"/> once applied.
     /// </remarks>
     /// <param name="colorName">A palette color's name (letter case ignored), or
     ///     <see langword="null"/> (or blank) for the automatic color.</param>
     /// <returns><see langword="true"/> when the card now has the requested color (including when it
     ///     already had); <see langword="false"/> when <paramref name="colorName"/> names no palette
-    ///     color or the choice could not be saved, and nothing changed.</returns>
+    ///     color or the owner refused the change, and nothing changed.</returns>
     public bool SetCardColor(string? colorName)
     {
         var requested = string.IsNullOrWhiteSpace(colorName) ? null : CardColorPalette.Find(colorName);
@@ -793,22 +931,81 @@ internal sealed class RepoCardViewModel : ViewModelBase
         {
             if (SetField(ref _currentBranch, value))
             {
-                OnPropertyChanged(nameof(HasBranch));
-                OnPropertyChanged(nameof(BranchTooltip));
+                RaiseBranchChipChanged();
             }
         }
     }
 
     /// <summary>
-    ///     Gets a value indicating whether the current branch is known, i.e. whether the branch
-    ///     chip is shown.
+    ///     Gets a value indicating whether the current branch is known, i.e. whether git named a
+    ///     branch for the repo.
     /// </summary>
     public bool HasBranch => !string.IsNullOrEmpty(_currentBranch);
 
     /// <summary>
+    ///     Gets a value indicating whether the branch chip is shown: the branch is known, or the card's
+    ///     repo state has not been read yet (the chip then shows that the branch is not known yet,
+    ///     rather than nothing, which would read as "no branch").
+    /// </summary>
+    public bool ShowBranchChip => HasBranch || !HasRepoState;
+
+    /// <summary>
+    ///     Gets a value indicating whether the branch chip stands for a branch that has not been read
+    ///     yet, so the view dims it.
+    /// </summary>
+    public bool IsBranchUnknown => !HasRepoState;
+
+    /// <summary>
+    ///     Gets the text of the branch chip: the current branch, or <c>...</c> while the card's repo
+    ///     state has not been read yet.
+    /// </summary>
+    public string? BranchChipText => HasRepoState ? CurrentBranch : "...";
+
+    /// <summary>
     ///     Gets the tooltip of the branch chip, which says what the chip shows.
     /// </summary>
-    public string BranchTooltip => $"Current git branch: {CurrentBranch}";
+    public string BranchTooltip => HasRepoState
+        ? $"Current git branch: {CurrentBranch}"
+        : "Reading the current Git branch...";
+
+    /// <summary>
+    ///     Gets a value indicating whether the card's repo state (the folder, the pin file, the branch
+    ///     and the committed agent folders) has been read at least once.
+    /// </summary>
+    /// <remarks>
+    ///     A card is shown at once, from the settings alone, and its repo state is read in the
+    ///     background (see <see cref="RefreshRepoStateAsync"/>). Until the first read was applied the
+    ///     card does not know whether its folder exists, which branch is checked out or whether agent
+    ///     folders are committed, so it shows them as unknown (<see cref="RepoCardStatus.Refreshing"/>,
+    ///     a dimmed <c>...</c> branch chip, no "No agent package" chip, no committed-files warning)
+    ///     rather than as facts. It never turns back to <see langword="false"/>: a later re-read shows
+    ///     the known values with <see cref="IsRefreshing"/> next to them.
+    /// </remarks>
+    public bool HasRepoState
+    {
+        get => _hasRepoState;
+        private set
+        {
+            if (SetField(ref _hasRepoState, value))
+            {
+                RaiseBranchChipChanged();
+                OnPropertyChanged(nameof(ShowNoPackageChip));
+                RaiseStatusChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Raises the change notifications of every property the branch chip binds to.
+    /// </summary>
+    private void RaiseBranchChipChanged()
+    {
+        OnPropertyChanged(nameof(HasBranch));
+        OnPropertyChanged(nameof(ShowBranchChip));
+        OnPropertyChanged(nameof(IsBranchUnknown));
+        OnPropertyChanged(nameof(BranchChipText));
+        OnPropertyChanged(nameof(BranchTooltip));
+    }
 
     /// <summary>
     ///     Gets a value indicating whether one or more of the four known agent folders are
@@ -898,7 +1095,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     edge.
     /// </summary>
     /// <remarks>
-    ///     A problem (missing folder, package source problem or sign-in needed, failed last action)
+    ///     Before the card's repo state was first read (see <see cref="HasRepoState"/>) the card is
+    ///     <see cref="RepoCardStatus.Refreshing"/>: whether the folder exists, the pin and so whether an
+    ///     upgrade or a problem exists are not known yet. After that a problem (missing folder, package
+    ///     source problem or sign-in needed, failed last action)
     ///     outranks everything else, then an available upgrade, then the absence of a package;
     ///     a pinned package whose upgrade check is still running (or whose last check failed) is
     ///     neutral, and only a pinned package whose check succeeded with no newer version reports
@@ -906,6 +1106,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </remarks>
     public RepoCardStatus Status => this switch
     {
+        { HasRepoState: false } => RepoCardStatus.Refreshing,
         { IsMissing: true } or { HasSourceProblem: true } or { LastActionFailed: true } => RepoCardStatus.Problem,
         { IsUpgradeAvailable: true } => RepoCardStatus.UpgradeAvailable,
         { IsPackageSelectionNeeded: true } => RepoCardStatus.NoPackage,
@@ -933,6 +1134,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RepoCardStatus.Problem => "Needs attention",
         RepoCardStatus.NoPackage => "No agent package",
         RepoCardStatus.Unknown => "Update check failed",
+        RepoCardStatus.Refreshing => "Refreshing",
         _ => "Checking for updates"
     };
 
@@ -946,6 +1148,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         RepoCardStatus.NoPackage => "No agent package is pinned for this repo.",
         RepoCardStatus.Checking => "Checking whether a newer agent package version is available...",
         RepoCardStatus.Unknown => "Update check failed: the package source could not be read, so it is not known whether a newer agent package version is available. Use Refresh in the card menu to try again.",
+        RepoCardStatus.Refreshing => "Refreshing: reading this repo's folder, pin file and Git state...",
         _ when IsMissing => "Needs attention: this repo's folder could not be found on disk. Use Check again in the card menu once it is back.",
         _ when HasSourceProblem => $"Needs attention: {SourceProblem}",
         _ => "Needs attention: the last action failed."
@@ -1275,9 +1478,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
     /// <summary>
     ///     Gets a value indicating whether the grey "No agent package" chip is shown: the repo
-    ///     exists but has never had an agent package pinned.
+    ///     exists but has never had an agent package pinned. Hidden until the card's repo state was
+    ///     read (see <see cref="HasRepoState"/>), so a pin that is only not known yet is never shown as
+    ///     missing.
     /// </summary>
-    public bool ShowNoPackageChip => IsPackageSelectionNeeded && !IsMissing;
+    public bool ShowNoPackageChip => IsPackageSelectionNeeded && !IsMissing && HasRepoState;
 
     /// <summary>
     ///     Gets the text of the agent package chip: the pinned package's name and version.
@@ -1858,13 +2063,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public event EventHandler<string>? ErrorOccurred;
 
     /// <summary>
-    ///     Raised after <see cref="IsFavorite"/> changed (and was saved), so the owning
+    ///     Raised after <see cref="IsFavorite"/> changed (accepted by the owner), so the owning
     ///     <see cref="MainWindowViewModel"/> can regroup <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
     /// </summary>
     public event EventHandler? FavoriteChanged;
 
     /// <summary>
-    ///     Raised after <see cref="MoveToGroup"/> changed the repo's group (and it was saved), so the
+    ///     Raised after <see cref="MoveToGroup"/> changed the repo's group (accepted by the owner), so the
     ///     owning <see cref="MainWindowViewModel"/> can rebuild the sectioned list.
     /// </summary>
     public event EventHandler? GroupChanged;
@@ -1876,12 +2081,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public event EventHandler? NewGroupRequested;
 
     /// <summary>
-    ///     Raised after <see cref="SetCardColor"/> changed the tile color (and it was saved).
+    ///     Raised after <see cref="SetCardColor"/> changed the tile color (accepted by the owner).
     /// </summary>
     public event EventHandler? CardColorChanged;
 
     /// <summary>
-    ///     Raised after a launch was recorded (and saved). The owning
+    ///     Raised after a launch was recorded (accepted by the owner). The owning
     ///     <see cref="MainWindowViewModel"/> does not listen to it: a launch never moves a card,
     ///     because the list shows the user's own order.
     /// </summary>
@@ -1902,7 +2107,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     released.
     /// </summary>
     /// <remarks>
-    ///     Called by <see cref="MainWindowViewModel"/> once the removal was saved. Without it a card
+    ///     Called by <see cref="MainWindowViewModel"/> once the repo was removed. Without it a card
     ///     the user removed - kept alive by handlers the window attached, or by an operation that is
     ///     still running - could still raise <see cref="ErrorOccurred"/> or
     ///     <see cref="ReleaseNotesReady"/> for a repo that is no longer listed. A retired card is never
@@ -1912,12 +2117,27 @@ internal sealed class RepoCardViewModel : ViewModelBase
     {
         _isRetired = true;
 
-        // Results of checks and picture loads that are still on their way are dropped
+        // Results of checks, background reads and picture loads that are still on their way are dropped
         _upgradeCheckGeneration++;
+        _appliedCheapGeneration = ++_cheapRefreshGeneration;
+        _appliedGitStatusGeneration = ++_gitStatusGeneration;
         _imageGeneration++;
         _loadedImageFile = null;
         IsCheckingUpgrade = false;
         CancelOperation();
+
+        // The card's reads that still wait in the queue are given up, so they take no slot; a queue of
+        // the card's own is shut down (its running read's git is stopped)
+        if (!_retiredToken.IsCancellationRequested)
+        {
+            _retiredCancellation.Cancel();
+            _retiredCancellation.Dispose();
+        }
+
+        if (_ownsRefreshQueue)
+        {
+            _refreshQueue.Dispose();
+        }
 
         // Nobody is listening any more: release the window's handlers and anything they reference
         ReleaseNotesReady = null;
@@ -1955,8 +2175,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     so the view layer can show a modal Yes/No prompt. Does not itself show any dialog -
     ///     that is a view-layer concern handled by <c>MainWindow</c>'s code-behind via the
     ///     <see cref="ConfirmationWindow"/> pattern, exactly like <see cref="RemoveRequested"/>.
-    ///     The user's choice is reported back via <see cref="AcceptAgentsMdTemplate"/> or
-    ///     <see cref="DeclineAgentsMdTemplate"/>.
+    ///     The user's choice is reported back via <see cref="AcceptAgentsMdTemplateAsync"/> or
+    ///     <see cref="DeclineAgentsMdTemplateAsync"/>.
     /// </summary>
     public event EventHandler<string>? AgentsMdTemplateOfferRequested;
 
@@ -2026,16 +2246,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     the filesystem/git/package source, updating every bindable property.
     /// </summary>
     /// <remarks>
-    ///     Equivalent to calling <see cref="RefreshCheap"/>, awaiting
-    ///     <see cref="RefreshUpgradeStatusAsync"/> and calling <see cref="RefreshDirtyStatus"/> -
-    ///     the single full-refresh entry point behind <see cref="RefreshCommand"/>, rather than
-    ///     the split eager/lazy sequencing <see cref="MainWindowViewModel"/> uses at app launch.
+    ///     The single full-refresh entry point behind <see cref="RefreshCommand"/> (the card menu's
+    ///     Refresh and the "Sign-in needed" chip). The repo state - the cheap facts and the working
+    ///     tree - is read through the shared refresh queue at the priority of a user action, ahead of
+    ///     the background reads and joined with any read of the card that already waits there, so no
+    ///     git runs on the UI thread and the card shows <see cref="IsRefreshing"/> meanwhile; then
+    ///     <see cref="RefreshUpgradeStatusAsync"/> runs as before.
     ///     It holds <see cref="IsBusy"/> while it runs so no other card action starts meanwhile.
     ///     Because the user asked for it, every configured source (NuGet, zip folder and Git) is read
     ///     again rather than answered from the cache, so a package published since the last listing
-    ///     (a new version) is offered at once.
+    ///     (a new version) is offered at once, and a server that needs a sign-in may ask for it.
     /// </remarks>
-    /// <param name="cancellationToken">Cancels the package-source part of the refresh.</param>
+    /// <param name="cancellationToken">Cancels the refresh: a repo read that has not started yet is
+    ///     given up, and the package-source part stops.</param>
     /// <returns>A task that completes when every property is current; a failing source is
     ///     reported through the card's state, not thrown.</returns>
     public Task RefreshAsync(CancellationToken cancellationToken = default) =>
@@ -2043,20 +2266,59 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     Performs the full refresh for <see cref="RefreshAsync"/> and for the refresh that follows a
-    ///     pull (<see cref="PullCoreAsync"/>): the cheap checks, the upgrade check and the working-tree
-    ///     check. It does not take <see cref="IsBusy"/> itself, so it can run inside the operation
-    ///     that is already holding it.
+    ///     pull (<see cref="PullCoreAsync"/>): the repo state through the shared queue at user-action
+    ///     priority, then the upgrade check. It does not take <see cref="IsBusy"/> itself, so it can run
+    ///     inside the operation that is already holding it.
     /// </summary>
-    /// <param name="token">Cancels the package-source part of the refresh.</param>
+    /// <param name="token">Cancels the refresh (see <see cref="RefreshAsync"/>).</param>
     /// <returns>A task that completes when every property is current.</returns>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="token"/> is
+    ///     cancelled; the card keeps whatever was already applied.</exception>
     private async Task RefreshCoreAsync(CancellationToken token)
     {
-        RefreshCheap();
+        // The repo state is read through the queue, ahead of the background reads; the upgrade check
+        // that follows needs the pin it reads
+        await RefreshRepoStateForUserAsync(token);
+        token.ThrowIfCancellationRequested();
+        if (_isRetired)
+        {
+            return;
+        }
 
         // The user asked for this refresh (or for the action that triggered it), so a server that
         // needs a sign-in may ask for it
         await RefreshUpgradeStatusAsync(token, allowPrompt: true, relistSources: true);
-        RefreshDirtyStatus();
+    }
+
+    /// <summary>
+    ///     Reads the card's whole repo state - its cheap facts and its working tree - through the shared
+    ///     refresh queue at the priority of a user action and waits until it was applied.
+    /// </summary>
+    /// <remarks>
+    ///     The working-tree check is skipped for a folder that is missing, so for a card whose folder
+    ///     was missing the cheap facts are read first: when the folder is back, its working tree is then
+    ///     checked too (the "Check again" case). Otherwise both are requested together and run side by
+    ///     side.
+    /// </remarks>
+    /// <param name="cancellationToken">Gives up the reads that have not started.</param>
+    /// <returns>A task that completes when the reads were applied, dropped or given up; never
+    ///     faults.</returns>
+    private async Task RefreshRepoStateForUserAsync(CancellationToken cancellationToken)
+    {
+        if (!IsMissing)
+        {
+            await RefreshRepoStateAsync(
+                RepoRefreshPriority.UserAction, cheapFacts: true, workingTree: true, cancellationToken: cancellationToken);
+            return;
+        }
+
+        await RefreshRepoStateAsync(
+            RepoRefreshPriority.UserAction, cheapFacts: true, workingTree: false, cancellationToken: cancellationToken);
+        if (!IsMissing && !_isRetired && !cancellationToken.IsCancellationRequested)
+        {
+            await RefreshRepoStateAsync(
+                RepoRefreshPriority.UserAction, cheapFacts: false, workingTree: true, cancellationToken: cancellationToken);
+        }
     }
 
     /// <summary>
@@ -2069,11 +2331,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     (<see cref="RefreshDirtyStatus"/>), which is not cacheable and is instead deferred/lazy
     ///     per architecture.md's repo-fact caching strategy, and the upgrade-availability check
     ///     (<see cref="RefreshUpgradeStatusAsync"/>), which reads a package source and is
-    ///     therefore asynchronous, so this method is safe to call eagerly for every recent repo
-    ///     at app launch without slowing down startup. When
+    ///     therefore asynchronous. When
     ///     <see cref="IsMissing"/> is <see langword="true"/>, every other check short-circuits to
     ///     its "unavailable" default rather than attempting a git/filesystem operation against a
-    ///     path that does not exist.
+    ///     path that does not exist. Runs synchronously on the calling thread, so the application
+    ///     never calls it: startup, Refresh, adds and Settings use <see cref="RefreshRepoStateAsync"/>
+    ///     (through the shared queue, off the UI thread). It remains for callers that are already off
+    ///     the UI thread (tests). Supersedes any background cheap refresh that is still reading.
     /// </remarks>
     public void RefreshCheap()
     {
@@ -2083,12 +2347,463 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return;
         }
 
+        ApplyCheapFacts(ReadCheapFacts(
+            RepoPath, CreateGitClient(_getSettings()), _committedAgentFilesCache, CancellationToken.None));
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether one of the card's repo-state reads (its cheap facts or its
+    ///     working-tree check) waits in the shared refresh queue or runs, so the card can show that its
+    ///     state is being refreshed.
+    /// </summary>
+    public bool IsRefreshing => Volatile.Read(ref _refreshesInFlight) > 0;
+
+    /// <summary>
+    ///     Gets the task of the most recent <see cref="RefreshRepoStateAsync"/>, so a caller (a test) can
+    ///     wait for the card's state to settle. Never faults.
+    /// </summary>
+    internal Task RefreshStateTask { get; private set; } = Task.CompletedTask;
+
+    /// <summary>
+    ///     Gets the task of the most recent cheap-facts read through the queue (see
+    ///     <see cref="RefreshRepoStateAsync"/> and <see cref="RefreshCheapInBackgroundAsync"/>), so a
+    ///     caller (a test) can wait for the card to settle. Never faults.
+    /// </summary>
+    internal Task CheapRefreshTask { get; private set; } = Task.CompletedTask;
+
+    /// <summary>
+    ///     Gets the task of the most recent working-tree check through the queue (see
+    ///     <see cref="RefreshRepoStateAsync"/> and <see cref="RefreshDirtyStatusInBackgroundAsync"/>), so
+    ///     a caller (a test) can wait for the check to settle. Never faults.
+    /// </summary>
+    internal Task GitStatusRefreshTask { get; private set; } = Task.CompletedTask;
+
+    /// <summary>
+    ///     Re-reads the card's repo state - its cheap facts, its working tree, or both - through the
+    ///     shared refresh queue, off the UI thread, and applies what was found on the caller's (UI)
+    ///     thread.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///     Every lazy refresh of a card goes through here, so however many cards and callers there are,
+    ///     only a few git processes run at once (see <see cref="RepoRefreshQueue"/>). A read of the same
+    ///     kind that already waits in the queue for this repo is joined rather than queued again, at the
+    ///     higher of the two priorities. <see cref="IsRefreshing"/> is true while any of the card's reads
+    ///     waits or runs; the card keeps showing its previous state meanwhile.
+    ///     </para>
+    ///     <para>
+    ///     The answer is dropped when the card was retired meanwhile or the answer of a newer read of
+    ///     the same kind (through the queue, synchronous, or a direct apply) has already been applied,
+    ///     so the newest answer always has the last word. A newer request that was given up applies
+    ///     nothing and so never voids an older read; for one repo and kind the queue starts reads in
+    ///     request order (a waiting read is joined, a running one is never overtaken by itself). A
+    ///     git command that hung and was stopped is shown as the card's status message; an ordinary git
+    ///     failure (not a repository, git missing) is shown as unknown state, as before. Must be called
+    ///     on the UI thread; the returned task completes there too.
+    ///     </para>
+    /// </remarks>
+    /// <param name="priority">How urgently the state is wanted: background, a card that is shown, or
+    ///     a user action.</param>
+    /// <param name="cheapFacts">Whether to read the cheap facts (folder, pin file, branch,
+    ///     <c>HEAD</c> and committed agent folders).</param>
+    /// <param name="workingTree">Whether to check the working tree (<c>git status</c>). Skipped for a
+    ///     card whose folder is missing (Pull is then simply not offered).</param>
+    /// <param name="reportsProgress">Whether the cheap-facts read counts in the queue's progress wave
+    ///     (shown in the global progress strip by the window).</param>
+    /// <param name="cancellationToken">Gives up the reads that have not started; nothing is applied
+    ///     then.</param>
+    /// <returns>A task that completes when every requested read was applied, dropped or given up;
+    ///     never faults. Also available as <see cref="RefreshStateTask"/>.</returns>
+    internal Task RefreshRepoStateAsync(
+        RepoRefreshPriority priority,
+        bool cheapFacts,
+        bool workingTree,
+        bool reportsProgress = false,
+        CancellationToken cancellationToken = default)
+    {
+        var reads = new List<Task>(2);
+        if (cheapFacts)
+        {
+            CheapRefreshTask = ReadCheapFactsThroughQueueAsync(
+                priority, reportsProgress, gitFactsOnly: false, cancellationToken);
+            reads.Add(CheapRefreshTask);
+        }
+
+        if (workingTree)
+        {
+            GitStatusRefreshTask = ReadWorkingTreeThroughQueueAsync(priority, cancellationToken);
+            reads.Add(GitStatusRefreshTask);
+        }
+
+        RefreshStateTask = reads.Count switch
+        {
+            0 => Task.CompletedTask,
+            1 => reads[0],
+            _ => Task.WhenAll(reads)
+        };
+        return RefreshStateTask;
+    }
+
+    /// <summary>
+    ///     Raises the priority of the card's repo-state reads that still wait in the shared queue, for
+    ///     example when the card is shown in the window or the user acts on it.
+    /// </summary>
+    /// <param name="priority">The priority the reads should have at least.</param>
+    internal void PrioritizeRepoState(RepoRefreshPriority priority)
+    {
+        _refreshQueue.Promote(new RepoRefreshKey(RepoPath, RepoRefreshKind.CheapFacts), priority);
+        _refreshQueue.Promote(new RepoRefreshKey(RepoPath, RepoRefreshKind.WorkingTree), priority);
+    }
+
+    /// <summary>
+    ///     Makes sure an action on the card acts on current repo state: moves the card's reads that
+    ///     still wait in the shared queue to the front and waits for them, or - when the card's state
+    ///     was never read and nothing is pending - reads it now, at the priority of a user action.
+    /// </summary>
+    /// <remarks>
+    ///     The promote-and-await step of Launch, Pull, Upgrade and Select Package (see
+    ///     <see cref="RunOperationAsync"/>). A card whose state is known and has nothing pending
+    ///     returns at once: an action adds no git round trip of its own, so it acts on the same state
+    ///     the card shows. The window is never blocked: this only awaits, on the UI thread, reads that
+    ///     run in the background; the wait is bounded by the reads already running in the queue and
+    ///     git's time limit. Must be called on the UI thread.
+    /// </remarks>
+    /// <param name="cancellationToken">Stops waiting (the reads go on and are applied when they
+    ///     land).</param>
+    /// <returns>A task that completes when the card's pending reads were applied (or dropped).</returns>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
+    ///     is cancelled while waiting.</exception>
+    internal async Task EnsureCurrentRepoStateAsync(CancellationToken cancellationToken = default)
+    {
+        // A read that waits is moved ahead of everything else; one that runs is simply awaited
+        PrioritizeRepoState(RepoRefreshPriority.UserAction);
+        await WhenRepoStateSettledAsync().WaitAsync(cancellationToken);
+
+        // Never read, and nothing pending any more (the first read was given up, for example by a newer
+        // Settings refresh): read it now
+        if (!HasRepoState && !_isRetired)
+        {
+            _ = RefreshRepoStateAsync(
+                RepoRefreshPriority.UserAction, cheapFacts: true, workingTree: false, cancellationToken: CancellationToken.None);
+            await WhenRepoStateSettledAsync().WaitAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>
+    ///     Waits, without changing their priority, until none of the card's repo-state reads (its
+    ///     cheap facts and its working tree) waits in the shared queue or runs, including reads that
+    ///     start while it waits.
+    /// </summary>
+    /// <returns>A task that completes when the card's state has settled; never faults.</returns>
+    internal async Task WhenRepoStateSettledAsync()
+    {
+        while (!CheapRefreshTask.IsCompleted || !GitStatusRefreshTask.IsCompleted)
+        {
+            await Task.WhenAll(CheapRefreshTask, GitStatusRefreshTask);
+        }
+    }
+
+    /// <summary>
+    ///     Waits, without changing its priority, until the card's cheap facts (the folder, the pin
+    ///     file, the branch and the committed agent folders) are no longer being read, including a read
+    ///     that starts while it waits.
+    /// </summary>
+    /// <remarks>
+    ///     A background upgrade check waits for this before it starts: applying cheap facts makes any
+    ///     upgrade check in flight irrelevant (it was started against the old pin), so a check started
+    ///     before the card's pending read landed would be thrown away, and the card would be left
+    ///     without an upgrade answer. The working-tree check does not affect the upgrade check and is
+    ///     not waited for.
+    /// </remarks>
+    /// <returns>A task that completes when the cheap facts have settled; never faults.</returns>
+    internal async Task WhenCheapFactsSettledAsync()
+    {
+        while (!CheapRefreshTask.IsCompleted)
+        {
+            await CheapRefreshTask;
+        }
+    }
+
+    /// <summary>
+    ///     Runs the same checks as <see cref="RefreshCheap"/> through the shared refresh queue, at
+    ///     background priority, reading the disk and git off the UI thread and applying what was found
+    ///     on the caller's (UI) thread.
+    /// </summary>
+    /// <remarks>
+    ///     The background form of <see cref="RefreshRepoStateAsync"/> for the cheap facts alone (see
+    ///     there for coalescing and for which answers are dropped). Also available as
+    ///     <see cref="CheapRefreshTask"/>.
+    /// </remarks>
+    /// <param name="cancellationToken">Gives up the read before it starts; nothing is applied then.</param>
+    /// <returns>A task that completes when the facts were applied (or dropped). Cancellation is not
+    ///     an error: the task completes without throwing.</returns>
+    internal Task RefreshCheapInBackgroundAsync(CancellationToken cancellationToken = default) =>
+        RefreshRepoStateAsync(RepoRefreshPriority.Background, cheapFacts: true, workingTree: false,
+            cancellationToken: cancellationToken);
+
+    /// <summary>
+    ///     Reads the card's cheap facts through the shared refresh queue and applies them.
+    /// </summary>
+    /// <param name="priority">The read's priority.</param>
+    /// <param name="reportsProgress">Whether the read counts in the queue's progress wave.</param>
+    /// <param name="gitFactsOnly">Whether only git's answers (the branch and the committed agent
+    ///     folders) are applied, leaving the pin and the upgrade state as they are; used after git's
+    ///     index was changed by the card itself (see <see cref="RefreshGitStateAfterUntrackAsync"/>).</param>
+    /// <param name="cancellationToken">Gives up the read before it starts.</param>
+    /// <returns>A task that completes when the facts were applied (or dropped); never faults.</returns>
+    private async Task ReadCheapFactsThroughQueueAsync(
+        RepoRefreshPriority priority, bool reportsProgress, bool gitFactsOnly, CancellationToken cancellationToken)
+    {
+        if (_isRetired)
+        {
+            return;
+        }
+
+        // Numbered and prepared here, on the UI thread, before anything runs in the background
+        var generation = ++_cheapRefreshGeneration;
+        var repoPath = RepoPath;
+        var git = CreateGitClient(_getSettings());
+        var cache = _committedAgentFilesCache;
+
+        var facts = await ReadThroughQueueAsync(
+            RepoRefreshKind.CheapFacts,
+            priority,
+            token => ReadCheapFacts(repoPath, git, cache, token),
+            reportsProgress,
+            cancellationToken);
+
+        // Given up, retired meanwhile, or a newer result has already been applied: that one has the
+        // last word
+        if (facts is null || _isRetired || generation <= _appliedCheapGeneration)
+        {
+            return;
+        }
+
+        if (gitFactsOnly)
+        {
+            // Only what git says about the branch and the committed agent folders; a folder that is
+            // gone meanwhile is left to the next full read. Numbered as applied either way, so an older
+            // full read that lands later cannot put back the state from before the untrack.
+            _appliedCheapGeneration = generation;
+            if (!facts.IsMissing)
+            {
+                ShowGitProblem(facts.GitProblem);
+                ApplyBranchFacts(facts.CurrentBranch, facts.HeadHash, facts.HasCommittedAgentFiles, facts.GitQueryFailed);
+            }
+
+            return;
+        }
+
+        ApplyNumberedCheapFacts(facts, generation);
+    }
+
+    /// <summary>
+    ///     Re-reads, through the shared refresh queue at the priority of a user action, what git says
+    ///     about the card's repo after the card itself took the agent folders out of git's index: the
+    ///     branch, the committed agent folders and the working tree, and waits until it was applied.
+    /// </summary>
+    /// <remarks>
+    ///     The cached committed-files answer is keyed by the commit and would otherwise keep showing the
+    ///     badge, so it is dropped first. Only git's answers are applied (not the pin or the upgrade
+    ///     state, which the apply manages itself), as the synchronous re-read this replaces did.
+    /// </remarks>
+    /// <returns>A task that completes when the answers were applied (or dropped); never faults.</returns>
+    private Task RefreshGitStateAfterUntrackAsync()
+    {
+        _committedAgentFilesCache.Invalidate(RepoPath);
+        CheapRefreshTask = ReadCheapFactsThroughQueueAsync(
+            RepoRefreshPriority.UserAction, reportsProgress: false, gitFactsOnly: true, CancellationToken.None);
+        GitStatusRefreshTask = ReadWorkingTreeThroughQueueAsync(RepoRefreshPriority.UserAction, CancellationToken.None);
+        RefreshStateTask = Task.WhenAll(CheapRefreshTask, GitStatusRefreshTask);
+        return RefreshStateTask;
+    }
+
+    /// <summary>
+    ///     Requests one read of the card's repo through the shared queue on behalf of the card, keeping
+    ///     <see cref="IsRefreshing"/> up while it waits or runs.
+    /// </summary>
+    /// <typeparam name="T">The read's result type.</typeparam>
+    /// <param name="kind">What is read.</param>
+    /// <param name="priority">The read's priority.</param>
+    /// <param name="read">The read; runs on a worker thread.</param>
+    /// <param name="reportsProgress">Whether the read counts in the queue's progress wave.</param>
+    /// <param name="cancellationToken">Gives up the read before it starts.</param>
+    /// <returns>The read's result, or <see langword="null"/> when it was given up, the card was
+    ///     retired, or the queue was shut down.</returns>
+    private async Task<T?> ReadThroughQueueAsync<T>(
+        RepoRefreshKind kind,
+        RepoRefreshPriority priority,
+        Func<CancellationToken, T> read,
+        bool reportsProgress,
+        CancellationToken cancellationToken)
+        where T : class
+    {
+        // The card's own retirement gives the read up as well as the caller's token
+        using var giveUp = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _retiredToken);
+        BeginRefreshing();
+        try
+        {
+            return await _refreshQueue.EnqueueAsync(
+                new RepoRefreshKey(RepoPath, kind), priority, read, reportsProgress, giveUp.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Given up, retired, or the window closed: nothing to apply
+            return null;
+        }
+        finally
+        {
+            EndRefreshing();
+        }
+    }
+
+    /// <summary>
+    ///     Counts one more of the card's reads as waiting or running, announcing
+    ///     <see cref="IsRefreshing"/> when it turns on.
+    /// </summary>
+    private void BeginRefreshing()
+    {
+        if (Interlocked.Increment(ref _refreshesInFlight) == 1)
+        {
+            OnPropertyChanged(nameof(IsRefreshing));
+        }
+    }
+
+    /// <summary>
+    ///     Counts one of the card's reads as ended, announcing <see cref="IsRefreshing"/> when it turns
+    ///     off.
+    /// </summary>
+    private void EndRefreshing()
+    {
+        if (Interlocked.Decrement(ref _refreshesInFlight) == 0)
+        {
+            OnPropertyChanged(nameof(IsRefreshing));
+        }
+    }
+
+    /// <summary>
+    ///     Reads what a cheap refresh needs to know about a repo from the disk and git: whether the
+    ///     folder exists, the pin file, the branch, <c>HEAD</c> and whether agent folders are
+    ///     committed.
+    /// </summary>
+    /// <remarks>
+    ///     Pure I/O with no view-model state, so it is safe on any thread; the shared refresh queue
+    ///     runs it on worker threads, and the main window's add runs it for folders that are not cards
+    ///     yet. A failure to read the pin file or to run git is captured in the result rather than
+    ///     thrown; a git command that hung past its time limit and was stopped is captured as
+    ///     <see cref="RepoCheapFacts.GitProblem"/> so the card can say so.
+    /// </remarks>
+    /// <param name="repoPath">The repository's root folder.</param>
+    /// <param name="git">The git client to ask (its executable and time limits).</param>
+    /// <param name="cache">The committed-files cache to consult and fill, or <see langword="null"/>
+    ///     to always ask git (a repo that has no card yet). The cache is safe for concurrent use.</param>
+    /// <param name="cancellationToken">Stops a running git when signaled (the window closed).</param>
+    /// <returns>The facts.</returns>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled; git was stopped.</exception>
+    internal static RepoCheapFacts ReadCheapFacts(
+        string repoPath, GitClient git, CommittedAgentFilesCache? cache, CancellationToken cancellationToken)
+    {
+        // A folder that does not exist has nothing else to read
+        if (!Directory.Exists(repoPath))
+        {
+            return new RepoCheapFacts(true, null, null, null, null, false, false);
+        }
+
+        // The pin file: a file that cannot be read is reported on the card, not thrown
+        RepoPin? pin = null;
+        string? pinLoadError = null;
+        try
+        {
+            pin = RepoPinStore.Load(repoPath);
+        }
+        catch (InvalidOperationException ex)
+        {
+            pinLoadError = ex.Message;
+        }
+
+        // The branch and the committed-files answer, the latter cached by HEAD commit
+        try
+        {
+            var branch = git.GetCurrentBranch(repoPath, cancellationToken);
+            var headHash = git.GetHeadCommitHash(repoPath, cancellationToken);
+            if (cache is null || !cache.TryGetCached(repoPath, headHash, out var hasCommittedFiles))
+            {
+                hasCommittedFiles = git.HasCommittedAgentFiles(repoPath, cancellationToken);
+                cache?.Set(repoPath, headHash, hasCommittedFiles);
+            }
+
+            return new RepoCheapFacts(false, pin, pinLoadError, branch, headHash, hasCommittedFiles, false);
+        }
+        catch (GitCommandTimeoutException ex)
+        {
+            return new RepoCheapFacts(false, pin, pinLoadError, null, null, false, true, DescribeGitTimeout(ex));
+        }
+        catch (InvalidOperationException)
+        {
+            return new RepoCheapFacts(false, pin, pinLoadError, null, null, false, true);
+        }
+    }
+
+    /// <summary>
+    ///     Describes, for the card's status message, a git command that did not answer in time.
+    /// </summary>
+    /// <param name="timeout">The timeout.</param>
+    /// <returns>What happened and what the user can do.</returns>
+    private static string DescribeGitTimeout(GitCommandTimeoutException timeout) =>
+        $"Git did not answer within {timeout.Timeout.TotalSeconds:0.###} seconds and was stopped; " +
+        "the repo's Git state is unknown. Use Refresh to try again.";
+
+    /// <summary>
+    ///     Applies what a cheap refresh read (see <see cref="ReadCheapFacts"/>) to the card's
+    ///     properties.
+    /// </summary>
+    /// <remarks>
+    ///     Called on the UI thread, by <see cref="RefreshCheap"/>, by the queued reads of
+    ///     <see cref="RefreshRepoStateAsync"/> and by the owning <see cref="MainWindowViewModel"/> for a
+    ///     card it creates from facts read in the background while repos were added. A direct apply is
+    ///     newer than everything in flight: any upgrade check still in flight is made irrelevant (it was
+    ///     started against the old pin), and any background cheap read still in flight is superseded
+    ///     (its facts are dropped when they arrive). A git timeout is shown as the card's status message
+    ///     (and cleared again by a later read that got an answer). Starts the background picture
+    ///     refresh. A retired card is left as it is.
+    /// </remarks>
+    /// <param name="facts">The facts to apply. Must not be <see langword="null"/>.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="facts"/> is
+    ///     <see langword="null"/>.</exception>
+    internal void ApplyCheapFacts(RepoCheapFacts facts)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        ApplyNumberedCheapFacts(facts, ++_cheapRefreshGeneration);
+    }
+
+    /// <summary>
+    ///     Applies cheap facts with the number of the request that read them, recording it as the
+    ///     newest applied number.
+    /// </summary>
+    /// <param name="facts">The facts to apply.</param>
+    /// <param name="generation">The number of the request that read <paramref name="facts"/>;
+    ///     higher than every number applied so far.</param>
+    private void ApplyNumberedCheapFacts(RepoCheapFacts facts, int generation)
+    {
+        if (_isRetired)
+        {
+            return;
+        }
+
+        // These facts are now the newest applied: an older background read must not replace them
+        _appliedCheapGeneration = generation;
+
+        // The card's repo state is known from now on; the values below replace "not read yet"
+        HasRepoState = true;
+
         // Whatever upgrade check is still in flight was started against the repo, pin and sources as
         // they were: its result must not be published over what this refresh finds (the caller starts
         // a new check when one is wanted)
         InvalidateUpgradeCheck();
 
-        IsMissing = !Directory.Exists(RepoPath);
+        ShowGitProblem(facts.GitProblem);
+        IsMissing = facts.IsMissing;
         if (IsMissing)
         {
             CurrentBranch = null;
@@ -2100,10 +2815,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             // The repo just disappeared (or was already missing): any previously-cached Git
             // status is no longer trustworthy, so invalidate it rather than let it linger and
-            // potentially be reported (stale) once the repo reappears. Callers that need an
-            // immediate fresh check after a missing-to-present transition (rather than waiting
-            // for the next lazy/deferred trigger) should call RefreshDirtyStatus explicitly -
-            // see MainWindowViewModel.ApplySettings.
+            // potentially be reported (stale) once the repo reappears; a working-tree check still
+            // running is ignored. Callers that need an immediate fresh check after a
+            // missing-to-present transition (rather than waiting for the next lazy/deferred
+            // trigger) request one explicitly - see MainWindowViewModel.ApplySettings.
+            _appliedGitStatusGeneration = ++_gitStatusGeneration;
             GitStatusChecked = false;
             GitStatusUnavailable = false;
             RaisePackageChipChanged();
@@ -2115,14 +2831,38 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return;
         }
 
-        RefreshPin();
-        RefreshBranchAndCommittedFiles();
+        ApplyPin(facts.Pin, facts.PinLoadError);
+        ApplyBranchFacts(facts.CurrentBranch, facts.HeadHash, facts.HasCommittedAgentFiles, facts.GitQueryFailed);
         EvaluatePinnedSource();
         RaisePackageChipChanged();
 
         // The picture is looked for in the background, so the UI never waits for the disk or the
         // decoder; the tile shows the generated initials until (and unless) it arrives
         RepoImageRefreshTask = RefreshRepoImageAsync();
+    }
+
+    /// <summary>
+    ///     Shows a git problem (a command that hung and was stopped) as the card's status message, or
+    ///     clears the one shown before once git answered again; a status message from anything else (an
+    ///     action's outcome) is left alone.
+    /// </summary>
+    /// <param name="problem">The problem, or <see langword="null"/> when git answered.</param>
+    private void ShowGitProblem(string? problem)
+    {
+        if (problem is not null)
+        {
+            _shownGitProblem = problem;
+            StatusMessage = problem;
+        }
+        else if (_shownGitProblem is not null)
+        {
+            if (StatusMessage == _shownGitProblem)
+            {
+                StatusMessage = null;
+            }
+
+            _shownGitProblem = null;
+        }
     }
 
     /// <summary>
@@ -2133,9 +2873,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Deliberately not called by <see cref="RefreshCheap"/> or the constructor - per
     ///     architecture.md's repo-fact caching strategy, working-tree dirty/clean state is not
     ///     cacheable by <c>HEAD</c> hash (it reflects uncommitted local edits), so it is computed
-    ///     lazily instead: on demand via <see cref="RefreshCommand"/>, or once when a card first
-    ///     becomes visible (see <c>MainWindow.axaml.cs</c>), rather than eagerly for every recent
-    ///     repo at app launch.
+    ///     lazily instead. The window uses <see cref="RefreshRepoStateAsync"/> (through the shared
+    ///     queue, off the UI thread); this synchronous form remains for callers that already run off
+    ///     the hot path. Supersedes any background check still running.
     /// </remarks>
     public void RefreshDirtyStatus()
     {
@@ -2149,12 +2889,121 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
+    ///     Re-checks the repo's working-tree cleanliness like <see cref="RefreshDirtyStatus"/>, through
+    ///     the shared refresh queue at background priority, running <c>git status</c> off the UI thread
+    ///     and applying the answer on the caller's (UI) thread.
+    /// </summary>
+    /// <remarks>
+    ///     The background form of <see cref="RefreshRepoStateAsync"/> for the working tree alone. The
+    ///     working-tree check is the slowest git call (it scans the whole working tree), so it never
+    ///     runs on the UI thread from the window. Until the answer arrives the card keeps its previous
+    ///     state; a card never checked stays "not checked yet" (<see cref="GitStatusChecked"/> is
+    ///     <see langword="false"/>), so it is never shown as dirty before git has answered. Also
+    ///     available as <see cref="GitStatusRefreshTask"/>.
+    /// </remarks>
+    /// <returns>A task that completes when the answer was applied (or dropped); never faults.</returns>
+    internal Task RefreshDirtyStatusInBackgroundAsync() =>
+        RefreshRepoStateAsync(
+            RepoRefreshPriority.Background, cheapFacts: false, workingTree: true, cancellationToken: CancellationToken.None);
+
+    /// <summary>
+    ///     Checks the card's working tree through the shared refresh queue and applies the answer.
+    /// </summary>
+    /// <param name="priority">The check's priority.</param>
+    /// <param name="cancellationToken">Gives up the check before it starts.</param>
+    /// <returns>A task that completes when the answer was applied (or dropped); never faults.</returns>
+    private async Task ReadWorkingTreeThroughQueueAsync(RepoRefreshPriority priority, CancellationToken cancellationToken)
+    {
+        if (_isRetired)
+        {
+            return;
+        }
+
+        if (IsMissing)
+        {
+            CanPull = false;
+            return;
+        }
+
+        // Numbered and prepared here, on the UI thread; only git runs in the background
+        var generation = ++_gitStatusGeneration;
+        var repoPath = RepoPath;
+        var git = CreateGitClient(_getSettings());
+
+        var answer = await ReadThroughQueueAsync(
+            RepoRefreshKind.WorkingTree,
+            priority,
+            token => ReadWorkingTreeClean(repoPath, git, token),
+            reportsProgress: false,
+            cancellationToken);
+
+        // Given up, retired meanwhile, or a newer answer has already been applied: that one has the
+        // last word
+        if (answer is null || _isRetired || generation <= _appliedGitStatusGeneration)
+        {
+            return;
+        }
+
+        _appliedGitStatusGeneration = generation;
+        ApplyGitStatus(answer);
+    }
+
+    /// <summary>
+    ///     Asks git whether a repo's working tree is clean; safe on any thread.
+    /// </summary>
+    /// <param name="repoPath">The repository's root folder.</param>
+    /// <param name="git">The git client to ask.</param>
+    /// <param name="cancellationToken">Stops a running git when signaled.</param>
+    /// <returns>The answer: clean, dirty, or unknown (not a repository, git missing, or git hung and was
+    ///     stopped - the last with the problem to show).</returns>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled; git was stopped.</exception>
+    private static WorkingTreeAnswer ReadWorkingTreeClean(string repoPath, GitClient git, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return new WorkingTreeAnswer(git.IsWorkingTreeClean(repoPath, cancellationToken), null);
+        }
+        catch (GitCommandTimeoutException ex)
+        {
+            return new WorkingTreeAnswer(null, DescribeGitTimeout(ex));
+        }
+        catch (InvalidOperationException)
+        {
+            return new WorkingTreeAnswer(null, null);
+        }
+    }
+
+    /// <summary>
+    ///     Applies a working-tree answer to <see cref="CanPull"/>, <see cref="GitStatusUnavailable"/>
+    ///     and <see cref="GitStatusChecked"/>, showing a git timeout as the card's status message.
+    /// </summary>
+    /// <param name="answer">The answer (see <see cref="ReadWorkingTreeClean"/>).</param>
+    private void ApplyGitStatus(WorkingTreeAnswer answer)
+    {
+        ShowGitProblem(answer.GitProblem);
+        CanPull = answer.Clean ?? false;
+        GitStatusUnavailable = answer.Clean is null;
+        GitStatusChecked = true;
+    }
+
+    /// <summary>
+    ///     What a working-tree check found; immutable, so it can be handed from a worker thread to the
+    ///     UI thread.
+    /// </summary>
+    /// <param name="Clean"><see langword="true"/> when clean, <see langword="false"/> when it has
+    ///     uncommitted changes, <see langword="null"/> when git could not tell.</param>
+    /// <param name="GitProblem">For a git that hung and was stopped, what to tell the user; otherwise
+    ///     <see langword="null"/>.</param>
+    private sealed record WorkingTreeAnswer(bool? Clean, string? GitProblem);
+
+    /// <summary>
     ///     Records that this repo was just successfully launched, stamping
-    ///     <see cref="LastLaunchedUtc"/> with the current UTC time (saved before it is applied, see
-    ///     <see cref="IsFavorite"/>) and raising <see cref="LaunchRecorded"/>. The stamp only
-    ///     records the launch; it does not move the card in the list.
-    ///     The launch itself has already happened; when the stamp cannot be saved it is simply not
-    ///     recorded (the owner tells the user).
+    ///     <see cref="LastLaunchedUtc"/> with the current UTC time (through the owner, which saves it in
+    ///     the background, see <see cref="IsFavorite"/>) and raising <see cref="LaunchRecorded"/>. The
+    ///     stamp only records the launch; it does not move the card in the list.
+    ///     The launch itself has already happened; when the owner refuses the stamp it is simply not
+    ///     recorded.
     /// </summary>
     private void RecordLaunched()
     {
@@ -2209,14 +3058,22 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 return;
             }
 
-            LaunchAgentTool();
-        }, cancellationToken);
+            await LaunchAgentToolAsync();
+        }, cancellationToken, NoFurtherStateCheck);
 
     /// <summary>
     ///     Resolves the configured agent tool and shell and starts the tool in this repo's
     ///     working directory, recording the launch on success and reporting any failure.
     /// </summary>
-    private void LaunchAgentTool()
+    /// <remarks>
+    ///     The settings and the command are read on the UI thread; finding the shell (a probe of
+    ///     every <c>PATH</c> folder and the well-known install folders) and starting the process run
+    ///     on a worker, so a slow or offline <c>PATH</c> entry never freezes the window. Once handed
+    ///     over the start is not canceled. The launch is recorded, and a failure reported, back on
+    ///     the UI thread.
+    /// </remarks>
+    /// <returns>A task that completes when the tool has been started or the failure reported.</returns>
+    private async Task LaunchAgentToolAsync()
     {
         try
         {
@@ -2235,9 +3092,18 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     RepoName, RepoPath, command);
             }
 
-            var shell = _shellDetector.Detect(settings.ShellPreference);
-            var startInfo = AgentLauncher.BuildProcessStartInfo(shell, command, RepoPath, settings.KeepShellOpen);
-            _processStarter.Start(startInfo);
+            var shellPreference = settings.ShellPreference;
+            var keepShellOpen = settings.KeepShellOpen;
+            var repoPath = RepoPath;
+            await _backgroundWork.RunAsync(
+                () =>
+                {
+                    var shell = _shellDetector.Detect(shellPreference);
+                    var startInfo = AgentLauncher.BuildProcessStartInfo(shell, command, repoPath, keepShellOpen);
+                    _processStarter.Start(startInfo);
+                    return true;
+                },
+                CancellationToken.None);
             StatusMessage = "Launched.";
             RecordLaunched();
         }
@@ -2338,7 +3204,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
 
         // Check 4: a pin without a files identity cannot be verified against the disk
-        var recordedIdentity = LoadPinForComparison()?.ContentIdentity;
+        var recordedIdentity = (await LoadPinForComparisonAsync(cancellationToken))?.ContentIdentity;
         if (!PackageContentIdentity.IsFilesIdentity(recordedIdentity))
         {
             return await EnsureUnverifiablePinFoldersAsync(pinnedPackageName, cancellationToken);
@@ -2400,8 +3266,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private async Task<AgentFilesSyncOutcome> EnsureUnverifiablePinFoldersAsync(
         string pinnedPackageName, CancellationToken cancellationToken)
     {
-        // Folder presence is a metadata-only check, so it needs no worker thread
-        if (PackageZipExtractor.AllManagedFoldersExist(RepoPath))
+        // Folder presence is a metadata-only check, but on a network repo even that can take a
+        // while, so it runs on a worker like every other look at the disk
+        var repoPath = RepoPath;
+        if (await _backgroundWork.RunAsync(() => PackageZipExtractor.AllManagedFoldersExist(repoPath), cancellationToken))
         {
             if (_logger.IsEnabled(LogLevel.Information))
             {
@@ -2603,7 +3471,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // source an older version recorded in the file, else the first that offers it, and is
             // never refused.
             var pinnedVersion = PinnedPackageVersion;
-            var recordedPin = LoadPinForComparison();
+            var recordedPin = await LoadPinForComparisonAsync(cancellationToken);
             var (offering, firstFailure, listingAccessDenied) = await FindOfferingSourcesAsync(
                 registry, pinnedPackageName, pinnedVersion, cancellationToken);
             if (offering.Count == 0)
@@ -2662,7 +3530,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // files is remembered in the user's own settings, never in the pin.
             await Task.Run(() => PackageContentExtractor.Extract(reader, RepoPath), CancellationToken.None);
             SupplyingSource = pinnedPackage.SourceAlias;
-            MaybeOfferAgentsMdTemplate(reader, fromLaunchResync: true);
+            await MaybeOfferAgentsMdTemplateAsync(reader, fromLaunchResync: true);
             return new RestoreResult(true);
         }
         catch (InvalidOperationException ex)
@@ -2706,7 +3574,16 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     has already started is not interrupted.</param>
     /// <returns>A task that completes when the pull and the refresh have finished.</returns>
     private Task PullAsync(CancellationToken cancellationToken) =>
-        RunOperationAsync("Pulling...", cancelable: false, PullCoreAsync, cancellationToken);
+        RunOperationAsync(
+            "Pulling...",
+            cancelable: false,
+            PullCoreAsync,
+            cancellationToken,
+            // Pull is offered only for a working tree git reported clean; when the check that was
+            // pending says otherwise, the pull is not made
+            () => !GitStatusChecked || CanPull
+                ? null
+                : "Pull is not available: the working tree has uncommitted changes or its Git status could not be read.");
 
     /// <summary>
     ///     Performs the pull for <see cref="PullAsync"/>.
@@ -2736,8 +3613,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
         try
         {
             var settings = _getSettings();
-            var git = new GitClient(ResolveGitExecutablePath(settings));
-            var result = await Task.Run(() => git.Pull(RepoPath), CancellationToken.None);
+            var git = CreateGitClient(settings);
+            var result = await Task.Run(() => git.Pull(RepoPath, CancellationToken.None), CancellationToken.None);
             var pullMessage = result.Succeeded
                 ? "Pull succeeded."
                 : $"Pull failed: {result.StandardError.Trim()}";
@@ -2767,13 +3644,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
             {
                 // The pull has already happened and cannot be undone, so canceling the package-source
                 // part of the refresh (the card was retired, or the caller gave up) must not turn its
-                // outcome into "The operation was canceled." The cheap checks have already run; the
-                // working-tree check is cheap too and is what the pull most directly affects, so it is
-                // still made - except for a retired card, which checks nothing any more. The upgrade
+                // outcome into "The operation was canceled." The working tree is what the pull most
+                // directly affects, so it is still checked (through the queue, ahead of background
+                // reads) - except for a retired card, which checks nothing any more. The upgrade
                 // state is left as it was, as when a Refresh is cancelled.
                 if (!_isRetired)
                 {
-                    RefreshDirtyStatus();
+                    await RefreshRepoStateAsync(
+                        RepoRefreshPriority.UserAction, cheapFacts: false, workingTree: true, cancellationToken: CancellationToken.None);
                 }
             }
 
@@ -2811,8 +3689,20 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </remarks>
     /// <param name="cancellationToken">Signaled when the command itself is cancelled.</param>
     /// <returns>A task that completes when the upgrade has finished or failed.</returns>
-    private Task UpgradeAsync(CancellationToken cancellationToken) =>
-        RunOperationAsync("Upgrading agent package...", cancelable: true, UpgradeCoreAsync, cancellationToken);
+    private Task UpgradeAsync(CancellationToken cancellationToken)
+    {
+        // The upgrade the user asked for is the one from the pin the card showed; when the card's
+        // pending read finds another pin, that upgrade is no longer what was offered
+        var pinShown = (PinnedPackageName, PinnedPackageVersion);
+        return RunOperationAsync(
+            "Upgrading agent package...",
+            cancelable: true,
+            UpgradeCoreAsync,
+            cancellationToken,
+            () => (PinnedPackageName, PinnedPackageVersion) == pinShown
+                ? null
+                : "The pinned package changed; check for an upgrade again.");
+    }
 
     /// <summary>
     ///     Performs the upgrade for <see cref="UpgradeAsync"/>.
@@ -2938,7 +3828,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
             "Applying agent package...",
             cancelable: true,
             token => ApplySelectedPackageCoreAsync(selection, acceptContentChange, token),
-            cancellationToken);
+            cancellationToken,
+            NoFurtherStateCheck);
     }
 
     /// <summary>
@@ -3095,17 +3986,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
         var untracked = false;
         try
         {
-            // Read the existing pin first: a newer-schema pin must stop the apply before the repo
-            // is touched; a corrupt one is simply replaced
-            RepoPin? existingPin;
-            try
-            {
-                existingPin = RepoPinStore.Load(RepoPath);
-            }
-            catch (InvalidOperationException ex) when (ex is not UnsupportedPinSchemaException)
-            {
-                existingPin = null;
-            }
+            // Read the existing pin first (on a worker, like all of the apply's disk work): a
+            // newer-schema pin must stop the apply before the repo is touched; a corrupt one is
+            // simply replaced
+            var repoPath = RepoPath;
+            var existingPin = await _backgroundWork.RunAsync(() => LoadExistingPinForApply(repoPath), cancellationToken);
 
             // Managed folders tracked by git must be converted (taken out of git) for the package to
             // manage them, and only with the user's consent: ask before anything is downloaded, and
@@ -3121,9 +4006,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
             using var reader = await provider.AcquireAsync(package, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
 
+            // The identity of the acquired files is a hash of every file: computed on a worker (the
+            // configured sources already did it there, and the reader remembers it)
+            var contentIdentity = await _backgroundWork.RunAsync(() => reader.ContentIdentity, cancellationToken);
+
             // A republished version must be noticed before anything in the repo is touched
-            if (ContentChangedSincePinned(existingPin, package, reader) &&
-                !ResolveContentChange(existingPin, package, reader, contentChange, failureVerb))
+            if (ContentChangedSincePinned(existingPin, package, contentIdentity) &&
+                !ResolveContentChange(existingPin, package, contentIdentity, contentChange, failureVerb))
             {
                 return;
             }
@@ -3150,8 +4039,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 throw;
             }
 
-            EnsureGitIgnoreCoversManagedFolders();
-
             // Preserve a prior AGENTS.md template decline (and any unknown fields) across
             // re-pinning by updating the loaded pin in place: those fields are orthogonal to the
             // selected package/version and must never be silently reset. The content identity is
@@ -3162,15 +4049,27 @@ internal sealed class RepoCardViewModel : ViewModelBase
             var pin = existingPin ?? new RepoPin();
             pin.PackageName = package.PackageName;
             pin.Version = package.Version.ToString();
-            pin.ContentIdentity = reader.ContentIdentity;
-            RepoPinStore.Save(RepoPath, pin);
+            pin.ContentIdentity = contentIdentity;
 
-            var releaseNotes = PackageContentExtractor.ReadReleaseNotes(reader) ?? string.Empty;
+            // The .gitignore, the pin, the release notes and the re-read of the pin all touch the
+            // disk: one step on a worker, whose outcome is applied here
+            var written = await _backgroundWork.RunAsync(() => WriteAppliedPackage(repoPath, pin, reader), CancellationToken.None);
+            if (written.GitIgnoreError is not null)
+            {
+                ErrorOccurred?.Invoke(this, written.GitIgnoreError);
+            }
+
+            if (written.Failure is not null)
+            {
+                ExceptionDispatchInfo.Capture(written.Failure).Throw();
+            }
 
             // The package is applied; the follow-up status refresh is no longer cancelable so
             // the card never shows the old pin's upgrade state next to the new pin. The source it
-            // came from is remembered in the user's own settings (never in the pin)
-            RefreshPin();
+            // came from is remembered in the user's own settings (never in the pin). The pin just
+            // read is newer than any background cheap read still in flight.
+            _appliedCheapGeneration = ++_cheapRefreshGeneration;
+            ApplyPin(written.Pin, written.PinLoadError);
             SupplyingSource = package.SourceAlias;
             EvaluatePinnedSource();
             await RefreshUpgradeStatusAsync(CancellationToken.None);
@@ -3194,8 +4093,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // modal question) at once and holds the release notes back until it is answered, so the
             // question never covers the notes (and the notes window, being non-modal, is not lost
             // behind it); the notes then appear in front as the completion of the upgrade.
-            MaybeOfferAgentsMdTemplate(reader);
-            ReleaseNotesReady?.Invoke(this, releaseNotes);
+            await MaybeOfferAgentsMdTemplateAsync(reader);
+            ReleaseNotesReady?.Invoke(this, written.ReleaseNotes);
         }
         catch (InvalidOperationException ex)
         {
@@ -3222,16 +4121,105 @@ internal sealed class RepoCardViewModel : ViewModelBase
         finally
         {
             // Git's index changed, so whatever the apply went on to do (or failed to do), the card
-            // must report what git now says: the cached committed-files answer is keyed by the
-            // commit and would otherwise keep showing the badge
+            // must report what git now says: re-read through the queue, ahead of background reads
+            // and off the UI thread, while the card is still busy
             if (untracked)
             {
-                _committedAgentFilesCache.Invalidate(RepoPath);
-                RefreshBranchAndCommittedFiles();
-                RefreshGitStatus();
+                await RefreshGitStateAfterUntrackAsync();
             }
         }
     }
+
+    /// <summary>
+    ///     Reads the pin an apply updates; reads the disk, so it runs on a worker.
+    /// </summary>
+    /// <param name="repoPath">The repo's root folder.</param>
+    /// <returns>The pin, or <see langword="null"/> when there is none or it cannot be read (a
+    ///     corrupt pin is simply replaced).</returns>
+    /// <exception cref="UnsupportedPinSchemaException">Thrown when the pin was written by a newer
+    ///     AgentControl; the apply must then stop before the repo is touched.</exception>
+    private static RepoPin? LoadExistingPinForApply(string repoPath)
+    {
+        try
+        {
+            return RepoPinStore.Load(repoPath);
+        }
+        catch (InvalidOperationException ex) when (ex is not UnsupportedPinSchemaException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    ///     Does the disk work that follows a successful extraction: makes the <c>.gitignore</c> cover
+    ///     the managed folders, writes the new pin, reads the package's release notes and reads the
+    ///     pin back for the card. Runs on a worker; touches no view-model state.
+    /// </summary>
+    /// <param name="repoPath">The repo's root folder.</param>
+    /// <param name="pin">The pin to write.</param>
+    /// <param name="reader">The applied package.</param>
+    /// <returns>What happened; a <c>.gitignore</c> failure, and a pin that cannot be written or release
+    ///     notes that cannot be read, are carried in the result rather than thrown, so the caller reports
+    ///     them in order.</returns>
+    private static AppliedPackageWrite WriteAppliedPackage(string repoPath, RepoPin pin, IPackageContentReader reader)
+    {
+        // A .gitignore failure never aborts the pin write or the release notes that follow it
+        string? gitIgnoreError = null;
+        try
+        {
+            GitIgnoreEnsurer.Ensure(repoPath);
+        }
+        catch (InvalidOperationException ex)
+        {
+            gitIgnoreError = ex.Message;
+        }
+
+        try
+        {
+            RepoPinStore.Save(repoPath, pin);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new AppliedPackageWrite(gitIgnoreError, ex, null, null, string.Empty);
+        }
+
+        string releaseNotes;
+        try
+        {
+            releaseNotes = PackageContentExtractor.ReadReleaseNotes(reader) ?? string.Empty;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new AppliedPackageWrite(gitIgnoreError, ex, null, null, string.Empty);
+        }
+
+        RepoPin? written = null;
+        string? loadError = null;
+        try
+        {
+            written = RepoPinStore.Load(repoPath);
+        }
+        catch (InvalidOperationException ex)
+        {
+            loadError = ex.Message;
+        }
+
+        return new AppliedPackageWrite(gitIgnoreError, null, written, loadError, releaseNotes);
+    }
+
+    /// <summary>
+    ///     The outcome of <see cref="WriteAppliedPackage"/>; immutable, so it can be handed from the
+    ///     worker to the UI thread.
+    /// </summary>
+    /// <param name="GitIgnoreError">Why the <c>.gitignore</c> could not be updated, or
+    ///     <see langword="null"/>.</param>
+    /// <param name="Failure">Why the pin could not be written or the release notes could not be read,
+    ///     or <see langword="null"/>; when set, nothing after the failed step was done.</param>
+    /// <param name="Pin">The pin read back after the write, or <see langword="null"/>.</param>
+    /// <param name="PinLoadError">Why the pin could not be read back, or <see langword="null"/>.</param>
+    /// <param name="ReleaseNotes">The package's release notes; empty when it has none.</param>
+    private sealed record AppliedPackageWrite(
+        string? GitIgnoreError, InvalidOperationException? Failure, RepoPin? Pin, string? PinLoadError, string ReleaseNotes);
 
     /// <summary>
     ///     Asks git, right now, which of the managed agent folders have files tracked by git.
@@ -3249,7 +4237,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     {
         try
         {
-            var git = new GitClient(ResolveGitExecutablePath(_getSettings()));
+            var git = CreateGitClient(_getSettings());
             return await Task.Run(() => git.GetTrackedAgentFolders(RepoPath), CancellationToken.None);
         }
         catch (InvalidOperationException ex)
@@ -3329,7 +4317,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     before any file is replaced.</exception>
     private async Task<bool> UntrackAgentFoldersAsync(IReadOnlyList<string> trackedFolders)
     {
-        var git = new GitClient(ResolveGitExecutablePath(_getSettings()));
+        var git = CreateGitClient(_getSettings());
         try
         {
             await Task.Run(() => git.UntrackAgentFolders(RepoPath, trackedFolders), CancellationToken.None);
@@ -3357,7 +4345,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="trackedFolders">The folders that were untracked; never empty.</param>
     private async Task RestoreAgentFolderTrackingAsync(IReadOnlyList<string> trackedFolders)
     {
-        var git = new GitClient(ResolveGitExecutablePath(_getSettings()));
+        var git = CreateGitClient(_getSettings());
         try
         {
             await Task.Run(() => git.RestoreAgentFolderTracking(RepoPath, trackedFolders), CancellationToken.None);
@@ -3499,7 +4487,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
             {
                 var provider = registry.Resolve(offer.SourceAlias);
                 reader = await provider.AcquireAsync(offer, cancellationToken);
-                if (PackageContentIdentity.Compare(pinnedIdentity, reader.ContentIdentity) == ContentIdentityComparison.Same)
+
+                // The identity is a hash of every file: computed on a worker (the configured
+                // sources already did it there, and the reader remembers it)
+                var acquired = reader;
+                var identity = await _backgroundWork.RunAsync(() => acquired.ContentIdentity, cancellationToken);
+                if (PackageContentIdentity.Compare(pinnedIdentity, identity) == ContentIdentityComparison.Same)
                 {
                     var verified = new VerifiedSource(offer, reader);
                     reader = null;
@@ -3511,7 +4504,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                     _logger.LogInformation(
                         "Source '{Source}' offers '{PackageName} {Version}' but its files differ from the pin of repo '{RepoName}' ({Pinned} vs {Actual}); not used",
                         offer.SourceAlias, offer.PackageName, offer.Version, RepoName,
-                        PackageContentIdentity.Describe(pinnedIdentity), PackageContentIdentity.Describe(reader.ContentIdentity));
+                        PackageContentIdentity.Describe(pinnedIdentity), PackageContentIdentity.Describe(identity));
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
@@ -3568,15 +4561,31 @@ internal sealed class RepoCardViewModel : ViewModelBase
         "same. The package may have been republished.";
 
     /// <summary>
-    ///     Reads the repo's pin for a content-identity comparison, tolerating an unreadable file.
+    ///     Reads the repo's pin for a content-identity comparison on a worker thread, tolerating an
+    ///     unreadable file.
     /// </summary>
+    /// <param name="cancellationToken">Cancels the read before it starts.</param>
     /// <returns>The pin, or <see langword="null"/> when there is none or it cannot be read (in
     ///     which case there is no recorded identity to compare against).</returns>
-    private RepoPin? LoadPinForComparison()
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
+    ///     was canceled before the read started.</exception>
+    private Task<RepoPin?> LoadPinForComparisonAsync(CancellationToken cancellationToken)
+    {
+        var repoPath = RepoPath;
+        return _backgroundWork.RunAsync(() => LoadPinForComparison(repoPath), cancellationToken);
+    }
+
+    /// <summary>
+    ///     Reads a repo's pin for a content-identity comparison, tolerating an unreadable file;
+    ///     reads the disk, so it runs on a worker.
+    /// </summary>
+    /// <param name="repoPath">The repo's root folder.</param>
+    /// <returns>The pin, or <see langword="null"/> when there is none or it cannot be read.</returns>
+    private static RepoPin? LoadPinForComparison(string repoPath)
     {
         try
         {
-            return RepoPinStore.Load(RepoPath);
+            return RepoPinStore.Load(repoPath);
         }
         catch (InvalidOperationException)
         {
@@ -3591,16 +4600,16 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     /// <param name="pin">The repo's current pin, or <see langword="null"/> when there is none.</param>
     /// <param name="package">The package that was acquired.</param>
-    /// <param name="reader">The acquired package's content, which names its identity.</param>
+    /// <param name="contentIdentity">The identity of the acquired package's files.</param>
     /// <returns><see langword="true"/> only when the pin names the same package and version (from any
     ///     source: the identity describes the delivered files, not the source) and both identities are
     ///     known and differ. A different version, a pin without a files identity (a pin made before
     ///     files identities were recorded) and a source that reports no identity are never a change.</returns>
-    private static bool ContentChangedSincePinned(RepoPin? pin, DiscoveredPackage package, IPackageContentReader reader) =>
+    private static bool ContentChangedSincePinned(RepoPin? pin, DiscoveredPackage package, string? contentIdentity) =>
         pin is not null &&
         string.Equals(pin.PackageName, package.PackageName, StringComparison.OrdinalIgnoreCase) &&
         IsVersion(package, pin.Version) &&
-        PackageContentIdentity.Compare(pin.ContentIdentity, reader.ContentIdentity) == ContentIdentityComparison.Changed;
+        PackageContentIdentity.Compare(pin.ContentIdentity, contentIdentity) == ContentIdentityComparison.Changed;
 
     /// <summary>
     ///     Describes, for the user, that a package version now delivers different content than the
@@ -3620,7 +4629,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     /// <param name="pin">The repo's current pin (carries the identity that was recorded).</param>
     /// <param name="package">The package that was acquired.</param>
-    /// <param name="reader">The acquired package's content.</param>
+    /// <param name="contentIdentity">The identity of the acquired package's files.</param>
     /// <param name="contentChange">The policy requested by the caller.</param>
     /// <param name="failureVerb">The action name used in the refusal message.</param>
     /// <returns><see langword="true"/> when the package may be applied; <see langword="false"/>
@@ -3634,7 +4643,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private bool ResolveContentChange(
         RepoPin? pin,
         DiscoveredPackage package,
-        IPackageContentReader reader,
+        string? contentIdentity,
         ContentChangeHandling contentChange,
         string failureVerb)
     {
@@ -3644,7 +4653,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 "Package '{PackageName} {Version}' from source '{SourceAlias}' changed content for repo '{RepoName}' ({Pinned} -> {Actual}); handling: {Handling}",
                 package.PackageName, package.Version, package.SourceAlias, RepoName,
                 PackageContentIdentity.Describe(pin?.ContentIdentity),
-                PackageContentIdentity.Describe(reader.ContentIdentity),
+                PackageContentIdentity.Describe(contentIdentity),
                 contentChange);
         }
 
@@ -3686,47 +4695,67 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     (extracted) to this repo.</param>
     /// <param name="fromLaunchResync"><see langword="true"/> when the offer follows the re-sync
     ///     that runs before a launch, which never writes the pin: a decline of such an offer is
-    ///     then not persisted (see <see cref="DeclineAgentsMdTemplate"/>).</param>
+    ///     then not persisted (see <see cref="DeclineAgentsMdTemplateAsync"/>).</param>
+    /// <returns>A task that completes once the offer was raised or found not to apply.</returns>
     /// <remarks>
     ///     Called only from call sites that already have a <paramref name="reader"/> in hand
     ///     immediately after a successful <see cref="PackageContentExtractor.Extract"/> call
     ///     (<see cref="ApplyPackageAndShowReleaseNotesAsync"/> and the re-extraction branch of
     ///     <see cref="EnsureAgentFilesSyncedBeforeLaunchAsync"/>) - never as an independent, standing
     ///     per-launch check, so the offer only ever fires when a sync genuinely just happened.
-    ///     Wrapped in its own non-blocking try/catch, mirroring
-    ///     <see cref="EnsureGitIgnoreCoversManagedFolders"/>'s precedent, so a pin-read or
-    ///     package-read failure here can never disrupt an already-successful sync.
+    ///     The three checks read the disk and the package, so they run on a worker; the offer is
+    ///     raised back on the UI thread. A pin-read or package-read failure is reported and never
+    ///     disrupts the already-successful sync, as a <c>.gitignore</c> failure does not.
     /// </remarks>
-    private void MaybeOfferAgentsMdTemplate(IPackageContentReader reader, bool fromLaunchResync = false)
+    private async Task MaybeOfferAgentsMdTemplateAsync(IPackageContentReader reader, bool fromLaunchResync = false)
     {
+        string? template;
         try
         {
-            if (File.Exists(PathHelpers.SafePathCombine(RepoPath, AgentsMdFileName)))
-            {
-                return;
-            }
-
-            var pin = RepoPinStore.Load(RepoPath);
-            if (pin is { AgentsMdTemplateDeclined: true })
-            {
-                return;
-            }
-
-            var template = PackageContentExtractor.ReadAgentsMdTemplate(reader);
-            if (template is null)
-            {
-                return;
-            }
-
-            // Remembered so that a decline of this offer does not write the pin (the launch re-sync
-            // never does); set just before the handlers run, replaced by every later offer
-            _agentsMdOfferFromLaunchResync = fromLaunchResync;
-            AgentsMdTemplateOfferRequested?.Invoke(this, template);
+            var repoPath = RepoPath;
+            template = await _backgroundWork.RunAsync(
+                () => FindAgentsMdTemplateToOffer(repoPath, reader), CancellationToken.None);
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException)
         {
             ErrorOccurred?.Invoke(this, ex.Message);
+            return;
         }
+
+        if (template is null)
+        {
+            return;
+        }
+
+        // Remembered so that a decline of this offer does not write the pin (the launch re-sync
+        // never does); set just before the handlers run, replaced by every later offer
+        _agentsMdOfferFromLaunchResync = fromLaunchResync;
+        AgentsMdTemplateOfferRequested?.Invoke(this, template);
+    }
+
+    /// <summary>
+    ///     Finds the <c>AGENTS.md</c> template to offer: none when the repo has an <c>AGENTS.md</c>,
+    ///     the pin records that the offer was declined, or the package has no template. Reads the
+    ///     disk and the package, so it runs on a worker; touches no view-model state.
+    /// </summary>
+    /// <param name="repoPath">The repo's root folder.</param>
+    /// <param name="reader">The package that was just applied.</param>
+    /// <returns>The template's text, or <see langword="null"/> when nothing is to be offered.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the pin or the package cannot be read.</exception>
+    private static string? FindAgentsMdTemplateToOffer(string repoPath, IPackageContentReader reader)
+    {
+        if (File.Exists(PathHelpers.SafePathCombine(repoPath, AgentsMdFileName)))
+        {
+            return null;
+        }
+
+        var pin = RepoPinStore.Load(repoPath);
+        if (pin is { AgentsMdTemplateDeclined: true })
+        {
+            return null;
+        }
+
+        return PackageContentExtractor.ReadAgentsMdTemplate(reader);
     }
 
     /// <summary>
@@ -3735,16 +4764,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     /// <param name="templateContent">The template's text content, as previously carried by
     ///     <see cref="AgentsMdTemplateOfferRequested"/>.</param>
+    /// <returns>A task that completes once the file was written, found to exist already, or the
+    ///     failure was reported.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="templateContent"/> is
     ///     <see langword="null"/>.</exception>
     /// <remarks>
     ///     <para>
     ///     Writes directly to the repo root - never into any of the four managed folders - since
     ///     a root-level <c>AGENTS.md</c> is a starting point the user is expected to customize
-    ///     themselves, not a file blind-deleted/replaced on every subsequent sync.
+    ///     themselves, not a file blind-deleted/replaced on every subsequent sync. The write runs on
+    ///     a worker; the outcome is reported back on the UI thread.
     ///     </para>
     ///     <para>
-    ///     Race-safe against the gap between <see cref="MaybeOfferAgentsMdTemplate"/>'s
+    ///     Race-safe against the gap between <see cref="MaybeOfferAgentsMdTemplateAsync"/>'s
     ///     <c>File.Exists</c> check (which runs before the modal offer is shown) and the user
     ///     actually accepting the offer: this writes via <see cref="FileMode.CreateNew"/> rather
     ///     than an unconditional overwrite, so if a user or another process creates
@@ -3755,12 +4787,66 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     informational outcomes from genuine errors.
     ///     </para>
     /// </remarks>
-    public void AcceptAgentsMdTemplate(string templateContent)
+    public async Task AcceptAgentsMdTemplateAsync(string templateContent)
     {
         ArgumentNullException.ThrowIfNull(templateContent);
 
-        var agentsMdPath = PathHelpers.SafePathCombine(RepoPath, AgentsMdFileName);
+        var repoPath = RepoPath;
+        var (outcome, failure) = await _backgroundWork.RunAsync(
+            () => WriteAgentsMdTemplate(repoPath, templateContent), CancellationToken.None);
+        switch (outcome)
+        {
+            case AgentsMdWriteOutcome.Written:
+                StatusMessage = "Added a starting AGENTS.md template - please review and customize it for this repo.";
+                if (_logger.IsEnabled(LogLevel.Information))
+                {
+                    _logger.LogInformation("Wrote a starting AGENTS.md template to repo '{RepoName}'", RepoName);
+                }
 
+                break;
+
+            case AgentsMdWriteOutcome.AlreadyExists:
+                // Another user/process created AGENTS.md after the offer was raised but before the
+                // write ran - it was never overwritten; this is a non-destructive, informational
+                // outcome, not a failure.
+                StatusMessage = "AGENTS.md already exists for this repo - nothing was written.";
+                if (_logger.IsEnabled(LogLevel.Information))
+                {
+                    _logger.LogInformation(
+                        failure,
+                        "AGENTS.md was created concurrently for repo '{RepoName}'; the offered template was not written",
+                        RepoName);
+                }
+
+                break;
+
+            default:
+                if (_logger.IsEnabled(LogLevel.Error))
+                {
+                    _logger.LogError(
+                        failure,
+                        outcome == AgentsMdWriteOutcome.CreateFailed
+                            ? "Failed to create AGENTS.md template for repo '{RepoName}'"
+                            : "Failed to write AGENTS.md template for repo '{RepoName}'",
+                        RepoName);
+                }
+
+                ErrorOccurred?.Invoke(this, $"Failed to write AGENTS.md: {failure?.Message}");
+                break;
+        }
+    }
+
+    /// <summary>
+    ///     Creates the repo's <c>AGENTS.md</c> with the template's text, never overwriting one that
+    ///     exists. Writes the disk, so it runs on a worker; touches no view-model state.
+    /// </summary>
+    /// <param name="repoPath">The repo's root folder.</param>
+    /// <param name="templateContent">The template's text.</param>
+    /// <returns>The outcome, with the exception behind any outcome other than
+    ///     <see cref="AgentsMdWriteOutcome.Written"/>.</returns>
+    private static (AgentsMdWriteOutcome Outcome, Exception? Failure) WriteAgentsMdTemplate(
+        string repoPath, string templateContent)
+    {
         // Opening with FileMode.CreateNew is the atomic, race-safe check for "does AGENTS.md
         // already exist" - but only *this* step can mean "another process created it concurrently
         // between the offer being raised and now". It is deliberately isolated from the write
@@ -3768,6 +4854,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         // AGENTS.md now exists only because this call just created it, and that failure must be
         // reported as a genuine error - not misreported as the benign "already exists" outcome,
         // which would otherwise happen if both steps shared one File.Exists-guarded catch.
+        var agentsMdPath = PathHelpers.SafePathCombine(repoPath, AgentsMdFileName);
         FileStream stream;
         try
         {
@@ -3775,30 +4862,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
         }
         catch (IOException ex) when (File.Exists(agentsMdPath))
         {
-            // Another user/process created AGENTS.md after the offer was raised but before this
-            // open ran - never overwrite it; this is a non-destructive, informational outcome,
-            // not a failure.
-            StatusMessage = "AGENTS.md already exists for this repo - nothing was written.";
-
-            if (_logger.IsEnabled(LogLevel.Information))
-            {
-                _logger.LogInformation(
-                    ex,
-                    "AGENTS.md was created concurrently for repo '{RepoName}'; the offered template was not written",
-                    RepoName);
-            }
-
-            return;
+            return (AgentsMdWriteOutcome.AlreadyExists, ex);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            if (_logger.IsEnabled(LogLevel.Error))
-            {
-                _logger.LogError(ex, "Failed to create AGENTS.md template for repo '{RepoName}'", RepoName);
-            }
-
-            ErrorOccurred?.Invoke(this, $"Failed to write AGENTS.md: {ex.Message}");
-            return;
+            return (AgentsMdWriteOutcome.CreateFailed, ex);
         }
 
         try
@@ -3809,36 +4877,46 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 writer.Write(templateContent);
             }
 
-            StatusMessage = "Added a starting AGENTS.md template - please review and customize it for this repo.";
-
-            if (_logger.IsEnabled(LogLevel.Information))
-            {
-                _logger.LogInformation("Wrote a starting AGENTS.md template to repo '{RepoName}'", RepoName);
-            }
+            return (AgentsMdWriteOutcome.Written, null);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            if (_logger.IsEnabled(LogLevel.Error))
-            {
-                _logger.LogError(ex, "Failed to write AGENTS.md template for repo '{RepoName}'", RepoName);
-            }
-
-            ErrorOccurred?.Invoke(this, $"Failed to write AGENTS.md: {ex.Message}");
+            return (AgentsMdWriteOutcome.WriteFailed, ex);
         }
     }
 
     /// <summary>
+    ///     What writing the offered <c>AGENTS.md</c> template did.
+    /// </summary>
+    private enum AgentsMdWriteOutcome
+    {
+        /// <summary>The template was written.</summary>
+        Written,
+
+        /// <summary>An <c>AGENTS.md</c> appeared after the offer; nothing was written.</summary>
+        AlreadyExists,
+
+        /// <summary>The file could not be created.</summary>
+        CreateFailed,
+
+        /// <summary>The file was created but the text could not be written.</summary>
+        WriteFailed
+    }
+
+    /// <summary>
     ///     Persists that the user declined the <c>AGENTS.md</c> template offer for this repo, so
-    ///     <see cref="MaybeOfferAgentsMdTemplate"/> never raises
+    ///     <see cref="MaybeOfferAgentsMdTemplateAsync"/> never raises
     ///     <see cref="AgentsMdTemplateOfferRequested"/> again for it.
     /// </summary>
+    /// <returns>A task that completes once the decline was recorded (or not needed), or the
+    ///     failure was reported.</returns>
     /// <remarks>
     ///     Loads the existing pin (if any) rather than constructing a fresh one, so the repo's
     ///     already-persisted package name/version are preserved alongside the new decline flag.
-    ///     There is deliberately no corresponding "reset" method - the decision is sticky for this
-    ///     repo, per the feature's explicit scope.
+    ///     The pin is read and written on a worker. There is deliberately no corresponding "reset"
+    ///     method - the decision is sticky for this repo, per the feature's explicit scope.
     /// </remarks>
-    public void DeclineAgentsMdTemplate()
+    public async Task DeclineAgentsMdTemplateAsync()
     {
         // The launch re-sync never writes the pin (a write would dirty the working tree on a
         // launch), so a decline of the offer that re-sync raised is not remembered; the offer
@@ -3855,15 +4933,20 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return;
         }
 
+        var repoPath = RepoPath;
+        var packageName = PinnedPackageName ?? string.Empty;
+        var version = PinnedPackageVersion ?? string.Empty;
         try
         {
-            var pin = RepoPinStore.Load(RepoPath) ?? new RepoPin
-            {
-                PackageName = PinnedPackageName ?? string.Empty,
-                Version = PinnedPackageVersion ?? string.Empty
-            };
-            pin.AgentsMdTemplateDeclined = true;
-            RepoPinStore.Save(RepoPath, pin);
+            await _backgroundWork.RunAsync(
+                () =>
+                {
+                    var pin = RepoPinStore.Load(repoPath) ?? new RepoPin { PackageName = packageName, Version = version };
+                    pin.AgentsMdTemplateDeclined = true;
+                    RepoPinStore.Save(repoPath, pin);
+                    return true;
+                },
+                CancellationToken.None);
 
             if (_logger.IsEnabled(LogLevel.Information))
             {
@@ -3878,35 +4961,6 @@ internal sealed class RepoCardViewModel : ViewModelBase
             }
 
             ErrorOccurred?.Invoke(this, $"Failed to record your AGENTS.md decision: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    ///     Proactively ensures this repo's root <c>.gitignore</c> covers the four managed agent
-    ///     folders immediately after a successful extraction, so they are far less likely to be
-    ///     accidentally committed. Purely a non-blocking, best-effort side effect: deliberately
-    ///     wrapped in its own try/catch, separate from <see cref="ApplyPackageAndShowReleaseNotesAsync"/>'s
-    ///     outer catch, so a <c>.gitignore</c> I/O failure can never abort the pin write or
-    ///     release-notes display that follow it.
-    /// </summary>
-    /// <remarks>
-    ///     Never touches git tracking state itself and never invokes git - see
-    ///     <see cref="GitIgnoreEnsurer"/>'s remarks for the marker-comment-only idempotency
-    ///     rationale. Ignoring a folder only hides untracked files, which is why
-    ///     <see cref="ApplyPackageAndShowReleaseNotesAsync"/> first stops git tracking any
-    ///     managed folder that is tracked (with the user's consent) - a step this method never
-    ///     takes. The "Committed agent files" badge remains purely advisory and unaffected by this
-    ///     method.
-    /// </remarks>
-    private void EnsureGitIgnoreCoversManagedFolders()
-    {
-        try
-        {
-            GitIgnoreEnsurer.Ensure(RepoPath);
-        }
-        catch (InvalidOperationException ex)
-        {
-            ErrorOccurred?.Invoke(this, ex.Message);
         }
     }
 
@@ -3942,22 +4996,24 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Re-reads the repo's <c>.agentcontrol.json</c> pin file, updating
-    ///     <see cref="PinnedPackageName"/> and <see cref="PinnedPackageVersion"/> (and the recorded
-    ///     content identity and the legacy source hint the card keeps).
+    ///     Applies a pin file's content (or the failure to read it) to <see cref="PinnedPackageName"/>
+    ///     and <see cref="PinnedPackageVersion"/> (and the recorded content identity and the legacy
+    ///     source hint the card keeps).
     /// </summary>
-    private void RefreshPin()
+    /// <param name="pin">The pin read from the repo, or <see langword="null"/> when there is none or it
+    ///     could not be read.</param>
+    /// <param name="loadError">Why the pin file could not be read, or <see langword="null"/>.</param>
+    private void ApplyPin(RepoPin? pin, string? loadError)
     {
         var previous = (PinnedPackageName, PinnedPackageVersion, _pinnedContentIdentity);
-        try
+        if (loadError is null)
         {
-            var pin = RepoPinStore.Load(RepoPath);
             PinnedPackageName = pin?.PackageName;
             PinnedPackageVersion = pin?.Version;
             _pinnedContentIdentity = pin?.ContentIdentity;
             _pinLegacySource = pin?.LegacySource;
         }
-        catch (InvalidOperationException ex)
+        else
         {
             // The pin file exists but could not be read/parsed (or was written by a newer
             // AgentControl) - clear any previously cached pin fields rather than leaving stale
@@ -3968,7 +5024,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             PinnedPackageVersion = null;
             _pinnedContentIdentity = null;
             _pinLegacySource = null;
-            StatusMessage = $"Failed to read pin file: {ex.Message}";
+            StatusMessage = $"Failed to read pin file: {loadError}";
         }
 
         // A different pin makes everything learned about upgrades for the old one meaningless: drop
@@ -4012,53 +5068,38 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     private void RefreshGitStatus()
     {
-        try
-        {
-            var settings = _getSettings();
-            var git = new GitClient(ResolveGitExecutablePath(settings));
-            CanPull = git.IsWorkingTreeClean(RepoPath);
-            GitStatusUnavailable = false;
-        }
-        catch (InvalidOperationException)
-        {
-            CanPull = false;
-            GitStatusUnavailable = true;
-        }
-        finally
-        {
-            GitStatusChecked = true;
-        }
+        // A direct check is newer than any background check still in flight
+        _appliedGitStatusGeneration = ++_gitStatusGeneration;
+        var settings = _getSettings();
+        ApplyGitStatus(ReadWorkingTreeClean(RepoPath, CreateGitClient(settings), CancellationToken.None));
     }
 
     /// <summary>
-    ///     Re-checks the repo's current branch name and "committed agent files" badge via
-    ///     <see cref="GitClient"/>, consulting (and populating) the per-card
-    ///     <see cref="CommittedAgentFilesCache"/> keyed by the repo's current <c>HEAD</c> commit
-    ///     hash. Any failure (not a git repo, git not installed, etc.) is treated as "unknown"
-    ///     rather than propagated.
+    ///     Applies git's answers about the branch and the committed agent folders to
+    ///     <see cref="CurrentBranch"/> and <see cref="HasCommittedAgentFiles"/>, remembering the
+    ///     committed-files answer in the per-card cache under its <c>HEAD</c> commit.
     /// </summary>
-    private void RefreshBranchAndCommittedFiles()
+    /// <param name="branch">The checked-out branch.</param>
+    /// <param name="headHash">The <c>HEAD</c> commit the answer belongs to.</param>
+    /// <param name="hasCommittedAgentFiles">Whether managed agent folders are committed.</param>
+    /// <param name="gitQueryFailed">Whether git could not answer; the card then shows no branch and
+    ///     no committed-files badge.</param>
+    private void ApplyBranchFacts(string? branch, string? headHash, bool hasCommittedAgentFiles, bool gitQueryFailed)
     {
-        try
-        {
-            var settings = _getSettings();
-            var git = new GitClient(ResolveGitExecutablePath(settings));
-            CurrentBranch = git.GetCurrentBranch(RepoPath);
-
-            var headHash = git.GetHeadCommitHash(RepoPath);
-            if (!_committedAgentFilesCache.TryGetCached(RepoPath, headHash, out var cached))
-            {
-                cached = git.HasCommittedAgentFiles(RepoPath);
-                _committedAgentFilesCache.Set(RepoPath, headHash, cached);
-            }
-
-            HasCommittedAgentFiles = cached;
-        }
-        catch (InvalidOperationException)
+        if (gitQueryFailed)
         {
             CurrentBranch = null;
             HasCommittedAgentFiles = false;
+            return;
         }
+
+        CurrentBranch = branch;
+        if (headHash is not null)
+        {
+            _committedAgentFilesCache.Set(RepoPath, headHash, hasCommittedAgentFiles);
+        }
+
+        HasCommittedAgentFiles = hasCommittedAgentFiles;
     }
 
     /// <summary>
@@ -4374,11 +5415,26 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     operation cannot start until it finishes, and makes it cancelable through
     ///     <see cref="CancelOperationCommand"/> when <paramref name="cancelable"/> is set.
     /// </summary>
+    /// <remarks>
+    ///     An operation that acts on the card's repo state (Launch, Pull, Upgrade, Select Package)
+    ///     passes <paramref name="checkCurrentRepoState"/>: the card first shows its busy row, then
+    ///     waits - without blocking the window - for its repo-state reads that are still queued or
+    ///     running, moved to the front of the shared queue (see <see cref="EnsureCurrentRepoStateAsync"/>),
+    ///     and decides again on what they found: a folder that turned out to be missing, or the check's
+    ///     own refusal, is told on the card and nothing runs. So no action uses state that is unknown or
+    ///     about to change. The background upgrade checks skip a busy card, so they do not run beside
+    ///     the action meanwhile.
+    /// </remarks>
     /// <param name="busyMessage">The text shown while the operation runs.</param>
     /// <param name="cancelable">Whether the user may cancel the operation.</param>
     /// <param name="operation">The work to run; receives a token cancelled by either
     ///     <paramref name="cancellationToken"/> or the card's cancel command.</param>
     /// <param name="cancellationToken">The caller's cancellation token.</param>
+    /// <param name="checkCurrentRepoState">When supplied, the operation needs current repo state: it
+    ///     waits for the card's pending reads first, then this is asked whether the operation can still
+    ///     run on what was found, returning why not (shown as the card's status message) or
+    ///     <see langword="null"/> to go ahead. <see langword="null"/> (the default) runs the operation
+    ///     at once.</param>
     /// <returns>A task that completes when the operation has finished; returns immediately
     ///     without running <paramref name="operation"/> when another operation is already
     ///     running. A cancelled operation sets a status message instead of failing.</returns>
@@ -4386,7 +5442,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
         string busyMessage,
         bool cancelable,
         Func<CancellationToken, Task> operation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string?>? checkCurrentRepoState = null)
     {
         if (IsBusy)
         {
@@ -4403,6 +5460,19 @@ internal sealed class RepoCardViewModel : ViewModelBase
         IsBusy = true;
         try
         {
+            // An action never acts on state that is unknown or about to change: the card's pending
+            // reads go first, then the action is decided again on what they found
+            if (checkCurrentRepoState is not null)
+            {
+                await EnsureCurrentRepoStateAsync(cancellation.Token);
+                var refusal = DescribeStateRefusal(checkCurrentRepoState);
+                if (refusal is not null)
+                {
+                    StatusMessage = refusal;
+                    return;
+                }
+            }
+
             await operation(cancellation.Token);
         }
         catch (OperationCanceledException)
@@ -4417,6 +5487,38 @@ internal sealed class RepoCardViewModel : ViewModelBase
             BusyMessage = null;
         }
     }
+
+    /// <summary>
+    ///     Decides, once the card's repo state is current, whether an action can still run.
+    /// </summary>
+    /// <param name="checkCurrentRepoState">The action's own check.</param>
+    /// <returns>Why the action does not run, or <see langword="null"/> to go ahead.</returns>
+    private string? DescribeStateRefusal(Func<string?> checkCurrentRepoState)
+    {
+        if (_isRetired)
+        {
+            return "This repo was removed from the list; nothing was done.";
+        }
+
+        if (!HasRepoState)
+        {
+            return "This repo's state could not be read; nothing was done. Use Refresh to try again.";
+        }
+
+        if (IsMissing)
+        {
+            return "This repo's folder could not be found; nothing was done.";
+        }
+
+        return checkCurrentRepoState();
+    }
+
+    /// <summary>
+    ///     The <see cref="RunOperationAsync"/> state check of an action that needs nothing beyond
+    ///     current repo state and an existing folder.
+    /// </summary>
+    /// <returns>Always <see langword="null"/>: go ahead.</returns>
+    private static string? NoFurtherStateCheck() => null;
 
     /// <summary>
     ///     Asks the running package operation to stop; does nothing when none is running.
@@ -4447,6 +5549,16 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
         ErrorOccurred?.Invoke(this, $"The operation failed: {SecretRedactor.SafeMessage(exception)}");
     }
+
+    /// <summary>
+    ///     Creates the git client the card runs its git commands through: the configured git
+    ///     executable (see <see cref="ResolveGitExecutablePath(AppSettings)"/>) with the card's time
+    ///     limits.
+    /// </summary>
+    /// <param name="settings">The current application settings.</param>
+    /// <returns>The client.</returns>
+    private GitClient CreateGitClient(AppSettings settings) =>
+        new(ResolveGitExecutablePath(settings), timeouts: _gitTimeouts);
 
     /// <summary>
     ///     Resolves the git executable path to use: the per-user setting if configured,

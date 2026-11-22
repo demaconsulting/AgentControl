@@ -43,6 +43,9 @@ the test's isolated git configuration.
   resolution all reflect the exact behavior configured on the git stub.
 - A folder is reported as the top folder of a Git repository only when it has its own `.git` folder or file.
 - The committed-agent-files cache never serves a stale result for a changed HEAD hash.
+- The repository queries (branch, `HEAD`, committed agent folders through a shared cache, repository root and
+  working-tree state) give the same answers on several worker threads at once as one at a time, and the cache keeps
+  every value stored from several threads.
 - A package feed's sign-in is found, kept and removed through the credential helper without any prompt, within a time
   limit, without a secret in the log, and a missing git or helper is "nothing saved" rather than an error.
 - The remote Git capability lists the tags of a repository without a clone, fetches exactly one tag shallow, lists its
@@ -53,8 +56,22 @@ the test's isolated git configuration.
 - A failure of the remote capability is classified and reported in one fixed sentence that repeats neither the address
   nor git's text; a git older than the minimum is refused with advice before any other command; a git that hangs is
   stopped at the time limit.
+- A local git command that hangs past its time limit, or whose caller gives up, is stopped before it finishes and
+  reported as timed out or canceled.
+- The git of package sources and of credential helpers is started off the thread that asks: a tag listing and a
+  credential-helper question asked from a thread guarded against blocking calls are answered with nothing refused.
 
 ### Test Scenarios
+
+**GitIntegration_QueriesFromAnyThread_SubsystemTestUsesTheRealGitOnSeveralThreads**: Against a real temporary repository
+that tracks a managed agent folder (`GitRepositoryFixture`; skipped where git is not installed and failed when `CI` is
+set), the branch, `HEAD` hash, committed-agent-folders answer, repository-root check and working-tree state are read
+once on one thread, then the same queries run on eight worker threads at once, the committed-files answer going
+through one shared `CommittedAgentFilesCache` (looked up by `HEAD`, stored on a miss); every thread gets exactly the
+one-at-a-time answers and the cache holds the answer afterwards. This scenario is tested by
+`GitIntegrationSubsystem_RepositoryQueries_OnSeveralWorkerThreadsAtOnce_GiveTheSameAnswers`, covering
+`AgentControl-GitIntegration-QueriesFromAnyThread` (child `AgentControl-CommittedAgentFilesCache-ConcurrentUse`, whose
+unit test stores, reads and invalidates from many threads at once).
 
 **GitIntegration_PullGating_UnitTestsCoverCleanAndDirtyWorkingTree**: Working-tree
 cleanliness reporting is verified by the `GitClient` unit tests (see the `GitClient` unit
@@ -165,3 +182,18 @@ classification and missing-git requirements) and
 `AgentControl-GitIntegration-RemoteGitMinimumVersion`, children: the `AgentControl-GitRemoteClient-MinimumGitVersion*`
 and `-UnreadableVersionNotBlocked` requirements, and `AgentControl-GitIntegration-RemoteGitBounded`, children: the time
 limit, cancellation, unstopped-process and output-limit requirements).
+
+**GitIntegration_LocalGit_HungGitIsStoppedAndReported**: With a stub standing in for git and a one-second local limit,
+a working-tree query that hangs is stopped and reported as timed out with the limit, a `HEAD` query whose caller gives
+up half a second after it started is stopped and reported as canceled, and neither command finished. This scenario is
+tested by `GitIntegrationSubsystem_LocalGitHangs_IsStoppedAndReportedAsTimedOut`, covering
+`AgentControl-GitIntegration-LocalGitTimeout` (children: `AgentControl-GitClient-TimeoutStopsGit` and
+`AgentControl-GitClient-CancelStopsGit`).
+
+**GitIntegrationSubsystem_RemoteAndCredentialGit_FromGuardedThread_StartOffThatThread**: With stubs standing in for
+git, a `GitRemoteClient` tag listing and a `GitCredentialClient` helper question are both started from inside a guard
+scope of `BlockingCallGuard`, the record of refused calls read before the `await`s: it is empty, the tag is listed and
+the helper is reported available. This scenario is tested by
+`GitIntegrationSubsystem_RemoteAndCredentialGit_FromGuardedThread_StartOffThatThread`, covering
+`AgentControl-GitIntegration-NoBlockingStart` (children: `AgentControl-GitRemoteClient-StartsOffCallerThread`,
+`AgentControl-GitCredentialClient-StartsOffCallerThread`).

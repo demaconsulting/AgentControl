@@ -76,6 +76,43 @@ Below the app bar is the list of **repo cards**, described in the next section, 
 section (see *Organizing Repos with Groups* and *Ordering Your Repos*). With no repos, or when the filter matches
 none, a short message says so instead.
 
+While AgentControl works on many repos at once - reading the cards when it starts, adding repositories, or refreshing
+every card after you save Settings - a thin **progress strip** appears directly under the app bar: a progress bar and
+a short line that counts the work, such as "Adding 7 of 20 repositories..." or "Refreshing repositories 12 of 50...",
+with a **Cancel** button while repositories are being added (reading and refreshing the cards cannot be canceled, and
+need not be: they only read). The window stays usable meanwhile. The strip disappears, taking no space, as soon as the
+work is done. Work on a single card - its **Refresh**, a **Git Pull**, a launch - shows on that card instead.
+
+**When AgentControl starts**, the window and every card appear at once, built from what AgentControl remembered, and
+each card is then filled in in the background: its pin file, Git branch and committed agent folders are read, the
+cards you can see first, two repos at a time, while the strip counts them ("Refreshing repositories 3 of 12..."). Until
+a card has been read it does not show anything it does not know yet as a fact:
+
+- an italic **refreshing...** appears among its chips (it also appears whenever the card is read again, next to the
+  values it already shows),
+- its status bar is grey, and hovering it says "Refreshing: reading this repo's folder, pin file and Git state...",
+- its branch chip shows a dimmed **...** (hover: "Reading the current Git branch..."), and
+- the **No agent package** chip and the **committed agent files** warning are not shown yet, and **Git Pull** says
+  the Git status has not been checked yet.
+
+The picture below shows the window a moment after it opened: the first two cards have been read, and the other two
+are still being read.
+
+![The main window while AgentControl starts: the progress strip under the app bar reads "Refreshing repositories 2 of
+4..."; payments-api and docs-site have been read and show their branch main, while web-portal and mobile-app still
+show an italic refreshing..., a dimmed "..." branch chip and a grey status bar](images/startup-refreshing.png)
+
+The upgrade check of a card follows once it has been read. A repo on a slow or offline network share, or one with a
+very large working tree, only keeps its own card waiting: the window stays usable, and the other cards keep being
+read meanwhile.
+
+**Actions wait for the card, not the window.** If you click **Launch**, or choose **Git Pull**, **Upgrade** or apply a
+package, while the card is still being read, the card shows that it is busy, its read is moved to the front of the
+queue, and the action continues as soon as the card's state is known - you do not need to click again, and the window
+stays usable meanwhile. If the read finds that the action no longer applies (for example the folder is gone, the
+working tree now has uncommitted changes, or the pinned package changed), the card says so in its message and nothing
+is done. A card whose state is already known acts at once.
+
 AgentControl follows your operating system's light or dark setting by default, and every window works in both
 themes; to always use one of them, choose a **Theme** in Settings (see *Settings*).
 
@@ -108,12 +145,48 @@ were added; otherwise one message says, for example, "Added 3 of 5 folders.", fo
 (already in the list or moved into the group, not the top folder of a Git repository, not found, or not saved).
 Each line names at most five folders and then says how many more there are.
 
+**Adding many folders at once.** The folders are checked in the background, so the window stays usable - you can
+filter, collapse sections, or remove repos and groups meanwhile. The progress strip under the app bar shows how far
+the check has got, for example "Adding 7 of 20 repositories...", and the new cards appear together once every folder
+has been checked. A repo that you add in another way while the check runs is not added twice. If you remove a group
+while repositories are being added to it, the add creates the group again, because that is where you asked to put
+them. Likewise, a repository you remove while it is being added is added again, and a group you collapse while
+repositories are being added to it is opened so you can see them. The picture below shows an add of 20 folders in
+progress.
+
+![The top of the main window while 20 folders are being added: directly under the app bar, the progress strip shows a
+partly filled bar, the text "Adding 6 of 20 repositories..." and a Cancel button, and the cards below stay as they
+were](images/global-progress.png)
+
+- **Cancel.** Click **Cancel** in the progress strip to stop the add: nothing of it is added, and no message is shown.
+  Once the add has started saving ("Saving..."), Cancel is no longer offered and the add completes. If the cards are
+  refreshed while repositories are being added (for example after you save Settings), the strip keeps showing the add
+  with its **Cancel** button; the refresh is shown once the add has ended or was canceled.
+- **Adding more while an add runs.** Folders you drop or pick while an add is still running wait for it and are added
+  right after it; one Cancel stops them all.
+- **When the settings cannot be saved.** If AgentControl cannot save the new repos (for example because the settings
+  file is locked or the disk is full), a question says why and offers **Retry** and **Discard**. **Retry** tries to
+  save again - and if that fails too, you are asked again, as often as needed, until the add is saved or you choose
+  **Discard**. **Discard** (also the answer to **Escape** and to closing the question) gives up the add and leaves the
+  list exactly as it was saved, and the message that follows names the folders that were not added.
+
+The question looks like this, with the reason that the settings could not be saved:
+
+![The question shown when an add cannot be saved: "The repositories could not be added because the settings could
+not be saved.", followed by the reason (here, access to the settings folder was denied) and "Retry to save again, or
+Discard to leave the list as it is.", with the buttons Discard (the default) and Retry](images/add-save-failed.png)
+
+A new card's Git status (whether it has uncommitted changes) is checked in the background once the card is shown;
+until then the card does not show the **uncommitted-changes** warning and **Git Pull** says the status has not been
+checked yet.
+
 Each repo card shows:
 
 - A colored **status bar** on the card's left edge: **green** — an agent package is pinned and no newer
   version is available; **amber** — an upgrade is available; **red** — something needs attention (the folder is
   missing, the package source has a problem or needs a sign-in, or the last action you started on the card
-  failed); **grey** — no agent package is pinned (or the upgrade check is still running). Color is never the
+  failed); **grey** — no agent package is pinned, the upgrade check is still running, or the card is still being read
+(see *The Main Window*). Color is never the
   only signal: hover the bar for the status and its reason, and the chips below say the same in words.
 - On the first line, the **favorite star** (click it, or press Space on it, to list the repo under
   **Favorites** - the first section, or the top of the list while there are no groups - and click it again to
@@ -128,7 +201,8 @@ Each repo card shows:
   visible (hover over either for the full text)
 - The "..." menu is grouped. **Repository**: **Git Pull** (see *Pulling Changes*) and **Refresh** (re-checks
   the repo's git state, upgrade status and committed-agent-files chip without waiting for the next app
-  launch, and re-reads all your package sources - NuGet, zip folders and Git repositories - so that a newly
+  launch - its read goes ahead of any background reading of the other cards - and re-reads all your package sources -
+  NuGet, zip folders and Git repositories - so that a newly
   published version or pushed tag shows up at
   once; for a repo whose folder is missing it reads **Check again** and checks whether the folder is
   available again). **Agent files**: **Select Package...** (a repo with no package yet), **Change package...** (a
@@ -232,6 +306,12 @@ leave the cards where they are, so a repo is always where you last put it.
   updates. Where a drop is accepted, no line is shown next to the card itself.
 - **In the flat list** (no groups) there are no sections to drop into, so dragging only reorders within the
   favorites at the top, or within the other repos.
+- **Scrolling while you drag.** To move a card further than the window shows, hold it near the top or bottom edge
+  of the list, over the app bar above the list, or below the list: the list keeps scrolling while you hold it there -
+  also when you hold the pointer perfectly still - faster the further out the pointer is, and the line follows the
+  card under the pointer. The same works when you drag a group header or folders from File Explorer. The scrolling
+  stops at the top or bottom of the list, and when you drop, move back toward the middle of the list, or leave the
+  window. Nothing can be dropped on the app bar.
 - **While the filter has text, ordering is off.** Only some repos are shown, so their positions cannot be changed:
   dragging does nothing and the **Reorder** submenu is disabled, with the tooltip "Clear the filter to change the order:
   while the filter has text only some repos are shown, so their positions cannot be changed." Filtering itself
@@ -250,6 +330,21 @@ leave the cards where they are, so a repo is always where you last put it.
 Like groups and card colors, the order of your repos and of your groups is stored only in your own AgentControl
 settings file (`%APPDATA%\AgentControl\settings.json`), never in the repository or its `.agentcontrol.json`, and it
 is kept when you restart AgentControl. Removing a repo from the list also removes it from the order.
+
+## How Your Changes Are Saved
+
+Everything you change in the main window - a favorite, a group, a card or group color, the order of your repos or
+groups, collapsing a section, renaming or removing a group, removing a repo, and the time of a launch - takes effect
+at once and is saved to your settings file in the background a moment later, so the window never waits for the
+disk (another program, such as a virus scanner or a sync client, can hold the file for a while). Several quick changes
+are saved together. Repositories you add, and the values you save in **Settings**, are the exception: they are
+applied only once they are saved (see *Adding a Repository* and *Settings*).
+
+If a background save fails (for example the disk is full or the file is locked), a message says so and why: "Your
+latest changes could not be saved to the settings file." Your changes **stay in effect** while AgentControl runs, and
+AgentControl saves them again with your next change and when it closes. The message is shown once - not again for
+every click while saving keeps failing - and AgentControl does not wait for you to close it. When AgentControl
+closes, it waits a few seconds at most for the last changes to be written.
 
 ## Choosing a Card Color
 
@@ -307,7 +402,8 @@ rename it, and it is forgotten when the group is removed or its last repo leaves
   source never blocks the window.
 - **No agent package chip** (grey) — the repo has no pin yet. Click it, or use "..." > **Select
   Package...**, to choose one.
-- **Branch chip** — the repo's current git branch.
+- **Branch chip** — the repo's current git branch. While the card is still being read it shows a dimmed **...**
+  instead (see *The Main Window*).
 - **Uncommitted changes** (amber) — the repo has uncommitted local changes; this disables the
   **Git Pull** action for that card.
 - **Committed agent files** (amber) — one or more of `.github/agents`, `.github/standards`,
@@ -344,6 +440,12 @@ rename it, and it is forgotten when the group is removed or its last repo leaves
 
 Below the chips, a card shows the outcome of the last action you started on it - for example the reason a
 **Git Pull** failed - in small text under the repo's path (hover for the full text).
+
+**When Git does not answer.** AgentControl gives each Git command on your repo 60 seconds (a **Git Pull** 10 minutes,
+since it uses the network and may wait for your sign-in). A Git command that takes longer - for example on a network
+share that has gone away, or a Git that waits for something - is stopped, and the card's message says: "Git did not
+answer within 60 seconds and was stopped; the repo's Git state is unknown. Use Refresh to try again." The rest of the
+window, and the other cards, carry on meanwhile. When the cause is gone, choose **Refresh** in the card's "..." menu.
 
 # Package Sources
 
@@ -644,7 +746,10 @@ click **Forget saved sign-in**. AgentControl asks you to confirm, naming the ser
 from your Git credential helper and from this session, and tells you the result: it was forgotten, there was
 nothing saved, or the helper could not remove it. The button is disabled, with a tooltip, when no Git
 credential helper is configured for the server (nothing can have been saved then) or while AgentControl is
-still checking. You can always remove the entry with the helper's own tools instead - for example
+still checking. That check runs in the background when the editor opens, and again shortly after you stop typing the
+feed address (not on every keystroke), so the button becomes available a moment after you finish typing; meanwhile
+its tooltip says "Checking whether a Git credential helper is available for this server...". You can always remove
+the entry with the helper's own tools instead - for example
 delete the `git:https://<host>` entry in the Windows **Credential Manager**, remove the item from the macOS
 **Keychain Access**, or delete the entry from your Linux keyring.
 
@@ -1088,7 +1193,9 @@ Once a repo has a pin, the "..." menu's **Agent files** group shows **Upgrade to
 whenever one of your configured sources offers a newer version of the pinned package - the newest across all of them
 wins, and with equal versions the source higher in your list does (shown by the
 upgrade chip, which you can also click to start the upgrade). It is offered even while the card shows a **Package
-source problem**, because upgrading is the way out. Upgrading:
+source problem**, because upgrading is the way out. An upgrade you start while the card is still being read waits for
+that read first, and stops with the message "The pinned package changed; check for an upgrade again." when the pin
+file turned out to name another package or version. Upgrading:
 
 1. Opens and validates the new package. If it opens without error, its contents are
    assumed good - unless the source requires signed packages (see
@@ -1158,7 +1265,9 @@ configured agentic CLI tool in that repo's
 working directory. Agent-package state does **not block** a launch — an agentic
 CLI tool remains useful whether or not any agent files are present, and may even help you
 migrate away from agent files you've committed to the repo. The one thing that can stop a launch is your own
-**Cancel** when agent files that were needed could not be installed (see below).
+**Cancel** when agent files that were needed could not be installed (see below). If the card is still being read
+when you click **Launch** (it shows **refreshing...**), the launch waits for that read, without holding up the
+window, so the check below sees the repo as it is now (see *The Main Window*).
 
 Before starting the tool, Launch checks that the agent files in the repo are those of the package the repo is pinned
 to. The check looks at the **files themselves** in the four managed agent folders (`.github/agents`,
@@ -1222,7 +1331,9 @@ nothing and records no launch. If you cancel the wait itself while the check is 
 
 **Git Pull**, in the "..." menu of a repo card (under **Repository**), runs `git pull` in that repo's working
 directory. When the pull has finished, the card refreshes itself completely - the same as **Refresh** - so a pin
-file, branch or committed agent files that the pull changed, and the upgrade chip, are current at once. The result of
+file, branch or committed agent files that the pull changed, and the upgrade chip, are current at once. If the card
+was still being read when you chose **Git Pull**, the pull first waits for that read, and does not run if the
+working tree turns out to have uncommitted changes. The result of
 the pull ("Pull succeeded." or the reason it failed) stays shown. It stays in the menu but is disabled (with a tooltip
 explaining why, shown even while it is
 disabled) whenever the repo's working tree has
@@ -1279,6 +1390,15 @@ Tools section](images/settings-dark.png)
   Windows PowerShell, PowerShell (`pwsh`) and the Command shell (`cmd`), from the next launch; you do not need to
   restart AgentControl. On macOS/Linux behavior is unchanged: AgentControl does not open a terminal window there, so
   the choice has no effect.
+
+When you click **Save**, the settings are written in the background: the **Save** button is briefly disabled while
+they are, and the window closes once they are saved. If they cannot be saved (for example the settings file is locked
+or the disk is full), the window stays open and says why, and nothing changes until a save succeeds.
+
+After you save Settings, AgentControl refreshes every card (its pin, branch and committed agent folders) in the
+background, two repos at a time, showing a count such as "Refreshing repositories 3 of 12..." in the progress strip
+under the app bar, and then checks for upgrades against your sources; the window stays usable meanwhile, and the strip
+disappears when the cards have been refreshed.
 
 # About
 

@@ -874,3 +874,32 @@ sections:
           the examples show the accepted forms.
         tests:
           - SourceEditorViewModel_TagPatternHelpText_GivesExamplesAndSaysCaseMatters
+
+      - id: AgentControl-SourceEditorViewModel-HelperCheckDebounced
+        title: >-
+          The SourceEditorViewModel class shall ask whether a Git credential helper applies to a
+          typed feed address only once the address (or the insecure-HTTP choice) has stayed
+          unchanged for a short delay, shall cancel a check for an address that was changed again,
+          never using its answer, shall ask at once when the dialog opens, and shall ask without
+          making the window wait for git.
+        justification: |
+          Asking runs git; one run per keystroke that happens to form a new valid address floods the
+          machine with processes and, on the window's thread, makes typing stutter. Only the address
+          the user stopped at matters.
+        tests:
+          - SourceEditorViewModel_LocationTyped_HelperCheckedOnceAfterDelay
+          - SourceEditorViewModel_EditorOpened_HelperCheckedWithoutDelay
+          - SourceEditorViewModel_ForgetSavedSignIn_AddressEdits_AskTheHelperOncePerOrigin
+
+      - id: AgentControl-SourceEditorViewModel-TestConnectionOffUiThread
+        title: >-
+          The SourceEditorViewModel class shall create the source and read it for a connection test
+          (a NuGet source's versions or a Git source's tags) and forget a saved sign-in without
+          making the window wait for the source, git or the credential helper.
+        justification: |
+          A connection test reads a server, a share or a remote repository and starts git, and
+          forgetting a sign-in runs the credential helper; done on the window's thread the dialog
+          freezes until they answer.
+        tests:
+          - SourceEditorViewModel_TestConnection_FromGuardedThread_NoBlockingCall
+          - SourceEditorViewModel_TestConnection_Git_FromGuardedThread_NoBlockingCall

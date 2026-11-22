@@ -22,8 +22,9 @@ options used by both `Load` and `Save`.
 **Replace retry policy**: `ReplaceMaxAttempts` (`8`, the first try plus seven retries),
 `ReplaceInitialDelay` (`20 ms`) and `ReplaceMaxDelay` (`200 ms`). A hold by another process (virus scanner, search
 indexer, sync client) normally lasts well under a second, so eight attempts cover it. The wait doubles from 20 ms and
-is capped at 200 ms (20, 40, 80, 160, 200, 200, 200 ms), at most 900 ms in all, because `Save` usually runs on the UI
-thread and must not freeze the window for long when a lock never clears.
+is capped at 200 ms (20, 40, 80, 160, 200, 200, 200 ms), at most 900 ms in all, so a lock that never clears still
+surfaces as a failure within about a second. The window's saves run on a worker thread (see the *SettingsWriter*
+design), so the waits never freeze it.
 
 #### Key Methods
 
@@ -113,6 +114,13 @@ path.
   server URL with a query string or fragment) makes `Save` throw `InvalidOperationException`
   without creating or changing any file and without repeating the location in the message
   (`AgentControl-SettingsStore-NoSecretsPersisted`).
+- *Guard*: `Save` writes the disk and can wait for a locked file, so it must never run on the UI thread. Its first
+  step (after the null check) is `BlockingCallGuard.ThrowIfGuarded("settings save")`: on a thread a test has guarded
+  (the headless UI thread, or a guard scope) the call is recorded and refused with
+  `BlockingCallOnGuardedThreadException` before anything is written; on any other thread it costs two thread-local
+  reads (`AgentControl-SettingsStore-RefusesGuardedThread`). The body is the private `SaveCore`, which the write-back
+  of the seeded repo order in `Load` calls directly: `Load` itself runs once, before the window exists, and is one of
+  the justified synchronous reads at startup, so its one-time write is part of it rather than a separate guarded call.
 
 **Git sources**: A Git source is saved and loaded like any other source, as one entry of `Sources` with these fields:
 `Type` (written by name, `Git`), `Location` (the repository address), `TagPattern`, an optional `Subfolder` and
@@ -133,7 +141,9 @@ contains invalid JSON (wrapping `IOException`/`UnauthorizedAccessException`/`Jso
 the seeded repo order is logged and does not throw.
 `Save` throws `ArgumentNullException` for a null `settings` and `InvalidOperationException`
 when the configuration directory cannot be created or the file cannot be written, including when a lock on the
-settings file outlasts the retries; the temporary file is removed in every failure case.
+settings file outlasts the retries; the temporary file is removed in every failure case. On a guarded thread it throws
+`BlockingCallOnGuardedThreadException` (deliberately not an `InvalidOperationException`, so no caller mistakes the
+programming error for a failed save) and writes nothing.
 
 #### Dependencies
 
@@ -146,9 +156,11 @@ settings file outlasts the retries; the temporary file is removed in every failu
 - **.NET BCL** — `System.Text.Json`, `Environment.GetFolderPath`, `File.Move`, `Thread.Sleep` (the defaults of the
   replace and delay seams).
 - **AppLogging** (`Logging` subsystem) — the logger factory used to log a seeded repo order that could not be saved.
+- **BlockingCallGuard** (`Utilities` subsystem) — asked before every `Save`, so the tests catch a save on the UI thread.
 
 #### Callers
 
-- **Program**/**App** — calls `Load` at startup to obtain the initial `AppSettings`, and the
-  `MainWindowViewModel`/`SettingsWindowViewModel` save path calls `Save` after every settings
-  change (favorite toggle, pin update, launch timestamp, or an explicit Settings-window save).
+- **Program**/**App** — calls `Load` at startup to obtain the initial `AppSettings`, before the window exists.
+- **SettingsWriter** (same subsystem) — through the save delegate `MainWindowViewModel` gives it, calls `Save` on a
+  worker thread for every settings change of the window (favorite, group, color, order, collapse, launch timestamp,
+  removal, an add, or an explicit Settings-window save).

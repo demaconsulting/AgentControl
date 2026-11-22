@@ -164,3 +164,14 @@ sections:
           - RepoPinStore_SaveThenLoad_WritesSchemaVersion4AndNeverASource
           - RepoPinStore_Load_NewerSchemaVersion_ThrowsUnsupportedPinSchemaExceptionWithActionableMessage
           - RepoPinStore_Save_NewerSchemaWithIncompatibleKnownPropertyType_ThrowsAndLeavesFileUnchanged
+
+      - id: AgentControl-RepoPinStore-RefusesGuardedThread
+        title: >-
+          The RepoPinStore class shall refuse to read or write a pin file on a thread that is
+          guarded against blocking calls, before the file is touched, recording the refusal.
+        justification: |
+          A pin file lives in the repo, which can be on a slow or offline network share; read or
+          written on the window's UI thread it freezes the window. The tests guard that thread, so a
+          pin read or write that slips back onto it fails them at once.
+        tests:
+          - RepoPinStore_LoadAndSave_OnGuardedThread_AreRefusedAndTouchNothing

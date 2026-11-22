@@ -122,3 +122,15 @@ sections:
           - AgentControl-RepoPinStore-SchemaVersion4
         tests:
           - RepoConfig_NewerSchemaPin_IsRefusedWithAdviceAndNeverOverwritten
+
+      - id: AgentControl-RepoConfig-RefusesGuardedThread
+        title: >-
+          The RepoConfig subsystem shall refuse to read or write a repo's pin on a thread that is
+          guarded against blocking calls, leaving the pin as it was and recording the refusal.
+        justification: |
+          A pin read or write that slips back onto the window's UI thread freezes it while a slow
+          share answers; the tests guard that thread so that it fails them at once.
+        children:
+          - AgentControl-RepoPinStore-RefusesGuardedThread
+        tests:
+          - RepoConfigSubsystem_PinOnGuardedThread_IsRefusedAndLeftUntouched

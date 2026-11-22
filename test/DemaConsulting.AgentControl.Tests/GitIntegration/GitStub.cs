@@ -31,15 +31,36 @@ namespace DemaConsulting.AgentControl.Tests.GitIntegration;
 ///     matching every subcommand <c>GitClient</c> issues. On Windows this is a <c>.bat</c> file
 ///     (directly runnable by <see cref="System.Diagnostics.Process.Start(System.Diagnostics.ProcessStartInfo)"/>
 ///     without <c>UseShellExecute</c>); elsewhere it is a POSIX shell script marked executable via
-///     <c>File.SetUnixFileMode</c>.
+///     <c>File.SetUnixFileMode</c>. On request, <c>status --porcelain</c> also starts a background copy
+///     of the stub (the hidden <c>__holder</c> invocation) that keeps the stub's output open after
+///     the stub exited, standing in for a helper git started that outlives git.
 /// </remarks>
 internal sealed class GitStub
 {
+    /// <summary>
+    ///     How long a command answered with a sleep hangs in the tests that check it is stopped: well
+    ///     past their one-second limit or cancellation, yet short enough that a command that was not
+    ///     stopped finishes while <see cref="RanToTheEndOfItsHangAsync"/> waits, so a missing kill is
+    ///     detected.
+    /// </summary>
+    public const int HangSeconds = 4;
+
+    /// <summary>
+    ///     The line a command that sleeps appends to <see cref="FinishedMarkerPath"/> once its sleep
+    ///     is over, i.e. when it was not killed while hanging.
+    /// </summary>
+    private const string FinishedMarker = "FINISHED";
+
     /// <summary>
     ///     Gets the path to the created stub script, suitable for passing as the
     ///     <c>GitClient</c>'s executable path.
     /// </summary>
     public string Path { get; }
+
+    /// <summary>
+    ///     Gets the file a command that sleeps appends <c>FINISHED</c> to once its sleep is over.
+    /// </summary>
+    public string FinishedMarkerPath => Path + ".finished";
 
     /// <summary>
     ///     Private constructor - use <see cref="Create"/> instead.
@@ -74,6 +95,17 @@ internal sealed class GitStub
     ///     (the full argument list it was called with) to this file, so tests can assert on
     ///     which subcommands were actually invoked and how many times, independent of the
     ///     stub's canned responses.</param>
+    /// <param name="statusSleepSeconds">How many seconds <c>status --porcelain</c> sleeps before it
+    ///     answers (then appends to <see cref="FinishedMarkerPath"/>); 0 answers at once.</param>
+    /// <param name="pullSleepSeconds">How many seconds <c>pull</c> sleeps before it answers (then
+    ///     appends to <see cref="FinishedMarkerPath"/>); 0 answers at once.</param>
+    /// <param name="revParseHeadSleepSeconds">How many seconds <c>rev-parse HEAD</c> sleeps before it
+    ///     answers (then appends to <see cref="FinishedMarkerPath"/>); 0 answers at once.</param>
+    /// <param name="statusOutputHolderSeconds">When above 0, <c>status --porcelain</c> first starts a
+    ///     background copy of the stub that inherits its standard output and error and keeps them open
+    ///     for that many seconds (then appends to <see cref="FinishedMarkerPath"/>), while the stub
+    ///     itself answers and exits at once - a helper git started that outlives git. 0 starts
+    ///     none.</param>
     /// <returns>A new <see cref="GitStub"/> whose <see cref="Path"/> is ready to use.</returns>
     public static GitStub Create(
         string statusOutput = "",
@@ -90,8 +122,14 @@ internal sealed class GitStub
         string lsFilesOutput = "",
         int lsFilesExitCode = 0,
         string lsFilesError = "",
-        string? invocationLogPath = null)
+        string? invocationLogPath = null,
+        int statusSleepSeconds = 0,
+        int pullSleepSeconds = 0,
+        int revParseHeadSleepSeconds = 0,
+        int statusOutputHolderSeconds = 0)
     {
+        var sleeps = new StubSleeps(
+            statusSleepSeconds, pullSleepSeconds, revParseHeadSleepSeconds, statusOutputHolderSeconds);
         if (OperatingSystem.IsWindows())
         {
             var path = System.IO.Path.Combine(
@@ -100,7 +138,7 @@ internal sealed class GitStub
                 statusOutput, statusError, statusExitCode, pullOutput, pullError, pullExitCode,
                 revParseHeadOutput, revParseHeadExitCode, revParseHeadError,
                 abbrevRefOutput, abbrevRefExitCode,
-                lsFilesOutput, lsFilesExitCode, lsFilesError, invocationLogPath));
+                lsFilesOutput, lsFilesExitCode, lsFilesError, invocationLogPath, sleeps, path + ".finished"));
             return new GitStub(path);
         }
         else
@@ -111,7 +149,7 @@ internal sealed class GitStub
                 statusOutput, statusError, statusExitCode, pullOutput, pullError, pullExitCode,
                 revParseHeadOutput, revParseHeadExitCode, revParseHeadError,
                 abbrevRefOutput, abbrevRefExitCode,
-                lsFilesOutput, lsFilesExitCode, lsFilesError, invocationLogPath));
+                lsFilesOutput, lsFilesExitCode, lsFilesError, invocationLogPath, sleeps, path + ".finished"));
             File.SetUnixFileMode(
                 path,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
@@ -130,6 +168,77 @@ internal sealed class GitStub
         {
             File.Delete(Path);
         }
+
+        if (File.Exists(FinishedMarkerPath))
+        {
+            File.Delete(FinishedMarkerPath);
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether a command that sleeps got as far as its post-sleep marker,
+    ///     i.e. was not killed while hanging.
+    /// </summary>
+    /// <returns><see langword="true"/> when the marker was written.</returns>
+    public bool WroteFinishedMarker() =>
+        File.Exists(FinishedMarkerPath) &&
+        File.ReadAllLines(FinishedMarkerPath).Any(line => line.Trim() == FinishedMarker);
+
+    /// <summary>
+    ///     Waits as long as a command answered with a <see cref="HangSeconds"/> sleep takes to finish on
+    ///     its own, then reports whether one got as far as its post-sleep marker. The command started
+    ///     before this is called, so one that was not killed has written the marker by the time the
+    ///     wait ends.
+    /// </summary>
+    /// <returns><see langword="true"/> when the marker was written.</returns>
+    public async Task<bool> RanToTheEndOfItsHangAsync()
+    {
+        await Task.Delay(TimeSpan.FromSeconds(HangSeconds), TestContext.Current.CancellationToken);
+        return WroteFinishedMarker();
+    }
+
+    /// <summary>
+    ///     How long each command that can hang sleeps before it answers.
+    /// </summary>
+    /// <param name="Status">Seconds for <c>status --porcelain</c>.</param>
+    /// <param name="Pull">Seconds for <c>pull</c>.</param>
+    /// <param name="RevParseHead">Seconds for <c>rev-parse HEAD</c>.</param>
+    /// <param name="StatusOutputHolder">Seconds the background copy started by
+    ///     <c>status --porcelain</c> holds the output open; 0 starts none.</param>
+    private sealed record StubSleeps(int Status, int Pull, int RevParseHead, int StatusOutputHolder);
+
+    /// <summary>
+    ///     Builds the batch lines that make a command sleep and then record that it finished.
+    /// </summary>
+    /// <param name="seconds">How long to sleep; 0 adds nothing.</param>
+    /// <param name="markerPath">The file the finished marker is appended to.</param>
+    /// <returns>The lines.</returns>
+    private static IEnumerable<string> BatchSleep(int seconds, string markerPath)
+    {
+        if (seconds <= 0)
+        {
+            yield break;
+        }
+
+        // ping waits one second between echo requests, so N + 1 requests wait N seconds
+        yield return $"ping -n {seconds + 1} 127.0.0.1 >nul";
+        yield return $">>\"{markerPath}\" echo {FinishedMarker}";
+    }
+
+    /// <summary>
+    ///     Builds the shell line that makes a command sleep and then record that it finished.
+    /// </summary>
+    /// <param name="seconds">How long to sleep; 0 adds nothing.</param>
+    /// <param name="markerPath">The file the finished marker is appended to.</param>
+    /// <returns>The lines.</returns>
+    private static IEnumerable<string> ShellSleep(int seconds, string markerPath)
+    {
+        if (seconds <= 0)
+        {
+            yield break;
+        }
+
+        yield return $"    sleep {seconds}; echo {FinishedMarker} >> \"{markerPath}\"";
     }
 
     /// <summary>
@@ -141,7 +250,7 @@ internal sealed class GitStub
         string revParseHeadOutput, int revParseHeadExitCode, string revParseHeadError,
         string abbrevRefOutput, int abbrevRefExitCode,
         string lsFilesOutput, int lsFilesExitCode, string lsFilesError,
-        string? invocationLogPath)
+        string? invocationLogPath, StubSleeps sleeps, string markerPath)
     {
         var lines = new List<string> { "@echo off" };
         if (invocationLogPath is not null)
@@ -151,14 +260,25 @@ internal sealed class GitStub
 
         lines.AddRange(
         [
+            "if \"%1\"==\"__holder\" goto :holder",
             "if \"%1\"==\"status\" goto :status",
             "if \"%1\"==\"pull\" goto :pull",
             "if \"%1\"==\"ls-files\" goto :lsfiles",
             "if \"%1\"==\"rev-parse\" if \"%2\"==\"HEAD\" goto :revparsehead",
             "if \"%1\"==\"rev-parse\" if \"%2\"==\"--abbrev-ref\" goto :abbrevref",
             "exit /b 127",
-            ":status"
+            ":holder"
         ]);
+        lines.AddRange(BatchSleep(sleeps.StatusOutputHolder, markerPath));
+        lines.Add("exit /b 0");
+        lines.Add(":status");
+        if (sleeps.StatusOutputHolder > 0)
+        {
+            // A background copy that inherits this stub's output and keeps it open after it exits
+            lines.Add("start \"\" /b cmd /c call \"%~f0\" __holder");
+        }
+
+        lines.AddRange(BatchSleep(sleeps.Status, markerPath));
         if (!string.IsNullOrEmpty(statusOutput))
         {
             lines.Add($"echo {statusOutput}");
@@ -171,6 +291,7 @@ internal sealed class GitStub
 
         lines.Add($"exit /b {statusExitCode}");
         lines.Add(":pull");
+        lines.AddRange(BatchSleep(sleeps.Pull, markerPath));
         if (!string.IsNullOrEmpty(pullOutput))
         {
             lines.Add($"echo {pullOutput}");
@@ -183,6 +304,7 @@ internal sealed class GitStub
 
         lines.Add($"exit /b {pullExitCode}");
         lines.Add(":revparsehead");
+        lines.AddRange(BatchSleep(sleeps.RevParseHead, markerPath));
         if (!string.IsNullOrEmpty(revParseHeadOutput))
         {
             lines.Add($"echo {revParseHeadOutput}");
@@ -225,7 +347,7 @@ internal sealed class GitStub
         string revParseHeadOutput, int revParseHeadExitCode, string revParseHeadError,
         string abbrevRefOutput, int abbrevRefExitCode,
         string lsFilesOutput, int lsFilesExitCode, string lsFilesError,
-        string? invocationLogPath)
+        string? invocationLogPath, StubSleeps sleeps, string markerPath)
     {
         var lines = new List<string> { "#!/bin/sh" };
         if (invocationLogPath is not null)
@@ -234,7 +356,18 @@ internal sealed class GitStub
         }
 
         lines.Add("case \"$1 $2\" in");
+        lines.Add("  \"__holder \")");
+        lines.AddRange(ShellSleep(sleeps.StatusOutputHolder, markerPath));
+        lines.Add("    exit 0");
+        lines.Add("    ;;");
         lines.Add("  \"status --porcelain\")");
+        if (sleeps.StatusOutputHolder > 0)
+        {
+            // A background copy that inherits this stub's output and keeps it open after it exits
+            lines.Add("    \"$0\" __holder &");
+        }
+
+        lines.AddRange(ShellSleep(sleeps.Status, markerPath));
         if (!string.IsNullOrEmpty(statusOutput))
         {
             lines.Add($"    echo \"{statusOutput}\"");
@@ -248,6 +381,7 @@ internal sealed class GitStub
         lines.Add($"    exit {statusExitCode}");
         lines.Add("    ;;");
         lines.Add("  \"pull \")");
+        lines.AddRange(ShellSleep(sleeps.Pull, markerPath));
         if (!string.IsNullOrEmpty(pullOutput))
         {
             lines.Add($"    echo \"{pullOutput}\"");
@@ -261,6 +395,7 @@ internal sealed class GitStub
         lines.Add($"    exit {pullExitCode}");
         lines.Add("    ;;");
         lines.Add("  \"rev-parse HEAD\")");
+        lines.AddRange(ShellSleep(sleeps.RevParseHead, markerPath));
         if (!string.IsNullOrEmpty(revParseHeadOutput))
         {
             lines.Add($"    echo \"{revParseHeadOutput}\"");

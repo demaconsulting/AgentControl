@@ -235,10 +235,13 @@ internal static class PackageContentExtractor
     ///     upgraded (or touch anything outside it); a delete or copy failure can still do so, and
     ///     per the class remarks there is no rollback for that case.
     /// </exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread a test
+    ///     has guarded (see <see cref="BlockingCallGuard"/>); nothing is read or written.</exception>
     public static void Extract(IPackageContentReader reader, string repoRoot, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(repoRoot);
+        BlockingCallGuard.ThrowIfGuarded("package extract");
 
         var effectiveLogger = logger ?? AppLogging.Factory.CreateLogger(LoggerCategoryName);
 

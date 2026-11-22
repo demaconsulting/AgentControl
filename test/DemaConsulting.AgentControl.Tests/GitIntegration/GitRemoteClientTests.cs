@@ -21,6 +21,7 @@
 using System.Diagnostics;
 using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.Tests.PackageCredentials;
+using DemaConsulting.AgentControl.Utilities;
 
 namespace DemaConsulting.AgentControl.Tests.GitIntegration;
 
@@ -337,6 +338,37 @@ public sealed class GitRemoteClientTests : IDisposable
         Assert.Equal(Sha, tags[1].CommitSha);
     }
 
+    /// <summary>
+    ///     Test that a listing started from a thread that is guarded against blocking calls (as the UI
+    ///     thread is in the headless tests: a connection test or an upgrade starts there) creates its
+    ///     work folders and starts git on another thread: nothing is refused on the guarded thread and
+    ///     the tags are listed.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_ListTags_FromGuardedThread_StartsGitOffThatThread()
+    {
+        // Arrange
+        var (client, stub, workRoot) = CreateClient();
+        stub.Respond("ls-remote", $"{Sha}\trefs/tags/v1.0.0\n");
+
+        // Act: the record of refused calls is per thread, so it is read before the await
+        Task<IReadOnlyList<GitRemoteTag>> listing;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            listing = client.ListTagsAsync(
+                new GitRemoteTarget("https://example.invalid/r.git", GitTransport.Https), "refs/tags/v*",
+                TestContext.Current.CancellationToken);
+        }
+
+        var violations = BlockingCallGuard.TakeViolations();
+        var tags = await listing;
+
+        // Assert: nothing blocking ran on the guarded thread; git ran and its work folders exist
+        Assert.Empty(violations);
+        Assert.Equal(["v1.0.0"], tags.Select(tag => tag.Name));
+        Assert.Single(stub.ReadInvocations());
+        Assert.True(Directory.Exists(workRoot));
+    }
     /// <summary>
     ///     Test that a tag glob that could carry anything but tag-name characters is refused before
     ///     git runs.
@@ -658,6 +690,43 @@ public sealed class GitRemoteClientTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.ListTagsAsync(
             new GitRemoteTarget("https://example.invalid/r.git", GitTransport.Https), "refs/tags/*", cancellation.Token));
         Assert.False(await stub.RanToTheEndOfItsHangAsync());
+    }
+
+    /// <summary>
+    ///     Test that a cancellation that arrives while the work folders are being prepared, before git
+    ///     was started, starts no git process at all and is reported as a cancellation.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_ListTags_CancelledWhilePreparingWorkFolders_StartsNoGit()
+    {
+        // Arrange: the start is held once the folders were prepared, and every start of git is counted
+        var stub = NewStub();
+        stub.Respond("ls-remote", $"{Sha}\trefs/tags/v1.0.0\n");
+        var prepared = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var starts = 0;
+        var client = new GitRemoteClient(new GitRemoteOptions(() => stub.Path, NewFolder())
+        {
+            WorkFoldersPrepared = () =>
+            {
+                prepared.TrySetResult();
+                resume.Task.Wait(TestContext.Current.CancellationToken);
+            },
+            ProcessStarting = _ => Interlocked.Increment(ref starts)
+        });
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+
+        // Act: list, cancel while the start is held after the folders, then let it go on
+        var listing = client.ListTagsAsync(
+            new GitRemoteTarget("https://example.invalid/r.git", GitTransport.Https), "refs/tags/*", cancellation.Token);
+        await prepared.Task.WaitAsync(TestContext.Current.CancellationToken);
+        await cancellation.CancelAsync();
+        resume.TrySetResult();
+
+        // Assert: canceled, and git was never started
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => listing);
+        Assert.Equal(0, Volatile.Read(ref starts));
+        Assert.Empty(stub.ReadInvocations());
     }
 
     /// <summary>

@@ -20,6 +20,8 @@
 
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.Settings;
+using DemaConsulting.AgentControl.Utilities;
+using Microsoft.Extensions.Time.Testing;
 
 namespace DemaConsulting.AgentControl.Tests.Settings;
 
@@ -277,6 +279,73 @@ public class SettingsSubsystemTests
                 () => Assert.Equal(["Work"], damaged.GroupOrder),
                 () => Assert.Equal("git-after", damaged.GitExecutablePath),
                 () => Assert.DoesNotContain("Gone", json, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that the subsystem writes the settings the way the window uses it: changes handed to the
+    ///     background writer on a thread that refuses blocking calls are written - the newest state,
+    ///     once - by the settings store on another thread, and the next session reads them; a direct
+    ///     save on that thread is refused.
+    /// </summary>
+    [Fact]
+    public async Task SettingsSubsystem_BackgroundWriter_WritesNewestStateOffTheGuardedThread()
+    {
+        // Arrange: a writer over the real store, on a clock the test moves
+        var configDir = CreateTempDirectory();
+        try
+        {
+            var writes = 0;
+            var time = new FakeTimeProvider();
+            var previous = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(null);
+            SettingsWriter writer;
+            try
+            {
+                writer = new SettingsWriter(
+                    snapshot =>
+                    {
+                        Interlocked.Increment(ref writes);
+                        SettingsStore.Save(snapshot, configDir);
+                    },
+                    time,
+                    TimeSpan.FromMilliseconds(300));
+            }
+            finally
+            {
+                SynchronizationContext.SetSynchronizationContext(previous);
+            }
+
+            using (writer)
+            {
+                // Act: two changes in quick succession, and a direct save, on a guarded thread
+                Exception? directSave;
+                IReadOnlyList<string> refused;
+                using (BlockingCallGuard.GuardCurrentThread())
+                {
+                    writer.Schedule(new AppSettings { GitExecutablePath = "first" });
+                    writer.Schedule(new AppSettings { GitExecutablePath = "newest" });
+                    time.Advance(TimeSpan.FromMilliseconds(300));
+                    directSave = Record.Exception(() => SettingsStore.Save(new AppSettings(), configDir));
+
+                    // The record of refused calls is kept per thread, so it is read on this one
+                    refused = BlockingCallGuard.TakeViolations();
+                }
+
+                await writer.FlushAsync();
+
+                // Assert: written once with the newest state for the next session; the direct save
+                // on the guarded thread was refused
+                Assert.Multiple(
+                    () => Assert.Equal(1, writes),
+                    () => Assert.Equal("newest", SettingsStore.Load(configDir).GitExecutablePath),
+                    () => Assert.IsType<BlockingCallOnGuardedThreadException>(directSave),
+                    () => Assert.Equal(["settings save"], refused));
+            }
         }
         finally
         {

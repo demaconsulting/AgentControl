@@ -5,7 +5,8 @@
 # - Define requirements for the AgentControl GitIntegration subsystem
 # - GitIntegration spans GitClient.cs (invokes the configured git executable for status,
 #   pull, branch, and committed-files queries and for stopping git tracking managed agent folders,
-#   and tells whether a folder is the top folder of a Git repository),
+#   and tells whether a folder is the top folder of a Git repository; every command runs under a
+#   time limit and can be canceled),
 #   CommittedAgentFilesCache.cs (caches the
 #   committed-agent-files-changed check keyed by HEAD commit hash), GitCredentialClient.cs
 #   (keeps, finds and removes a package feed's sign-in in the user's own Git credential helper)
@@ -18,6 +19,21 @@
 sections:
   - title: GitIntegration Subsystem Requirements
     requirements:
+      - id: AgentControl-GitIntegration-QueriesFromAnyThread
+        title: >-
+          The GitIntegration subsystem shall answer its repository queries (branch, HEAD commit,
+          committed agent folders, repository root and working-tree state) correctly when they are
+          made from several threads at the same time, including through one shared committed-files
+          cache.
+        justification: |
+          The window reads git for many repos off its own thread so that it stays usable; the
+          answers must be the same as one at a time, and the shared cache must never lose or mix up
+          a stored answer.
+        children:
+          - AgentControl-CommittedAgentFilesCache-ConcurrentUse
+        tests:
+          - GitIntegrationSubsystem_RepositoryQueries_OnSeveralWorkerThreadsAtOnce_GiveTheSameAnswers
+
       - id: AgentControl-GitIntegration-PullGating
         title: >-
           The GitIntegration subsystem shall report whether a repo's working tree is clean, so
@@ -265,3 +281,31 @@ sections:
           - AgentControl-GitClient-RepositoryRoot
         tests:
           - GitIntegrationSubsystem_RepositoryRoot_RepositoryWorktreeAndSubfolder
+
+      - id: AgentControl-GitIntegration-LocalGitTimeout
+        title: >-
+          The GitIntegration subsystem shall stop a git command on a local repository that does not
+          answer within its time limit, or whose caller gives up, together with every process it
+          started, and report a stopped command as timed out.
+        justification: |
+          A git that hangs must neither hold the work waiting for it forever nor keep running after
+          the window has closed, and the user must be able to learn that git did not answer.
+        children:
+          - AgentControl-GitClient-TimeoutStopsGit
+          - AgentControl-GitClient-CancelStopsGit
+        tests:
+          - GitIntegrationSubsystem_LocalGitHangs_IsStoppedAndReportedAsTimedOut
+
+      - id: AgentControl-GitIntegration-NoBlockingStart
+        title: >-
+          The GitIntegration subsystem shall start the git of package sources and of credential
+          helpers on a worker thread, so that the thread that asks never waits for a process start
+          or for git's work folders.
+        justification: |
+          Connection tests, upgrades and the source editor ask from the window's UI thread, and a
+          NuGet sign-in can ask from any thread; starting a process there freezes the window.
+        children:
+          - AgentControl-GitRemoteClient-StartsOffCallerThread
+          - AgentControl-GitCredentialClient-StartsOffCallerThread
+        tests:
+          - GitIntegrationSubsystem_RemoteAndCredentialGit_FromGuardedThread_StartOffThatThread

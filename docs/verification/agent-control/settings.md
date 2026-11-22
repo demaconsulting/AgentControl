@@ -4,11 +4,14 @@
 
 The `Settings` subsystem is verified at two levels. The subsystem tests (`SettingsSubsystemTests.cs`) use the subsystem
 the way the application does - through its public surface (`SettingsStore.Load` and `SettingsStore.Save` with the
-`AppSettings` and `RecentRepo` values) - by saving in one session and loading in a later one against a real temporary
-configuration directory, and are the evidence of the theme and organization requirements. The `SettingsStore` unit's
+`AppSettings` and `RecentRepo` values, and `SettingsWriter` over `SettingsStore.Save` the way the main window writes)
+
+- by saving in one session and loading in a later one against a real temporary configuration directory, and are the
+evidence of the theme, organization and background-writing requirements. The `SettingsStore` unit's
 test suite (`SettingsStoreTests.cs`, `SettingsStoreOrganizingTests.cs` and `SettingsStoreRepoOrderTests.cs`) and the
 `RepoGroupName` unit's test suite
-(`RepoGroupNameTests.cs`) carry the unit requirements and, as before, the persistence and package-source requirements
+(`RepoGroupNameTests.cs`) and the `SettingsWriter` unit's test suite (`SettingsWriterTests.cs`) carry the unit
+requirements and, as before, the persistence and package-source requirements
 of the subsystem. The `AppSettings`, `RecentRepo`, `AgentToolKind` and `ThemePreference` data types have no dedicated
 test file and are exercised only as values round-tripped through `SettingsStore`; `RepoGroupName` is a unit with its
 own verification design. All tests use a real temporary configuration directory on disk.
@@ -20,7 +23,10 @@ temporary configuration directory.
 
 ### Acceptance Criteria
 
-- All subsystem tests and all unit tests for `SettingsStore` and `RepoGroupName` pass with zero failures.
+- All subsystem tests and all unit tests for `SettingsStore`, `SettingsWriter` and `RepoGroupName` pass with zero
+  failures.
+- Changes handed to the background writer on a thread guarded against blocking calls are written once, with the newest
+  state, off that thread and read by the next session; a direct save on that thread is refused.
 - Saved settings survive a save-then-load round trip unchanged.
 - A first-ever run with no settings file yet produces usable default settings rather than
   failing.
@@ -145,3 +151,11 @@ what was loaded does not write the stale group back. This scenario is tested by
 `AgentControl-SettingsStore-GroupColorsAndOrderDefaults`,
 `AgentControl-SettingsStore-InvalidGroupColorsAndOrderRepaired`
 and `AgentControl-SettingsStore-StaleGroupSettingsDropped`, whose unit tests are in `SettingsStoreOrganizingTests.cs`).
+
+**SettingsSubsystem_BackgroundWriter_WritesNewestStateOffTheGuardedThread**: A `SettingsWriter` over the real
+`SettingsStore.Save`, on a clock the test moves: two changes are scheduled in quick succession on a thread guarded
+against blocking calls and the delay passes; a direct `SettingsStore.Save` on that thread is attempted as well. After a
+flush the settings were written once, the next load reads the newest change, and the direct save was refused and
+recorded, covering `AgentControl-Settings-BackgroundWriter` (children: `AgentControl-SettingsWriter-Debounce`,
+`-Serialize`, `-ConfirmedSave`, `-FailureReportedOnce`, `-Flush`, and `AgentControl-SettingsStore-RefusesGuardedThread`,
+each verified by its unit tests).

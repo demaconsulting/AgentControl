@@ -48,7 +48,7 @@ public class SettingsWindowServerSourceTests
     public void SettingsWindowViewModel_AddNuGetServerSourceCommand_RequestsServerEditor()
     {
         // Arrange
-        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => { }, (_, _) => Task.FromResult(true));
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => Task.CompletedTask, (_, _) => Task.FromResult(true));
         SourceEditorViewModel? requested = null;
         viewModel.EditorRequested += (_, editor) => requested = editor;
 
@@ -75,7 +75,7 @@ public class SettingsWindowServerSourceTests
         AppSettings? saved = null;
         var viewModel = new SettingsWindowViewModel(
             new AppSettings(),
-            settings => saved = settings,
+            settings => { saved = settings; return Task.CompletedTask; },
             (path, _) =>
             {
                 asked.Add(path);
@@ -138,7 +138,7 @@ public class SettingsWindowServerSourceTests
         };
         var viewModel = new SettingsWindowViewModel(
             settings,
-            _ => { },
+            _ => Task.CompletedTask,
             (_, _) => Task.FromResult(true),
             _ =>
             {
@@ -171,7 +171,7 @@ public class SettingsWindowServerSourceTests
     public void SettingsWindow_AddNuGetServerSourceButton_OpensServerEditorWithServerControls() => HeadlessTestApp.RunAsync(async () =>
     {
         // Arrange
-        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => { }, (_, _) => Task.FromResult(true));
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => Task.CompletedTask, (_, _) => Task.FromResult(true));
         var settingsWindow = new SettingsWindow(viewModel);
         settingsWindow.Show();
         try

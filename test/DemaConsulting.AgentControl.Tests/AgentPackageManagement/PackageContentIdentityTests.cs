@@ -24,6 +24,7 @@ using System.Security.Cryptography;
 using System.Text;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.RepoSync;
+using DemaConsulting.AgentControl.Utilities;
 
 // cspell:ignore xabc ghij
 namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
@@ -1040,6 +1041,36 @@ public sealed class PackageContentIdentityTests : IDisposable
     /// <returns>The hash.</returns>
     private static string Sha256Hex(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 
+    /// <summary>
+    ///     Test that hashing a package's files or a repo's installed agent files on a thread guarded
+    ///     against blocking calls (as the window's UI thread is in the tests) is refused and recorded,
+    ///     and is not mistaken for content that cannot be identified.
+    /// </summary>
+    [Fact]
+    public void PackageContentIdentity_Hash_OnGuardedThread_IsRefusedAndRecorded()
+    {
+        // Arrange
+        var reader = new InMemoryReader((".github/agents/a.md", Encoding.UTF8.GetBytes("agent")));
+        var repo = CreateTempDirectory();
+        BlockingCallGuard.TakeViolations();
+
+        // Act
+        Exception? packageHash;
+        Exception? installedHash;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            packageHash = Record.Exception(() => PackageContentIdentity.TryComputeFilesIdentity(reader));
+            installedHash = Record.Exception(() => PackageContentIdentity.ComputeInstalledFilesIdentity(repo, TestContext.Current.CancellationToken));
+        }
+
+        var violations = BlockingCallGuard.TakeViolations();
+
+        // Assert: refused (never reported as "no identity"), and the same work succeeds on this thread
+        Assert.IsType<BlockingCallOnGuardedThreadException>(packageHash);
+        Assert.IsType<BlockingCallOnGuardedThreadException>(installedHash);
+        Assert.Equal(["package content hash", "installed files hash"], violations);
+        Assert.True(PackageContentIdentity.IsFilesIdentity(PackageContentIdentity.TryComputeFilesIdentity(reader)));
+    }
     /// <summary>
     ///     An in-memory package: files given as path and bytes, listed in the order given.
     /// </summary>

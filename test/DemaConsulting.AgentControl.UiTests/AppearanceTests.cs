@@ -70,7 +70,8 @@ public sealed class AppearanceTests
         // Act: choose Dark and save
         ChooseTheme(context, mainWindow, "Dark");
 
-        // Assert: the page is dark, and the choice was persisted
+        // Assert: the page is dark, and the choice was persisted (Settings closes only once its save was written, so
+        // the file is read without polling)
         Assert.True(Retry.WhileFalse(
             () => PageBrightness(mainWindow) < 0.3,
             TimeSpan.FromSeconds(10),
@@ -202,7 +203,8 @@ public sealed class AppearanceTests
         var settingsWindow = context.WaitForWindowWithDescendant("ThemeComboBox", TimeSpan.FromSeconds(15));
         Assert.NotNull(settingsWindow);
 
-        // Assert: Settings shows the saved theme as the current choice, and the file still holds it
+        // Assert: Settings shows the saved theme as the current choice, and the file still holds it (written by the
+        // Settings save, which completed before that window closed)
         Assert.Equal(theme, Find(settingsWindow, "ThemeComboBox").AsComboBox().SelectedItem?.Text);
         Assert.Contains($"\"Theme\": \"{theme}\"", ReadSettings(context), StringComparison.Ordinal);
     }

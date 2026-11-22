@@ -8,7 +8,9 @@ package AgentControl {
          * overrides, recent repos in the user's own order, shell preference, whether the shell stays open after the
          * agent tool exits, and the user's own repo groups, card
          * colors, collapsed sections, group colors and group order - unknown colors and entries of
-         * groups no repo is in are dropped when loaded). The data types AppSettings, RecentRepo, AgentToolKind
+         * groups no repo is in are dropped when loaded), and writes them in the background (one write at a
+         * time, the newest state of a burst of changes, a failure reported once per failure streak) so the
+         * window never waits for the settings file. The data types AppSettings, RecentRepo, AgentToolKind
          * and ThemePreference are documented as supporting types of this subsystem rather than
          * as units of their own.
          */
@@ -22,6 +24,7 @@ package AgentControl {
         }
 
         part settingsStore : SettingsStore;
+        part settingsWriter : SettingsWriter;
         part repoGroupName : RepoGroupName;
     }
 }

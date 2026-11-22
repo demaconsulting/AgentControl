@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Diagnostics;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Headless;
@@ -27,6 +28,7 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Tests.LauncherUI;
+using DemaConsulting.AgentControl.Utilities;
 
 namespace DemaConsulting.AgentControl.Tests.RepoSync;
 
@@ -620,6 +622,32 @@ public class ReleaseNotesViewerViewModelTests
         Assert.Contains("https://example.com/y", message, StringComparison.Ordinal);
     });
 
+    /// <summary>
+    ///     Test that the default opener hands the address to the system shell on a worker thread: run on
+    ///     the headless UI thread, which is guarded against blocking calls, the start is made off that
+    ///     thread, as a shell start of exactly the address.
+    /// </summary>
+    [Fact]
+    public void ReleaseNotesViewer_OpenInBrowserAsync_StartsTheShellOffTheUiThread() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a start that is refused on a guarded thread, as the real one is
+        ProcessStartInfo? started = null;
+        var startedOnGuardedThread = true;
+
+        // Act
+        await ReleaseNotesViewer.OpenInBrowserAsync("https://example.com/notes?a=1", startInfo =>
+        {
+            startedOnGuardedThread = BlockingCallGuard.IsCurrentThreadGuarded;
+            BlockingCallGuard.ThrowIfGuarded("open link");
+            started = startInfo;
+        });
+
+        // Assert
+        Assert.False(startedOnGuardedThread);
+        Assert.NotNull(started);
+        Assert.True(started.UseShellExecute);
+        Assert.Equal("https://example.com/notes?a=1", started.FileName);
+    });
     /// <summary>
     ///     Finds the link buttons rendered into a release-notes window.
     /// </summary>

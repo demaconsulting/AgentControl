@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 using DemaConsulting.AgentControl.RepoConfig;
+using DemaConsulting.AgentControl.Utilities;
 
 namespace DemaConsulting.AgentControl.Tests.RepoConfig;
 
@@ -196,6 +197,43 @@ public class RepoConfigSubsystemTests
         }
     }
 
+    /// <summary>
+    ///     Test that the pin file is never read or written on a thread guarded against blocking calls (as
+    ///     the window's UI thread is in the tests): both are refused and recorded, the file is left as it
+    ///     was, and the same read works on an ordinary thread.
+    /// </summary>
+    [Fact]
+    public void RepoConfigSubsystem_PinOnGuardedThread_IsRefusedAndLeftUntouched()
+    {
+        // Arrange: a pinned repo
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+            BlockingCallGuard.TakeViolations();
+
+            // Act
+            Exception? read;
+            Exception? write;
+            using (BlockingCallGuard.GuardCurrentThread())
+            {
+                read = Record.Exception(() => RepoPinStore.Load(repoRoot));
+                write = Record.Exception(() => RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "other", Version = "9.0.0" }));
+            }
+
+            var violations = BlockingCallGuard.TakeViolations();
+
+            // Assert
+            Assert.IsType<BlockingCallOnGuardedThreadException>(read);
+            Assert.IsType<BlockingCallOnGuardedThreadException>(write);
+            Assert.Equal(2, violations.Count);
+            Assert.Equal("1.0.0", RepoPinStore.Load(repoRoot)?.Version);
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
     /// <summary>
     ///     Creates a unique, empty temporary repo folder.
     /// </summary>

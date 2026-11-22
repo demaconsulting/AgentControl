@@ -18,7 +18,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.IO.Compression;
 using DemaConsulting.AgentControl.AgentPackageManagement;
+using DemaConsulting.AgentControl.RepoSync;
+using DemaConsulting.AgentControl.Utilities;
 
 namespace DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 
@@ -183,8 +186,8 @@ public class PackageSourceRegistryTests
         ], Path.Combine(Path.GetTempPath(), "agentcontrol_registry_test_nuget"));
 
         // Act / Assert
-        Assert.IsType<ZipFolderSourceProvider>(registry.Resolve("Zips"));
-        Assert.IsType<NuGetSourceProvider>(registry.Resolve("Feed"));
+        Assert.IsType<ZipFolderSourceProvider>(Unwrap(registry.Resolve("Zips")));
+        Assert.IsType<NuGetSourceProvider>(Unwrap(registry.Resolve("Feed")));
         Assert.Empty(PackageSourceRegistry.Create([]).Definitions);
     }
 
@@ -210,8 +213,8 @@ public class PackageSourceRegistryTests
         var withDefaults = PackageSourceRegistry.Create([definition]);
 
         // Act
-        var configured = Assert.IsType<GitSourceProvider>(withOptions.Resolve("Repo"));
-        var defaulted = Assert.IsType<GitSourceProvider>(withDefaults.Resolve("Repo"));
+        var configured = Assert.IsType<GitSourceProvider>(Unwrap(withOptions.Resolve("Repo")));
+        var defaulted = Assert.IsType<GitSourceProvider>(Unwrap(withDefaults.Resolve("Repo")));
 
         // Assert: the options reached the provider (its cache lives under the given root), and the defaults
         // put it under the per-user default
@@ -256,7 +259,7 @@ public class PackageSourceRegistryTests
 
         // Assert: building succeeded, the valid source resolves, the invalid one fails when resolved, and an
         // alias that is not configured is still an error
-        Assert.IsType<GitSourceProvider>(registry.Resolve("Repo"));
+        Assert.IsType<GitSourceProvider>(Unwrap(registry.Resolve("Repo")));
         Assert.Throws<InvalidOperationException>(() => registry.Resolve("Bad"));
         Assert.Throws<UnknownSourceException>(() => registry.Resolve("Missing"));
     }
@@ -287,7 +290,7 @@ public class PackageSourceRegistryTests
         ]);
 
         // Act / Assert
-        Assert.IsType<NuGetSourceProvider>(registry.Resolve("Secure"));
+        Assert.IsType<NuGetSourceProvider>(Unwrap(registry.Resolve("Secure")));
         Assert.Throws<InvalidOperationException>(() => registry.Resolve("Plain"));
     }
 
@@ -392,6 +395,83 @@ public class PackageSourceRegistryTests
         // Assert
         Assert.Contains("missing", ex.Message, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    ///     Test that the built-in providers of a registry made by Create are called on a worker thread:
+    ///     listing and acquiring a zip package from a thread guarded against blocking calls makes no
+    ///     blocking call on it, and the acquired package's content identity is already known, so reading
+    ///     it on the guarded thread hashes nothing.
+    /// </summary>
+    [Fact]
+    public async Task PackageSourceRegistry_Create_BuiltInProviders_ReadOffCallerThread()
+    {
+        // Arrange: a zip source with one package that has an agent file
+        var folder = Path.Combine(Path.GetTempPath(), "agentcontrol_registry_test_worker_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            CreateZipPackage(folder);
+            var registry = PackageSourceRegistry.Create(
+                [new PackageSourceDefinition { Alias = "Zips", Type = PackageSourceType.Zip, Location = folder }]);
+            var provider = registry.Resolve("Zips");
+
+            // Act: list from a guarded thread, reading the record of refused calls before any await
+            Task<IReadOnlyList<DiscoveredPackage>> listing;
+            using (BlockingCallGuard.GuardCurrentThread())
+            {
+                listing = provider.ListVersionsAsync("contoso-agents", CancellationToken.None);
+            }
+
+            var listingViolations = BlockingCallGuard.TakeViolations();
+            var package = Assert.Single(await listing);
+
+            Task<IPackageContentReader> acquiring;
+            using (BlockingCallGuard.GuardCurrentThread())
+            {
+                acquiring = provider.AcquireAsync(package, CancellationToken.None);
+            }
+
+            var acquireViolations = BlockingCallGuard.TakeViolations();
+            using var reader = await acquiring;
+            string? identity;
+            using (BlockingCallGuard.GuardCurrentThread())
+            {
+                identity = reader.ContentIdentity;
+            }
+
+            var identityViolations = BlockingCallGuard.TakeViolations();
+
+            // Assert: nothing blocking ran on the guarded thread, and the identity was computed already
+            Assert.Empty(listingViolations);
+            Assert.Empty(acquireViolations);
+            Assert.Empty(identityViolations);
+            Assert.True(PackageContentIdentity.IsFilesIdentity(identity));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Creates the zip package <c>contoso-agents</c> 1.0.0 with one agent file in a folder.
+    /// </summary>
+    /// <param name="folder">The folder of the zip source.</param>
+    private static void CreateZipPackage(string folder)
+    {
+        using var archive = ZipFile.Open(Path.Combine(folder, "contoso-agents-1.0.0.zip"), ZipArchiveMode.Create);
+        using var writer = new StreamWriter(archive.CreateEntry(".github/agents/a.md").Open());
+        writer.Write("agent");
+    }
+
+    /// <summary>
+    ///     Returns the built-in provider that a registry made by <see cref="PackageSourceRegistry.Create"/>
+    ///     serves, checking that it is wrapped so that its calls run on a worker thread.
+    /// </summary>
+    /// <param name="provider">The provider the registry resolved.</param>
+    /// <returns>The wrapped built-in provider.</returns>
+    private static IPackageSourceProvider Unwrap(IPackageSourceProvider provider) =>
+        Assert.IsType<BackgroundPackageSourceProvider>(provider).Inner;
 
     /// <summary>
     ///     Creates a registry that serves the given fake providers by their aliases.

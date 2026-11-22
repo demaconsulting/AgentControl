@@ -22,6 +22,7 @@ using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.RepoSync;
 using DemaConsulting.AgentControl.Tests.AgentPackageManagement;
+using DemaConsulting.AgentControl.Utilities;
 
 namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 
@@ -282,6 +283,39 @@ public class SourceEditorServerViewModelTests
         Assert.False(string.IsNullOrWhiteSpace(tested.Alias));
     }
 
+    /// <summary>
+    ///     Test that a connection test started from a thread guarded against blocking calls (as the UI
+    ///     thread is in the headless tests) creates the provider and lists the versions on another
+    ///     thread: nothing is refused on the guarded thread and the result is shown.
+    /// </summary>
+    [Fact]
+    public async Task SourceEditorViewModel_TestConnection_FromGuardedThread_NoBlockingCall()
+    {
+        // Arrange: a provider whose listing would be refused on the guarded thread
+        var fake = new FakePackageSourceProvider("any", ("contoso-agents", "1.0.0"));
+        var versions = await fake.ListVersionsAsync("contoso-agents", CancellationToken.None);
+        var editor = CreateEditor(_ =>
+        {
+            BlockingCallGuard.ThrowIfGuarded("provider creation");
+            return new GuardedListingProvider(versions);
+        });
+        AddValidServerValues(editor);
+
+        // Act: the record of refused calls is per thread, so it is read before the await
+        Task running;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            running = editor.TestConnectionCommand.ExecuteAsync();
+        }
+
+        var violations = BlockingCallGuard.TakeViolations();
+        await running;
+
+        // Assert
+        Assert.Empty(violations);
+        Assert.True(editor.TestSucceeded);
+        Assert.Contains("1 version of 'contoso-agents'", editor.TestResultDetail, StringComparison.Ordinal);
+    }
     /// <summary>
     ///     Test that a server that answers but does not have the package is reported as "package
     ///     not found" with advice.
@@ -544,6 +578,31 @@ public class SourceEditorServerViewModelTests
         editor.AddPackageIdCommand.Execute(null);
     }
 
+    /// <summary>
+    ///     A provider whose version listing makes a guarded blocking call first, as a real source's
+    ///     disk, git or NuGet work would, and then answers with the given versions.
+    /// </summary>
+    /// <param name="versions">The versions the listing returns.</param>
+    private sealed class GuardedListingProvider(IReadOnlyList<DiscoveredPackage> versions) : IPackageSourceProvider
+    {
+        /// <inheritdoc />
+        public string Alias => "any";
+
+        /// <inheritdoc />
+        public Task<IReadOnlyList<string>> ListPackageIdsAsync(CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
+
+        /// <inheritdoc />
+        public Task<IReadOnlyList<DiscoveredPackage>> ListVersionsAsync(string packageId, CancellationToken cancellationToken)
+        {
+            BlockingCallGuard.ThrowIfGuarded("source listing");
+            return Task.FromResult(versions);
+        }
+
+        /// <inheritdoc />
+        public Task<IPackageContentReader> AcquireAsync(DiscoveredPackage package, CancellationToken cancellationToken) =>
+            throw new NotSupportedException("The connection test never acquires a package.");
+    }
     /// <summary>
     ///     A provider that ignores cancellation: its version listing finishes with the given
     ///     versions as soon as its gate opens, whatever the token says - like a source that cannot

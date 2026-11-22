@@ -47,7 +47,7 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 /// </summary>
 /// <remarks>
 ///     Runs in the <c>RealProcess</c> collection because showing cards spawns real git subprocesses as
-///     part of each card's eager refresh.
+///     part of each card's background repo-state read.
 /// </remarks>
 [Collection("RealProcess")]
 public sealed class UsabilityWindowTests : IDisposable
@@ -258,7 +258,7 @@ public sealed class UsabilityWindowTests : IDisposable
             PackageIds = ["contoso-agents"]
         };
         var repo = CreateRepoDirectory("git-pinned");
-        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.2.3" });
+        HeadlessTestApp.RunOffUiThread(() => RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.2.3" }));
 
         // Act: the main window shows the repo's card
         var (window, viewModel) = CreateWindow(
@@ -311,13 +311,13 @@ public sealed class UsabilityWindowTests : IDisposable
         using (var reader = DemaConsulting.AgentControl.RepoSync.ZipPackageContentReader.Open(
                    Path.Combine(contoso, "contoso-agents-1.0.0.zip")))
         {
-            identity = reader.ContentIdentity;
+            identity = HeadlessTestApp.RunOffUiThread(() => reader.ContentIdentity);
         }
 
         var repo = CreateRepoDirectory("portable-pin");
-        RepoPinStore.Save(
+        HeadlessTestApp.RunOffUiThread(() => RepoPinStore.Save(
             repo,
-            new RepoPin { PackageName = "contoso-agents", Version = "1.0.0", ContentIdentity = identity });
+            new RepoPin { PackageName = "contoso-agents", Version = "1.0.0", ContentIdentity = identity }));
         var source = new PackageSourceDefinition { Alias = "Artifactory", Type = PackageSourceType.Zip, Location = artifactory };
 
         // Act: the main window shows the card and its upgrade check runs
@@ -360,13 +360,13 @@ public sealed class UsabilityWindowTests : IDisposable
         using (var reader = DemaConsulting.AgentControl.RepoSync.ZipPackageContentReader.Open(
                    Path.Combine(contoso, "contoso-agents-1.0.0.zip")))
         {
-            identity = reader.ContentIdentity;
+            identity = HeadlessTestApp.RunOffUiThread(() => reader.ContentIdentity);
         }
 
         var repo = CreateRepoDirectory("portable-pin-upgrade");
-        RepoPinStore.Save(
+        HeadlessTestApp.RunOffUiThread(() => RepoPinStore.Save(
             repo,
-            new RepoPin { PackageName = "contoso-agents", Version = "1.0.0", ContentIdentity = identity });
+            new RepoPin { PackageName = "contoso-agents", Version = "1.0.0", ContentIdentity = identity }));
         var source = new PackageSourceDefinition { Alias = "Artifactory", Type = PackageSourceType.Zip, Location = artifactory };
 
         // Act
@@ -539,7 +539,7 @@ public sealed class UsabilityWindowTests : IDisposable
     public void SettingsWindow_Layout_AppearanceIsItsOwnSectionBeforeTools() => HeadlessTestApp.Run(() =>
     {
         // Arrange
-        var window = new SettingsWindow(new SettingsWindowViewModel(new AppSettings(), _ => { }, (_, _) => Task.FromResult(true)));
+        var window = new SettingsWindow(new SettingsWindowViewModel(new AppSettings(), _ => Task.CompletedTask, (_, _) => Task.FromResult(true)));
         window.Show();
 
         try
@@ -577,7 +577,7 @@ public sealed class UsabilityWindowTests : IDisposable
     public void SettingsWindow_Layout_KeepShellOpenCheckBoxFollowsShellPreferenceWithTooltip() => HeadlessTestApp.Run(() =>
     {
         // Arrange
-        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => { }, (_, _) => Task.FromResult(true));
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => Task.CompletedTask, (_, _) => Task.FromResult(true));
         var window = new SettingsWindow(viewModel);
         window.Show();
         Dispatcher.UIThread.RunJobs();
@@ -622,7 +622,7 @@ public sealed class UsabilityWindowTests : IDisposable
         {
             Sources = [new PackageSourceDefinition { Alias = "Long", Type = PackageSourceType.Zip, Location = longLocation }]
         };
-        var window = new SettingsWindow(new SettingsWindowViewModel(settings, _ => { }, (_, _) => Task.FromResult(true)));
+        var window = new SettingsWindow(new SettingsWindowViewModel(settings, _ => Task.CompletedTask, (_, _) => Task.FromResult(true)));
         window.Show();
         Dispatcher.UIThread.RunJobs();
 
@@ -752,7 +752,7 @@ public sealed class UsabilityWindowTests : IDisposable
 
         // The user opened Settings from the keyboard (Enter on the Settings button), so the focus ring shows
         PressKey(owner, PhysicalKey.Enter);
-        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => { }, (_, _) => Task.FromResult(true));
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => Task.CompletedTask, (_, _) => Task.FromResult(true));
         var settings = new SettingsWindow(viewModel);
 
         try
@@ -1008,7 +1008,7 @@ public sealed class UsabilityWindowTests : IDisposable
             await card.ApplySelectedPackageAsync(selection);
             Dispatcher.UIThread.RunJobs();
             CloseChildWindows(window);
-            var recorded = RepoPinStore.Load(repo)?.ContentIdentity;
+            var recorded = HeadlessTestApp.RunOffUiThread(() => RepoPinStore.Load(repo))?.ContentIdentity;
             Assert.NotNull(recorded);
             File.Delete(Path.Combine(sourceDir, "contoso-agents-1.0.0.zip"));
             CreateZip(
@@ -1025,21 +1025,21 @@ public sealed class UsabilityWindowTests : IDisposable
             // Assert 1: the question was asked before anything changed, and No changed nothing
             Assert.Empty(window.OwnedWindows);
             Assert.Empty(window.OpenChildWindows);
-            Assert.Equal(recorded, RepoPinStore.Load(repo)?.ContentIdentity);
+            Assert.Equal(recorded, HeadlessTestApp.RunOffUiThread(() => RepoPinStore.Load(repo))?.ContentIdentity);
 
             // Act 2: select it again and answer Yes
             await card.ApplySelectedPackageAsync(selection);
             Dispatcher.UIThread.RunJobs();
             question = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
             DialogWindowTests.Click(question, "ConfirmationYesButton");
-            for (var attempt = 0; attempt < 100 && RepoPinStore.Load(repo)?.ContentIdentity == recorded; attempt++)
+            for (var attempt = 0; attempt < 100 && HeadlessTestApp.RunOffUiThread(() => RepoPinStore.Load(repo))?.ContentIdentity == recorded; attempt++)
             {
                 await Task.Delay(50, TestContext.Current.CancellationToken);
                 Dispatcher.UIThread.RunJobs();
             }
 
             // Assert 2: the changed package was applied and its identity recorded
-            var applied = RepoPinStore.Load(repo)?.ContentIdentity;
+            var applied = HeadlessTestApp.RunOffUiThread(() => RepoPinStore.Load(repo))?.ContentIdentity;
             Assert.NotNull(applied);
             Assert.NotEqual(recorded, applied);
         }
@@ -1101,7 +1101,7 @@ public sealed class UsabilityWindowTests : IDisposable
 
             // Assert 3: git no longer tracks the folder, the package is applied and the user is told to commit
             Assert.DoesNotContain(".github/agents", fixture.Git(fixture.WorkPath, "ls-files"), StringComparison.Ordinal);
-            Assert.Equal("1.0.0", RepoPinStore.Load(fixture.WorkPath)?.Version);
+            Assert.Equal("1.0.0", HeadlessTestApp.RunOffUiThread(() => RepoPinStore.Load(fixture.WorkPath))?.Version);
             Assert.False(File.Exists(Path.Combine(fixture.WorkPath, ".github", "agents", "old.md")));
             Assert.Contains("commit the change", card.StatusMessage, StringComparison.Ordinal);
             Assert.False(card.HasCommittedAgentFiles);
@@ -1243,7 +1243,15 @@ public sealed class UsabilityWindowTests : IDisposable
     {
         foreach (var path in _tempPaths.Where(Directory.Exists))
         {
-            Directory.Delete(path, recursive: true);
+            try
+            {
+                Directory.Delete(path, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A card's background git check may still have the folder as its working directory
+                // when the window closes; leaving a temporary folder behind is harmless
+            }
         }
     }
 
@@ -1268,6 +1276,11 @@ public sealed class UsabilityWindowTests : IDisposable
         var window = new MainWindow { DataContext = viewModel, Width = width, Height = 1600 };
         window.Show();
         Dispatcher.UIThread.RunJobs();
+
+        // The cards' repo state is read in the background and the window's upgrade check follows it; the
+        // tests act on settled cards, and no check is left running on the UI thread when a test ends
+        HeadlessTestApp.RunJobsUntilRepoStateSettled(viewModel);
+        HeadlessTestApp.RunJobsUntil(() => viewModel.PendingRefresh.IsCompleted, "The window's upgrade check did not finish.");
         return (window, viewModel);
     }
 
@@ -1432,7 +1445,7 @@ public sealed class UsabilityWindowTests : IDisposable
     private string CreatePinnedRepo(string name, string version)
     {
         var path = CreateRepoDirectory(name);
-        RepoPinStore.Save(path, new RepoPin { PackageName = "contoso-agents", Version = version });
+        HeadlessTestApp.RunOffUiThread(() => RepoPinStore.Save(path, new RepoPin { PackageName = "contoso-agents", Version = version }));
         return path;
     }
 

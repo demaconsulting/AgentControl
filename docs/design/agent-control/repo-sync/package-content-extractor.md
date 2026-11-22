@@ -197,6 +197,11 @@ the `content` mode, while a link that is not part of the layout is neither inspe
 `LayoutFolders`, `LayoutRootFiles` and `LayoutPaths` expose the
 single list of layout paths to the Git source provider.
 
+**Guard**: `Extract` deletes and writes every managed file of a repo, so it must never run on the UI thread. Its
+first step (after the null checks) is `BlockingCallGuard.ThrowIfGuarded("package extract")`: on a thread a test has
+guarded the call is recorded and refused with `BlockingCallOnGuardedThreadException` before the repo is touched
+(`AgentControl-PackageContentExtractor-RefusesGuardedThread`).
+
 #### Error Handling
 
 `ArgumentNullException` for null arguments; `InvalidOperationException` for a package that cannot
@@ -243,13 +248,15 @@ This residual risk is repeated in the `RepoSync` subsystem design and is recorde
   calls `GetManagedPackagePath` and the reader's `ListFiles`/`OpenRead`.
 - **AppLogging**, **ILogger** (`Logging` subsystem) — extraction/delete diagnostics under a string
   category name (a static class cannot be a generic type argument).
+- **BlockingCallGuard** (`Utilities` subsystem) — asked before every extraction.
 - **.NET BCL** — `System.IO.Compression`, `System.IO`.
 
 #### Callers
 
 - **PackageZipExtractor** — zip-file facade delegating to it.
 - **RepoCardViewModel** — extracts a package acquired from a source provider, reads its release
-  notes and `AGENTS.md` template, and asks `HasInstalledFiles` before a launch.
+  notes and `AGENTS.md` template, and asks `HasInstalledFiles` and `AllManagedFoldersExist` before a launch, all on
+  worker threads.
 - **PackageContentIdentity** (`AgentPackageManagement` subsystem) — `ComputeInstalledFilesIdentity` opens
   `DirectoryPackageContentReader.OpenManagedFolders` over a repo.
 - **ZipFolderSourceProvider**, **NuGetSourceProvider** (`AgentPackageManagement` subsystem) —

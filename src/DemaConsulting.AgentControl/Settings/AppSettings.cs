@@ -279,6 +279,35 @@ internal sealed class AppSettings
     }
 
     /// <summary>
+    ///     Creates a full, independent copy of these settings to hand to the background settings
+    ///     writer (see <see cref="SettingsWriter"/>).
+    /// </summary>
+    /// <remarks>
+    ///     The writer serializes the copy on another thread while the window keeps changing the live
+    ///     settings, so nothing it reads may be shared with them: the repos, the sources, the collapsed
+    ///     sections, the group colors and the group order are copied (the repos and sources entry by
+    ///     entry); the remaining values are immutable. Like <see cref="CreatePersistedCopy"/>, the copy
+    ///     holds the effective sources and no legacy <see cref="PackageSourcePath"/>. Reads only; call it
+    ///     on the thread that changes these settings.
+    /// </remarks>
+    /// <returns>The copy; this instance is left unchanged.</returns>
+    internal AppSettings CreateSnapshot()
+    {
+        var snapshot = CreatePersistedCopy();
+        snapshot.Sources = [.. snapshot.Sources.Select(source => source.Clone())];
+        snapshot.RecentRepos = [.. (RecentRepos ?? []).Select(repo => repo.Clone())];
+        snapshot.CollapsedGroups = [.. CollapsedGroups ?? []];
+        snapshot.GroupColors = new Dictionary<string, string>(RepoGroupName.Comparer);
+        foreach (var (group, color) in GroupColors ?? new Dictionary<string, string>())
+        {
+            snapshot.GroupColors.TryAdd(group, color);
+        }
+
+        snapshot.GroupOrder = [.. GroupOrder ?? []];
+        return snapshot;
+    }
+
+    /// <summary>
     ///     Gets or sets the git executable path override, or <see langword="null"/> to resolve
     ///     <c>git</c> from the process <c>PATH</c> (the default).
     /// </summary>

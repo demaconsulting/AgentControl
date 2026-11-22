@@ -22,6 +22,7 @@ using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.Tests.AgentPackageManagement;
+using DemaConsulting.AgentControl.Utilities;
 
 namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 
@@ -410,6 +411,37 @@ public class SourceEditorGitViewModelTests
         Assert.Equal(1, saved);
     }
 
+    /// <summary>
+    ///     Test that a Git connection test started from a thread guarded against blocking calls (as
+    ///     the UI thread is in the headless tests) creates the provider and previews the tags on
+    ///     another thread: git is never started on the guarded thread, and the preview is shown.
+    /// </summary>
+    [Fact]
+    public async Task SourceEditorViewModel_TestConnection_Git_FromGuardedThread_NoBlockingCall()
+    {
+        // Arrange: creating the provider would be refused on the guarded thread, as starting git is
+        var fake = new FakeGitSourceProvider { Preview = new GitTagPreview(1, [FakeGitSourceProvider.Version("1.0.0", "v1.0.0")], 0, []) };
+        var editor = CreateValidEditor(_ =>
+        {
+            BlockingCallGuard.ThrowIfGuarded("git source");
+            return fake;
+        });
+
+        // Act: the record of refused calls is per thread, so it is read before the await
+        Task running;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            running = editor.TestConnectionCommand.ExecuteAsync();
+        }
+
+        var violations = BlockingCallGuard.TakeViolations();
+        await running;
+
+        // Assert
+        Assert.Empty(violations);
+        Assert.Equal(1, fake.PreviewCalls);
+        Assert.True(editor.TestSucceeded);
+    }
     /// <summary>
     ///     Test that the connection test can run before an alias is typed when a package name is
     ///     given (a placeholder alias is used), but not when the package name would have to come from

@@ -25,6 +25,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using DemaConsulting.AgentControl.Logging;
 using DemaConsulting.AgentControl.PackageCredentials;
+using DemaConsulting.AgentControl.Utilities;
 using Microsoft.Extensions.Logging;
 
 namespace DemaConsulting.AgentControl.GitIntegration;
@@ -214,6 +215,19 @@ internal sealed record GitRemoteOptions(
     ///     confirmed; <see langword="null"/> for the default (10 seconds). For tests.
     /// </summary>
     internal TimeSpan? StopTimeout { get; init; }
+
+    /// <summary>
+    ///     Gets a test seam called on the worker thread once the work folders were prepared, before
+    ///     git is started, so a test can hold the start there and cancel meanwhile;
+    ///     <see langword="null"/> for none.
+    /// </summary>
+    internal Action? WorkFoldersPrepared { get; init; }
+
+    /// <summary>
+    ///     Gets a test seam called right before a git process is started, so a test can see whether
+    ///     one would be; <see langword="null"/> for none.
+    /// </summary>
+    internal Action<ProcessStartInfo>? ProcessStarting { get; init; }
 }
 
 /// <summary>
@@ -465,7 +479,7 @@ internal sealed partial class GitRemoteClient
         // One check at a time for one executable: callers that arrive while it runs wait for it and
         // then find its result, so git --version never runs twice for the same executable
         var gate = VersionGates.GetOrAdd(executable, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (VerifiedExecutables.ContainsKey(executable))
@@ -475,7 +489,7 @@ internal sealed partial class GitRemoteClient
 
             var arguments = BuildArguments(null, GitTransport.File, "--version");
             var result = await RunAsync(
-                "version", arguments, GitTransport.File, VersionTimeout, MaxVersionOutputBytes, cancellationToken);
+                "version", arguments, GitTransport.File, VersionTimeout, MaxVersionOutputBytes, cancellationToken).ConfigureAwait(false);
             var version = ParseVersion(result.Output);
             if (version is null)
             {
@@ -547,7 +561,7 @@ internal sealed partial class GitRemoteClient
 
         var arguments = BuildArguments(null, target.Transport, "ls-remote", "--tags", "--", target.Url, refGlob);
         var result = await RunAsync(
-            "ls-remote", arguments, target.Transport, ListTimeout, MaxListOutputBytes, cancellationToken);
+            "ls-remote", arguments, target.Transport, ListTimeout, MaxListOutputBytes, cancellationToken).ConfigureAwait(false);
         return ParseTags(result.Output);
     }
 
@@ -561,12 +575,12 @@ internal sealed partial class GitRemoteClient
     public async Task InitRepositoryAsync(string repositoryPath, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
-        EnsureWorkFolders();
 
+        // The template folder is created (off the caller's thread) by the run itself, before git starts
         var arguments = BuildArguments(
             null, GitTransport.File,
             "init", "-q", "--template=" + _emptyTemplateDirectory, "--", repositoryPath);
-        await RunAsync("init", arguments, GitTransport.File, FetchTimeout, 64 * 1024, cancellationToken);
+        await RunAsync("init", arguments, GitTransport.File, FetchTimeout, 64 * 1024, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -593,12 +607,12 @@ internal sealed partial class GitRemoteClient
         var fetch = BuildArguments(
             repositoryPath, target.Transport,
             "fetch", "--depth=1", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", target.Url, refspec);
-        await RunAsync("fetch", fetch, target.Transport, FetchTimeout, 64 * 1024, cancellationToken);
+        await RunAsync("fetch", fetch, target.Transport, FetchTimeout, 64 * 1024, cancellationToken).ConfigureAwait(false);
 
         var parse = BuildArguments(
             repositoryPath, target.Transport,
             "rev-parse", "--verify", "--quiet", $"refs/tags/{tagName}^{{commit}}");
-        var result = await RunAsync("rev-parse", parse, target.Transport, FetchTimeout, 4096, cancellationToken);
+        var result = await RunAsync("rev-parse", parse, target.Transport, FetchTimeout, 4096, cancellationToken).ConfigureAwait(false);
         var commit = result.Output.Trim();
         if (!ObjectIdPattern().IsMatch(commit))
         {
@@ -647,7 +661,7 @@ internal sealed partial class GitRemoteClient
         command.AddRange(paths);
         var arguments = BuildArguments(repositoryPath, GitTransport.File, [.. command]);
         var result = await RunAsync(
-            "ls-tree", arguments, GitTransport.File, FetchTimeout, MaxListOutputBytes, cancellationToken);
+            "ls-tree", arguments, GitTransport.File, FetchTimeout, MaxListOutputBytes, cancellationToken).ConfigureAwait(false);
         return ParseTree(result.Output);
     }
 
@@ -715,12 +729,11 @@ internal sealed partial class GitRemoteClient
             declared += blob.Size.Value;
         }
 
-        EnsureWorkFolders();
         var arguments = BuildArguments(repositoryPath, GitTransport.File, "cat-file", "--batch");
         var startInfo = CreateStartInfo(arguments, GitTransport.File, null);
         _logger.LogDebug(
             "Running git cat-file ({Interactive}).", _options.Interactive ? "interactive" : "background");
-        using var process = StartProcess("cat-file", startInfo);
+        using var process = await StartOffCallerThreadAsync("cat-file", startInfo, cancellationToken).ConfigureAwait(false);
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         limit.CancelAfter(FetchTimeout);
 
@@ -731,10 +744,10 @@ internal sealed partial class GitRemoteClient
         try
         {
             var complete = await ReadBatchAnswersAsync(
-                process.StandardOutput.BaseStream, blobs, openDestination, limit.Token);
-            await requests;
-            await process.WaitForExitAsync(limit.Token);
-            var (errorText, _) = await error;
+                process.StandardOutput.BaseStream, blobs, openDestination, limit.Token).ConfigureAwait(false);
+            await requests.ConfigureAwait(false);
+            await process.WaitForExitAsync(limit.Token).ConfigureAwait(false);
+            var (errorText, _) = await error.ConfigureAwait(false);
             if (process.ExitCode != 0)
             {
                 throw CreateFailure("cat-file", errorText, process.ExitCode);
@@ -747,7 +760,7 @@ internal sealed partial class GitRemoteClient
         }
         catch (OperationCanceledException ex)
         {
-            await StopProcessAsync(process, "cat-file", output: null, error, requests);
+            await StopProcessAsync(process, "cat-file", output: null, error, requests).ConfigureAwait(false);
             if (cancellationToken.IsCancellationRequested)
             {
                 throw;
@@ -759,7 +772,7 @@ internal sealed partial class GitRemoteClient
         {
             // Any other failure (a refused answer, a destination that cannot be written) also ends
             // the process: it must not be left waiting for requests or output
-            await StopProcessAsync(process, "cat-file", output: null, error, requests);
+            await StopProcessAsync(process, "cat-file", output: null, error, requests).ConfigureAwait(false);
             throw;
         }
     }
@@ -781,10 +794,10 @@ internal sealed partial class GitRemoteClient
             var input = process.StandardInput.BaseStream;
             foreach (var blob in blobs)
             {
-                await input.WriteAsync(Encoding.ASCII.GetBytes(blob.Sha + "\n"), cancellationToken);
+                await input.WriteAsync(Encoding.ASCII.GetBytes(blob.Sha + "\n"), cancellationToken).ConfigureAwait(false);
             }
 
-            await input.FlushAsync(cancellationToken);
+            await input.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (IOException)
         {
@@ -817,7 +830,7 @@ internal sealed partial class GitRemoteClient
         var reader = new BatchReader(output);
         foreach (var blob in blobs)
         {
-            var header = await reader.ReadLineAsync(MaxBatchHeaderBytes, cancellationToken);
+            var header = await reader.ReadLineAsync(MaxBatchHeaderBytes, cancellationToken).ConfigureAwait(false);
             if (header is null)
             {
                 return false;
@@ -834,20 +847,20 @@ internal sealed partial class GitRemoteClient
 
             await using (var destination = openDestination(blob))
             {
-                if (!await reader.CopyAsync(destination, size, cancellationToken))
+                if (!await reader.CopyAsync(destination, size, cancellationToken).ConfigureAwait(false))
                 {
                     return false;
                 }
             }
 
             // Each answer ends with a line feed
-            if (await reader.ReadByteAsync(cancellationToken) != '\n')
+            if (await reader.ReadByteAsync(cancellationToken).ConfigureAwait(false) != '\n')
             {
                 throw new GitRemoteException(GitFailureKind.Other, "git cat-file returned unexpected data.");
             }
         }
 
-        if (await reader.ReadByteAsync(cancellationToken) != -1)
+        if (await reader.ReadByteAsync(cancellationToken).ConfigureAwait(false) != -1)
         {
             throw new GitRemoteException(GitFailureKind.Other, "git cat-file returned more data than was asked for.");
         }
@@ -1260,7 +1273,7 @@ internal sealed partial class GitRemoteClient
             {
                 var result = await RunAsync(
                     "config", ["config", "--get", "core.sshCommand"], GitTransport.Ssh, ListTimeout, 4096,
-                    cancellationToken, allowFailure: true, applySsh: false);
+                    cancellationToken, allowFailure: true, applySsh: false).ConfigureAwait(false);
                 configured = result.ExitCode == 0 ? result.Output.Trim() : null;
             }
             catch (GitRemoteException)
@@ -1311,9 +1324,8 @@ internal sealed partial class GitRemoteClient
         bool allowFailure = false,
         bool applySsh = true)
     {
-        EnsureWorkFolders();
         var sshCommand = transport == GitTransport.Ssh && applySsh
-            ? await ResolveSshCommandAsync(cancellationToken)
+            ? await ResolveSshCommandAsync(cancellationToken).ConfigureAwait(false)
             : null;
 
         var startInfo = CreateStartInfo(arguments, transport, sshCommand);
@@ -1321,7 +1333,7 @@ internal sealed partial class GitRemoteClient
         _logger.LogDebug(
             "Running git {Operation} ({Interactive}).", operation, _options.Interactive ? "interactive" : "background");
 
-        using var process = StartProcess(operation, startInfo);
+        using var process = await StartOffCallerThreadAsync(operation, startInfo, cancellationToken).ConfigureAwait(false);
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         limit.CancelAfter(timeout);
 
@@ -1331,9 +1343,9 @@ internal sealed partial class GitRemoteClient
         var error = ReadBoundedAsync(process.StandardError.BaseStream, MaxErrorBytes, limit.Token);
         try
         {
-            await process.WaitForExitAsync(limit.Token);
-            var (text, truncated) = await output;
-            var (errorText, _) = await error;
+            await process.WaitForExitAsync(limit.Token).ConfigureAwait(false);
+            var (text, truncated) = await output.ConfigureAwait(false);
+            var (errorText, _) = await error.ConfigureAwait(false);
             _logger.LogDebug(
                 "git {Operation} exited with code {ExitCode} after {ElapsedMilliseconds}ms.",
                 operation, process.ExitCode, stopwatch.ElapsedMilliseconds);
@@ -1354,7 +1366,7 @@ internal sealed partial class GitRemoteClient
         }
         catch (OperationCanceledException ex)
         {
-            await StopProcessAsync(process, operation, output, error);
+            await StopProcessAsync(process, operation, output, error).ConfigureAwait(false);
             if (cancellationToken.IsCancellationRequested)
             {
                 throw;
@@ -1365,15 +1377,53 @@ internal sealed partial class GitRemoteClient
     }
 
     /// <summary>
+    ///     Creates the work folders and starts a git process on a worker thread, so the caller's
+    ///     thread (the UI thread, for a connection test or an upgrade) never waits for the disk or the
+    ///     process start.
+    /// </summary>
+    /// <param name="operation">A short name of the operation, for diagnostics.</param>
+    /// <param name="startInfo">The start information.</param>
+    /// <param name="cancellationToken">Cancels the start before git is started, also while the work
+    ///     folders are prepared; a started process is returned.</param>
+    /// <returns>The running process; the caller disposes it. The awaiting method continues on a
+    ///     worker thread (it awaits without the caller's context).</returns>
+    /// <exception cref="GitRemoteException">Thrown with <see cref="GitFailureKind.GitNotFound"/> when
+    ///     the process cannot be started.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when cancelled before git started.</exception>
+    private Task<Process> StartOffCallerThreadAsync(
+        string operation, ProcessStartInfo startInfo, CancellationToken cancellationToken) =>
+        Task.Run(
+            () =>
+            {
+                EnsureWorkFolders();
+                _options.WorkFoldersPrepared?.Invoke();
+
+                // Preparing the folders can take a while (a slow or network disk): a caller that
+                // canceled meanwhile gets no git process at all, rather than one that is killed
+                cancellationToken.ThrowIfCancellationRequested();
+                return StartProcess(operation, startInfo);
+            },
+            cancellationToken);
+
+    /// <summary>
     ///     Starts a git process.
     /// </summary>
+    /// <remarks>
+    ///     Asks <see cref="BlockingCallGuard"/> first, so a git process started on a thread the tests
+    ///     guard (the UI thread) fails them; <see cref="StartOffCallerThreadAsync"/> is the only
+    ///     caller and runs it on a worker.
+    /// </remarks>
     /// <param name="operation">A short name of the operation, for diagnostics.</param>
     /// <param name="startInfo">The start information.</param>
     /// <returns>The running process; the caller disposes it.</returns>
     /// <exception cref="GitRemoteException">Thrown with <see cref="GitFailureKind.GitNotFound"/> when
     ///     the process cannot be started.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown on a thread a test has guarded;
+    ///     nothing is started.</exception>
     private Process StartProcess(string operation, ProcessStartInfo startInfo)
     {
+        BlockingCallGuard.ThrowIfGuarded($"git {operation}");
+        _options.ProcessStarting?.Invoke(startInfo);
         try
         {
             return Process.Start(startInfo) ?? throw new InvalidOperationException("The git process did not start.");
@@ -1498,7 +1548,7 @@ internal sealed partial class GitRemoteClient
         var truncated = false;
         while (true)
         {
-            var read = await stream.ReadAsync(buffer.AsMemory(), cancellationToken);
+            var read = await stream.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
             if (read == 0)
             {
                 return (Utf8WithoutBom.GetString(kept.GetBuffer(), 0, (int)kept.Length), truncated);
@@ -1507,11 +1557,11 @@ internal sealed partial class GitRemoteClient
             var room = cap - (int)kept.Length;
             if (read <= room)
             {
-                await kept.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                await kept.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                await kept.WriteAsync(buffer.AsMemory(0, Math.Max(room, 0)), cancellationToken);
+                await kept.WriteAsync(buffer.AsMemory(0, Math.Max(room, 0)), cancellationToken).ConfigureAwait(false);
                 truncated = true;
             }
         }
@@ -1559,7 +1609,7 @@ internal sealed partial class GitRemoteClient
 
         try
         {
-            await Task.WhenAll(pending).WaitAsync(stopTimeout);
+            await Task.WhenAll(pending).WaitAsync(stopTimeout).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is OperationCanceledException or TimeoutException or IOException or ObjectDisposedException)
         {
@@ -1570,7 +1620,7 @@ internal sealed partial class GitRemoteClient
         var ended = false;
         try
         {
-            await process.WaitForExitAsync().WaitAsync(stopTimeout);
+            await process.WaitForExitAsync().WaitAsync(stopTimeout).ConfigureAwait(false);
             ended = true;
         }
         catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
@@ -1633,7 +1683,7 @@ internal sealed partial class GitRemoteClient
             }
 
             _position = 0;
-            _length = await stream.ReadAsync(_buffer.AsMemory(), cancellationToken);
+            _length = await stream.ReadAsync(_buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
             return _length > 0;
         }
 
@@ -1643,7 +1693,7 @@ internal sealed partial class GitRemoteClient
         /// <param name="cancellationToken">Cancels the read.</param>
         /// <returns>The byte, or -1 at the end of the stream.</returns>
         public async ValueTask<int> ReadByteAsync(CancellationToken cancellationToken) =>
-            await FillAsync(cancellationToken) ? _buffer[_position++] : -1;
+            await FillAsync(cancellationToken).ConfigureAwait(false) ? _buffer[_position++] : -1;
 
         /// <summary>
         ///     Reads a line of ASCII text up to a line feed.
@@ -1659,7 +1709,7 @@ internal sealed partial class GitRemoteClient
             var line = new StringBuilder();
             while (true)
             {
-                var next = await ReadByteAsync(cancellationToken);
+                var next = await ReadByteAsync(cancellationToken).ConfigureAwait(false);
                 if (next == -1)
                 {
                     return line.Length == 0
@@ -1692,13 +1742,13 @@ internal sealed partial class GitRemoteClient
         {
             while (count > 0)
             {
-                if (!await FillAsync(cancellationToken))
+                if (!await FillAsync(cancellationToken).ConfigureAwait(false))
                 {
                     return false;
                 }
 
                 var chunk = (int)Math.Min(_length - _position, count);
-                await destination.WriteAsync(_buffer.AsMemory(_position, chunk), cancellationToken);
+                await destination.WriteAsync(_buffer.AsMemory(_position, chunk), cancellationToken).ConfigureAwait(false);
                 _position += chunk;
                 count -= chunk;
             }

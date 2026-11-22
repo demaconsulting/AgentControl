@@ -20,6 +20,7 @@
 
 using System.Text.Json;
 using DemaConsulting.AgentControl.Logging;
+using DemaConsulting.AgentControl.Utilities;
 using Microsoft.Extensions.Logging;
 
 namespace DemaConsulting.AgentControl.Settings;
@@ -70,8 +71,9 @@ internal static class SettingsStore
     /// </summary>
     /// <remarks>
     ///     With <see cref="ReplaceMaxAttempts"/> and <see cref="ReplaceInitialDelay"/> the waits are
-    ///     20, 40, 80, 160, 200, 200 and 200 ms: at most 900 ms in total, because a save usually runs
-    ///     on the UI thread and must not freeze the window for long when the lock never clears.
+    ///     20, 40, 80, 160, 200, 200 and 200 ms: at most 900 ms in total, so a lock that never clears
+    ///     still surfaces as a failure within about a second. The window's saves run in the background
+    ///     (see <see cref="SettingsWriter"/>), so the waits never freeze it.
     /// </remarks>
     internal static readonly TimeSpan ReplaceMaxDelay = TimeSpan.FromMilliseconds(200);
 
@@ -191,7 +193,8 @@ internal static class SettingsStore
     {
         try
         {
-            Save(settings, directory, replaceFile, delay);
+            // The load itself runs before the window exists (see Load); its one-time write is part of it
+            SaveCore(settings, directory, replaceFile, delay);
         }
         catch (InvalidOperationException ex)
         {
@@ -215,7 +218,10 @@ internal static class SettingsStore
     ///     (<see cref="ReplaceMaxAttempts"/>, backing off from <see cref="ReplaceInitialDelay"/> to
     ///     <see cref="ReplaceMaxDelay"/>) when another process briefly holds the file open, so a
     ///     virus scanner or indexer does not cause a spurious failure. The persisted model has no
-    ///     field that can hold a password, token or other secret, so none can be written.
+    ///     field that can hold a password, token or other secret, so none can be written. It writes
+    ///     the disk and can wait for a locked file, so it must not run on the UI thread: it first asks
+    ///     <see cref="BlockingCallGuard.ThrowIfGuarded"/>, which refuses the call on a thread a test has
+    ///     guarded. The window saves through <see cref="SettingsWriter"/>, on a worker thread.
     /// </remarks>
     /// <param name="replaceFile">Test seam: moves the temporary file (first argument) over the
     ///     settings file (second argument), replacing it; <see langword="null"/> for the real move.</param>
@@ -226,6 +232,8 @@ internal static class SettingsStore
     /// <exception cref="InvalidOperationException">Thrown when a source location embeds a
     ///     credential (nothing is written), the configuration directory cannot be created, or the
     ///     settings file cannot be written.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread a test
+    ///     has guarded (see <see cref="BlockingCallGuard"/>); nothing is written.</exception>
     public static void Save(
         AppSettings settings,
         string? configDirectory = null,
@@ -233,6 +241,27 @@ internal static class SettingsStore
         Action<TimeSpan>? delay = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        BlockingCallGuard.ThrowIfGuarded("settings save");
+        SaveCore(settings, configDirectory, replaceFile, delay);
+    }
+
+    /// <summary>
+    ///     The body of <see cref="Save"/>, without the blocking-call guard: also used by the one-time
+    ///     write of <see cref="Load"/>, which runs before the window exists.
+    /// </summary>
+    /// <param name="settings">The settings to persist.</param>
+    /// <param name="configDirectory">Configuration directory to write to, or <see langword="null"/>
+    ///     for the default.</param>
+    /// <param name="replaceFile">Test seam for the file replace, or <see langword="null"/>.</param>
+    /// <param name="delay">Test seam for the wait between replace attempts, or
+    ///     <see langword="null"/>.</param>
+    /// <exception cref="InvalidOperationException">Thrown as documented on <see cref="Save"/>.</exception>
+    private static void SaveCore(
+        AppSettings settings,
+        string? configDirectory,
+        Action<string, string>? replaceFile,
+        Action<TimeSpan>? delay)
+    {
 
         // Refuse before anything is written: a source location that embeds a credential must
         // never reach the settings file

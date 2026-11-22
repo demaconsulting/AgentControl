@@ -79,8 +79,8 @@ refused.
 
 Notably absent: the recent-repos list is intentionally not exposed here — it is owned
 exclusively by `MainWindowViewModel` (the list is also the user's repo order, with its `HasUserRepoOrder` marker) and
-is preserved by `MainWindowViewModel.ApplySettings`
-when the `AppSettings` built by `Save` is applied. The recent-repos list is only read to count
+is preserved by `MainWindowViewModel.ApplySettingsAsync`
+when the `AppSettings` built by `SaveAsync` is applied. The recent-repos list is only read to count
 the repos pinned to each source.
 
 #### Key Methods
@@ -88,7 +88,8 @@ the repos pinned to each source.
 **Constructor**: Seeds editable properties from the current settings and starts the status
 check of every source.
 
-- *Parameters*: `AppSettings initial`, `Action<AppSettings> onSave`, an optional folder-exists
+- *Parameters*: `AppSettings initial`, `Func<AppSettings, Task> onSave` (its task completes when the settings were
+  saved, or faults when they were not), an optional folder-exists
   check (so tests need no real folders), and an optional provider factory that the editor's
   **Test connection** uses (so the application can give the test the session credentials, and
   tests can use a fake).
@@ -123,19 +124,25 @@ for confirmation. `GetRemovalWarning` builds the confirmation text, which, when 
 pinned to the source, states how many and that they will show a package source problem
 afterwards; `RemoveSource` then removes the row.
 
-**Save** (private, bound to `SaveCommand`): Builds an `AppSettings` from the current editable
-properties and invokes the `onSave` callback.
+**SaveAsync** (private, bound to `SaveCommand`, an `AsyncRelayCommand`): Builds an `AppSettings` from the current
+editable properties, invokes the `onSave` callback and awaits it.
 
 - *Parameters*: None.
-- *Returns*: `void`.
+- *Returns*: `Task` — completes when the settings were saved (and `Saved` raised) or the reason they were not is shown;
+  it never faults for a rejected save.
 - *Postconditions*: `onSave` has been invoked with a new `AppSettings` reflecting the current
   property values, whose `Sources` are clones of the current rows in order and whose legacy
-  single-path field is empty; `Saved` has been raised
-  (`AgentControl-SettingsWindowViewModel-Save`).
+  single-path field is empty; once its task completed, `Saved` has been raised
+  (`AgentControl-SettingsWindowViewModel-Save`). While the task runs the window stays usable (the owner saves on a
+  worker thread) and `SaveCommand` is unavailable (`AsyncRelayCommand` refuses a second run and reports
+  `CanExecute` false), so a second click cannot save twice; `Saved` is not raised before the save completed, so the
+  window does not close early. An exception the command catches outside the expected rejection is shown in
+  `ErrorMessage` (redacted), never escaping to the UI thread.
 
 The returned `AppSettings.RecentRepos` is left as a fresh empty list and its `HasUserRepoOrder` marker is left at its
-default; callers (specifically `MainWindowViewModel.ApplySettings`) are responsible for preserving the authoritative
-recent-repos list - the user's repo order - and its marker, since this view model never owns or edits them.
+default; callers (specifically `MainWindowViewModel.ApplySettingsAsync`) are responsible for preserving the
+authoritative recent-repos list - the user's repo order - and its marker, since this view model never owns or edits
+them.
 
 **Dispose**: Cancels the folder checks still running and releases their cancellation source;
 the window calls it when it closes (`AgentControl-SettingsWindowViewModel-SourceList`).
@@ -151,8 +158,9 @@ a location embedding a
 credential (for example a URL with user information) or a Git source with unusable settings is not
 saved - `onSave` is not invoked, `Saved` is not raised, and `ErrorMessage` (shown in red in the
 window, and never containing the location) explains why. Any failure persisting the resulting
-`AppSettings` (e.g. `InvalidOperationException` from `SettingsStore.Save`) originates from the
-`onSave` callback, not from this view model. A failing folder check is not an error: the row
+`AppSettings` (e.g. `InvalidOperationException` from `SettingsStore.Save`, through the task of the `onSave`
+callback) originates from the callback, not from this view model: the window stays open with the redacted reason in
+`ErrorMessage` and `Saved` is not raised. A failing folder check is not an error: the row
 shows the source as missing.
 
 #### Dependencies
@@ -165,12 +173,13 @@ shows the source as missing.
   subsystem) — the add/edit dialog's view model and the list row support.
 - **IPackageSourceProvider** (`AgentPackageManagement` subsystem) — the type of the provider the
   optional factory creates for the connection test.
-- **RelayCommand** (`LauncherUI` subsystem, shared MVVM support) — backs the commands.
+- **RelayCommand**, **AsyncRelayCommand** (`LauncherUI` subsystem, shared MVVM support) — back the commands
+  (`AsyncRelayCommand` the Save command, so it is unavailable while the save runs).
 
 #### Callers
 
 - **MainWindow** (code-behind) — constructs `SettingsWindowViewModel` from
-  `MainWindowViewModel.Settings` with `onSave` bound to `MainWindowViewModel.ApplySettings` and the
+  `MainWindowViewModel.Settings` with `onSave` bound to `MainWindowViewModel.ApplySettingsAsync` and the
   provider factory bound to `MainWindowViewModel.CreateConnectionTestProvider`,
   when the user opens the Settings window.
 - **SettingsWindow** (code-behind) — subscribes to `EditorRequested` and `RemoveRequested` to

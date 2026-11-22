@@ -143,5 +143,44 @@ public class UtilitiesSubsystemTests
             }
         }
     }
+
+    /// <summary>
+    ///     Test the blocking-call guard as a whole, the way the tests use it: a blocking call made on a
+    ///     guarded thread is refused and recorded, the same call on another thread at the same time
+    ///     goes through, and once the guard ends the thread may make the call again.
+    /// </summary>
+    [Fact]
+    public void UtilitiesSubsystem_BlockingCallGuard_GuardedThreadRefusedOthersUnaffected()
+    {
+        // Arrange: a worker thread that makes the call once this thread is guarded
+        using var guarded = new ManualResetEventSlim();
+        Exception? workerRefusal = new InvalidOperationException("The worker did not run.");
+        var worker = new Thread(() =>
+        {
+            guarded.Wait();
+            workerRefusal = Record.Exception(() => BlockingCallGuard.ThrowIfGuarded("git status"));
+        });
+        worker.Start();
+        BlockingCallGuard.TakeViolations();
+
+        // Act: the call on the guarded thread and, meanwhile, on the worker
+        Exception? guardedRefusal;
+        IReadOnlyList<string> recorded;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            guarded.Set();
+            worker.Join();
+            guardedRefusal = Record.Exception(() => BlockingCallGuard.ThrowIfGuarded("git status"));
+            recorded = BlockingCallGuard.TakeViolations();
+        }
+
+        var afterGuard = Record.Exception(() => BlockingCallGuard.ThrowIfGuarded("git status"));
+
+        // Assert: refused and recorded only on the guarded thread, and only while it was guarded
+        Assert.IsType<BlockingCallOnGuardedThreadException>(guardedRefusal);
+        Assert.Equal(["git status"], recorded);
+        Assert.Null(workerRefusal);
+        Assert.Null(afterGuard);
+    }
 }
 

@@ -22,6 +22,8 @@ includes:
   - docs/reqstream/agent-control/launcher-ui/repo-group-header-view-model.yaml
   - docs/reqstream/agent-control/launcher-ui/group-name-view-model.yaml
   - docs/reqstream/agent-control/launcher-ui/dialog-behavior.yaml
+  - docs/reqstream/agent-control/launcher-ui/global-progress-view-model.yaml
+  - docs/reqstream/agent-control/launcher-ui/repo-refresh-queue.yaml
   - docs/reqstream/agent-control/package-credentials.yaml
   - docs/reqstream/agent-control/package-credentials/feed-origin.yaml
   - docs/reqstream/agent-control/package-credentials/session-credential-store.yaml
@@ -57,12 +59,14 @@ includes:
   - docs/reqstream/agent-control/git-integration/git-remote-client.yaml
   - docs/reqstream/agent-control/settings.yaml
   - docs/reqstream/agent-control/settings/settings-store.yaml
+  - docs/reqstream/agent-control/settings/settings-writer.yaml
   - docs/reqstream/agent-control/settings/repo-group-name.yaml
   - docs/reqstream/agent-control/logging.yaml
   - docs/reqstream/agent-control/startup.yaml
   - docs/reqstream/agent-control/startup/startup-options.yaml
   - docs/reqstream/agent-control/utilities.yaml
   - docs/reqstream/agent-control/utilities/path-helpers.yaml
+  - docs/reqstream/agent-control/utilities/blocking-call-guard.yaml
   - docs/reqstream/ots/xunit.yaml
   - docs/reqstream/ots/reqstream.yaml
   - docs/reqstream/ots/buildmark.yaml

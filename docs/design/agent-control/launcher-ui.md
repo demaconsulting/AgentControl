@@ -15,19 +15,30 @@ window, the settings window, the package-source editor window and the sign-in di
 `AsyncRelayCommand`, `ViewModelBase`, `PackageSourceIcons`, `PackageSourceItemViewModel`,
 `SelectPackageSourceViewModel`, `AvaloniaCredentialPrompt`, `ConnectionTestResultKind`, `RepoCardStatus`,
 `CardColorPalette`, `ThirdPartyDependencies`, `ColorPalettePanel`), the shared theme resources and styles
-(`AppStyles.axaml`, included by `App.axaml`). The subsystem contains ten units: the six
+(`AppStyles.axaml`, included by `App.axaml`). The subsystem contains twelve units: the six
 view-model units `MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`,
-`SettingsWindowViewModel`, `SourceEditorViewModel` and `CredentialPromptViewModel`, and four further
+`SettingsWindowViewModel`, `SourceEditorViewModel` and `CredentialPromptViewModel`, and six further
 independently testable classes with behavior of their own, each with its own requirements, design, verification
 document and review set: `RepoImageLocator` (finds and decodes a repo's untrusted picture; security-relevant),
 `RepoGroupHeaderViewModel` (with `RepoGroupKind`; the header row of a repo-list section), `GroupNameViewModel` (the
-validating view model of the group-name prompt) and `DialogBehavior` (the keyboard behavior every dialog shares).
+validating view model of the group-name prompt), `DialogBehavior` (the keyboard behavior every dialog shares) and
+`GlobalProgressViewModel` (with `GlobalProgressOperation`; the progress strip under the app bar that shows bulk work -
+adding repositories, and refreshing the cards at start-up and after Settings are saved - with Cancel for an add) and
+`RepoRefreshQueue` (the one queue every lazy read of a repo's state goes through - the cards' start-up reads, the
+folder checks of an add, the cards' refresh after a settings save, the working-tree checks of the cards shown, and the
+reads of Refresh, Pull and the card actions - so at most two run at once across all of them).
 
 **Supporting types.** The remaining types are documented here, as supporting types of the subsystem, rather than as
 units: the `RelayCommand`/`ViewModelBase`/`PackageSourceItemViewModel`-style MVVM plumbing and the `.axaml` Views are
 declared glue with no logic of their own to verify apart from the units that bind them; `RepoCardStatus`,
 `ConnectionTestResultKind` and `CardColorPalette` are small enumerations and static tables belonging to the card view
-model; `AsyncRelayCommand` and `ThirdPartyDependencies` have dedicated test files
+model; `BackgroundWorkRunner.cs` (`IBackgroundWorkRunner` and its application implementation
+`ThreadPoolBackgroundWorkRunner`, a stateless `Task.Run` wrapper with one shared `Instance`) is the seam through which
+`RepoRefreshQueue` runs the blocking file-system and git reads of `MainWindowViewModel` and `RepoCardViewModel` off
+the UI thread; it has
+no logic of its own, and the tests replace it with `GatedBackgroundWorkRunner` (a test helper that holds every piece
+of work at a gate until released) to prove the callers stay free while the work runs;
+`AsyncRelayCommand` and `ThirdPartyDependencies` have dedicated test files
 (`AsyncRelayCommandTests.cs`, `ThirdPartyDependenciesTests.cs`) because each is independent of any Avalonia control;
 and the pure display helpers - the value converters `FavoriteIconConverter`, `AgentToolKindDisplayNameConverter` and
 `ThemePreferenceDisplayNameConverter` (each maps one value to its display text or glyph; the last two have their own
@@ -62,7 +73,8 @@ collapsed sections.)
 - *Type*: In-process .NET observable collection (data-bound to `MainWindow`'s `ListBox`, which picks the
   header or the card template by row type).
 - *Role*: Provider.
-- *Contract*: Reflects `AddRepos`/`RemoveRepo` mutations, `FilterText` changes, grouping changes and repo
+- *Contract*: Reflects `EnqueueAddReposAsync`/`AddRepos`/`RemoveRepo` mutations, `FilterText` changes, grouping
+  changes and repo
   order. The order is the user's own, never the launch time: with no repo in a group it is flat - favorites
   first, then the other repos in the order the user keeps them in (a new repo at the end, Move and drag reorder it).
   Once a repo is in a group it is sectioned - Favorites (a favorite only
@@ -132,9 +144,11 @@ selection.
 - *Type*: In-process .NET `ICommand`.
 - *Role*: Provider.
 - *Contract*: Invokes an `onSave` callback with the current property values, including the
-  edited list of package sources, and raises `Saved`, letting
-  `MainWindowViewModel.ApplySettings` persist the change and invalidate the cached package
-  data of every edited or removed source (`AgentControl-LauncherUI-Settings`). Whenever the Settings window
+  edited list of package sources, waits for its task without blocking the window (the command is unavailable until
+  then), and raises `Saved` once it completed, letting
+  `MainWindowViewModel.ApplySettingsAsync` persist the change in the background and invalidate the cached package
+  data of every edited or removed source (`AgentControl-LauncherUI-Settings`,
+  `AgentControl-LauncherUI-SettingsApplyResponsive`). Whenever the Settings window
   closes, saved or not, `MainWindow` calls `MainWindowViewModel.RecheckAfterSettingsClosed(settingsSaved)` with
   whether `Saved` was raised, which re-checks the cards that show a source problem or a failed upgrade check
   when nothing was saved and starts nothing after a save (`AgentControl-LauncherUI-SettingsClosedRechecksProblems`).
@@ -181,15 +195,53 @@ a NuGet source's editor and the "Forget saved sign-in" action of a server source
   (`AgentControl-LauncherUI-ForgetSavedSignIn`).
 - *Constraints*: The fingerprint is saved normalized, and only while signatures are required.
 
+**Global progress strip** (`MainWindowViewModel.GlobalProgress`, a `GlobalProgressViewModel`): the strip directly under
+the app bar that shows bulk work not tied to one card - adding repositories, and refreshing the cards at start-up and
+after Settings are saved.
+
+- *Type*: In-process .NET bindable properties and an `ICommand`, bound by `MainWindow.axaml` to a `Border`
+  (AutomationId `GlobalProgressStrip`, exposed to UI Automation as a content element, visible only while `IsActive`),
+  a 3-pixel `ProgressBar` (`GlobalProgressBar`,
+  indeterminate or with `Value` of `Maximum`, its accessible name the status text), a `TextBlock`
+  (`GlobalProgressText`) and a Cancel `Button` (`GlobalProgressCancelButton`, accessible name "Cancel adding
+  repositories", visible only while `CanCancel`).
+- *Role*: Provider.
+- *Contract*: Shows the most recently begun running bulk operation that can still be canceled or, when none can, the
+  most recently begun running one: "Adding repositories..." while the
+  folders of an add are counted, "Adding {completed} of {total} repositories..." as each folder has been checked,
+  "Saving..." while the add saves (no Cancel then), and "Refreshing repositories {completed} of {total}..." while the
+  shared refresh queue reads the cards at start-up or after a settings save (no Cancel). A single card's Refresh,
+  Pull or action shows on its card, not in the strip. Cancel stops the running add and every queued
+  add before anything is saved or added, with no message afterwards; an add stays shown, with its Cancel, while the
+  cards refresh after a settings save, and the refresh is shown once the add has ended or was canceled
+  (`AgentControl-LauncherUI-GlobalProgress`, `AgentControl-LauncherUI-AddCancel`).
+- *Constraints*: Fully collapsed when idle, so the idle window is unchanged; the strip, its text and its bar use
+  the theme brushes `GlobalProgressStripBackground`, `GlobalProgressTextForeground`, `GlobalProgressForeground` and
+  `GlobalProgressTrack`, defined for both themes and checked for contrast.
+
+**MainWindowViewModel.AddSaveFailed** (with `SettingsSaveRetryRequest`): asks the view what to do when the settings
+could not be saved at the end of a background add.
+
+- *Type*: In-process .NET event whose argument carries the message and a `Task<bool>` answer.
+- *Role*: Provider (the view answers).
+- *Contract*: `MainWindow` shows the message - what failed, why (secrets redacted) and what Retry and Discard do - in
+  the modal `ConfirmationWindow` with the buttons **Retry** and **Discard** and answers with
+  `SettingsSaveRetryRequest.Respond`: Retry saves the add again, Discard gives it up and leaves the list as saved
+  (`AgentControl-LauncherUI-AddSaveFailureChoice`). The first answer wins.
+- *Constraints*: Discard is the focused default, and Escape, closing the dialog, a failure to show it, or no
+  subscriber at all count as Discard, so nothing is retried without the user asking and the add never waits for
+  ever.
+
 ### Design
 
 `MainWindowViewModel` owns the `ObservableCollection<RepoCardViewModel>` backing the
 recent-repos list; on construction it creates one `RepoCardViewModel` per `RecentRepo` in the
-loaded `AppSettings`. It exposes `AddRepos` (and the single-folder `AddRepo`/`AddRepoToGroup`) and `RemoveRepo` (each
-saved through `SettingsStore` before it takes effect, see
-*Transactional persistence* below), a `FilterText` property driving `DisplayedRepoCards`/`DisplayedItems`, and
-`ApplySettings`
-(invoked when `SettingsWindowViewModel` reports `Saved`), which persists the new settings
+loaded `AppSettings`. It exposes `EnqueueAddReposAsync` (the background, queued add the window uses), `AddRepos` (the
+same add, synchronous, and the single-folder `AddRepo`/`AddRepoToGroup`, each saved before it takes effect) and
+`RemoveRepo` (applied at once and saved in the background, see *Background persistence* below), a `FilterText`
+property driving `DisplayedRepoCards`/`DisplayedItems`, and
+`ApplySettingsAsync`
+(the Settings window's `onSave`), which persists the new settings in the background
 while preserving the existing recent-repos list (and its order), the collapsed sections and the group colors and order,
 and invalidates the shared
 `PackageVersionCache` for each package source that was edited or removed.
@@ -220,11 +272,11 @@ outcome of the last Launch/Pull/Upgrade action (`StatusMessage`) is shown
 under the repo path; a repo whose folder is missing offers no upgrade; the Launch button is labeled with a
 short name of the configured agent tool
 (falling back to plain "Launch" for a long or unknown name) and Git Pull is an item of the card's "..." menu
-(`AgentControl-LauncherUI-RepoCardChips`). A lightweight `RefreshCheap` path (branch
-resolution, cached committed-files badge, pin and source problem - it never reads a package
-source) is kept separate from the full `Refresh` path (which also
-checks working-tree cleanliness) so the main window's frequent UI refresh does not eagerly invoke a
-git subprocess for every card. Removal never mutates state directly: `RemoveCommand` raises
+(`AgentControl-LauncherUI-RepoCardChips`). A lightweight read of the card's *cheap facts* (folder, pin, branch,
+cached committed-files badge and source problem - it never reads a package source) is kept separate from the
+working-tree check (`git status`, which scans the whole tree), and both run through the shared refresh queue off the
+UI thread (see *Background work and the global progress strip*); only the full `Refresh` reads both and then checks
+the package sources. Removal never mutates state directly: `RemoveCommand` raises
 `RemoveRequested` and `MainWindowViewModel` shows a `ConfirmationWindow`, removing the card only if
 the user confirms (`AgentControl-LauncherUI-RemoveRepo`).
 
@@ -235,12 +287,12 @@ card's own changes are saved, see below), subscribes to the card events that cha
 launch never moves a card); the window's code-behind subscribes to
 the events that need a dialog.
 
-- *`RepoCardViewModel` and `RepoImageLocator`*: the card is the only caller. `RefreshCheap` starts the picture
-  refresh on a worker thread, which calls `RepoImageLocator.Find` for the repo's root and, when the returned
+- *`RepoCardViewModel` and `RepoImageLocator`*: the card is the only caller. Applying the card's cheap facts starts the
+  picture refresh on a worker thread, which calls `RepoImageLocator.Find` for the repo's root and, when the returned
   `RepoImageFile` differs from the one already shown, decodes it (`RepoImageLocator.Decode` by default; the decoder is
   an injectable delegate so tests need no Avalonia platform). The `RepoImageFile` is the cache key, the card owns and
-  disposes the `Bitmap` it publishes in `RepoImage`, and `Retire` clears it. The locator knows nothing of cards;
-  any failure reaches the card as "no picture".
+  disposes the `Bitmap` it publishes in `RepoImage`, and `Retire` clears it. The locator knows nothing of cards; any
+  failure reaches the card as "no picture".
 - *`MainWindowViewModel` and `RepoGroupHeaderViewModel`*: the main view-model creates, and keeps one instance per
   section (Favorites, each group, Ungrouped), and updates its `Count`, collapsed state, toggle availability, group
   color (`UpdateColor`) and move availability (`UpdateOrder`) in place
@@ -249,25 +301,40 @@ the events that need a dialog.
   save through `SettingsSaveFailed`); `RenameRequested`, `RemoveGroupRequested` and
   `AddRepoRequested` it forwards, with the group's name, as its own `GroupRenameRequested`, `GroupRemoveRequested` and
   `GroupAddRepoRequested` events, to which `MainWindow` responds with a prompt, a confirmation or the folder picker and
-  then calls `RenameGroup`/`RemoveGroup`/`AddRepos`. The header's **Group color...** item needs no request: the window
+  then calls `RenameGroup`/`RemoveGroup`/`EnqueueAddReposAsync`. The header's **Group color...** item needs no
+  request: the window
   opens the group palette and calls `MainWindowViewModel.SetGroupColor` with the color chosen. The header holds no
   settings and no reference to the main view-model.
 - *Add repositories*: `MainWindow.AddRepoAsync(viewModel, groupName)` is the one add-repo flow, shared by the
   top-bar `AddRepoButton` (no group) and the group header menu's **Add repository...** (the header's group): it asks
   for folders through the native folder picker with several folders allowed (`AllowMultiple`; a replaceable seam,
   `RepoFolderPicker`, a `Func<Task<IReadOnlyList<string>>>` that tests answer with paths, or with an empty list for a
-  cancel), does nothing at all when the picker is cancelled, calls `MainWindowViewModel.AddRepos` with the paths and
-  the group, and shows the text of `MainWindowViewModel.DescribeAddOutcomes`, if any, in a message box
-  (`AgentControl-LauncherUI-AddSeveralRepos`, `-AddRepoSummary`). Every folder goes through the same private add
-  (`AddRepoCore`: the path must be a folder, a repo already listed is not added twice, the folder must be the top
-  folder of a Git repository - `GitClient.IsRepositoryRoot`, a `.git` folder or file directly in it - pin loaded, saved
-  once, then listed), which, given a group, stores the group on the new entry before it is saved
+  cancel), does nothing at all when the picker is cancelled, calls `MainWindowViewModel.EnqueueAddReposAsync` with the
+  paths and the group, and - unless the add was canceled - shows the text of
+  `MainWindowViewModel.DescribeAddOutcomes`, if any, in a message box
+  (`AgentControl-LauncherUI-AddSeveralRepos`, `-AddRepoSummary`). Every folder goes through the same checks (the path
+  must be a folder, a repo already listed is not added twice, the folder must be the top
+  folder of a Git repository - `GitClient.IsRepositoryRoot`, a `.git` folder or file directly in it - pin loaded), and
+  the batch is saved once and then listed; given a group, the group is stored on the new entries before they are saved
   (`AgentControl-LauncherUI-AddRepoGitRootOnly`). For a repo that is already listed the add into a group instead moves
-  the existing entry with `RepoCardViewModel.MoveToGroup` and the message says so (`AddRepoResult.MovedExisting`); the
-  plain add keeps refusing it. A collapsed target group is expanded once so the new cards are visible. The favorites
+  the existing entry into the group, at the bottom of its section, in the same save, and the message says so
+  (`AddRepoResult.MovedExisting`); the plain add keeps refusing it. A collapsed target group is expanded in the same
+  save so the new cards are visible. The favorites
   and ungrouped headers have no "..." menu, so the item is offered on the user's own groups only
   (`AgentControl-LauncherUI-GroupAddRepository`). Folders dropped from the file manager use the same view-model calls
-  (see *Adding repos by dropping folders*).
+  (see *Adding repos by dropping folders*); how the add stays off the UI thread is described under *Background work
+  and the global progress strip*.
+- *`MainWindowViewModel` and `GlobalProgressViewModel`*: the main view-model creates one `GlobalProgressViewModel`
+  (`GlobalProgress`) and is its only caller: `Begin` for a session of adds (with `CancelAddRepos` as the cancel action)
+  and for each wave of counted reads of the shared refresh queue (no cancel action), reporting through the returned
+  `GlobalProgressOperation` and disposing it when the work ends.
+- *`MainWindowViewModel`, `RepoCardViewModel` and `RepoRefreshQueue`*: the main view-model creates one
+  `RepoRefreshQueue` on the UI thread (so the queue posts its progress there), hands it to every card it creates,
+  queues the folder checks of its adds on it, turns its progress into the strip's "Refreshing repositories ..." and
+  disposes it when the window closes. A card queues its own cheap facts and working-tree checks on it
+  (`RefreshRepoStateAsync`), raises their priority when it is shown (`PrioritizeRepoState`) and gives up its waiting
+  reads when it is retired. The window binds the strip to it and its Cancel
+  button to `CancelCommand`; the progress view model knows nothing of repos.
 - *`GroupNameViewModel` and `GroupNameWindow`*: neither the card nor the main view-model creates the prompt; the
   window's code-behind does, when `RepoCardViewModel` raises `NewGroupRequested` (with the card's existing group
   names) or the header's rename is forwarded (with the group's name as the name being renamed), and shows
@@ -301,30 +368,167 @@ the events that need a dialog.
   `ThemePreferenceDisplayNameConverter` is used by the Settings window's theme picker to show a `ThemePreference`
   under a friendly name; the persisted value stays the enum member.
 
-**Transactional persistence.** Every change the user makes in the main window is saved before it takes effect, so
-memory, the list and the settings file never disagree. `MainWindowViewModel.CommitSettingsChange` tries the change on
-a candidate copy of the settings (`CreatePersistedCopy`, with the repos cloned by `RecentRepo.Clone` and the collapsed
-list, the group colors and the group order copied), saves the candidate with `SettingsStore.Save`, and only when that
-succeeded applies the same change to
-the live settings; then the list is refreshed (candidate copy, save, commit, refresh). After the change, on the
-candidate and on the live settings alike, `AppSettings.RepairGroupSettings` drops the color and position of a group
-that no repo is in any more (`AgentControl-LauncherUI-GroupSettingsKeptInStep`). A change made on a card -
-`IsFavorite`, `MoveToGroup`, `SetCardColor`, and the launch timestamp - reaches this through the card's
-`commitChange` callback (`MainWindowViewModel.CommitRepoChange`), which returns whether the change was saved: when it
-was not, the card property keeps its value (the two-way bound star is told to read it again),
-`MoveToGroup`/`SetCardColor` return `false`, and the main view-model raises `SettingsSaveFailed` with the message
-for the user, which `MainWindow` shows in a message box. A collapse toggle from a header is reported the same way, and
-so are `SetGroupColor`, `MoveGroup` and `DropGroup`, which return `false`.
-`RemoveRepo`, `ToggleGroupCollapsed`, `RenameGroup` and `RemoveGroup` instead throw
-`InvalidOperationException` when the save fails, having changed nothing, and the window's code-behind shows it in a
-message box; `AddRepos` reports a folder that could not be saved in its outcome and goes on with the next one. A
-failed save therefore leaves the live settings, the cards, the displayed list and the file as they
-were, and a later unrelated save can never write the failed change. `ApplySettings` follows the same rule for the
-Settings window's values: it saves them and adopts them only after that. When a repo is removed, `RemoveRepo` saves
-the removal and then calls `RepoCardViewModel.Retire`: the card cancels its running operation, ignores the results of
-upgrade checks and picture loads still in flight, clears all its events (so nothing it still does can show an error
-box, release notes or a prompt), and disposes its picture; `MainWindow` detaches its per-card handlers when a card
-leaves `RepoCards` and forgets its bookkeeping for it.
+**Background persistence.** Every change the user makes in the main window is applied at once and saved in the
+background, so the window never waits for the settings file, which another program (a virus scanner, an indexer, a
+sync client) can hold for up to a second (`AgentControl-LauncherUI-ChangeAppliedWhenSaved`).
+`MainWindowViewModel.CommitSettingsChange` applies the change to the live settings, runs
+`AppSettings.RepairGroupSettings` (which drops the color and position of a group that no repo is in any more,
+`AgentControl-LauncherUI-GroupSettingsKeptInStep`), and hands a snapshot of the live settings
+(`AppSettings.CreateSnapshot`) to the `Settings` subsystem's `SettingsWriter`, which writes the newest snapshot on a
+worker thread a moment after the last change, one write at a time; then the list is refreshed. A change made on a
+card - `IsFavorite`, `MoveToGroup`, `SetCardColor`, and the launch timestamp - reaches this through the card's
+`commitChange` callback (`MainWindowViewModel.CommitRepoChange`), which applies it and returns `true`. When a write
+fails, the change stays in effect - the settings in memory, the cards and the list - and is written with the next
+change or when the window closes (`AgentControl-LauncherUI-FailedSaveChangesNothing`); the writer reports the first
+failure of a streak, and the main view-model raises `SettingsSaveFailed` with a message saying why and that the
+changes stay in effect, which `MainWindow` shows in a message box it does not wait for - once per failure streak, not
+for every click (`AgentControl-LauncherUI-FailedSaveReported`). The changes that must be on disk before they are
+applied - an add, and the Settings window's values (`ApplySettingsAsync`) - are confirmed saves of the same writer,
+made on a worker thread: they are applied only once written, and a failure changes nothing and reaches their caller -
+`AddRepos` reports every folder that would have been added or moved as not saved, the background add asks the user
+through `AddSaveFailed` whether to retry or discard (see *Background work and the global progress strip*), and the
+Settings window stays open with the reason. A change made in the window while a confirmed save runs is applied at once
+and written after it, together with it, so the file never loses either. When the window closes,
+`MainWindowViewModel.Dispose` writes what is not written yet, on a worker thread, waiting at most five seconds; a
+change made while an add was still saving at the close is written together with the add once the add's write
+succeeded, and left out (and logged) when the add's write is still running after the wait, so the close never takes
+the add out of the file again. When a
+repo is removed, `RemoveRepo` applies and schedules the removal and then calls `RepoCardViewModel.Retire`: the card
+cancels its running operation, ignores the results of upgrade checks and picture loads still in flight, clears all its
+events (so nothing it still does can show an error box, release notes or a prompt), and disposes its picture;
+`MainWindow` detaches its per-card handlers when a card leaves `RepoCards` and forgets its bookkeeping for it.
+
+**Background work and the global progress strip.** Reading the cards at start-up, adding folders, refreshing the cards
+after a settings save and checking the working tree of the cards read the disk and run git for every repo; done on the
+UI thread for many repos they froze the window (`AgentControl-System-ResponsiveRepoListWork`). The rule is: blocking
+reads run off the UI thread through the shared `RepoRefreshQueue` (owned by `MainWindowViewModel` and handed to every
+`RepoCardViewModel`), which runs at most two of them at a time through `IBackgroundWorkRunner`
+(`ThreadPoolBackgroundWorkRunner.Instance` in the application), they only read and return immutable records
+(`RepoFolderFacts`, `RepoCheapFacts`, a working-tree answer), and every change to view-model state, the settings and the
+list happens on the UI thread in the continuation of the `await` (which resumes on Avalonia's synchronization context).
+The view models never touch the dispatcher and need no locking; the only shared mutable object a worker thread touches,
+the per-card `CommittedAgentFilesCache`, is lock-guarded (`AgentControl-GitIntegration-QueriesFromAnyThread`).
+
+- *One shared queue* (`AgentControl-LauncherUI-BoundedRepoReads`): every lazy repo read - the cards' startup reads, an
+  add's folder checks, the cards' refresh after a settings save, the working-tree check of a card shown, a re-added
+  repo's facts, the repo state of a Refresh (and of the "Sign-in needed" chip), of a Pull and after an untrack, and the
+  read an action waits for - goes through `RepoRefreshQueue` instead of starting its own tasks, so
+  the number of git processes is independent of the number of repos and callers. The limit is two: one read is at
+  most one git process; two keep the work moving when one repo is slow (a network share, a huge tree, a git that hangs
+  until its time limit), more would only compete for the same disk. A read already waiting for the same repo and kind
+  is joined, not queued again; a user action goes before a card on screen, which goes before background work; a card
+  shows that it is refreshing (`RepoCardViewModel.IsRefreshing`) while one of its reads waits or runs. The total
+  process budget without a user action is the queue's two reads plus the upgrade checks' one shared limit of four
+  source reads (each at most one git process for a Git source; see *Upgrade checks* below); a user action adds at most
+  one process per busy card.
+- *Start-up* (`AgentControl-LauncherUI-StartupCardsAtOnce`): the `MainWindowViewModel` constructor builds the cards from
+  the settings alone - no disk access and no git - so the window appears at once; the pinned package the settings
+  remember is shown until the pin file is read (even that read can take tens of seconds on an offline share). The
+  constructor then queues every card's cheap facts at background priority, in display order (the cards shown, top first,
+  then the collapsed and filtered-out ones), counted in the progress wave, so the strip shows "Refreshing repositories
+  {completed} of {total}..." without Cancel. A card the window realizes moves its read ahead of the background ones
+  (`Visible`), and its working-tree check follows; the list only realizes the rows it shows, so "visible first" comes
+  from the realized rows and the display order without tracking the scroll position. The only work left before the
+  window exists is loading the settings file (with a one-time order seeding save), creating the log folder and the
+  credential profile check: one small local file or folder each, needed to build the window.
+- *The card's refreshing state* (`AgentControl-LauncherUI-RefreshingCardState`): until a card's cheap facts were first
+  applied (`RepoCardViewModel.HasRepoState`), the card knows nothing git-derived, so it does not show it as a fact: its
+  status is `Refreshing` (grey accent, "Refreshing" for screen readers), its branch chip shows a dimmed `...`
+  (`ShowBranchChip`, `BranchChipText`, `IsBranchUnknown` with the `Chip.unknown` style), the "No agent package" chip
+  and the committed-files warning are hidden, and the working tree is "not checked yet". The italic "refreshing..."
+  indicator (`RepoRefreshingText`, next to "checking for updates...") is shown while any of the card's reads waits or
+  runs. A later re-read keeps the known values with the indicator next to them, so the accent does not flicker.
+- *Actions wait for the card's state* (`AgentControl-LauncherUI-ActionWaitsForCardState`): Launch, Pull, Upgrade and
+  Select Package (the apply) take the card's busy row first, then promote the card's waiting reads to the front of the
+  queue and await them (`EnsureCurrentRepoStateAsync`; a card whose state was never read reads it now), and decide
+  again on what was found: a missing folder, a working tree git now reports dirty (Pull) or a pin other than the one
+  shown (Upgrade) stops the action with a status message. A card whose state is known and has nothing pending acts at
+  once, with no git round trip of its own. This was chosen over re-reading on every action (an extra git call per
+  click for state that is current) and over refusing the action until the state is known (the user would have to
+  click again): the window is never blocked, the wait is bounded by the reads already running and git's time limit,
+  and no action uses unknown or stale-pending data. The launch-time committed-files decision and the pre-launch sync
+  therefore see the card's fresh state. Because the card is busy meanwhile, the background upgrade checks skip it.
+- *Refresh and Pull through the queue* (`AgentControl-LauncherUI-RefreshThroughQueue`): a card's Refresh (the menu
+  item and the "Sign-in needed" chip) reads its cheap facts and working tree through the queue at `UserAction`
+  priority - ahead of background work, joined with a read of the card that already waits - and only then checks the
+  package sources (allowing the sign-in prompt); a missing folder reads its cheap facts first, so a folder that came
+  back is also checked for its working tree. The refresh after a Pull (and the working-tree check after a canceled
+  one) and the re-read of git's answers after the card untracked agent folders go through the queue the same way,
+  while the card is still busy. No git runs on the UI thread for any of them.
+- *Upgrade checks*: every background upgrade check (start-up, added repos, after Settings, the periodic round) waits
+  for the card's pending cheap-facts read before it takes a slot, because applying cheap facts makes a check in flight
+  irrelevant (it was started against the old pin); the slots are one `SemaphoreSlim` of four shared by all of these
+  checks, so overlapping checks do not multiply the source reads. The busy-card skip is unchanged: whether a card is
+  busy is read right before its check starts, with no await in between; the periodic round and the re-check after
+  Settings also skip a card whose state was never read.
+- *Regression guard*: `BlockingCallGuard` is switched on for the headless test session's UI thread
+  (`HeadlessTestApp`), so a git command (`GitClient`) made on the UI thread fails the test that made it; the
+  synchronous `RefreshCheap`/`RefreshDirtyStatus` remain only for callers off the UI thread (tests), and the
+  synchronous test-only adds (`AddRepo`, `AddRepoToGroup`, `AddRepos`) check only the folder and leave the card's
+  state to the queue.
+- *A git that hangs* (`AgentControl-LauncherUI-GitTimeoutShown`): every git command runs under a time limit
+  (`GitClient`, 60 seconds for the local repository); a command past it is stopped and the card's status message says
+  that git did not answer and was stopped, that the repo's Git state is unknown and that Refresh tries again, until a
+  later read gets an answer. Closing the window disposes the queue, which stops the git that is still running.
+
+- *The add pipeline* (`AgentControl-LauncherUI-AddReposResponsive`): `EnqueueAddReposAsync` validates the group name
+  at once, then runs `AddReposAsync`: (1) **plan** on the UI thread - blank and repeated paths dropped, which folders
+  are already listed noted, the git executable resolved; (2) **inspect** each folder through the shared queue (kind
+  `FolderInspection`, priority `Visible`, the add's cancellation as the requester's; `InspectFolder`: exists, a file,
+  the top folder of a Git repository and, for a Git root not yet listed,
+  `RepoCardViewModel.ReadCheapFacts` - its pin, branch, `HEAD` and committed agent folders), the strip counting the
+  folders checked; (3) **commit** on the UI thread (`PrepareAddCommit` then `ApplyAddCommit`): every folder is checked
+  again against the list as it is now - a repo listed meanwhile is not added twice, a repo removed meanwhile is added
+  again (its card's facts read in the background), a target group removed meanwhile
+  is created again by the add, because the user asked for that group - and one deterministic settings change appends
+  the new entries, moves listed repos into the group at the bottom of their section and opens a collapsed target
+  group; it is saved once through the transactional change, and only then are the new cards created from the facts
+  already read (no git call on the UI thread), put in the stored order and the list rebuilt once; the new cards'
+  upgrade checks start in the background. The working tree of a new repo is not checked by the add; its card shows
+  its Git status as not checked yet until the card is first shown (see below). The other list operations (filter,
+  collapse, color, reorder, remove, rename) stay enabled during an add, because the commit is atomic and re-checks
+  the live state.
+- *Queue and Cancel* (`AgentControl-LauncherUI-AddQueued`, `AgentControl-LauncherUI-AddCancel`): each request is
+  chained after the previous one (`PendingAddRepos`), so adds never run at the same time. Requests made while adds
+  run join one session with one progress operation and one `CancellationTokenSource`; Cancel (the strip's button,
+  `CancelAddRepos`) cancels the running add and every queued add of the session before they commit, and nothing is
+  saved, added or reported. A request made after a cancel starts a new session. Once an add is saving, Cancel is
+  hidden ("Saving..."), and the save completes. Closing the window cancels the adds that have not saved.
+- *A failed save* (`AgentControl-LauncherUI-AddSaveFailureChoice`): the commit raises `AddSaveFailed` with a
+  `SettingsSaveRetryRequest` and waits for its answer; Retry prepares the commit again against the list as it is then
+  and saves again; Discard (or no subscriber, a closed window, Escape) reports the folders that would have been added
+  or moved as not saved; Retry saves again and asks again each time that save fails. Because the add is applied only
+  once saved, nothing has to be undone: memory, the cards and the list are as they were before the add, including the
+  group, place and collapsed state of repos the add would have moved.
+- *Settings refresh* (`AgentControl-LauncherUI-SettingsApplyResponsive`): `ApplySettingsAsync` saves the new settings
+  with a confirmed save of the settings writer on a worker thread (the Settings window's Save button is unavailable
+  meanwhile and the window stays usable) and adopts them once saved, then cancels the upgrade check and periodic round
+  that were running and starts
+  `RefreshCardsAfterSettingsAsync` as `PendingRefresh`: each card's cheap facts through the shared queue at background
+  priority, the cards shown first (`RefreshRepoStateAsync` with `reportsProgress`), and, for a card whose folder came
+  back or every present card when the git executable changed, its working tree, with "Refreshing repositories
+  {completed} of {total}..." in the strip (the queue's progress wave) and no Cancel; then one list rebuild and the
+  upgrade check against the new sources. A newer settings save supersedes an
+  older refresh, which then neither rebuilds nor starts the upgrade check.
+- *Working-tree checks* (`AgentControl-LauncherUI-GitStatusInBackground`): the first time a card's row is attached
+  to the visual tree (priority `Visible`, and the card's other waiting reads are promoted), after a Refresh and after
+  a Pull (also a canceled one), the card runs `git status` through the shared queue (`RefreshRepoStateAsync`); until it
+  answers the card keeps its previous state, and a card never
+  checked shows its Git status as not checked yet, never as having uncommitted changes.
+- *Package work* (`AgentControl-LauncherUI-PackageWorkNeverBlocks`): a card's actions never wait for the disk, a process
+  or a package hash on the UI thread. The sources the cards and the Select Package dialog ask come from
+  `PackageSourceRegistry.Create`, whose providers run on the thread pool and hand over packages whose identity is
+  already computed; the card computes the identity on a worker itself for a source that does not. The pin reads and
+  writes, the `.gitignore` and release notes of an apply, the managed-folder check before a launch, the AGENTS.md
+  check and answer, and the shell detection and start of the agent tool run through the card's background-work runner
+  (see the `RepoCardViewModel` design). The source editor runs its connection test, its "Forget saved sign-in" and its
+  credential-helper question on workers and asks that question only once the typed address has stayed unchanged for a
+  short delay (see the `SourceEditorViewModel` design). The headless tests guard the UI thread, so a pin read, a hash,
+  an extraction or a git start that slips back onto it fails them.
+- *The strip*: `GlobalProgressViewModel` (see its design) shows one operation at a time - the most recently begun
+  running one that can still be canceled, otherwise the most recently begun running one - so an add started while the
+  cards refresh is shown, and the refresh again when the add ends; and a refresh that starts during an add (after a
+  settings save) does not take the add's Cancel away: the refresh is shown once the add has ended or was canceled.
 
 `SelectPackageWindowViewModel` backs the package-selection dialog opened from a card's **Select Package...** (a repo
 with no pin) or **Change package...** (a repo with a pin). It shows three columns - source, package, version. For Change
@@ -413,7 +617,7 @@ itself because every automatic check never prompts. Every other failure of that 
 check (`AgentControl-LauncherUI-SignInNotGivenKeepsChip`). A
 sign-in made with the Settings window's Test connection is kept in the session's credential store the cards share,
 so when the Settings window closes, `MainWindow` calls `MainWindowViewModel.RecheckAfterSettingsClosed`, passing
-whether `SettingsWindowViewModel.Saved` was raised: after a save it starts nothing (`ApplySettings` has already
+whether `SettingsWindowViewModel.Saved` was raised: after a save it starts nothing (`ApplySettingsAsync` has already
 started the check of every card), otherwise it re-checks in the background - the same never-prompting check,
 alongside any check that is running - only the cards that are not busy, not missing, pinned, and show a source
 problem or a failed upgrade check, so the sign-in (or a connection that came back) shows on them at once
@@ -450,7 +654,8 @@ are not literally Yes and No, keeping the AutomationIds, the focus on the declin
 to offer a package's optional root-level `AGENTS.md` template
 when the repo has none of its own: `MainWindow` subscribes to
 `AgentsMdTemplateOfferRequested`, shows `ConfirmationWindow` with explanatory text, and calls
-back into `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` depending on the user's answer
+back into `AcceptAgentsMdTemplateAsync`/`DeclineAgentsMdTemplateAsync` (which write off the UI thread) depending on
+the user's answer
 (`AgentControl-LauncherUI-AgentsMdTemplateOffer`). This mirrors the non-modal
 `ReleaseNotesViewer` pattern's event-raise/subscribe structure but intentionally uses a
 *modal* dialog instead, since this prompt requires an explicit yes/no decision before
@@ -568,13 +773,15 @@ dark) is a setting edited in the Settings window's Appearance picker (`ThemeComb
 `SettingsStore`. `App` maps it to an Avalonia theme variant (`ToThemeVariant`: `ThemeVariant.Default` for the
 system default, which makes Avalonia follow the operating system's light/dark setting live, otherwise
 `Light` or `Dark`) and applies it to the running application (`ApplyTheme`) before the main window is shown and
-again whenever `MainWindowViewModel.ApplySettings` has saved new settings (through an injected
+again whenever `MainWindowViewModel.ApplySettingsAsync` has saved new settings (through an injected
 `Action<ThemePreference>`, so the view model stays free of the UI framework), so every open window changes
 at once without a restart (`AgentControl-LauncherUI-Appearance`). Every color the application's own XAML uses
 lives in `AppStyles.axaml` as a resource in a `Light` and a `Dark` theme dictionary (surfaces, borders,
 shadows, the status accent colors, chip fills and text, button states, the avatar palette, the group accent palette
 (`GroupAccent0` ... `GroupAccent9`), the drag-and-drop
-indicator `RepoDropIndicator` and header highlight `RepoDropTargetBackground`, the About banner (`AboutBanner*`),
+indicator `RepoDropIndicator` and header highlight `RepoDropTargetBackground`, the About banner (`AboutBanner*`), the
+global progress strip (`GlobalProgressForeground`, `GlobalProgressTrack`, `GlobalProgressStripBackground`,
+`GlobalProgressTextForeground`),
 validation,
 caution and success text, the page background) consumed with `DynamicResource`; no template or setter holds a
 hard-coded color. Text colors were chosen for at least 4.5:1 contrast against the fill and surface they are
@@ -712,8 +919,10 @@ live in `MainWindowViewModel` and the window only translates input and shows fee
   ends. The operating system's drag is started through the `DragStarter` seam, whose default is
   `DragDrop.DoDragDropAsync`; as with the folder picker seam (`RepoFolderPicker`), a headless test supplies its own
   starter that records the data and then raises the drop events on the list. **Drop target**: the list is a drop target
-  (`DragDrop.AllowDrop`) with drag-enter, drag-over, drag-leave and drop handlers. The pointer is hit-tested to the row
-  it is over: over a card, the upper half of the row (`IsUpperHalf`) means "before that card" and the lower half "after
+  (`DragDrop.AllowDrop`) with drag-enter, drag-over, drag-leave and drop handlers. The row under the pointer is found
+  from the realized rows' layout bounds (`GetRowAt`, not a renderer hit test, so it is right straight after an
+  auto-scroll moved the rows): over a card, the upper half of the row (`IsUpperHalf`) means "before that card" and the
+  lower half "after
   it", giving a `RepoDropTarget.ForCard` with the card's section (`GetSectionOf`); over a section header,
   `RepoDropTarget.ForHeader` (no anchor: the end of that section). Drag-over asks `MainWindowViewModel.CanDrop` and
   answers `Move` or `None` as the drag effect; drop calls `MainWindowViewModel.DropCard`. A drag that does not carry
@@ -735,10 +944,35 @@ live in `MainWindowViewModel` and the window only translates input and shows fee
   `AppStyles.axaml` makes the matching indicator line visible (`dropAbove`, `dropBelow`) or tints the header
   (`dropHeader`, `RepoDropTargetBackground`). The line uses `RepoDropIndicator`; both resources are defined for the
   light and the dark theme and are checked for contrast by `ThemeResourceTests`. A refused place (the drag effect
-  `None`) shows no line, and neither does the dragged card's own row. When the pointer is within 24 pixels of the top
-  or bottom
-  of the list's scroll viewer the list scrolls a little per drag event (best effort), so a long list can be reordered
-  without dropping first.
+  `None`) shows no line, and neither does the dragged card's own row.
+- *Auto-scroll while dragging* (`AgentControl-LauncherUI-DragAutoScroll`): a drag of a card, a group header or folders
+  held near the top or bottom edge of the list, over the app bar above it (the `AppBar` border has `DragDrop.AllowDrop`
+  with drag-enter/over handlers that refuse the drop, effect `None`, and a drag-leave handler) or below it (the
+  `RepoListArea` margins) keeps the list scrolling, even while the pointer does not move. Every drag-over of the list,
+  the list area and the app bar calls `UpdateAutoScroll` with the drag's data and the pointer position relative to the
+  window: it remembers both and starts a `DispatcherTimer` (40 ms interval, 25 ticks a second) when the pointer is in a
+  scroll zone, never restarting a running timer (so frequent drag-over events do not starve its ticks), or stops it when
+  the pointer left the zones. Each tick (`AutoScrollTick`) recomputes the step for the remembered position, scrolls the
+  list's `ScrollViewer` by it within its extent (stopping at the top or bottom), lays the list out again and redraws the
+  drop feedback for whatever row is now under the pointer (`UpdateDragFeedback`, the same feedback a drag-over would
+  show). The step is the pure function `ComputeAutoScrollStep(pointerY, viewportHeight)`, with the pointer's height
+  relative to the viewport: the zone is `AutoScrollEdge` = 32 DIP inside each edge (half the viewport when it is shorter
+  than two zones, so the nearer edge wins) and extends beyond the edge; the depth into the zone is measured from its
+  inner boundary, and the step grows linearly from `AutoScrollMinStep` = 4 DIP per tick at the zone's boundary to the
+  cap `AutoScrollMaxStep` = 36 DIP per tick, reached at a depth of `AutoScrollEdge` + `AutoScrollOvershoot` (32 + 96 =
+  128 DIP) - from 100 to 900 DIP a second; negative scrolls up, 0 (the middle of the list, a non-positive or unknown
+  height) does not scroll, and a step or an offset change below `MinimumScrollDistance` (0.5 DIP) stops the timer.
+  Clearing the feedback is split: `HideDropFeedback` removes the line or tint only (used inside the drag-over paths,
+  where the drag goes on), while `ClearDropFeedback` also stops the auto-scroll (drag-leave, drop, the end of a card or
+  group drag). A drag-leave stops the auto-scroll only when the pointer really left the element (`IsInside` is false),
+  not when it moved from one row or child control to the next; leaving the window raises a drag-leave on the last
+  element and stops it. `IsAutoScrolling` exposes whether the timer runs, for tests. On Windows the `DispatcherTimer`
+  keeps ticking while the application's own card or group-header drag runs the operating system's modal OLE drag loop
+  (`DoDragDrop`) on the UI thread; a drag from File Explorer does not block the UI thread at all. The headless tests
+  call `AutoScrollTick` directly; the end-to-end UI tests that hold a real drag perfectly still at the list's bottom and
+  top edges (`RepoList_DragCardHeldStillAtBottomEdge_...`, `..._AtTopEdge_...`,
+  `RepoList_DragGroupHeaderHeldStillAtBottomEdge_...`) confirm the ticks, because only a tick can scroll the list while
+  the drag reports no movement.
 - *No reordering while filtering* (`AgentControl-LauncherUI-ReorderOffWhileFiltering`): while the filter box has text
   only some repos are shown, so their positions cannot be changed. `MainWindowViewModel.IsReorderEnabled` is then
   `false`: no drag starts, the **Reorder** submenu and its four Move items are disabled with the tooltip
@@ -798,10 +1032,12 @@ list's handlers answer every drag over the list; the `RepoListArea` handlers ans
 (files are added ungrouped there; any other data is refused with `None`). The platform raises a drag-leave and a
 drag-enter whenever the element under the pointer changes, so the handlers treat drag-enter like drag-over. The paths
 come from `IDataTransfer.TryGetFiles()` and `IStorageItem.TryGetLocalPath()` (falling back to `Path.LocalPath` of a
-`file` URI); items without a local path are left out. The drop calls `MainWindowViewModel.AddRepos` at once (so a
-dropped file is reported as not a Git repository, and every folder is checked like a picked one,
-`AgentControl-LauncherUI-AddRepoGitRootOnly`) and posts the message of `DescribeAddOutcomes`, if any, with
-`Dispatcher.UIThread.Post`, so no modal dialog opens inside the operating system's drag-and-drop loop
+`file` URI); items without a local path are left out. The drop is answered at once (Copy) and the add is posted to the
+UI thread with `Dispatcher.UIThread.Post`, which calls `MainWindowViewModel.EnqueueAddReposAsync` (queued after any
+add still running, checked in the background with progress in the strip; a dropped file is reported as not a Git
+repository, and every folder is checked like a picked one, `AgentControl-LauncherUI-AddRepoGitRootOnly`) and then
+shows the message of `DescribeAddOutcomes`, if any (nothing after a cancel), so neither the add nor a modal dialog runs
+inside the operating system's drag-and-drop loop
 (`AgentControl-LauncherUI-AddRepoSummary`). A drag of a card or a group header is never taken for folders, and folders
 are never taken for a card move (see *Telling drags apart*).
 
@@ -818,8 +1054,9 @@ it owns dialog-orchestration, view-layer plumbing that requires a live Avalonia 
 `RepoCardViewModel` event (`RemoveRequested`, `SelectPackageRequested`, `ReleaseNotesReady`,
 `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`, `CommittedFilesConversionRequested`,
 `AgentFilesChoiceRequested`, `ErrorOccurred`) and deciding which dialog/window to show and how to route the user's
-response back into the view model (e.g. calling `AcceptAgentsMdTemplate`/`DeclineAgentsMdTemplate` from the
-`ConfirmationWindow` shown for the AGENTS.md template offer). `AboutWindow` (opened via a toolbar command with no
+response back into the view model (e.g. awaiting `AcceptAgentsMdTemplateAsync`/`DeclineAgentsMdTemplateAsync` from the
+`ConfirmationWindow` shown for the AGENTS.md template offer, or answering `MainWindowViewModel.AddSaveFailed` from the
+Retry/Discard `ConfirmationWindow`). `AboutWindow` (opened via a toolbar command with no
 dedicated view model, as a modal dialog over the main window) is 600 wide, sizes its height to its content up to a
 `MaxHeight` of 640 and cannot be resized. Its root `Grid` has three rows. Row 0 is a banner across the top
 (`AboutBanner`, exposed to assistive technology as one content element named "AgentControl: A Desktop Launcher for
@@ -958,3 +1195,74 @@ supplies the repo's files (when known), its package and version; choosing the pi
 before the changed content replaces the files (`AgentControl-LauncherUI-ChangePackage`,
 `AgentControl-LauncherUI-ContentChangeConfirmation`). The Select Package dialog never replaces a choice the user made
 while the sources were loading with the repo's own source and package.
+
+### Design Constraints
+
+**Never block the UI thread** (`AgentControl-System-ResponsiveOperations`, `AgentControl-System-ResponsiveRepoListWork`,
+`AgentControl-LauncherUI-PackageWorkNeverBlocks`). Once the main window exists, the UI thread does no disk, process or
+network work of its own. It only changes view-model state, the settings in memory and the list, in the continuations of
+work that ran elsewhere. A slow disk, an offline network share, a hung git or a slow package server can therefore make
+a card wait, but never the window. The rule is met as follows:
+
+- *Repo state*: every read of a repo's folder, pin, branch, committed agent folders and working tree goes through the
+  one shared `RepoRefreshQueue` (`AgentControl-LauncherUI-BoundedRepoReads`). See *Background work and the global
+  progress strip* and the queue's own design.
+  - **Limit: two reads at a time** across all callers. One read is at most one git process or one burst of
+    file-system metadata reads. Two slots, not one, so that one slow repo (a network share, a huge working tree, a git
+    that hangs until its time limit) cannot stall the whole wave, or a user action that was moved up behind it. Two,
+    not more, because the reads compete for the same disk and the antivirus scan at each process start: more parallel
+    `git status` runs gain little and make the computer sluggish, the opposite of the goal.
+  - **Priorities**: `UserAction` (Refresh, the "Sign-in needed" chip, Pull, the re-read after an untrack, and the
+    read an action waits for) before `Visible` (a card the list realizes, an add's folder checks) before `Background`
+    (start-up and the refresh after Settings, in display order). First in, first out within a priority. A read
+    already waiting for the same repo and kind is joined, not queued again; `Promote` raises a waiting read's
+    priority.
+  - **Shutdown**: closing the window disposes the queue, which cancels the waiting reads and stops the running git.
+- *Git*: every `GitClient` command runs under a time limit (60 seconds for the local repository, 10 minutes for a
+  pull, then 10 seconds for the stopped process tree to exit). A command past its limit is stopped with its process
+  tree, and the card's status message says so (`AgentControl-LauncherUI-GitTimeoutShown`).
+- *Network upgrade checks* keep their own limiter: one `SemaphoreSlim` of four slots that every check shares
+  (start-up, added repos, after Settings, the periodic round), so overlapping checks do not multiply. A Git source
+  runs at most one git at a time per check. A check waits for its card's pending cheap-facts read before it takes a
+  slot.
+- *Process budget*: without a user action, at most the queue's 2 reads plus the 4 upgrade-check slots, so at most 6
+  processes, typically 2. A user action adds at most one process at a time per busy card, the settings writer one
+  write, and the dialogs' own work (listing a source, Test connection, the sign-in helper check) is paced by the user.
+- *No periodic local re-check*: there is no timer that re-reads local git state. The periodic round (every five
+  minutes, the package-version cache lifetime) runs the network upgrade checks only, through the shared limiter.
+- *Settings*: every save goes through the `Settings` subsystem's `SettingsWriter`
+  (`AgentControl-System-ListChangesKept`; see *Background persistence* and the writer's own design). A gesture's change
+  is applied at once and scheduled: the writer keeps only the newest snapshot (`AppSettings.CreateSnapshot`, a deep copy
+  taken on the UI thread) and writes it on a worker thread 300 ms after the last change, one write at a time. An add and
+  the Settings window's Save are confirmed writes (`SaveNowAsync`), applied only once written. A failed background write
+  is reported once per failure streak through a message box the window does not wait for, and the change is written
+  again with the next change and at the close. `MainWindowViewModel.Dispose` flushes what is not written yet, waiting at
+  most five seconds.
+- *Packages and sources*: every built-in provider that `PackageSourceRegistry.Create` builds is wrapped in
+  `BackgroundPackageSourceProvider`, which runs each call on the thread pool and computes a delivered package's
+  content identity there. `GitRemoteClient` and `GitCredentialClient` start git off the caller's thread. The card's
+  pin reads and writes, the extraction, the `.gitignore`, the release notes, the AGENTS.md offer and its answer, and
+  the launch (shell detection and the process start) run through `IBackgroundWorkRunner`. The source editor runs Test
+  connection and Forget saved sign-in in `Task.Run`, and checks a feed address for a Git credential helper 400 ms
+  after the typing stops, off the UI thread. A release-notes link is opened by a shell start on a worker thread.
+- *Exceptions*, each justified:
+  - Before the window exists: `SettingsStore.Load` (plus a one-time order-seeding save of an older file), creating
+    the log folder and the credential profile probe. Each is one small local file or folder, needed to build the
+    window.
+  - At the close: the bounded settings flush (at most five seconds, after the window has closed).
+  - Serilog's synchronous file sink, for the few lines a user action logs on the UI thread.
+  - `Path.GetFullPath` in path normalization, which is lexical (no I/O).
+  - The synchronous `RepoCardViewModel.RefreshCheap`/`RefreshDirtyStatus` and `MainWindowViewModel.AddRepo`,
+    `AddRepoToGroup` and `AddRepos` remain for tests and callers off the UI thread; no production code calls them on
+    the UI thread.
+- *Regression guard* (`Quality-UiThreadRegressionGuard`): `BlockingCallGuard` is a no-op in the application. The
+  headless test session marks its UI thread as guarded, so a guarded call made there fails the test that made it. The
+  guard points are:
+  - `GitClient` (every git command, and the `.git/HEAD` read of the current branch)
+  - `SettingsStore.Save`
+  - `RepoPinStore.Load` and `Save`
+  - `PackageContentIdentity` (the package hash and the installed-files hash)
+  - `PackageContentExtractor.Extract`
+  - `GitRemoteClient` (its process start)
+  - `GitCredentialClient` (its process start)
+  - the release-notes link's shell start

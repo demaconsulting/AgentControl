@@ -2,7 +2,7 @@
 
 ### Verification Approach
 
-The `LauncherUI` subsystem is verified by the combined unit tests of its ten units
+The `LauncherUI` subsystem is verified by the combined unit tests of its eleven units
 (`MainWindowViewModelTests.cs` and `RepoGroupingTests.cs`, `RepoCardViewModelTests.cs`,
 `RepoCardLaunchVerificationTests.cs` (the checks of a repo's agent files before launch),
 `RepoCardServerSourceTests.cs`
@@ -15,7 +15,8 @@ and `RepoCardImageTests.cs`,
 `PackageSourceStatusPresentationTests.cs` (the "Online source" status, the folder statuses and the "Signed only"
 badge of a source row, with the Settings window showing it),
 `CredentialPromptViewModelTests.cs`, `RepoImageLocatorTests.cs`, `RepoGroupHeaderViewModelTests.cs`,
-`GroupNameViewModelTests.cs` and `DialogBehaviorTests.cs`, the last four units each with its own verification
+`GroupNameViewModelTests.cs`, `DialogBehaviorTests.cs` and `GlobalProgressViewModelTests.cs`, the last five units each
+with its own verification
 document), plus
 `AsyncRelayCommandTests.cs` for the shared asynchronous
 command, which together
@@ -102,13 +103,65 @@ the headless application now uses the real Skia drawing backend (so pictures are
 measured, which the earlier stub backend could not do), and the `DialogWindowTests.Click` helper also executes a
 button's bound `Command` (raising the click event alone does not run a view-model command).
 
+**Background work, without timing.** The responsiveness requirements (`AgentControl-LauncherUI-AddReposResponsive`,
+`-GlobalProgress`, `-AddCancel`, `-AddQueued`, `-AddSaveFailureChoice`, `-SettingsApplyResponsive`,
+`-GitStatusInBackground`, `-BoundedRepoReads`) are verified through two constructor seams instead of timing assertions.
+The background runner seam takes `GatedBackgroundWorkRunner` (a test helper in `GatedBackgroundWorkRunner.cs`, a
+supporting type of the tests), which sits under the shared refresh queue: it counts every piece of work handed to it
+(`Calls`, with `FirstCall` completing at the first one) and the most pieces handed over and unfinished at the same time
+(`MaxInFlight`, how many reads the queue ran at once), and holds the work at a gate until the test calls `Release`,
+then runs it on the thread pool; while the work is held the tests assert
+what the user would see - nothing added yet, the strip and its text, the Cancel button - and, in the headless window
+tests (`HeadlessTestApp.RunAsync`), that the UI thread is free: `Dispatcher.UIThread.InvokeAsync` of a trivial action
+completes while the add or the refresh is still held. No test asserts on thread identity or elapsed time. The save seam
+of `MainWindowViewModel` takes a delegate that counts saves and throws `InvalidOperationException` on demand, so "one
+save per batch", Retry and Discard are deterministic (the earlier way of breaking a save, turning `settings.json` into
+a folder, still works for the older tests). Every save goes through the view model's background settings writer, on a
+worker thread: a window test that reads the settings file right after a change first runs
+`HeadlessTestApp.RunJobsUntilSettingsWritten`, which flushes the writer while running the UI thread's jobs, and the
+headless UI thread is guarded, so a settings save made on it would fail the test (`SettingsStore.Save` asks the
+`BlockingCallGuard`). The window tests that pick or drop folders run asynchronously and let the
+queued add settle before asserting (`RepoReorderWindowTests.SettleAddsAsync`: run the posted add, await
+`PendingAddRepos`, run what it posted afterwards).
+
+**Drag auto-scroll.** The scroll step is a pure function (`MainWindow.ComputeAutoScrollStep`) verified with exact
+values and a monotonicity check; the timer behavior is verified in headless windows short enough that the list
+scrolls, by raising the platform's drag events (card and group drags through the `DragStarter` seam, folders as a
+`DataTransfer` of storage items) at a point held in a scroll zone and calling the timer's handler
+(`MainWindow.AutoScrollTick`) directly, since the headless platform does not advance real time; `IsAutoScrolling`
+tells whether the timer runs. Whether Avalonia's `DispatcherTimer` ticks while the operating system's own drag loop
+runs on Windows (OLE `DoDragDrop`) cannot be shown headlessly and must be confirmed by a UI run.
+
+**Lazy start-up and the UI-thread guard.** The view model reads every card's repo state in the background from its
+constructor, so a test that must act on settled cards waits for them: plain tests await
+`MainWindowViewModel.WhenRepoStateSettledAsync` (or the card's `RefreshCheapInBackgroundAsync`), and headless tests,
+which run on the UI thread and cannot block on it, call `HeadlessTestApp.RunJobsUntilRepoStateSettled`, which runs the
+posted jobs until the reads have landed. Tests that hold the reads use `GatedBackgroundWorkRunner.Close` to let the
+start-up reads run and hold the next ones, and `SteppedBackgroundWorkRunner` (same file) to release the reads one at a
+time in the order the queue started them, which shows which read the queue chose next (with a one-slot queue).
+`HeadlessTestApp` marks the session's UI thread as guarded (`BlockingCallGuard.MarkCurrentThreadGuarded`) and, after
+every `Run` and `RunAsync`, fails the test when a guarded blocking call - any `GitClient` command - was recorded on that
+thread, so every headless test also verifies that no git runs on the UI thread
+(`Quality-UiThreadRegressionGuard`); `HeadlessTestApp_UiThread_GitCallIsRefusedAndRecorded` proves that the guard is
+really on there. The headless session gives every test body an application of its own and drops what the UI thread
+still had queued when the body ended, so work a test started on the UI thread must have finished before the test ends -
+otherwise it never finishes and never releases what it holds (for example the one-at-a-time gate of the git version
+check, which a later test would then wait for forever). Window tests that show cards therefore also wait for the
+cards' repo state (`HeadlessTestApp.RunJobsUntilRepoStateSettled`) and the window's upgrade check
+(`HeadlessTestApp.RunJobsUntil`).
+
+**A git that hangs.** `MainWindowViewModel` takes optional git time limits (`GitClientTimeouts`), passed to every card;
+the headless test of `AgentControl-LauncherUI-GitTimeoutShown` uses a one-second local limit and a stub git whose
+working-tree query sleeps past it, so the timeout happens within the test without any timing assertion: the test
+awaits the card's working-tree check and asserts what the card shows.
+
 ### Test Environment
 
 Unit tests run under xUnit v3 using unique temporary configuration and repo directories per
 test (hermetic, parallel-safe). Tests that construct a `MainWindowViewModel` or
 `RepoCardViewModel` run in the `RealProcess` xUnit collection (disabled parallelization)
-because eager `RefreshCheap()` calls spawn real subprocesses via `GitStub` or the system git
-executable.
+because constructing a view model with repos starts background git reads through the shared
+refresh queue, which spawn real subprocesses via `GitStub` or the system git executable.
 
 ### Acceptance Criteria
 
@@ -164,6 +217,19 @@ executable.
 - The picker accepts several folders and folders dropped from the file manager are added (into the group dropped on,
   otherwise ungrouped, with copy feedback that is cleared); only top folders of Git repositories are added, and one
   message says which folders were not added and why.
+- While the folders of an add are checked or the cards refresh after a settings save, the UI thread stays free, the
+  progress strip under the app bar shows the operation (with the count, and Cancel for an add only) and is gone
+  afterwards; Cancel adds nothing and says nothing; a further add waits for the running one; a failed save asks Retry
+  or Discard, Retry adds the folders and Discard leaves the list as saved; a shown card's working tree is checked in
+  the background and shows "not checked yet" until git answers; and the strip is legible in both themes.
+- However many cards are shown, never more than two repo reads run at once, each card waiting for or undergoing a read
+  says it is refreshing until its state was applied, and a git that hangs is stopped and reported on its card.
+- A drag held near the list's top or bottom edge, over the app bar or below the list keeps the list scrolling, faster
+  the deeper the pointer is, redraws the drop feedback as the list moves and stops when the drag leaves, drops or
+  ends.
+- An upgrade check, an upgrade (with the AGENTS.md answer) and a launch that restores the pinned package, each run on
+  the headless UI thread (guarded), make no pin read or write, package hash, extraction or git start there, and
+  complete: the matching source is found, the package applied and the tool started.
 
 ### Test Scenarios
 
@@ -223,6 +289,121 @@ shows one summary message (`MainWindow_AddRepoButton_SeveralFoldersPicked_AddsEa
 a drop of a repository with a file and a plain folder (`MainWindow_DropFile_IsSkippedAsNotARepository`); a single
 folder keeps its single-add message. These cover `AgentControl-LauncherUI-AddRepoSummary` (child
 `AgentControl-MainWindowViewModel-AddReposSummary`, whose unit tests check every wording and the five-name limit).
+
+**LauncherUI_AddReposResponsive_WindowStaysUsableWhileFoldersAreChecked**: In a headless main window whose background
+runner is a gate, two folders are dropped on the empty-state panel; while their checks are held the UI thread runs
+other work, no card is added yet, and the strip shows "Adding 0 of 2 repositories..." (also the progress bar's
+accessible name) with its Cancel button. Once the checks are released both folders are added, silently, and the strip
+is gone (`MainWindow_DropFolders_WhileChecked_WindowStaysResponsiveAndShowsProgress`). With two repos in the group
+`Work` and one in `Home`, two folders are dropped on the `Work` header; while their checks are held (the add is still
+pending and the strip shown) clicking the `Home` header toggle collapses it at once and typing a filter narrows the
+shown cards at once. Once released both folders are added into `Work`, silently, the shown cards follow the filter in
+force (only the new folder that matches it appears) and the strip is gone; with the filter cleared `Home` stays
+collapsed and the new repos follow `Work`'s stored repos in drop order
+(`MainWindow_DropFolders_FilterAndCollapseWhileChecked_TakeEffectAtOnceAndApplyToTheNewCards`). The removal of repos
+and groups during an add is verified through the child. This covers
+`AgentControl-LauncherUI-AddReposResponsive` (child `AgentControl-MainWindowViewModel-AddReposInBackground`).
+
+**LauncherUI_GlobalProgress_StripShownOnlyWhileBulkWorkRuns**: The strip is collapsed in an idle window, shows the add's
+count and Cancel while dropped folders are checked and goes when they are added
+(`MainWindow_DropFolders_WhileChecked_WindowStaysResponsiveAndShowsProgress`); it shows "Refreshing repositories 0 of
+1..." without Cancel while the cards refresh after Settings are saved and goes when they are done
+(`MainWindow_SettingsApplied_RefreshesCardsInBackgroundShowingProgress`); and in the light and the dark theme the bar
+reaches 3:1 against its track and the strip and the status text 4.5:1 on the strip
+(`ThemeResources_GlobalProgress_IsLegibleInLightAndDark`). These cover `AgentControl-LauncherUI-GlobalProgress`
+(children `AgentControl-MainWindowViewModel-AddReposProgress` and the `GlobalProgressViewModel` unit requirements).
+
+**LauncherUI_AddCancel_CancelStopsTheAddSilently**: While dropped folders are held at the gate the strip's Cancel button
+is clicked; after the checks are released nothing is added or saved, no message is shown and the strip is gone
+(`MainWindow_GlobalProgressCancel_WhileAddingFolders_AddsNothing`). This covers `AgentControl-LauncherUI-AddCancel`
+(children `AgentControl-MainWindowViewModel-AddReposCancel`, `AgentControl-GlobalProgressViewModel-CancelOnce` and
+`-NoCancelWhenNotCancelable`).
+
+**LauncherUI_AddQueued_FurtherDropWaitsForTheRunningAdd**: While the first dropped folder is held at the gate a second
+folder is dropped; only the first folder has been handed to the runner (the second add waits), and once released both
+are added in drop order and the strip is gone (`MainWindow_DropFolders_WhileAnAddRuns_AddsThemAfterwards`). This covers
+`AgentControl-LauncherUI-AddQueued` (child `AgentControl-MainWindowViewModel-AddReposQueued`, whose unit test also
+shows a folder named by both adds is added once).
+
+**LauncherUI_AddSaveFailureChoice_RetryOrDiscard**: With a save that fails ("The disk is full."), a folder picked from
+the app bar's Add brings up the confirmation window with the reason and the buttons Retry and Discard, and nothing is
+added meanwhile; after saving works again Retry adds and saves the folder and nothing more is shown
+(`MainWindow_AddSaveFails_RetryAddsThem`); with every save failing, Discard adds nothing and a message says the folder
+was not added and why (`MainWindow_AddSaveFails_DiscardLeavesListAsSaved`). These cover
+`AgentControl-LauncherUI-AddSaveFailureChoice` (child `AgentControl-MainWindowViewModel-AddReposSaveFailure`, whose unit
+tests show that moved repos keep their group, place and collapsed state on Discard and that no subscriber means
+Discard).
+
+**LauncherUI_SettingsApplyResponsive_CardsRefreshInTheBackground**: In a headless main window over one repo whose
+background reads are held, Settings is opened and saved; the UI thread is free and the strip shows "Refreshing
+repositories 0 of 1..." without Cancel; once the reads are released the refresh ends and the strip is gone
+(`MainWindow_SettingsApplied_RefreshesCardsInBackgroundShowingProgress`). This covers
+`AgentControl-LauncherUI-SettingsApplyResponsive` (children `AgentControl-MainWindowViewModel-ApplySettingsInBackground`
+and `AgentControl-RepoCardViewModel-CheapRefreshInBackground`).
+
+**LauncherUI_GitStatusInBackground_ShownCardIsCheckedWithoutBlocking**: A headless main window is shown over one repo
+whose stub git reports a clean working tree, with the background reads held; the shown card's working-tree check has
+started but the card is not checked yet and is not shown as dirty; once released the card is checked and can pull
+(`MainWindow_CardShown_ChecksGitStatusInBackground`). This covers `AgentControl-LauncherUI-GitStatusInBackground`
+(child `AgentControl-RepoCardViewModel-GitStatusInBackground`).
+
+**LauncherUI_BoundedRepoReads_ShownCardsCheckedTwoAtATime**: A headless main window is shown, tall enough for several
+cards, over six repos whose stub git reports clean working trees, with the background reads held; exactly two
+working-tree checks have been handed to the runner, the UI thread is free, and every shown card (at least two) says it
+is refreshing; once released every shown card is checked, none says it is refreshing any more, and never more than two
+checks ran at once (`MainWindow_CardsShown_WorkingTreeChecksRunAtMostTwoAtOnce`). This covers
+`AgentControl-LauncherUI-BoundedRepoReads` (children: the `AgentControl-RepoRefreshQueue` unit requirements,
+`AgentControl-MainWindowViewModel-SharedRepoReads`, whose unit tests show that adds and the settings refresh share the
+same limit, and `AgentControl-RepoCardViewModel-RefreshingState`).
+
+**LauncherUI_GitTimeoutShown_CardSaysGitWasStopped**: A headless main window is shown over one repo whose stub git
+hangs on its working-tree check, with a one-second git limit; the UI thread stays free, and once the check has ended
+the card's status message is visible and says that git did not answer within 1 seconds and was stopped and to use
+Refresh to try again, and the card's Git state is unknown (not clean, no Pull)
+(`MainWindow_CardShown_GitHangs_CardSaysGitWasStopped`). This covers `AgentControl-LauncherUI-GitTimeoutShown` (child
+`AgentControl-RepoCardViewModel-GitTimeoutShown`).
+
+**LauncherUI_StartupCardsAtOnce_WindowFreeWhileCardsRead**: A headless main window is shown over three repos (stub git)
+whose start-up reads are held: the UI thread runs another job, each card shows "refreshing..." and its branch as `...`,
+no card shows the "No agent package" chip, and the strip says "Refreshing repositories 0 of 3..."; once the reads run
+and the cards settle, the indicators are hidden, the branches read `main`, the "No agent package" chips are shown and
+the strip is gone (`MainWindow_Startup_GitHeld_WindowRespondsCardsShowRefreshingAndStrip`). This covers
+`AgentControl-LauncherUI-StartupCardsAtOnce` (children `AgentControl-MainWindowViewModel-StartupReadsQueued`,
+`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck` and `AgentControl-RepoCardViewModel-RefreshingState`) and
+`AgentControl-LauncherUI-RefreshingCardState`.
+
+**LauncherUI_ActionWaitsForCardState_LaunchWaitsWithoutBlocking**: A headless main window is shown over one repo with
+committed agent files (stub git) whose start-up read is held, with a recording process starter; the Launch button is
+clicked: the UI thread runs another job, the card is busy and refreshing, and nothing is launched; once the read runs,
+the card shows the committed agent files and the tool was launched once ("Launched.")
+(`MainWindow_LaunchWhileCardStateHeld_WaitsWithoutBlockingThenLaunches`). This covers
+`AgentControl-LauncherUI-ActionWaitsForCardState` (child `AgentControl-RepoCardViewModel-PromoteAndAwait`).
+
+**LauncherUI_RefreshThroughQueue_SignInChipReadsGitFirst**: A headless main window over a card whose source needs a
+sign-in, its start-up reads done and the next reads held; after the source answers again the "Sign-in needed" chip is
+clicked: the card is busy, says it is refreshing ("refreshing..." visible), and the source has not been read while the
+git work is held; once released the source is read, the chip is gone, an upgrade is offered and the card no longer
+says it is refreshing (`MainWindow_SignInChip_RefreshesThroughQueue`). This covers
+`AgentControl-LauncherUI-RefreshThroughQueue` (children `AgentControl-RepoCardViewModel-RefreshQueuedAtUserAction` and
+`-PostPullRefreshQueued`).
+
+**LauncherUI_DragAutoScroll_ListKeepsScrollingWhileADragIsHeldNearItsEdges**: The step function gives no scroll in
+the middle of the list and at a zone's inner boundary, 4.25 DIP per tick one pixel inside a 32-DIP zone, 12 at the
+edge, the 36-DIP cap 96 DIP beyond the edge (over the app bar) or below the list and further out, zones that split a
+viewport shorter than two zones in halves, and nothing for a zero, negative or unknown height or an unknown position
+(`MainWindow_ComputeAutoScrollStep_ZonesAndDepth_GiveExpectedSteps`); the speed never drops as the pointer goes deeper
+and never exceeds the cap (`MainWindow_ComputeAutoScrollStep_DeeperIsNeverSlower`). In a short headless window over
+many repos: a card held still near the bottom edge keeps the list scrolling on every tick without a new drag event,
+and the scroll stops when the drag leaves the list
+(`MainWindow_DragCardNearListEdge_KeepsScrollingWhileHeldAndStopsOnLeave`);
+a group header held over the app bar scrolls the list up, a drop there is refused (the groups keep their order) and the
+drop stops the scroll (`MainWindow_DragGroupHeaderOverAppBar_ScrollsUpAndDropIsRefused`); folders held near the bottom
+edge scroll the list and dropping them stops the scroll and adds them
+(`MainWindow_DropFoldersNearBottomEdge_AutoScrollsAndDropStopsIt`); after a tick the insertion line is shown on
+exactly one row, the card now under the unmoved pointer (`MainWindow_AutoScrollTick_UpdatesDropIndicatorForThePointer`);
+and a card drag that ends without a drop stops the scroll (`MainWindow_CardDragEnds_StopsAutoScroll`). These cover
+`AgentControl-LauncherUI-DragAutoScroll`. That the timer ticks during a real Windows drag is left to a UI run (see the
+Verification Approach).
 
 **LauncherUI_RemoveRepo_RequiresConfirmationBeforeMutatingState**: A card's `RemoveCommand` is
 executed (raising `RemoveRequested` without removing the card), and `MainWindowViewModel`'s
@@ -417,7 +598,7 @@ covering `AgentControl-LauncherUI-AgentsMdTemplateOffer`. The order of the quest
 scenario `LauncherUI_AgentsMdOfferBeforeReleaseNotes_QuestionFirstThenReleaseNotes` below.
 
 **LauncherUI_Settings_SaveAndApplyPreservesRecentReposAndUpdatesFields**: The settings
-dialog's `SaveCommand` invokes its `onSave` callback and raises `Saved` with the current
+dialog's `SaveCommand` invokes its `onSave` callback, waits for it, and raises `Saved` with the current
 property values, and applying the resulting settings on `MainWindowViewModel` preserves the
 existing recent-repos list while adopting the new field values. This scenario is tested by
 `SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved` and
@@ -1037,25 +1218,27 @@ match and the collapse toggles disabled and explained meanwhile). The
 end-to-end checks of the same behavior are the system scenarios (`AgentControl-System-RepoGroups` and the
 requirements next to it).
 
-**LauncherUI_ChangesSaved_ChangeIsAppliedOnlyWhenSavedAndAFailedSaveChangesNothing**: Every change the user makes to
-a repo or a section (favorite, group, card color, launch time, collapse, rename or removal of a group, adding or
-removing a repo) is applied and written when the save succeeds; when the save fails - the tests put a directory
-where the settings file belongs - the live settings, the cards, the displayed list and the file stay as they were, a
-later unrelated save
-does not write the failed change, the user is told in a message, and the operations that return to a caller (collapse,
-rename, remove a group, add and remove a repo) refuse by reporting the failure. In the headless main window a
-settings change that cannot be saved shows the message and keeps the state as it was. This scenario is tested by
-`MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten` and
+**LauncherUI_ChangesSaved_AppliedAtOnceWrittenInTheBackgroundAndKeptWhenAWriteFails**: Every change the user makes to
+a repo or a section (favorite, group, card color, launch time, collapse, rename, removal, color or order of a group,
+the order of the repos, removing a repo) is applied at once and written to the settings file in the background - with
+the writes held, the change is in effect before anything is written; when a write fails - the tests make the save fail
+or put the settings file's directory where a file is - the change stays in effect in the live settings, the cards and
+the displayed list, the user is told once per failure streak in a message that does not hold up the window, and the
+next change, once writing works, writes it; an add and the Settings window's values that cannot be saved change
+nothing. In the headless main window a favorite that cannot be saved is kept and shows one message saying the change
+stays in effect, and a removal whose save fails as well is applied without a second message. This scenario is tested
+by `MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten`,
+`MainWindowViewModel_Favorite_SaveHeld_AppliedAtOnceAndWrittenAfterFlush` and
 `RepoCardViewModel_Changes_GoThroughTheOwnerAndAreNotAppliedWhenItRefuses`, covering
-`AgentControl-LauncherUI-ChangeAppliedWhenSaved`; by `MainWindow_SettingsCannotBeSaved_ShowsMessageAndKeepsStateAsItWas`
-and `MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt`, covering
+`AgentControl-LauncherUI-ChangeAppliedWhenSaved`; by `MainWindow_SettingsCannotBeSaved_ChangeKeptAndMessageShownOnce`
+and `MainWindowViewModel_FavoriteSaveFails_KeptReportedOnceAndSavedWithNextChange`, covering
 `AgentControl-LauncherUI-FailedSaveChangesNothing`; and by
-`MainWindow_SettingsCannotBeSaved_ShowsMessageAndKeepsStateAsItWas`, covering
-`AgentControl-LauncherUI-FailedSaveReported`. The unit tests of each operation are in
+`MainWindow_SettingsCannotBeSaved_ChangeKeptAndMessageShownOnce`, covering
+`AgentControl-LauncherUI-FailedSaveReported`. The headless test waits for the message with `RunJobsUntil`, because
+the failure is posted to the UI thread after the background write. The unit tests of each operation are in
 `MainWindowViewModelPersistenceTests.cs` (see the `MainWindowViewModel` verification design).
-
-**LauncherUI_RemovedRepoGoesQuiet_NothingIsReportedForARemovedCard**: When a repo is removed (after the removal was
-saved) its card is retired: a running upgrade check publishes nothing, a running operation is canceled and reports
+**LauncherUI_RemovedRepoGoesQuiet_NothingIsReportedForARemovedCard**: When a repo is removed (once it was
+removed) its card is retired: a running upgrade check publishes nothing, a running operation is canceled and reports
 nothing, and the card checks nothing when asked to refresh; the window releases the handlers it had on the card. This
 scenario is tested by `MainWindow_RepoRemoved_ReleasesTheCardHandlers` and
 `MainWindowViewModel_RemoveRepo_RetiresTheCard`, covering `AgentControl-LauncherUI-RemovedRepoGoesQuiet`.
@@ -1362,3 +1545,15 @@ requirements: `-PreselectCurrentPackage`, `-PreselectNewestWhenVersionGone`, `-P
 `-PreselectNothingWhenNotOffered`, `-PreselectNothingWhenSourceUnknown`, `-PreselectKeepsUserChoice` and
 `-PreselectCancelled`) and `MainWindow_SelectingRepublishedPinnedVersion_AsksFirstAndAppliesOnlyWhenConfirmed` (the
 confirmation, covered above).
+
+**RepoCard_PackageWork_NoBlockingCallOnUiThread**: Arranged off the UI thread (pins written, identities computed, cheap
+facts read), each action is then run on the headless UI thread, which is guarded, so any guarded call there fails the
+test. The background upgrade check of a card whose source is served by a provider that computes the identity only when
+it is first read finds that source as the supplier with no problem (the card computed the identity on a worker); an
+upgrade from 1.0.0 to 2.0.0 applies the package and, accepting the offered AGENTS.md template, writes it; and a launch
+of a repo whose agent files are missing restores them from the source whose files match the pin, declines the AGENTS.md
+offer and starts the tool. This scenario is tested by `RepoCard_UpgradeCheck_PackageHashedOffTheUiThread`,
+`RepoCard_Upgrade_NoBlockingCallOnUiThread` and `RepoCard_LaunchWithRestore_NoBlockingCallOnUiThread`, covering
+`AgentControl-LauncherUI-PackageWorkNeverBlocks` (children: `AgentControl-RepoCardViewModel-ActionIoInBackground`,
+`AgentControl-SourceEditorViewModel-HelperCheckDebounced`,
+`AgentControl-SourceEditorViewModel-TestConnectionOffUiThread`).

@@ -173,7 +173,12 @@ public sealed class RepoGroupsAndColorsTests
             () => RepoNames(mainWindow).SequenceEqual(["elsewhere"]),
             TimeSpan.FromSeconds(10),
             TimeSpan.FromMilliseconds(200)).Result);
-        Assert.Contains("\"Work\"", ReadSettings(context), StringComparison.Ordinal);
+
+        // The settings are written in the background a moment after a change, so the file is polled
+        Assert.True(Retry.WhileFalse(
+            () => ReadSettings(context).Contains("\"Work\"", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
     }
 
     /// <summary>

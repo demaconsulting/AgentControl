@@ -44,7 +44,7 @@ places them in the .github folders (normally git-ignored), and launches the agen
 - 🏷️ **Repo Cards**: Show a status bar and chips for package, upgrade, and branch
 - ⭐ **Groups and Favorites**: Organizes repos with favorites, colored groups, and card colors, all in your own order
 - 🌗 **Light and Dark Themes**: Follows the system theme or uses a fixed choice
-- ⚡ **Responsive**: Reads package sources in the background, with progress and Cancel
+- ⚡ **Responsive**: Opens at once; repo, source and settings work runs in the background, with progress and Cancel
 - 📦 **Easy Install**: Ships as an MSI installer with a self-contained .NET runtime
 
 ## Installation

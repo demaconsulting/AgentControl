@@ -123,6 +123,13 @@ recorded (a container hash, `sha256:`, or a Git commit, `git-commit:`) is not
   or `none` when no identity is known (`AgentControl-PackageContentIdentity-DescribeNone`). The text is split at its
   first colon, so an identity of an unrecognized shape is cut the same way and never echoed in full.
 
+**Guard**: Hashing reads every file of a package or of a repo's managed folders, so it must never run on the UI
+thread. `HashFiles` (behind `ComputeFilesIdentity` and `TryComputeFilesIdentity`) and `ComputeInstalledFilesIdentity`
+first ask `BlockingCallGuard.ThrowIfGuarded("package content hash")` / `("installed files hash")`. On a thread a test
+has guarded the call is recorded and refused with `BlockingCallOnGuardedThreadException`, which
+`TryComputeFilesIdentity` does not catch, so a refusal is never mistaken for content that cannot be identified
+(`AgentControl-PackageContentIdentity-RefusesGuardedThread`).
+
 #### Error Handling
 
 `ComputeFilesIdentity` throws the `InvalidOperationException` described above for a package that cannot be
@@ -137,6 +144,7 @@ unreadable repo the same way (naming the repo folder) and lets a canceled token 
 - **IPackageContentReader** and **PackageContentExtractor** (`RepoSync` subsystem) - the reader supplies the files;
   `GetManagedPackagePath` is the membership rule; `DirectoryPackageContentReader.OpenManagedFolders` supplies the
   files installed in a repo.
+- **BlockingCallGuard** (`Utilities` subsystem) - asked before every hash.
 - **.NET BCL** - `System.Security.Cryptography.IncrementalHash`.
 
 #### Callers
@@ -145,4 +153,7 @@ unreadable repo the same way (naming the repo folder) and lets a canceled token 
   over their own files, which makes every source's identity come out the same way.
 - **RepoCardViewModel** (`LauncherUI` subsystem) - `Compare`, `Describe` and `IsFilesIdentity` when applying,
   upgrading to or restoring a package, and when verifying which configured source delivers the files a pin recorded;
-  `ComputeInstalledFilesIdentity` before a launch, to compare the files in the repo with the pin's identity.
+  `ComputeInstalledFilesIdentity` before a launch, to compare the files in the repo with the pin's identity, on a
+  worker thread; and an acquired reader's `ContentIdentity` on a worker when its source did not compute it.
+- **BackgroundPackageSourceProvider** (same subsystem) - reads an acquired reader's `ContentIdentity` on a worker
+  thread, which computes it through `TryComputeFilesIdentity`.

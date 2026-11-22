@@ -7,7 +7,8 @@
 #   AppSettings.cs/RecentRepo.cs/AgentToolKind.cs/ThemePreference.cs data types, which are
 #   documented as supporting types of this subsystem rather than as units of their own, and
 #   RepoGroupName.cs, the rules for the names of the user's own repo groups, which is a unit
-#   with its own requirements file (settings/repo-group-name.yaml)
+#   with its own requirements file (settings/repo-group-name.yaml), and SettingsWriter.cs, which
+#   writes settings snapshots in the background (settings/settings-writer.yaml)
 # - Subsystem requirements describe the observable behavior of persisting application-wide
 #   preferences (package sources, git/agent tool overrides, recent repos, shell preference,
 #   keep-shell-open choice, color theme) and the user's own organizing choices (repo groups,
@@ -175,3 +176,25 @@ sections:
           - AgentControl-SettingsStore-StaleGroupSettingsDropped
         tests:
           - SettingsSubsystem_GroupOrganization_ColorAndOrderSurviveSessionsAndDamagedOrStaleEntriesAreDropped
+
+      - id: AgentControl-Settings-BackgroundWriter
+        title: >-
+          The Settings subsystem shall write the settings in the background without making its
+          caller wait - one write at a time, a burst of changes written once with the newest state,
+          and a confirmed write that tells its caller whether it succeeded - shall tell its caller,
+          once per failure streak, when a background write fails, keeping the change to write it
+          later, shall write what is waiting when asked, and shall refuse a settings save made on a
+          thread guarded against blocking calls.
+        justification: |
+          Writing the settings file can take up to about a second when another program holds it; the
+          window that saved on every click froze for that long. The guard lets the tests catch a
+          settings save that slips back onto the UI thread.
+        children:
+          - AgentControl-SettingsWriter-Debounce
+          - AgentControl-SettingsWriter-Serialize
+          - AgentControl-SettingsWriter-ConfirmedSave
+          - AgentControl-SettingsWriter-FailureReportedOnce
+          - AgentControl-SettingsWriter-Flush
+          - AgentControl-SettingsStore-RefusesGuardedThread
+        tests:
+          - SettingsSubsystem_BackgroundWriter_WritesNewestStateOffTheGuardedThread

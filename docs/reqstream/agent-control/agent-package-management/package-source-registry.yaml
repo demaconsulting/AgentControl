@@ -122,3 +122,22 @@ sections:
           A misconfigured source must not stop the other sources from being used.
         tests:
           - PackageSourceRegistry_Create_GitSourceWithInvalidSettings_FailsWhenResolvedNotWhenBuilt
+
+      - id: AgentControl-PackageSourceRegistry-ReadsOffCallerThread
+        title: >-
+          The PackageSourceRegistry class shall run every call of the built-in sources it creates
+          on a worker thread, so that the calling thread never waits for a source's disk, process or
+          network work, and shall hand over an acquired package whose content identity is already
+          computed, passing the source's answers, failures and cancellation through unchanged.
+        justification: |
+          The window asks the sources from its UI thread (upgrade checks, Upgrade, Select Package, the
+          restore before a launch); a source that starts git, reads its cache or a share, or hashes a
+          whole package on that thread freezes the window for as long as the work takes.
+        tests:
+          - PackageSourceRegistry_Create_BuiltInProviders_ReadOffCallerThread
+          - PackageSourceRegistry_Create_ZipAndNuGetDefinitions_ResolvesMatchingProviderKinds
+          - BackgroundPackageSourceProvider_AcquireAsync_InnerBlocksSynchronously_ReturnsPendingTask
+          - BackgroundPackageSourceProvider_AcquireAsync_ComputesContentIdentityBeforeReturning
+          - BackgroundPackageSourceProvider_ListVersionsAsync_OnGuardedThread_RunsInnerOffThread
+          - BackgroundPackageSourceProvider_Canceled_PropagatesCancellation
+          - BackgroundPackageSourceProvider_AcquireAsync_IdentityFails_DisposesReaderAndThrows

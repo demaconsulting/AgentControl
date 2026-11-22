@@ -23,6 +23,7 @@ using System.Diagnostics;
 using System.Text;
 using DemaConsulting.AgentControl.Logging;
 using DemaConsulting.AgentControl.PackageCredentials;
+using DemaConsulting.AgentControl.Utilities;
 using DemaConsulting.NuGet.Caching;
 using Microsoft.Extensions.Logging;
 
@@ -200,7 +201,7 @@ internal sealed class GitCredentialClient : IRememberedCredentialStore
         ArgumentNullException.ThrowIfNull(origin);
 
         var arguments = BuildArguments(origin, withProviderOverride: false, "config", "--get-urlmatch", "credential.helper", origin + "/");
-        var result = await RunAsync("config", origin, arguments, standardInput: null, cancellationToken);
+        var result = await RunAsync("config", origin, arguments, standardInput: null, cancellationToken).ConfigureAwait(false);
         return result.Completed && result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.Output);
     }
 
@@ -222,7 +223,7 @@ internal sealed class GitCredentialClient : IRememberedCredentialStore
         }
 
         var arguments = BuildArguments(origin, withProviderOverride: true, "credential", "fill");
-        var result = await RunAsync("fill", origin, arguments, request, cancellationToken);
+        var result = await RunAsync("fill", origin, arguments, request, cancellationToken).ConfigureAwait(false);
         if (!result.Completed || result.ExitCode != 0)
         {
             return null;
@@ -260,7 +261,7 @@ internal sealed class GitCredentialClient : IRememberedCredentialStore
         using var lease = SecretRedactor.Lease(credential);
         var result = await RunAsync(
             "approve", origin, BuildArguments(origin, withProviderOverride: true, "credential", "approve"),
-            request, cancellationToken);
+            request, cancellationToken).ConfigureAwait(false);
         return result.Completed && result.ExitCode == 0;
     }
 
@@ -285,7 +286,7 @@ internal sealed class GitCredentialClient : IRememberedCredentialStore
         using var lease = credential is null ? null : SecretRedactor.Lease(credential);
         var result = await RunAsync(
             "reject", origin, BuildArguments(origin, withProviderOverride: true, "credential", "reject"),
-            request, cancellationToken);
+            request, cancellationToken).ConfigureAwait(false);
         return result.Completed && result.ExitCode == 0;
     }
 
@@ -452,17 +453,11 @@ internal sealed class GitCredentialClient : IRememberedCredentialStore
         var stopwatch = Stopwatch.StartNew();
         _logger.LogDebug("Running git credential operation {Operation} for {FeedOrigin}.", operation, origin);
 
-        Process process;
-        try
+        // Started on a worker: the caller may be the UI thread (the source editor, a sign-in) and
+        // must never wait for a process start
+        var process = await Task.Run(() => StartGit(operation, startInfo), cancellationToken).ConfigureAwait(false);
+        if (process is null)
         {
-            process = Process.Start(startInfo)
-                      ?? throw new InvalidOperationException("The git process did not start.");
-        }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
-        {
-            // Not having git (or being unable to run it) is "no credential store", not a failure
-            _logger.LogWarning(
-                ex, "Git could not be started for credential operation {Operation}.", operation);
             return GitRunResult.NotRun;
         }
 
@@ -478,10 +473,10 @@ internal sealed class GitCredentialClient : IRememberedCredentialStore
             var error = process.StandardError.ReadToEndAsync(limit.Token);
             try
             {
-                await WriteInputAsync(process, standardInput, limit.Token);
-                await process.WaitForExitAsync(limit.Token);
-                var text = await output;
-                await error;
+                await WriteInputAsync(process, standardInput, limit.Token).ConfigureAwait(false);
+                await process.WaitForExitAsync(limit.Token).ConfigureAwait(false);
+                var text = await output.ConfigureAwait(false);
+                await error.ConfigureAwait(false);
 
                 _logger.LogDebug(
                     "git credential operation {Operation} for {FeedOrigin} exited with code {ExitCode} after {ElapsedMilliseconds}ms.",
@@ -490,7 +485,7 @@ internal sealed class GitCredentialClient : IRememberedCredentialStore
             }
             catch (OperationCanceledException ex)
             {
-                await KillAsync(process, output, error);
+                await KillAsync(process, output, error).ConfigureAwait(false);
                 if (cancellationToken.IsCancellationRequested)
                 {
                     throw;
@@ -502,6 +497,31 @@ internal sealed class GitCredentialClient : IRememberedCredentialStore
                     operation, origin, _timeout.TotalSeconds);
                 return GitRunResult.NotRun;
             }
+        }
+    }
+
+    /// <summary>
+    ///     Starts git, asking <see cref="BlockingCallGuard"/> first so a start on a thread the tests
+    ///     guard (the UI thread) fails them; <see cref="RunAsync"/> runs it on a worker.
+    /// </summary>
+    /// <param name="operation">A short name of the operation, for diagnostics.</param>
+    /// <param name="startInfo">The start information.</param>
+    /// <returns>The running process, or <see langword="null"/> when git could not be started (not
+    ///     having git is "no credential store", not a failure).</returns>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown on a thread a test has guarded;
+    ///     nothing is started.</exception>
+    private Process? StartGit(string operation, ProcessStartInfo startInfo)
+    {
+        BlockingCallGuard.ThrowIfGuarded($"git credential {operation}");
+        try
+        {
+            return Process.Start(startInfo) ?? throw new InvalidOperationException("The git process did not start.");
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
+        {
+            _logger.LogWarning(
+                ex, "Git could not be started for credential operation {Operation}.", operation);
+            return null;
         }
     }
 
@@ -555,7 +575,7 @@ internal sealed class GitCredentialClient : IRememberedCredentialStore
         {
             if (standardInput is not null)
             {
-                await process.StandardInput.WriteAsync(standardInput.AsMemory(), cancellationToken);
+                await process.StandardInput.WriteAsync(standardInput.AsMemory(), cancellationToken).ConfigureAwait(false);
             }
 
             process.StandardInput.Close();
@@ -591,7 +611,7 @@ internal sealed class GitCredentialClient : IRememberedCredentialStore
 
         try
         {
-            await Task.WhenAll(output, error).WaitAsync(ReapTimeout);
+            await Task.WhenAll(output, error).WaitAsync(ReapTimeout).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is OperationCanceledException or TimeoutException or IOException or ObjectDisposedException)
         {

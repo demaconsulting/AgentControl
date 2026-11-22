@@ -140,6 +140,11 @@ internal sealed class PackageSourceRegistry
     /// <summary>
     ///     Creates a registry whose providers are the built-in zip-folder, NuGet and Git providers.
     /// </summary>
+    /// <remarks>
+    ///     Each provider is wrapped in a <see cref="BackgroundPackageSourceProvider"/>, so its calls
+    ///     run on a worker thread and an acquired package's content identity is computed there: a
+    ///     caller on the UI thread never waits for a source's disk, process or hashing work.
+    /// </remarks>
     /// <param name="definitions">The configured sources.</param>
     /// <param name="nugetRootBase">Folder under which NuGet sources keep their private caches, or
     ///     <see langword="null"/> for the per-user default (see
@@ -160,14 +165,14 @@ internal sealed class PackageSourceRegistry
         string? nugetRootBase = null,
         PackageCredentialContext? credentials = null,
         GitSourceOptions? git = null) =>
-        new(definitions, definition => definition.Type switch
+        new(definitions, definition => new BackgroundPackageSourceProvider(definition.Type switch
         {
             PackageSourceType.Zip => new ZipFolderSourceProvider(definition),
             PackageSourceType.NuGet => new NuGetSourceProvider(definition, nugetRootBase, credentials),
             PackageSourceType.Git => new GitSourceProvider(definition, git ?? GitSourceOptions.Default),
             _ => throw new InvalidOperationException(
                 $"Package source '{definition.Alias}' has an unsupported type '{definition.Type}'.")
-        });
+        }));
 
     /// <summary>
     ///     Gets the configured source definitions in configuration order.

@@ -48,6 +48,8 @@ shell script elsewhere). The tests pass an explicit working folder, so they neve
   credential (or origin) with a line feed, carriage
   return or NUL is refused without running git, while a password containing `=` is sent and read back unchanged.
 - With a real git and an isolated helper the full miss, approve, fill, reject life cycle behaves as specified.
+- A credential-helper question asked from a thread guarded against blocking calls starts git on another thread:
+  nothing is refused on the guarded thread and the helper's answer is returned.
 
 #### Test Scenarios
 
@@ -125,3 +127,9 @@ tested by `GitCredentialClient_AllOperations_NeverLogRequestOrResponseContent`,
 `GitCredentialClient_IsSafeValue_OnlyLineFeedCarriageReturnAndNul_AreRejected` and
 `GitCredentialClient_RealGit_PasswordWithEquals_RoundTripsIdentically`, covering
 `AgentControl-GitCredentialClient-SecretsNeverLogged`.
+
+**GitCredentialClient_IsAvailable_FromGuardedThread_StartsGitOffThatThread**: With a stub git that reports a helper,
+`IsAvailableAsync` is started inside a guard scope of `BlockingCallGuard` and the record of refused calls is read
+before the `await`: it is empty, the answer is "available" and git ran once. This scenario is tested by
+`GitCredentialClient_IsAvailable_FromGuardedThread_StartsGitOffThatThread`, covering
+`AgentControl-GitCredentialClient-StartsOffCallerThread`.

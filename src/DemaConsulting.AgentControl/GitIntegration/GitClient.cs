@@ -21,9 +21,91 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using DemaConsulting.AgentControl.Logging;
+using DemaConsulting.AgentControl.Utilities;
 using Microsoft.Extensions.Logging;
 
 namespace DemaConsulting.AgentControl.GitIntegration;
+
+/// <summary>
+///     How long a <see cref="GitClient"/> lets a git command run before it stops it.
+/// </summary>
+/// <remarks>
+///     A git command against a local working tree normally answers in well under a second, but one on
+///     a network share or a huge tree, or a git that is stuck (a lock held by a crashed process, a
+///     credential helper waiting for input nobody sees), may never answer. Without a limit such a
+///     command holds its caller - and the worker slot it runs in - forever.
+/// </remarks>
+/// <param name="LocalCommand">The limit for every command that only reads or changes the local
+///     repository (status, branch, <c>HEAD</c>, the committed-files listing, stopping the tracking of agent folders). Must be
+///     positive.</param>
+/// <param name="Pull">The limit for <c>git pull</c>, which talks to a remote and may wait for the
+///     credential helper's own sign-in window. Must be positive.</param>
+/// <param name="Stop">How long to wait for a stopped command to end. Must be positive.</param>
+internal sealed record GitClientTimeouts(TimeSpan LocalCommand, TimeSpan Pull, TimeSpan Stop)
+{
+    /// <summary>
+    ///     Gets the limits the application uses: a minute for a local command (enough for a cold
+    ///     <c>git status</c> of a large tree on a network share), ten minutes for a pull (network work
+    ///     that may include signing in), and ten seconds for a stopped command to end.
+    /// </summary>
+    public static GitClientTimeouts Default { get; } =
+        new(TimeSpan.FromSeconds(60), TimeSpan.FromMinutes(10), TimeSpan.FromSeconds(10));
+}
+
+/// <summary>
+///     Thrown by <see cref="GitClient"/> when a git command did not finish within its time limit and
+///     was stopped.
+/// </summary>
+/// <remarks>
+///     Derives from <see cref="InvalidOperationException"/>, the type every <see cref="GitClient"/>
+///     method already throws when git cannot answer, so existing callers keep treating it as "git could
+///     not tell"; a caller that wants to tell the user that git hung catches this type first.
+/// </remarks>
+internal sealed class GitCommandTimeoutException : InvalidOperationException
+{
+    /// <summary>
+    ///     Initializes the exception with a default message and no time limit.
+    /// </summary>
+    public GitCommandTimeoutException()
+        : base("A git command did not finish within its time limit and was stopped.")
+    {
+    }
+
+    /// <summary>
+    ///     Initializes the exception with a message and no time limit.
+    /// </summary>
+    /// <param name="message">What timed out.</param>
+    public GitCommandTimeoutException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>
+    ///     Initializes the exception with a message, no time limit and the exception that caused it.
+    /// </summary>
+    /// <param name="message">What timed out.</param>
+    /// <param name="innerException">The cause.</param>
+    public GitCommandTimeoutException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+
+    /// <summary>
+    ///     Initializes the exception with a message and the limit that was exceeded.
+    /// </summary>
+    /// <param name="message">What timed out.</param>
+    /// <param name="timeout">The time limit the command exceeded.</param>
+    public GitCommandTimeoutException(string message, TimeSpan timeout)
+        : base(message)
+    {
+        Timeout = timeout;
+    }
+
+    /// <summary>
+    ///     Gets the time limit the command exceeded, or <see cref="TimeSpan.Zero"/> when not known.
+    /// </summary>
+    public TimeSpan Timeout { get; }
+}
 
 /// <summary>
 ///     Result of running a single git subcommand: exit code plus captured stdout/stderr.
@@ -50,6 +132,11 @@ internal sealed record GitCommandResult(int ExitCode, string StandardOutput, str
 ///     can substitute a stub script/executable instead of depending on a real git installation.
 ///     Not thread-safe for concurrent calls against the same repository path (concurrent git
 ///     invocations against one working tree are inherently unsafe regardless of this wrapper).
+///     Every command runs under a time limit (see <see cref="GitClientTimeouts"/>): a command that
+///     does not finish in time is stopped together with every process it started and reported as a
+///     <see cref="GitCommandTimeoutException"/>; a canceled command is stopped the same way. Every
+///     method blocks its calling thread until git answers, so it must be called off the UI thread; a
+///     call on a thread guarded by <see cref="BlockingCallGuard"/> is refused before git starts.
 /// </remarks>
 internal sealed class GitClient
 {
@@ -74,6 +161,11 @@ internal sealed class GitClient
     private readonly ILogger<GitClient> _logger;
 
     /// <summary>
+    ///     The time limits of the commands this client runs; see the constructor.
+    /// </summary>
+    private readonly GitClientTimeouts _timeouts;
+
+    /// <summary>
     ///     Initializes a new <see cref="GitClient"/>.
     /// </summary>
     /// <param name="gitExecutablePath">
@@ -89,11 +181,20 @@ internal sealed class GitClient
     ///     coding-principles.md's "Dependency Injection" guidance. Existing call sites that do not
     ///     pass a logger are unaffected.
     /// </param>
+    /// <param name="timeouts">The time limits of the commands, or <see langword="null"/> for
+    ///     <see cref="GitClientTimeouts.Default"/>. Supplied so tests can use a short limit against a
+    ///     stub that hangs.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="gitExecutablePath"/> is
     ///     null, empty, or whitespace.</exception>
-    public GitClient(string gitExecutablePath = "git", ILogger<GitClient>? logger = null)
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when a limit in
+    ///     <paramref name="timeouts"/> is zero or negative.</exception>
+    public GitClient(string gitExecutablePath = "git", ILogger<GitClient>? logger = null, GitClientTimeouts? timeouts = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(gitExecutablePath);
+        _timeouts = timeouts ?? GitClientTimeouts.Default;
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_timeouts.LocalCommand, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_timeouts.Pull, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_timeouts.Stop, TimeSpan.Zero);
         _gitExecutablePath = gitExecutablePath;
         _logger = logger ?? AppLogging.Factory.CreateLogger<GitClient>();
     }
@@ -103,6 +204,7 @@ internal sealed class GitClient
     ///     running <c>git status --porcelain</c>.
     /// </summary>
     /// <param name="repositoryPath">Absolute path to the repository working directory.</param>
+    /// <param name="cancellationToken">Stops git and abandons the call when signaled.</param>
     /// <returns>
     ///     <see langword="true"/> if <c>git status --porcelain</c> produced no output (clean
     ///     working tree); otherwise <see langword="false"/>.
@@ -112,9 +214,15 @@ internal sealed class GitClient
     /// <exception cref="InvalidOperationException">Thrown when the git executable cannot be
     ///     started, or when <c>git status</c> exits with a non-zero code (e.g. the path is not a
     ///     git repository).</exception>
-    public bool IsWorkingTreeClean(string repositoryPath)
+    /// <exception cref="GitCommandTimeoutException">Thrown when git did not answer within the local
+    ///     command limit and was stopped.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled; git was stopped.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread guarded
+    ///     by <see cref="BlockingCallGuard"/>; git was not started.</exception>
+    public bool IsWorkingTreeClean(string repositoryPath, CancellationToken cancellationToken = default)
     {
-        var result = RunGit(repositoryPath, "status", "--porcelain");
+        var result = RunGit(repositoryPath, _timeouts.LocalCommand, cancellationToken, "status", "--porcelain");
         if (!result.Succeeded)
         {
             throw new InvalidOperationException(
@@ -128,22 +236,34 @@ internal sealed class GitClient
     ///     Performs a <c>git pull</c> in the given repository.
     /// </summary>
     /// <param name="repositoryPath">Absolute path to the repository working directory.</param>
+    /// <param name="cancellationToken">Stops git and abandons the call when signaled.</param>
     /// <returns>The command result; callers should check <see cref="GitCommandResult.Succeeded"/>
     ///     rather than assuming success, since a failed pull (e.g. merge conflict) is a normal
     ///     outcome the caller must surface to the user rather than an exceptional one.</returns>
+    /// <remarks>
+    ///     Runs under the pull limit (<see cref="GitClientTimeouts.Pull"/>), not the local-command
+    ///     limit: a pull talks to a remote and may wait for the user to sign in.
+    /// </remarks>
     /// <exception cref="ArgumentException">Thrown when <paramref name="repositoryPath"/> is null,
     ///     empty, or whitespace.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the git executable cannot be
     ///     started.</exception>
-    public GitCommandResult Pull(string repositoryPath)
+    /// <exception cref="GitCommandTimeoutException">Thrown when the pull did not finish within the
+    ///     pull limit and was stopped.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled; git was stopped.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread guarded
+    ///     by <see cref="BlockingCallGuard"/>; git was not started.</exception>
+    public GitCommandResult Pull(string repositoryPath, CancellationToken cancellationToken = default)
     {
-        return RunGit(repositoryPath, "pull");
+        return RunGit(repositoryPath, _timeouts.Pull, cancellationToken, "pull");
     }
 
     /// <summary>
     ///     Gets the repository's current <c>HEAD</c> commit hash via <c>git rev-parse HEAD</c>.
     /// </summary>
     /// <param name="repositoryPath">Absolute path to the repository working directory.</param>
+    /// <param name="cancellationToken">Stops git and abandons the call when signaled.</param>
     /// <returns>The trimmed <c>HEAD</c> commit hash.</returns>
     /// <remarks>
     ///     Per architecture.md's repo-fact caching strategy, this is the cheap operation used to
@@ -155,9 +275,15 @@ internal sealed class GitClient
     /// <exception cref="InvalidOperationException">Thrown when the git executable cannot be
     ///     started, or when <c>git rev-parse HEAD</c> exits with a non-zero code (e.g. the path
     ///     is not a git repository, or has no commits yet).</exception>
-    public string GetHeadCommitHash(string repositoryPath)
+    /// <exception cref="GitCommandTimeoutException">Thrown when git did not answer within the local
+    ///     command limit and was stopped.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled; git was stopped.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread guarded
+    ///     by <see cref="BlockingCallGuard"/>; git was not started.</exception>
+    public string GetHeadCommitHash(string repositoryPath, CancellationToken cancellationToken = default)
     {
-        var result = RunGit(repositoryPath, "rev-parse", "HEAD");
+        var result = RunGit(repositoryPath, _timeouts.LocalCommand, cancellationToken, "rev-parse", "HEAD");
         if (!result.Succeeded)
         {
             throw new InvalidOperationException(
@@ -173,6 +299,7 @@ internal sealed class GitClient
     ///     tracked by git at <c>HEAD</c>, via <c>git ls-files</c>.
     /// </summary>
     /// <param name="repositoryPath">Absolute path to the repository working directory.</param>
+    /// <param name="cancellationToken">Stops git and abandons the call when signaled.</param>
     /// <returns>
     ///     <see langword="true"/> if <c>git ls-files</c> reports any tracked file under one of
     ///     the four known agent folders; otherwise <see langword="false"/>.
@@ -188,12 +315,18 @@ internal sealed class GitClient
     ///     empty, or whitespace.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the git executable cannot be
     ///     started, or when <c>git ls-files</c> exits with a non-zero code.</exception>
-    public bool HasCommittedAgentFiles(string repositoryPath)
+    /// <exception cref="GitCommandTimeoutException">Thrown when git did not answer within the local
+    ///     command limit and was stopped.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled; git was stopped.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread guarded
+    ///     by <see cref="BlockingCallGuard"/>; git was not started.</exception>
+    public bool HasCommittedAgentFiles(string repositoryPath, CancellationToken cancellationToken = default)
     {
         var arguments = new List<string> { "ls-files", "--" };
         arguments.AddRange(KnownAgentFolders);
 
-        var result = RunGit(repositoryPath, arguments.ToArray());
+        var result = RunGit(repositoryPath, _timeouts.LocalCommand, cancellationToken, arguments.ToArray());
         if (!result.Succeeded)
         {
             throw new InvalidOperationException(
@@ -230,7 +363,7 @@ internal sealed class GitClient
         var arguments = new List<string> { "ls-files", "-z", "--" };
         arguments.AddRange(KnownAgentFolders);
 
-        var result = RunGit(repositoryPath, arguments.ToArray());
+        var result = RunGit(repositoryPath, _timeouts.LocalCommand, CancellationToken.None, arguments.ToArray());
         if (!result.Succeeded)
         {
             throw new InvalidOperationException(
@@ -294,7 +427,7 @@ internal sealed class GitClient
         var arguments = new List<string> { "rm", "-r", "--cached", "--quiet", "--" };
         arguments.AddRange(folders);
 
-        var result = RunGit(repositoryPath, arguments.ToArray());
+        var result = RunGit(repositoryPath, _timeouts.LocalCommand, CancellationToken.None, arguments.ToArray());
         if (!result.Succeeded)
         {
             throw new InvalidOperationException(
@@ -340,7 +473,7 @@ internal sealed class GitClient
         var arguments = new List<string> { "reset", "-q", "--" };
         arguments.AddRange(folders);
 
-        var result = RunGit(repositoryPath, arguments.ToArray());
+        var result = RunGit(repositoryPath, _timeouts.LocalCommand, CancellationToken.None, arguments.ToArray());
         if (!result.Succeeded)
         {
             throw new InvalidOperationException(
@@ -353,6 +486,8 @@ internal sealed class GitClient
     ///     detached.
     /// </summary>
     /// <param name="repositoryPath">Absolute path to the repository working directory.</param>
+    /// <param name="cancellationToken">Stops the fallback git and abandons the call when
+    ///     signaled.</param>
     /// <returns>The current branch name, or <c>"(detached)"</c> for a detached <c>HEAD</c>.</returns>
     /// <remarks>
     ///     Implements a hybrid fast-path: this first attempts a direct read of
@@ -363,16 +498,24 @@ internal sealed class GitClient
     ///     unexpected format, permission failure) this falls back unconditionally to
     ///     <c>git rev-parse --abbrev-ref HEAD</c> via <see cref="RunGit"/>, so correctness never
     ///     depends on the fast path being right - only on it usually being right, which keeps the
-    ///     common case free of a subprocess spawn.
+    ///     common case free of a subprocess spawn. The fast path reads the disk, so it is refused on
+    ///     a guarded thread just like git.
     /// </remarks>
     /// <exception cref="ArgumentException">Thrown when <paramref name="repositoryPath"/> is null,
     ///     empty, or whitespace.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the fallback git executable
     ///     cannot be started, or when <c>git rev-parse --abbrev-ref HEAD</c> exits with a
     ///     non-zero code.</exception>
-    public string GetCurrentBranch(string repositoryPath)
+    /// <exception cref="GitCommandTimeoutException">Thrown when the fallback git did not answer
+    ///     within the local command limit and was stopped.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled; git was stopped.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread guarded
+    ///     by <see cref="BlockingCallGuard"/>; nothing was read.</exception>
+    public string GetCurrentBranch(string repositoryPath, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
+        BlockingCallGuard.ThrowIfGuarded("git branch");
 
         var fastPathResult = TryReadBranchFromGitHead(repositoryPath);
         if (fastPathResult is not null)
@@ -380,7 +523,7 @@ internal sealed class GitClient
             return fastPathResult;
         }
 
-        var result = RunGit(repositoryPath, "rev-parse", "--abbrev-ref", "HEAD");
+        var result = RunGit(repositoryPath, _timeouts.LocalCommand, cancellationToken, "rev-parse", "--abbrev-ref", "HEAD");
         if (!result.Succeeded)
         {
             throw new InvalidOperationException(
@@ -509,18 +652,44 @@ internal sealed class GitClient
 
     /// <summary>
     ///     Runs the configured git executable with the given arguments in a repository directory,
-    ///     capturing stdout/stderr.
+    ///     capturing stdout/stderr, under a time limit and a cancellation token.
     /// </summary>
+    /// <remarks>
+    ///     A command that does not exit within <paramref name="timeout"/>, or whose
+    ///     <paramref name="cancellationToken"/> is signaled while it runs, is killed together with every
+    ///     process it started (git may start helpers such as a credential manager or an SSH client), so
+    ///     a hung git never keeps running unnoticed or holds its caller. A command that exited but whose
+    ///     output is still held open, past the limit, by a process it started after it exited is
+    ///     treated the same way (see <see cref="ReadOutput"/>): the wait for the output is bounded, and
+    ///     an abandoned read never blocks the caller. The blocking-call guard is consulted before
+    ///     anything starts.
+    /// </remarks>
     /// <param name="repositoryPath">Working directory the git process runs in.</param>
-    /// <param name="arguments">Command-line arguments to pass to git.</param>
+    /// <param name="timeout">How long the command may run before it is stopped.</param>
+    /// <param name="cancellationToken">Stops the command when signaled.</param>
+    /// <param name="arguments">Command-line arguments to pass to git; the first is the
+    ///     subcommand.</param>
     /// <returns>The captured exit code and output streams.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="repositoryPath"/> is null,
     ///     empty, or whitespace.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the process fails to start (e.g.
     ///     the configured executable path does not exist).</exception>
-    private GitCommandResult RunGit(string repositoryPath, params string[] arguments)
+    /// <exception cref="GitCommandTimeoutException">Thrown when the command did not exit within
+    ///     <paramref name="timeout"/>, or its output was still held open, past the limit, by a process
+    ///     it started after it exited; it was stopped.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled before or while the command ran; a running
+    ///     command was stopped.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown on a thread guarded by
+    ///     <see cref="BlockingCallGuard"/>; nothing was started.</exception>
+    private GitCommandResult RunGit(
+        string repositoryPath, TimeSpan timeout, CancellationToken cancellationToken, params string[] arguments)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
+
+        // Refuse before anything starts: a git process must never be waited for on a guarded thread
+        BlockingCallGuard.ThrowIfGuarded($"git {arguments[0]}");
+        cancellationToken.ThrowIfCancellationRequested();
 
         var startInfo = new ProcessStartInfo(_gitExecutablePath)
         {
@@ -556,10 +725,28 @@ internal sealed class GitClient
                                      $"Failed to start git executable '{_gitExecutablePath}'.");
 
             // Read output asynchronously to avoid deadlock from full stdout/stderr buffers
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
-            process.WaitForExit();
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
+            var stderrTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
+
+            // Wait for the exit within the limit; a cancellation kills the process tree, which ends
+            // the wait at once
+            bool exited;
+            using (cancellationToken.Register(() => TryKillProcessTree(process)))
+            {
+                exited = process.WaitForExit(timeout);
+            }
+
             stopwatch.Stop();
+            if (!exited)
+            {
+                StopTimedOutProcess(process, argumentsText.Value, timeout);
+                throw new GitCommandTimeoutException(
+                    $"'git {arguments[0]}' did not finish within {timeout.TotalSeconds:0.###} seconds and was stopped.",
+                    timeout);
+            }
+
+            // Canceled while it ran: the process was killed, so its output means nothing
+            cancellationToken.ThrowIfCancellationRequested();
 
             // A long WaitForExit points at a hung/slow process rather than a fast failure -
             // exactly the ambiguity the flaky-test investigation could not previously resolve.
@@ -570,8 +757,8 @@ internal sealed class GitClient
                     _gitExecutablePath, argumentsText.Value, stopwatch.ElapsedMilliseconds);
             }
 
-            var stdout = stdoutTask.GetAwaiter().GetResult();
-            var stderr = stderrTask.GetAwaiter().GetResult();
+            var (stdout, stderr) = ReadOutput(
+                process, stdoutTask, stderrTask, stopwatch.Elapsed, timeout, argumentsText.Value, arguments[0], cancellationToken);
 
             if (_logger.IsEnabled(LogLevel.Information))
             {
@@ -610,6 +797,186 @@ internal sealed class GitClient
 
             throw new InvalidOperationException(
                 $"Failed to run '{_gitExecutablePath} {argumentsText.Value}': {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    ///     Collects the output of a git process that has exited, waiting a bounded time for its output
+    ///     streams to close.
+    /// </summary>
+    /// <remarks>
+    ///     The streams normally close when git exits. A process git started (a credential helper, an
+    ///     SSH client, a background maintenance job) that inherited them keeps them open after git
+    ///     exited, so the wait is bounded: by what is left of <paramref name="timeout"/>, but at least
+    ///     the stop time (<see cref="GitClientTimeouts.Stop"/>), so a git that exits at the very end of
+    ///     its limit still gets to hand over its output. When the streams are still open after that,
+    ///     everything git started is killed (best effort: on Windows the processes git started can
+    ///     still be found after it exited; elsewhere they were handed to another parent and may
+    ///     survive), the reads are abandoned (their faults are observed, so they are never reported as
+    ///     unobserved) and the command is reported as timed out. An abandoned read never blocks the
+    ///     caller.
+    /// </remarks>
+    /// <param name="process">The git process; has exited.</param>
+    /// <param name="stdoutTask">The read of its standard output.</param>
+    /// <param name="stderrTask">The read of its standard error.</param>
+    /// <param name="elapsed">How long the command has run so far.</param>
+    /// <param name="timeout">The command's time limit.</param>
+    /// <param name="argumentsText">The command's arguments, for the log.</param>
+    /// <param name="subcommand">The git subcommand, for the exception message.</param>
+    /// <param name="cancellationToken">Stops waiting when signaled.</param>
+    /// <returns>The standard output and standard error text.</returns>
+    /// <exception cref="GitCommandTimeoutException">Thrown when the output was still held open past
+    ///     the bound.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled while waiting.</exception>
+    private (string Stdout, string Stderr) ReadOutput(
+        Process process,
+        Task<string> stdoutTask,
+        Task<string> stderrTask,
+        TimeSpan elapsed,
+        TimeSpan timeout,
+        string argumentsText,
+        string subcommand,
+        CancellationToken cancellationToken)
+    {
+        // What is left of the limit, but never less than the stop time
+        var readLimit = timeout - elapsed;
+        if (readLimit < _timeouts.Stop)
+        {
+            readLimit = _timeouts.Stop;
+        }
+
+        var outputs = Task.WhenAll(stdoutTask, stderrTask);
+        Task[] waited = [outputs];
+        try
+        {
+            // WaitAny never throws for a faulted read; the read's own exception is rethrown below
+            if (Task.WaitAny(waited, (int)Math.Ceiling(readLimit.TotalMilliseconds), cancellationToken) == 0)
+            {
+                return (stdoutTask.GetAwaiter().GetResult(), stderrTask.GetAwaiter().GetResult());
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            TryKillProcessTreeAfterExit(process);
+            ObserveAbandoned(outputs);
+            throw;
+        }
+
+        // Still held open by a process git started: stop it (best effort), give the reads a bounded
+        // moment to end, and abandon them
+        TryKillProcessTreeAfterExit(process);
+        Task.WaitAny(waited, _timeouts.Stop);
+        ObserveAbandoned(outputs);
+        if (_logger.IsEnabled(LogLevel.Warning))
+        {
+            _logger.LogWarning(
+                "git process '{GitExecutable} {Arguments}' exited, but its output was still held open by a process it started after {TimeoutSeconds}s; stopped waiting",
+                _gitExecutablePath, argumentsText, readLimit.TotalSeconds);
+        }
+
+        throw new GitCommandTimeoutException(
+            $"'git {subcommand}' did not finish within {timeout.TotalSeconds:0.###} seconds and was stopped.",
+            timeout);
+    }
+
+    /// <summary>
+    ///     Observes the fault of an abandoned output read whenever it ends, so it is never reported as
+    ///     an unobserved task exception.
+    /// </summary>
+    /// <param name="outputs">The abandoned reads.</param>
+    private static void ObserveAbandoned(Task outputs) =>
+        outputs.ContinueWith(
+            static task => _ = task.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+    /// <summary>
+    ///     Stops a git process that outlived its time limit: kills it and everything it started, waits
+    ///     a bounded time for it to end, and logs what happened.
+    /// </summary>
+    /// <param name="process">The process.</param>
+    /// <param name="argumentsText">The command's arguments, for the log.</param>
+    /// <param name="timeout">The limit it exceeded, for the log.</param>
+    private void StopTimedOutProcess(Process process, string argumentsText, TimeSpan timeout)
+    {
+        TryKillProcessTree(process);
+
+        // The kill is asynchronous; wait (bounded) so the process is normally gone when the caller
+        // hears about the timeout
+        var ended = TryWaitForExit(process, _timeouts.Stop);
+        if (_logger.IsEnabled(LogLevel.Warning))
+        {
+            _logger.LogWarning(
+                "git process '{GitExecutable} {Arguments}' did not finish within {TimeoutSeconds}s and was stopped (ended: {Ended})",
+                _gitExecutablePath, argumentsText, timeout.TotalSeconds, ended);
+        }
+    }
+
+    /// <summary>
+    ///     Kills every process a git process that has already exited started, as far as they can still
+    ///     be found.
+    /// </summary>
+    /// <remarks>
+    ///     Best effort, and never throws. Unlike <see cref="TryKillProcessTree"/> it does not skip a
+    ///     process that has exited: on Windows the handle still held keeps the process's identity, so
+    ///     the processes it started can still be found and killed; elsewhere they were handed to
+    ///     another parent when it exited and may survive.
+    /// </remarks>
+    /// <param name="process">The process.</param>
+    private static void TryKillProcessTreeAfterExit(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or NotSupportedException or AggregateException)
+        {
+            // Nothing could be found or killed; the bounded wait that follows does not depend on it
+        }
+    }
+
+    /// <summary>
+    ///     Kills a process and every process it started, ignoring a process that has already ended.
+    /// </summary>
+    /// <remarks>
+    ///     Called from a cancellation callback too, so it never throws: whether the process really
+    ///     ended is decided by the wait that follows, not by the kill.
+    /// </remarks>
+    /// <param name="process">The process.</param>
+    private static void TryKillProcessTree(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or NotSupportedException or AggregateException)
+        {
+            // The process ended between the check and the kill, or could not be killed; the wait
+            // that follows tells which
+        }
+    }
+
+    /// <summary>
+    ///     Waits a bounded time for a process to end.
+    /// </summary>
+    /// <param name="process">The process.</param>
+    /// <param name="limit">How long to wait.</param>
+    /// <returns><see langword="true"/> when the process has ended.</returns>
+    private static bool TryWaitForExit(Process process, TimeSpan limit)
+    {
+        try
+        {
+            return process.WaitForExit(limit);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+        {
+            // No process is associated any more: there is nothing left to wait for
+            return true;
         }
     }
 }

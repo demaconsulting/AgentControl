@@ -46,6 +46,8 @@ N/A - standard test environment.
   ignores empty folders, the repo's root files and anything outside the four managed folders; a missing, changed,
   renamed or extra file gives a different identity; a linked managed folder, a missing repo, a null repo root and a
   canceled token are refused rather than identified; and a repo root reached through a link is accepted.
+- Hashing a package's files or a repo's installed agent files on a thread guarded against blocking calls is refused
+  and recorded, never reported as content that cannot be identified.
 
 #### Test Scenarios
 
@@ -162,3 +164,10 @@ throws `ArgumentNullException` and a missing repo throws `InvalidOperationExcept
 `PackageContentIdentity_ComputeInstalledFilesIdentity_NullRepoRoot_ThrowsArgumentNullException` and
 `PackageContentIdentity_ComputeInstalledFilesIdentity_MissingRepoRoot_ThrowsInvalidOperationException`, covering
 `AgentControl-PackageContentIdentity-InstalledIdentityFailsSafely`.
+
+**PackageContentIdentity_Hash_OnGuardedThread_IsRefusedAndRecorded**: Inside a guard scope of `BlockingCallGuard`,
+`TryComputeFilesIdentity` and `ComputeInstalledFilesIdentity` both throw `BlockingCallOnGuardedThreadException` (the
+former does not turn it into "no identity"), the record holds `package content hash` and `installed files hash`, and
+the same package is identified outside the scope. This scenario is tested by
+`PackageContentIdentity_Hash_OnGuardedThread_IsRefusedAndRecorded`, covering
+`AgentControl-PackageContentIdentity-RefusesGuardedThread`.

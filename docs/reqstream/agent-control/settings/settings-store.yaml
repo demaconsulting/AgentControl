@@ -344,3 +344,14 @@ sections:
           must not come back on a new group of the same name.
         tests:
           - SettingsStore_Load_ColorAndOrderOfGroupWithoutRepos_AreDropped
+
+      - id: AgentControl-SettingsStore-RefusesGuardedThread
+        title: >-
+          The SettingsStore class shall refuse a save made on a thread that is guarded against
+          blocking calls, before anything is written, recording the refusal.
+        justification: |
+          A save writes the disk and can wait for about a second on a locked file; made on the
+          window's UI thread it freezes the window. The tests guard that thread, so a settings save
+          that slips back onto it fails them at once.
+        tests:
+          - SettingsStore_Save_OnGuardedThread_IsRefusedAndWritesNothing

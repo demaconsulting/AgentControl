@@ -30,9 +30,10 @@ namespace DemaConsulting.AgentControl.GitIntegration;
 ///     <c>git ls-files</c> when <c>HEAD</c> has not changed since the last check. This cache is
 ///     in-memory only (no persistence): the <c>HEAD</c>-hash key is naturally invalidated by a
 ///     process restart or a new commit, and re-running one cheap <c>git rev-parse HEAD</c> per
-///     card at each app launch is already required for the branch/pin displays. Not thread-safe;
-///     callers are expected to use this only from the UI thread, consistent with every other
-///     view-model-adjacent class in this codebase.
+///     card at each app launch is already required for the branch/pin displays. Safe for
+///     concurrent use: a card's cheap refresh reads git on a worker thread (so the window stays
+///     responsive while many repos are added or refreshed) while the UI thread may consult or
+///     invalidate the same cache, so every member takes a private lock around the dictionary.
 /// </remarks>
 internal sealed class CommittedAgentFilesCache
 {
@@ -41,6 +42,12 @@ internal sealed class CommittedAgentFilesCache
     ///     the time the result was recorded.
     /// </summary>
     private readonly Dictionary<(string RepoPath, string HeadHash), bool> _cache = [];
+
+    /// <summary>
+    ///     Guards <see cref="_cache"/>, so lookups, stores and invalidations made from different
+    ///     threads at the same time never corrupt the dictionary or observe it half-updated.
+    /// </summary>
+    private readonly Lock _lock = new();
 
     /// <summary>
     ///     Attempts to retrieve a cached result for a repo at a specific <c>HEAD</c> commit hash.
@@ -53,7 +60,11 @@ internal sealed class CommittedAgentFilesCache
     /// <returns><see langword="true"/> if a cached entry was found; otherwise <see langword="false"/>.</returns>
     public bool TryGetCached(string repoPath, string headHash, out bool hasCommittedFiles)
     {
-        return _cache.TryGetValue((Normalize(repoPath), headHash), out hasCommittedFiles);
+        var key = (Normalize(repoPath), headHash);
+        lock (_lock)
+        {
+            return _cache.TryGetValue(key, out hasCommittedFiles);
+        }
     }
 
     /// <summary>
@@ -65,7 +76,11 @@ internal sealed class CommittedAgentFilesCache
     /// <param name="hasCommittedFiles">The result to cache.</param>
     public void Set(string repoPath, string headHash, bool hasCommittedFiles)
     {
-        _cache[(Normalize(repoPath), headHash)] = hasCommittedFiles;
+        var key = (Normalize(repoPath), headHash);
+        lock (_lock)
+        {
+            _cache[key] = hasCommittedFiles;
+        }
     }
 
     /// <summary>
@@ -76,9 +91,12 @@ internal sealed class CommittedAgentFilesCache
     public void Invalidate(string repoPath)
     {
         var normalized = Normalize(repoPath);
-        foreach (var key in _cache.Keys.Where(key => key.RepoPath == normalized).ToList())
+        lock (_lock)
         {
-            _cache.Remove(key);
+            foreach (var key in _cache.Keys.Where(key => key.RepoPath == normalized).ToList())
+            {
+                _cache.Remove(key);
+            }
         }
     }
 

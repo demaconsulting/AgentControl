@@ -12,4 +12,7 @@ package AgentControl {
             requirementFiles = ("docs/reqstream/agent-control/repo-sync/package-content-extractor.yaml");
         }
     }
+
+    // Asks the blocking-call guard before every extraction, so the tests catch one made on the UI thread
+    dependency PackageContentExtractor to BlockingCallGuard;
 }

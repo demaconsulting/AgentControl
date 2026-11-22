@@ -22,6 +22,7 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using DemaConsulting.AgentControl.RepoSync;
+using DemaConsulting.AgentControl.Utilities;
 
 namespace DemaConsulting.AgentControl.AgentPackageManagement;
 
@@ -133,6 +134,8 @@ internal static class PackageContentIdentity
     ///     two files with the same canonical path (the identity would depend on which one wins) or
     ///     with paths that differ only in letter case (they would be one file on a case-insensitive
     ///     file system), or a file changes length while it is being read.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread a test
+    ///     has guarded (see <see cref="BlockingCallGuard"/>); nothing is read or written.</exception>
     public static string ComputeFilesIdentity(IPackageContentReader reader) =>
         HashFiles(reader, CancellationToken.None);
 
@@ -155,6 +158,9 @@ internal static class PackageContentIdentity
     private static string HashFiles(IPackageContentReader reader, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(reader);
+
+        // Reads and hashes every file: never on a thread that must not wait for the disk
+        BlockingCallGuard.ThrowIfGuarded("package content hash");
 
         // Select the files with the extraction's own rule, so the identity covers exactly what
         // would be written - then put them into the canonical order
@@ -235,9 +241,12 @@ internal static class PackageContentIdentity
     ///     case; the installed files then cannot be verified.</exception>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/>
     ///     is canceled while the files are being hashed.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread a test
+    ///     has guarded (see <see cref="BlockingCallGuard"/>); nothing is read or written.</exception>
     public static string ComputeInstalledFilesIdentity(string repoRoot, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(repoRoot);
+        BlockingCallGuard.ThrowIfGuarded("installed files hash");
 
         // The very same function hashes a package's files and the installed ones; only the reader
         // differs, which is what makes the two identities comparable
@@ -261,6 +270,8 @@ internal static class PackageContentIdentity
     /// </remarks>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="reader"/> is
     ///     <see langword="null"/>.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread a test
+    ///     has guarded (see <see cref="BlockingCallGuard"/>); nothing is read or written.</exception>
     public static string? TryComputeFilesIdentity(IPackageContentReader reader)
     {
         try

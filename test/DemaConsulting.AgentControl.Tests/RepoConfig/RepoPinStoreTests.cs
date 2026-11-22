@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 using DemaConsulting.AgentControl.RepoConfig;
+using DemaConsulting.AgentControl.Utilities;
 
 // cspell:ignore SCHEMAVERSION
 namespace DemaConsulting.AgentControl.Tests.RepoConfig;
@@ -850,6 +851,43 @@ public class RepoPinStoreTests
         }
     }
 
+    /// <summary>
+    ///     Test that a pin read or write made on a thread guarded against blocking calls (as the
+    ///     window's UI thread is in the tests) is refused before the file is touched, and recorded.
+    /// </summary>
+    [Fact]
+    public void RepoPinStore_LoadAndSave_OnGuardedThread_AreRefusedAndTouchNothing()
+    {
+        // Arrange: a repo with a pin
+        var repoRoot = CreateTempDirectory();
+        try
+        {
+            RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+            var before = File.ReadAllText(Path.Combine(repoRoot, ".agentcontrol.json"));
+            BlockingCallGuard.TakeViolations();
+
+            // Act
+            Exception? load;
+            Exception? save;
+            using (BlockingCallGuard.GuardCurrentThread())
+            {
+                load = Record.Exception(() => RepoPinStore.Load(repoRoot));
+                save = Record.Exception(() => RepoPinStore.Save(repoRoot, new RepoPin { PackageName = "other", Version = "2.0.0" }));
+            }
+
+            var violations = BlockingCallGuard.TakeViolations();
+
+            // Assert: both refused and recorded, and the pin file is as it was
+            Assert.IsType<BlockingCallOnGuardedThreadException>(load);
+            Assert.IsType<BlockingCallOnGuardedThreadException>(save);
+            Assert.Equal(["pin read", "pin write"], violations);
+            Assert.Equal(before, File.ReadAllText(Path.Combine(repoRoot, ".agentcontrol.json")));
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+        }
+    }
     /// <summary>
     ///     Creates a unique temporary directory for test isolation.
     /// </summary>

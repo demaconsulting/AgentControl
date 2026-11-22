@@ -8,6 +8,36 @@
 sections:
   - title: RepoCardViewModel Unit Requirements
     requirements:
+      - id: AgentControl-RepoCardViewModel-CheapRefreshInBackground
+        title: >-
+          The RepoCardViewModel class shall offer a refresh of its pin, branch and committed agent
+          folders that does not make its caller wait for the disk or git, keeps showing the previous
+          state until the new one is known, and applies nothing when the card was removed meanwhile
+          or the result of a newer refresh has already been applied, and still apply its result when
+          a newer refresh was given up before it applied anything.
+        justification: |
+          Many cards are refreshed at once after a settings save; the window must stay usable, and
+          an older, slower read must never overwrite what a newer one found. A newer refresh the
+          user canceled found nothing, so it must not throw away what an older read finds, or the
+          card would never learn its state.
+        tests:
+          - RepoCardViewModel_RefreshCheapInBackgroundAsync_ReadHeld_ReturnsAndAppliesWhenReleased
+          - RepoCardViewModel_RefreshCheapInBackgroundAsync_NewerRefreshStarted_OlderResultDropped
+          - RepoCardViewModel_RefreshCheapInBackgroundAsync_Retired_AppliesNothing
+          - RepoCardViewModel_RefreshAsync_CanceledWhileEarlierReadPending_EarlierReadStillApplied
+
+      - id: AgentControl-RepoCardViewModel-GitStatusInBackground
+        title: >-
+          The RepoCardViewModel class shall check its repo's working tree without making its caller
+          wait for git, show its Git status as not checked yet (never as having uncommitted changes)
+          until git has answered, and apply nothing when the card was removed meanwhile.
+        justification: |
+          git status is the slowest per-repo check; the window shows many cards at once and must not
+          wait for each, and a card must not claim uncommitted changes it has not seen.
+        tests:
+          - RepoCardViewModel_RefreshDirtyStatusInBackgroundAsync_StatusHeld_StaysNotYetCheckedUntilDone
+          - RepoCardViewModel_RefreshDirtyStatusInBackgroundAsync_Retired_AppliesNothing
+
       - id: AgentControl-RepoCardViewModel-DisplayInfo
         title: >-
           The RepoCardViewModel class shall expose the repo's leaf folder name as its display
@@ -1015,13 +1045,12 @@ sections:
       - id: AgentControl-RepoCardViewModel-ChangeSavedBeforeApplied
         title: >-
           The RepoCardViewModel class shall change its favorite status, its group, its card color
-          and its launch time only after its owner has saved the change, and shall remain as it was
-          (reporting the refusal of a group move or color choice to its caller) when the owner
-          refuses it.
+          and its launch time only through its owner, which has the change saved and may refuse it,
+          and shall remain as it was (reporting the refusal of a group move or color choice to its
+          caller) when the owner refuses it.
         justification: |
-          A card that shows a change the settings file does not have would be wrong after the next
-          start; applying a change only once it is saved keeps what the user sees equal to what is
-          kept.
+          The settings the card shows belong to the owner, which keeps them and writes them; a card
+          that changed its entry behind the owner's back would show something that is never saved.
         tests:
           - RepoCardViewModel_Changes_GoThroughTheOwnerAndAreNotAppliedWhenItRefuses
 
@@ -1554,3 +1583,97 @@ sections:
           Nothing can be listed with a git that is too old, so no version can be offered.
         tests:
           - RepoCardViewModel_RefreshUpgradeStatus_GitTooOld_ShowsSourceProblemWithoutSignIn
+
+      - id: AgentControl-RepoCardViewModel-RefreshingState
+        title: >-
+          The RepoCardViewModel class shall report that it is refreshing while a read of its repo
+          state (its pin, branch and committed agent folders, or its working tree) waits to run or
+          runs, announce when that changes, and stop reporting it once the reads were applied; until
+          its repo state was first read it shall report its status as Refreshing, its branch as not
+          known yet, and neither the "No agent package" chip nor the committed-agent-files warning.
+        justification: |
+          With reads queued a couple at a time a card may wait a while for its state; the user must
+          see that its state is being refreshed rather than take the shown state as current. A card
+          shown before its first read knows nothing git-derived yet, so showing "no branch", "no
+          agent package" or a healthy status would state as facts what is only not known.
+        tests:
+          - RepoCardViewModel_RefreshRepoStateAsync_WhileQueued_ShowsRefreshingAndClearsAfter
+          - RepoCardViewModel_Status_BeforeFirstRead_IsRefreshing
+          - RepoCardViewModel_RefreshAsync_CanceledWhileEarlierReadPending_EarlierReadStillApplied
+
+      - id: AgentControl-RepoCardViewModel-GitTimeoutShown
+        title: >-
+          The RepoCardViewModel class shall, when git did not answer a read of its repo state within
+          its time limit and was stopped, show in its status message that git was stopped, that the
+          repo's Git state is unknown and that Refresh tries again, show the Git state as unknown,
+          and remove that message once a later read gets an answer.
+        justification: |
+          The user must learn why the card shows no Git state and what to do; a message that stays
+          after git answers again would be wrong.
+        tests:
+          - RepoCardViewModel_RefreshRepoStateAsync_GitTimesOut_ShowsGitProblemOnCard
+
+      - id: AgentControl-RepoCardViewModel-PromoteAndAwait
+        title: >-
+          The RepoCardViewModel class shall, when Launch, Pull, Upgrade or Select Package is started
+          while a read of its repo state waits to run or runs, be busy, move that read ahead of the
+          other reads that wait, wait for it without blocking its caller, and then act on what it
+          read: do nothing and say why when the folder turned out to be missing, the working tree is
+          not clean (Pull) or the pin changed (Upgrade); a card whose state was never read shall read
+          it first.
+        justification: |
+          A card is shown before its repo state is read, and that state can be re-read at any time.
+          An action must not use state that is unknown or about to change - launch without seeing
+          committed agent files, pull a tree that turned dirty, or upgrade from a pin that is no
+          longer the one shown - and the window must stay usable while it waits.
+        tests:
+          - RepoCardViewModel_Launch_WhileStateQueued_PromotesAndUsesFreshCommittedFilesState
+          - RepoCardViewModel_Launch_FreshStateShowsMissing_DoesNotLaunchAndSays
+          - RepoCardViewModel_Pull_WhileStatusQueued_WaitsAndRechecksCanPull
+          - RepoCardViewModel_Upgrade_WhileStateQueued_WaitsForState
+          - RepoCardViewModel_ApplySelectedPackage_WhileStateQueued_WaitsForState
+
+      - id: AgentControl-RepoCardViewModel-RefreshQueuedAtUserAction
+        title: >-
+          The RepoCardViewModel class shall read its repo state for Refresh through the shared refresh
+          queue at the priority of a user action - ahead of reads that wait at a lower priority, and
+          joined with a read of its state that already waits - make no git call on the caller's
+          thread, and check the package sources only after that read was applied.
+        justification: |
+          The user asked for the refresh, so it must not wait behind the background reads of other
+          repos, must not start a second read of a repo that is already waiting, and must not freeze
+          the window with git; the upgrade check needs the pin the read finds.
+        tests:
+          - RepoCardViewModel_Refresh_EnqueuedAtUserActionAndShowsRefreshing
+          - RepoCardViewModel_Refresh_SynchronousPart_MakesNoGitCallOnGuardedThread
+          - RepoCardViewModel_Refresh_WhileAlreadyQueued_CoalescesIntoOneRead
+
+      - id: AgentControl-RepoCardViewModel-PostPullRefreshQueued
+        title: >-
+          The RepoCardViewModel class shall, after a Git Pull and after it took agent folders out of
+          git's index, re-read its repo state through the shared refresh queue at the priority of a
+          user action while it is still busy, showing that it is refreshing.
+        justification: |
+          A pull or an untrack changes what the card shows (pin, branch, committed agent folders,
+          working tree); reading it again must not freeze the window with git and must not wait
+          behind the background reads of other repos.
+        tests:
+          - RepoCardViewModel_Pull_AfterPull_RefreshEnqueuedAtUserAction
+          - RepoCardViewModel_ApplyPackage_UntrackedFolders_RefreshesThroughQueue
+
+      - id: AgentControl-RepoCardViewModel-ActionIoInBackground
+        title: >-
+          The RepoCardViewModel class shall do the disk, hashing and process work of its actions -
+          the pin reads and writes, the identity of an acquired package, the .gitignore and release
+          notes of an apply, the check of the managed folders before a launch, the AGENTS.md offer
+          check, the AGENTS.md answer, the shell detection and the start of the agent tool - off the
+          UI thread, applying the outcome on the UI thread once the work has ended.
+        justification: |
+          Every one of these touches the repo (which can be on a slow or offline share), the package
+          cache or the PATH; done on the window's thread, a slow disk or a large package freezes the
+          window for as long as it takes.
+        tests:
+          - RepoCardViewModel_Launch_ShellAndStartRunInBackground
+          - RepoCardViewModel_Upgrade_ApplyIoRunsInBackground
+          - RepoCardViewModel_AgentsMdAccept_WritesInBackground
+          - RepoCardViewModel_AgentsMdDecline_SavesPinInBackground

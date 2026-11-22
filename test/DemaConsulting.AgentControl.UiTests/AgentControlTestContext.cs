@@ -161,6 +161,14 @@ internal sealed class AgentControlTestContext : IDisposable
     public string? CredentialStoreFile { get; set; }
 
     /// <summary>
+    ///     Gets or sets a "hold" file for the arg-logger stub, or <see langword="null"/> (the default) for
+    ///     none. Set before <see cref="Launch"/>: while the file exists, every git command the
+    ///     application runs through the stub waits (at most 45 seconds) before it answers, so a test can
+    ///     see what the window shows while git has not answered; deleting the file releases them.
+    /// </summary>
+    public string? GitHoldFile { get; set; }
+
+    /// <summary>
     ///     Gets or sets environment variables to add to the launched application's environment (and so to
     ///     the real <c>git</c> it runs), or <see langword="null"/> (the default) for none. Set before
     ///     <see cref="Launch"/>; the Git source tests use it to keep git away from the user's own
@@ -202,6 +210,12 @@ internal sealed class AgentControlTestContext : IDisposable
         {
             // Opt in to the arg-logger stub's emulation of the user's Git credential helper
             startInfo.EnvironmentVariables["ARGLOGGER_CREDENTIAL_STORE"] = CredentialStoreFile;
+        }
+
+        if (GitHoldFile is not null)
+        {
+            // Make the arg-logger stub wait while the hold file exists
+            startInfo.EnvironmentVariables["ARGLOGGER_HOLD_FILE"] = GitHoldFile;
         }
 
         // NuGet caches service indexes on disk by URL; a private cache per launch keeps a feed that

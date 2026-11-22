@@ -279,6 +279,30 @@ public class ThemeResourceTests
     });
 
     /// <summary>
+    ///     Test that the global progress strip under the app bar is legible in both themes: the bar
+    ///     reaches graphics contrast against its track and against the strip, and the status text keeps
+    ///     AA contrast on the strip.
+    /// </summary>
+    /// <param name="variantName">The theme variant to check.</param>
+    [Theory]
+    [InlineData("Light")]
+    [InlineData("Dark")]
+    public void ThemeResources_GlobalProgress_IsLegibleInLightAndDark(string variantName) => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var palette = LoadPalette(variantName == "Light" ? ThemeVariant.Light : ThemeVariant.Dark);
+        var strip = Opaque(palette, "GlobalProgressStripBackground");
+        var track = Opaque(palette, "GlobalProgressTrack");
+        var bar = Opaque(palette, "GlobalProgressForeground");
+        var text = Opaque(palette, "GlobalProgressTextForeground");
+
+        // Act / Assert: the bar against its track and the strip, the text on the strip
+        Assert.True(Contrast(bar, track) >= GraphicContrast, $"bar on track: {Contrast(bar, track):F2}");
+        Assert.True(Contrast(bar, strip) >= GraphicContrast, $"bar on strip: {Contrast(bar, strip):F2}");
+        Assert.True(Contrast(text, strip) >= TextContrast, $"text on strip: {Contrast(text, strip):F2}");
+    });
+
+    /// <summary>
     ///     Test that the About banner's name and tagline reach AA text contrast in both themes, on the
     ///     banner's band and where its glows are strongest.
     /// </summary>

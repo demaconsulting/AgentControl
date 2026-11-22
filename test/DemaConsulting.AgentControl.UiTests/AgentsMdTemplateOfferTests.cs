@@ -85,10 +85,12 @@ public sealed class AgentsMdTemplateOfferTests
                 title => title.StartsWith("Release Notes", StringComparison.Ordinal),
                 TimeSpan.FromSeconds(15)));
 
-            // The template must be written verbatim to the repo root, not into any managed folder.
+            // The template must be written verbatim to the repo root, not into any managed folder. It is
+            // written in the background once the question is answered, so wait for the whole text (a file
+            // that is still being written may exist with part of it, or be locked for a moment).
             var agentsMdPath = Path.Combine(context.RepoPath, "AGENTS.md");
             var written = Retry.WhileFalse(
-                () => File.Exists(agentsMdPath),
+                () => ReadIfPresent(agentsMdPath) == templateContent,
                 timeout: TimeSpan.FromSeconds(10),
                 interval: TimeSpan.FromMilliseconds(200));
             Assert.True(written.Success);
@@ -276,6 +278,14 @@ public sealed class AgentsMdTemplateOfferTests
     {
         mainWindow.SetForeground();
 
+        // The menu offers Upgrade only once the card's state has been read and its upgrade check has found
+        // the newer version (both run in the background after start-up): wait for the upgrade chip first, so
+        // the menu is not opened before the item exists
+        Assert.NotNull(Retry.WhileNull(
+            () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("UpgradeAvailableBadge")),
+            timeout: TimeSpan.FromSeconds(30),
+            interval: TimeSpan.FromMilliseconds(200)).Result);
+
         var moreActionsButton = Retry.WhileNull(
             () => mainWindow.FindFirstDescendant(cf => cf.ByAutomationId("MoreActionsButton")),
             timeout: TimeSpan.FromSeconds(10),
@@ -324,14 +334,37 @@ public sealed class AgentsMdTemplateOfferTests
     ///     property is present and set to <see langword="true"/>.</returns>
     private static bool PinFileRecordsDecline(string repoPath)
     {
-        var pinFilePath = Path.Combine(repoPath, ".agentcontrol.json");
-        if (!File.Exists(pinFilePath))
+        // The decline is saved in the background: a pin file that is being written may be locked for a moment
+        var text = ReadIfPresent(Path.Combine(repoPath, ".agentcontrol.json"));
+        if (text is null)
         {
             return false;
         }
 
-        var normalized = string.Concat(File.ReadAllText(pinFilePath).Where(c => !char.IsWhiteSpace(c)));
+        var normalized = string.Concat(text.Where(c => !char.IsWhiteSpace(c)));
         return normalized.Contains("\"AgentsMdTemplateDeclined\":true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     Reads a text file the application may still be writing in the background.
+    /// </summary>
+    /// <param name="path">The file.</param>
+    /// <returns>The file's text, or <see langword="null"/> when it does not exist or cannot be read at this
+    ///     moment.</returns>
+    private static string? ReadIfPresent(string path)
+    {
+        try
+        {
+            return File.Exists(path) ? SharedFile.ReadAllText(path) : null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
