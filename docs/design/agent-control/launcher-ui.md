@@ -200,7 +200,8 @@ the app bar that shows bulk work not tied to one card - adding repositories, and
 after Settings are saved.
 
 - *Type*: In-process .NET bindable properties and an `ICommand`, bound by `MainWindow.axaml` to a `Border`
-  (AutomationId `GlobalProgressStrip`, visible only while `IsActive`), a 3-pixel `ProgressBar` (`GlobalProgressBar`,
+  (AutomationId `GlobalProgressStrip`, exposed to UI Automation as a content element, visible only while `IsActive`),
+  a 3-pixel `ProgressBar` (`GlobalProgressBar`,
   indeterminate or with `Value` of `Maximum`, its accessible name the status text), a `TextBlock`
   (`GlobalProgressText`) and a Cancel `Button` (`GlobalProgressCancelButton`, accessible name "Cancel adding
   repositories", visible only while `CanCancel`).

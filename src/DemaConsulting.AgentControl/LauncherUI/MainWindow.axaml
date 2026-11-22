@@ -93,10 +93,12 @@
              operation runs - reading the cards at start-up, adding several repositories, or
              refreshing the cards after Settings were saved. Fully collapsed (no space reserved) when
              idle, so the idle layout is unchanged. The bar is indeterminate until the amount of work
-             is known. -->
+             is known. The strip is a content element for UI Automation (a plain Border is not exposed),
+             so it can be found by its AutomationId while it is shown. -->
         <Border DockPanel.Dock="Top"
                 Name="GlobalProgressStrip"
                 AutomationProperties.AutomationId="GlobalProgressStrip"
+                AutomationProperties.AccessibilityView="Content"
                 IsVisible="{Binding GlobalProgress.IsActive}"
                 Background="{DynamicResource GlobalProgressStripBackground}"
                 BorderBrush="{DynamicResource SurfaceDivider}"
