@@ -4380,8 +4380,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="packageName">The pinned package name.</param>
     /// <param name="version">The pinned version text.</param>
     /// <param name="cancellationToken">Cancels the listing.</param>
-    /// <param name="failureMemo">The failures of the background check round the listing belongs to,
-    ///     or <see langword="null"/> outside a round; see
+    /// <param name="failureMemo">The failures recorded so far by the upgrade check the listing
+    ///     belongs to: the current background check round's (the periodic round or the launch-time
+    ///     check), or the memo a repo card's check the user started (Refresh, the "Sign-in needed"
+    ///     chip) keeps of its own for its length - <see cref="RefreshUpgradeStatusAsync"/> always
+    ///     passes one; or <see langword="null"/> for a listing outside any such check (restoring the
+    ///     pinned files when the agent tool is launched); see
     ///     <see cref="PackageVersionCache.GetVersionsDescendingAsync"/>.</param>
     /// <returns>The offers of the package at exactly that version in Settings order (a source
     ///     with several spellings of the version lists each), the failure to report for a source
