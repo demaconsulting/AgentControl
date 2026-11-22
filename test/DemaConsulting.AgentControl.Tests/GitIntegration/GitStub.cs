@@ -31,7 +31,9 @@ namespace DemaConsulting.AgentControl.Tests.GitIntegration;
 ///     matching every subcommand <c>GitClient</c> issues. On Windows this is a <c>.bat</c> file
 ///     (directly runnable by <see cref="System.Diagnostics.Process.Start(System.Diagnostics.ProcessStartInfo)"/>
 ///     without <c>UseShellExecute</c>); elsewhere it is a POSIX shell script marked executable via
-///     <c>File.SetUnixFileMode</c>.
+///     <c>File.SetUnixFileMode</c>. On request, <c>status --porcelain</c> also starts a background copy
+///     of the stub (the hidden <c>__holder</c> invocation) that keeps the stub's output open after
+///     the stub exited, standing in for a helper git started that outlives git.
 /// </remarks>
 internal sealed class GitStub
 {
@@ -99,6 +101,11 @@ internal sealed class GitStub
     ///     appends to <see cref="FinishedMarkerPath"/>); 0 answers at once.</param>
     /// <param name="revParseHeadSleepSeconds">How many seconds <c>rev-parse HEAD</c> sleeps before it
     ///     answers (then appends to <see cref="FinishedMarkerPath"/>); 0 answers at once.</param>
+    /// <param name="statusOutputHolderSeconds">When above 0, <c>status --porcelain</c> first starts a
+    ///     background copy of the stub that inherits its standard output and error and keeps them open
+    ///     for that many seconds (then appends to <see cref="FinishedMarkerPath"/>), while the stub
+    ///     itself answers and exits at once - a helper git started that outlives git. 0 starts
+    ///     none.</param>
     /// <returns>A new <see cref="GitStub"/> whose <see cref="Path"/> is ready to use.</returns>
     public static GitStub Create(
         string statusOutput = "",
@@ -118,9 +125,11 @@ internal sealed class GitStub
         string? invocationLogPath = null,
         int statusSleepSeconds = 0,
         int pullSleepSeconds = 0,
-        int revParseHeadSleepSeconds = 0)
+        int revParseHeadSleepSeconds = 0,
+        int statusOutputHolderSeconds = 0)
     {
-        var sleeps = new StubSleeps(statusSleepSeconds, pullSleepSeconds, revParseHeadSleepSeconds);
+        var sleeps = new StubSleeps(
+            statusSleepSeconds, pullSleepSeconds, revParseHeadSleepSeconds, statusOutputHolderSeconds);
         if (OperatingSystem.IsWindows())
         {
             var path = System.IO.Path.Combine(
@@ -194,7 +203,9 @@ internal sealed class GitStub
     /// <param name="Status">Seconds for <c>status --porcelain</c>.</param>
     /// <param name="Pull">Seconds for <c>pull</c>.</param>
     /// <param name="RevParseHead">Seconds for <c>rev-parse HEAD</c>.</param>
-    private sealed record StubSleeps(int Status, int Pull, int RevParseHead);
+    /// <param name="StatusOutputHolder">Seconds the background copy started by
+    ///     <c>status --porcelain</c> holds the output open; 0 starts none.</param>
+    private sealed record StubSleeps(int Status, int Pull, int RevParseHead, int StatusOutputHolder);
 
     /// <summary>
     ///     Builds the batch lines that make a command sleep and then record that it finished.
@@ -249,14 +260,24 @@ internal sealed class GitStub
 
         lines.AddRange(
         [
+            "if \"%1\"==\"__holder\" goto :holder",
             "if \"%1\"==\"status\" goto :status",
             "if \"%1\"==\"pull\" goto :pull",
             "if \"%1\"==\"ls-files\" goto :lsfiles",
             "if \"%1\"==\"rev-parse\" if \"%2\"==\"HEAD\" goto :revparsehead",
             "if \"%1\"==\"rev-parse\" if \"%2\"==\"--abbrev-ref\" goto :abbrevref",
             "exit /b 127",
-            ":status"
+            ":holder"
         ]);
+        lines.AddRange(BatchSleep(sleeps.StatusOutputHolder, markerPath));
+        lines.Add("exit /b 0");
+        lines.Add(":status");
+        if (sleeps.StatusOutputHolder > 0)
+        {
+            // A background copy that inherits this stub's output and keeps it open after it exits
+            lines.Add("start \"\" /b cmd /c call \"%~f0\" __holder");
+        }
+
         lines.AddRange(BatchSleep(sleeps.Status, markerPath));
         if (!string.IsNullOrEmpty(statusOutput))
         {
@@ -335,7 +356,17 @@ internal sealed class GitStub
         }
 
         lines.Add("case \"$1 $2\" in");
+        lines.Add("  \"__holder \")");
+        lines.AddRange(ShellSleep(sleeps.StatusOutputHolder, markerPath));
+        lines.Add("    exit 0");
+        lines.Add("    ;;");
         lines.Add("  \"status --porcelain\")");
+        if (sleeps.StatusOutputHolder > 0)
+        {
+            // A background copy that inherits this stub's output and keeps it open after it exits
+            lines.Add("    \"$0\" __holder &");
+        }
+
         lines.AddRange(ShellSleep(sleeps.Status, markerPath));
         if (!string.IsNullOrEmpty(statusOutput))
         {

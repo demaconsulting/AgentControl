@@ -147,7 +147,9 @@ them. Likewise, a repository you remove while it is being added is added again, 
 repositories are being added to it is opened so you can see them.
 
 - **Cancel.** Click **Cancel** in the progress strip to stop the add: nothing of it is added, and no message is shown.
-  Once the add has started saving ("Saving..."), Cancel is no longer offered and the add completes.
+  Once the add has started saving ("Saving..."), Cancel is no longer offered and the add completes. If the cards are
+  refreshed while repositories are being added (for example after you save Settings), the strip keeps showing the add
+  with its **Cancel** button; the refresh is shown once the add has ended or was canceled.
 - **Adding more while an add runs.** Folders you drop or pick while an add is still running wait for it and are added
   right after it; one Cancel stops them all.
 - **When the settings cannot be saved.** If AgentControl cannot save the new repos (for example because the settings

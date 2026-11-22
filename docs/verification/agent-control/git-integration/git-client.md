@@ -27,6 +27,8 @@ Approach).
 - The repository-root check reports a root only for a folder with its own `.git` folder or file.
 - A command that outlives its time limit, or whose caller cancels it, is stopped before it finishes and reported as
   timed out (with the limit) or canceled; a pull runs under its own, longer limit.
+- A command that exited while a process it started still holds its output open is not waited for past its limit: it
+  is reported as timed out (with the limit) instead of returning once that process ends.
 - On a thread guarded against blocking calls no git command starts.
 
 #### Test Scenarios
@@ -125,7 +127,15 @@ is stopped (it never writes its post-sleep marker) and reported as `GitCommandTi
 `InvalidOperationException` - naming `git status` and the one-second limit
 (`GitClient_IsWorkingTreeClean_GitHangsPastTimeout_StopsItAndThrowsTimedOut`); a pull that takes two seconds completes
 under the same one-second local limit, because a pull runs under the pull limit
-(`GitClient_Pull_UsesPullTimeoutNotLocalTimeout`). These cover `AgentControl-GitClient-TimeoutStopsGit`.
+(`GitClient_Pull_UsesPullTimeoutNotLocalTimeout`). A stub whose `status` answers and exits at once, but first starts
+a background copy of itself that inherits its output and keeps it open for four seconds (standing in for a helper git
+started that outlives git), is reported as `GitCommandTimeoutException` naming `git status` and the one-second limit,
+rather than returning once the helper ends
+(`GitClient_IsWorkingTreeClean_HelperHoldsOutputAfterGitExits_StopsWaitingAndThrowsTimedOut`). Whether the helper was
+killed is not asserted: killing what git started after git exited is best effort and platform-dependent (on Linux and
+macOS the helper is handed to another parent when the stub exits), and the outcome - a timeout - is the same on every
+platform; the test waits for the helper's four seconds before it removes the stub. These cover
+`AgentControl-GitClient-TimeoutStopsGit`.
 
 **GitClient_Cancel_RunningGitIsStopped**: A stub whose `rev-parse HEAD` hangs is canceled by its caller after one
 second; the call throws `OperationCanceledException` and the stub never finishes. This scenario is tested by

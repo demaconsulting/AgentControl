@@ -3751,6 +3751,46 @@ public sealed class RepoCardViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a Refresh canceled while the card's earlier reads were still pending does not void
+    ///     them: the earlier reads are applied when they land, so the card leaves "Refreshing".
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_RefreshAsync_CanceledWhileEarlierReadPending_EarlierReadStillApplied()
+    {
+        // Arrange: a clean repo whose card was never read, and a one-slot queue whose reads are held; the
+        // earlier cheap read holds the slot and the earlier working-tree read waits
+        var stub = GitStub.Create(statusOutput: "", statusExitCode: 0);
+        _tempPaths.Add(stub.Path);
+        var settings = new AppSettings { GitExecutablePath = stub.Path };
+        var gate = new GatedBackgroundWorkRunner();
+        using var queue = new RepoRefreshQueue(gate, maxConcurrentReads: 1);
+        var card = CreateQueuedCard(CreateTempDirectory(), settings, queue);
+        var earlier = card.RefreshRepoStateAsync(
+            RepoRefreshPriority.Background, cheapFacts: true, workingTree: true, cancellationToken: TestContext.Current.CancellationToken);
+        await gate.FirstCall;
+        Assert.False(card.HasRepoState);
+
+        // Act: the user's Refresh queues its cheap read behind the running one and joins the waiting
+        // working-tree read; the user then cancels it before anything ran
+        var refresh = card.RefreshAsync(TestContext.Current.CancellationToken);
+        card.CancelOperationCommand.Execute(null);
+        await refresh;
+
+        // Act: the earlier reads run
+        gate.Release();
+        await earlier;
+        await card.WhenRepoStateSettledAsync();
+
+        // Assert: the earlier reads were applied, so the card left "Refreshing"
+        Assert.True(card.HasRepoState);
+        Assert.NotEqual(RepoCardStatus.Refreshing, card.Status);
+        Assert.Equal("main", card.CurrentBranch);
+        Assert.True(card.GitStatusChecked);
+        Assert.False(card.IsRefreshing);
+        Assert.False(card.IsBusy);
+    }
+
+    /// <summary>
     ///     Test that a card retired while its background cheap refresh was reading applies nothing.
     /// </summary>
     [Fact]
@@ -4427,8 +4467,21 @@ public sealed class RepoCardViewModelTests : IDisposable
 
         // Act: pull; its refresh is queued after git pull (the card then says it is refreshing); the
         // queue's next two reads are let run
+        var refreshing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        pulled.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(RepoCardViewModel.IsRefreshing) && pulled.IsRefreshing)
+            {
+                refreshing.TrySetResult();
+            }
+        };
         var pull = pulled.PullCommand.ExecuteAsync();
-        await WaitUntilAsync(() => pulled.IsRefreshing);
+        if (pulled.IsRefreshing)
+        {
+            refreshing.TrySetResult();
+        }
+
+        await refreshing.Task.WaitAsync(TestContext.Current.CancellationToken);
         runner.ReleaseNext();
         await runner.WaitForCallsAsync(2);
         runner.ReleaseNext();
@@ -4654,22 +4707,6 @@ public sealed class RepoCardViewModelTests : IDisposable
         Assert.Equal("1.0.0", RepoPinStore.Load(repo)?.Version);
         Assert.Equal("1.0.0", card.PinnedPackageVersion);
         Assert.False(card.IsBusy);
-    }
-
-    /// <summary>
-    ///     Waits, polling, until a condition that background work makes true holds (or about thirty seconds
-    ///     passed), then asserts it.
-    /// </summary>
-    /// <param name="condition">The condition to wait for.</param>
-    /// <returns>A task that completes when the condition holds.</returns>
-    private static async Task WaitUntilAsync(Func<bool> condition)
-    {
-        for (var attempt = 0; attempt < 1200 && !condition(); attempt++)
-        {
-            await Task.Delay(25, TestContext.Current.CancellationToken);
-        }
-
-        Assert.True(condition());
     }
 
     /// <summary>

@@ -397,7 +397,7 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
         Assert.True(card.IsBusy);
 
         // The refresh reads the card's repo state in the background first, then its source
-        await WaitUntilAsync(() => feed.ListVersionsCalls > 0);
+        await feed.WaitForListVersionsCallsAsync(1).WaitAsync(TestContext.Current.CancellationToken);
         Assert.Equal(1, feed.ListVersionsCalls);
 
         // Act: a tick while the card is busy
@@ -790,7 +790,7 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
         Assert.True(busy.IsBusy);
 
         // The refresh reads the card's repo state in the background first, then its source (held)
-        await WaitUntilAsync(() => feed.ListVersionsCalls > readsBeforeRefresh);
+        await feed.WaitForListVersionsCallsAsync(readsBeforeRefresh + 1).WaitAsync(TestContext.Current.CancellationToken);
         var callsWhileBusy = feed.ListVersionsCalls;
 
         // Act: Settings closes while the first card is busy; then the source answers
@@ -1207,7 +1207,7 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
         Assert.True(waiting.IsBusy);
 
         // The refresh reads the card's repo state in the background first, then the source (held)
-        await WaitUntilAsync(() => feed.ListVersionsCalls > readsBeforeRefresh);
+        await feed.WaitForListVersionsCallsAsync(readsBeforeRefresh + 1).WaitAsync(TestContext.Current.CancellationToken);
 
         feed.ListVersionsGate = null;
         feed.ListVersionsException = new IOException("Feed is unreachable.");
@@ -1307,22 +1307,6 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
         Sources = [new PackageSourceDefinition { Alias = "Feed", Type = PackageSourceType.Zip, Location = "unused" }],
         RecentRepos = [.. repos.Select(path => new RecentRepo { Path = path })]
     };
-
-    /// <summary>
-    ///     Waits, polling, until a condition that background work makes true holds (or about thirty seconds
-    ///     passed), then asserts it.
-    /// </summary>
-    /// <param name="condition">The condition to wait for.</param>
-    /// <returns>A task that completes when the condition holds.</returns>
-    private static async Task WaitUntilAsync(Func<bool> condition)
-    {
-        for (var attempt = 0; attempt < 1200 && !condition(); attempt++)
-        {
-            await Task.Delay(25, TestContext.Current.CancellationToken);
-        }
-
-        Assert.True(condition());
-    }
 
     /// <summary>
     ///     Creates a unique temporary directory removed by <see cref="Dispose"/>.

@@ -658,8 +658,11 @@ internal sealed class GitClient
     ///     A command that does not exit within <paramref name="timeout"/>, or whose
     ///     <paramref name="cancellationToken"/> is signaled while it runs, is killed together with every
     ///     process it started (git may start helpers such as a credential manager or an SSH client), so
-    ///     a hung git never keeps running unnoticed or holds its caller. The blocking-call guard is
-    ///     consulted before anything starts.
+    ///     a hung git never keeps running unnoticed or holds its caller. A command that exited but whose
+    ///     output is still held open, past the limit, by a process it started after it exited is
+    ///     treated the same way (see <see cref="ReadOutput"/>): the wait for the output is bounded, and
+    ///     an abandoned read never blocks the caller. The blocking-call guard is consulted before
+    ///     anything starts.
     /// </remarks>
     /// <param name="repositoryPath">Working directory the git process runs in.</param>
     /// <param name="timeout">How long the command may run before it is stopped.</param>
@@ -672,7 +675,8 @@ internal sealed class GitClient
     /// <exception cref="InvalidOperationException">Thrown when the process fails to start (e.g.
     ///     the configured executable path does not exist).</exception>
     /// <exception cref="GitCommandTimeoutException">Thrown when the command did not exit within
-    ///     <paramref name="timeout"/>; it was stopped.</exception>
+    ///     <paramref name="timeout"/>, or its output was still held open, past the limit, by a process
+    ///     it started after it exited; it was stopped.</exception>
     /// <exception cref="OperationCanceledException">Thrown when
     ///     <paramref name="cancellationToken"/> was signaled before or while the command ran; a running
     ///     command was stopped.</exception>
@@ -753,8 +757,8 @@ internal sealed class GitClient
                     _gitExecutablePath, argumentsText.Value, stopwatch.ElapsedMilliseconds);
             }
 
-            var stdout = stdoutTask.GetAwaiter().GetResult();
-            var stderr = stderrTask.GetAwaiter().GetResult();
+            var (stdout, stderr) = ReadOutput(
+                process, stdoutTask, stderrTask, stopwatch.Elapsed, timeout, argumentsText.Value, arguments[0], cancellationToken);
 
             if (_logger.IsEnabled(LogLevel.Information))
             {
@@ -797,6 +801,98 @@ internal sealed class GitClient
     }
 
     /// <summary>
+    ///     Collects the output of a git process that has exited, waiting a bounded time for its output
+    ///     streams to close.
+    /// </summary>
+    /// <remarks>
+    ///     The streams normally close when git exits. A process git started (a credential helper, an
+    ///     SSH client, a background maintenance job) that inherited them keeps them open after git
+    ///     exited, so the wait is bounded: by what is left of <paramref name="timeout"/>, but at least
+    ///     the stop time (<see cref="GitClientTimeouts.Stop"/>), so a git that exits at the very end of
+    ///     its limit still gets to hand over its output. When the streams are still open after that,
+    ///     everything git started is killed (best effort: on Windows the processes git started can
+    ///     still be found after it exited; elsewhere they were handed to another parent and may
+    ///     survive), the reads are abandoned (their faults are observed, so they are never reported as
+    ///     unobserved) and the command is reported as timed out. An abandoned read never blocks the
+    ///     caller.
+    /// </remarks>
+    /// <param name="process">The git process; has exited.</param>
+    /// <param name="stdoutTask">The read of its standard output.</param>
+    /// <param name="stderrTask">The read of its standard error.</param>
+    /// <param name="elapsed">How long the command has run so far.</param>
+    /// <param name="timeout">The command's time limit.</param>
+    /// <param name="argumentsText">The command's arguments, for the log.</param>
+    /// <param name="subcommand">The git subcommand, for the exception message.</param>
+    /// <param name="cancellationToken">Stops waiting when signaled.</param>
+    /// <returns>The standard output and standard error text.</returns>
+    /// <exception cref="GitCommandTimeoutException">Thrown when the output was still held open past
+    ///     the bound.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled while waiting.</exception>
+    private (string Stdout, string Stderr) ReadOutput(
+        Process process,
+        Task<string> stdoutTask,
+        Task<string> stderrTask,
+        TimeSpan elapsed,
+        TimeSpan timeout,
+        string argumentsText,
+        string subcommand,
+        CancellationToken cancellationToken)
+    {
+        // What is left of the limit, but never less than the stop time
+        var readLimit = timeout - elapsed;
+        if (readLimit < _timeouts.Stop)
+        {
+            readLimit = _timeouts.Stop;
+        }
+
+        var outputs = Task.WhenAll(stdoutTask, stderrTask);
+        Task[] waited = [outputs];
+        try
+        {
+            // WaitAny never throws for a faulted read; the read's own exception is rethrown below
+            if (Task.WaitAny(waited, (int)Math.Ceiling(readLimit.TotalMilliseconds), cancellationToken) == 0)
+            {
+                return (stdoutTask.GetAwaiter().GetResult(), stderrTask.GetAwaiter().GetResult());
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            TryKillProcessTreeAfterExit(process);
+            ObserveAbandoned(outputs);
+            throw;
+        }
+
+        // Still held open by a process git started: stop it (best effort), give the reads a bounded
+        // moment to end, and abandon them
+        TryKillProcessTreeAfterExit(process);
+        Task.WaitAny(waited, _timeouts.Stop);
+        ObserveAbandoned(outputs);
+        if (_logger.IsEnabled(LogLevel.Warning))
+        {
+            _logger.LogWarning(
+                "git process '{GitExecutable} {Arguments}' exited, but its output was still held open by a process it started after {TimeoutSeconds}s; stopped waiting",
+                _gitExecutablePath, argumentsText, readLimit.TotalSeconds);
+        }
+
+        throw new GitCommandTimeoutException(
+            $"'git {subcommand}' did not finish within {timeout.TotalSeconds:0.###} seconds and was stopped.",
+            timeout);
+    }
+
+    /// <summary>
+    ///     Observes the fault of an abandoned output read whenever it ends, so it is never reported as
+    ///     an unobserved task exception.
+    /// </summary>
+    /// <param name="outputs">The abandoned reads.</param>
+    private static void ObserveAbandoned(Task outputs) =>
+        outputs.ContinueWith(
+            static task => _ = task.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+    /// <summary>
     ///     Stops a git process that outlived its time limit: kills it and everything it started, waits
     ///     a bounded time for it to end, and logs what happened.
     /// </summary>
@@ -815,6 +911,29 @@ internal sealed class GitClient
             _logger.LogWarning(
                 "git process '{GitExecutable} {Arguments}' did not finish within {TimeoutSeconds}s and was stopped (ended: {Ended})",
                 _gitExecutablePath, argumentsText, timeout.TotalSeconds, ended);
+        }
+    }
+
+    /// <summary>
+    ///     Kills every process a git process that has already exited started, as far as they can still
+    ///     be found.
+    /// </summary>
+    /// <remarks>
+    ///     Best effort, and never throws. Unlike <see cref="TryKillProcessTree"/> it does not skip a
+    ///     process that has exited: on Windows the handle still held keeps the process's identity, so
+    ///     the processes it started can still be found and killed; elsewhere they were handed to
+    ///     another parent when it exited and may survive.
+    /// </remarks>
+    /// <param name="process">The process.</param>
+    private static void TryKillProcessTreeAfterExit(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or NotSupportedException or AggregateException)
+        {
+            // Nothing could be found or killed; the bounded wait that follows does not depend on it
         }
     }
 

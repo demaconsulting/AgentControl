@@ -190,7 +190,11 @@ text after (`MainWindowViewModel_EnqueueAddRepos_ShowsAndClearsGlobalProgress`).
 **MainWindowViewModel_AddReposCancel_NothingSavedOrAdded**: The global progress's Cancel is executed while the folder
 checks are held; once released the result is canceled with no outcome, no card or entry is added, no save was made
 and no settings file exists, and the progress is cleared
-(`MainWindowViewModel_EnqueueAddRepos_Canceled_SavesNothingAndAddsNothing`). This covers
+(`MainWindowViewModel_EnqueueAddRepos_Canceled_SavesNothingAndAddsNothing`). With one listed repo read and the reads
+then held, an add is started and, while its folder check is held, new settings are applied, which starts the cards'
+refresh wave: the global progress still shows the add ("Adding...") with Cancel; executing Cancel makes it show the
+refresh ("Refreshing repositories..."), and once released the add's result is canceled
+(`MainWindowViewModel_EnqueueAddRepos_SettingsRefreshStartsDuringAdd_StripKeepsAddCancel`). These cover
 `AgentControl-MainWindowViewModel-AddReposCancel`.
 
 **MainWindowViewModel_AddReposQueued_SecondAddRunsAfterTheFirst**: While the first add's two folder checks are held, a
@@ -663,6 +667,15 @@ and nothing has been written; the view model is disposed inside a `BlockingCallG
 recorded on the closing thread, and the settings file holds the favorite. This scenario is tested by
 `MainWindowViewModel_Dispose_OnGuardedThread_WritesPendingChangeWithoutBlockingCall`, covering
 `AgentControl-MainWindowViewModel-SettingsFlushedOnClose`.
+
+**MainWindowViewModel_Dispose_WhileAddSaving_WritesAddAndChange**: On the headless UI thread (so, as in the
+application, the add's own completion cannot run while the close blocks that thread), writes are held at a gate; an
+add is started and its save is held; a favorite is marked meanwhile (deferred while the add saves); the gate is opened
+and the view model disposed in the same UI-thread turn: the settings file holds both repos, the added one included,
+and the favorite. This scenario is tested by
+`MainWindowViewModel_Dispose_WhileAddSavingAfterAnotherChange_WritesAddAndChange`, covering
+`AgentControl-MainWindowViewModel-SettingsFlushedOnClose`.
+
 **MainWindowViewModel_RemoveRepo_RetiresTheCard**: A repo's card is asked to report an error (its select-package
 action with no package source configured) and does; the repo is removed and the same action is tried again: nothing is
 reported for the removed card. What a retired card does with work that is still running is verified by the

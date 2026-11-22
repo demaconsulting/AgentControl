@@ -16,7 +16,7 @@ package AgentControl {
     // The add flows accept only Git repository roots, which GitClient decides
     dependency MainWindowViewModel to GitClient;
 
-    // Adds and the card refresh after a settings save report their progress (and an add its Cancel) through the strip
+    // Adds, the cards' start-up reads and the card refresh after a settings save report their progress (and an add its Cancel) through the strip
     dependency MainWindowViewModel to GlobalProgressViewModel;
 
     // Every settings save goes through its background settings writer: the changes made in the window are scheduled, an add and the Settings window's values are confirmed saves, and the close flushes it

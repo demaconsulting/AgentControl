@@ -885,7 +885,8 @@ sections:
       - id: AgentControl-LauncherUI-GlobalProgress
         title: >-
           The LauncherUI subsystem shall show, directly under the app bar and only while repos are
-          being added or the repo cards are refreshed after the settings were saved, a thin progress
+          being added or the repo cards are read at start-up or refreshed after the settings were
+          saved, a thin progress
           bar - without an amount until the amount of work is known, then with it - and a short
           status text (for example "Adding 7 of 20 repositories..."), named for screen readers and
           legible in the light and the dark theme, and shall take no space when no such work runs.
@@ -903,13 +904,15 @@ sections:
         tests:
           - MainWindow_DropFolders_WhileChecked_WindowStaysResponsiveAndShowsProgress
           - MainWindow_SettingsApplied_RefreshesCardsInBackgroundShowingProgress
+          - MainWindow_Startup_GitHeld_WindowRespondsCardsShowRefreshingAndStrip
           - ThemeResources_GlobalProgress_IsLegibleInLightAndDark
 
       - id: AgentControl-LauncherUI-AddCancel
         title: >-
           The LauncherUI subsystem shall offer a Cancel button in the progress strip while repos are
-          being added that stops the add, and every add queued after it, before anything is added
-          or saved, without a message afterwards.
+          being added, including while the repo cards are refreshed at the same time, that stops the
+          add, and every add queued after it, before anything is added or saved, without a message
+          afterwards.
         justification: |
           A drop of the wrong folders, or of far more than intended, must be stoppable without
           having to remove the repos one by one afterwards.

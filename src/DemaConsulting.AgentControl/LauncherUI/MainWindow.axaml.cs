@@ -703,16 +703,17 @@ internal sealed partial class MainWindow : Window
     ///     ones.
     /// </summary>
     /// <remarks>
-    ///     <b>Simplification note:</b> this is a "first-attach" trigger, not true
-    ///     viewport-visibility tracking - it fires once per card shortly after the card's
-    ///     container is realized (which, since <see cref="ListBox"/> here is not virtualizing a
-    ///     huge list, is effectively "shortly after window load" for all initially-visible
-    ///     cards). It intentionally does not re-fire if a card scrolls out of and back into view,
-    ///     nor does it defer work for off-screen cards in a long list. Per the plan's own
-    ///     guidance, literal viewport-visibility tracking is not required for this feature; this
-    ///     approximation keeps the working-tree dirty check lazy (never run during the
-    ///     cheap/eager startup pass) while still populating it for the user shortly after
-    ///     launch, without the added complexity of scroll-position-aware virtualization tracking.
+    ///     <b>Simplification note:</b> this is a "first-realization" trigger, not true
+    ///     viewport-visibility tracking. The list is virtualized: its default
+    ///     <see cref="VirtualizingStackPanel"/> realizes only the rows in and near the viewport, and a
+    ///     recycled container's content is cleared and rebuilt, so the trigger fires for the cards
+    ///     realized when the window loads and later for cards as they are scrolled into view.
+    ///     <see cref="_dirtyStatusRefreshedCards"/> keeps it to once per card, so a card scrolled out of
+    ///     and back into view is not checked again. Per the plan's own guidance, literal
+    ///     viewport-visibility tracking is not required for this feature; this approximation keeps the
+    ///     working-tree dirty check lazy (never run during the cheap/eager startup pass) while still
+    ///     populating it for the user shortly after a card is first shown, without the added
+    ///     complexity of scroll-position-aware tracking.
     /// </remarks>
     /// <param name="sender">The card's container <see cref="Border"/>.</param>
     /// <param name="e">Event arguments (unused).</param>

@@ -907,6 +907,42 @@ public class GitClientTests
     }
 
     /// <summary>
+    ///     Test that a git command that exited while a process it started still holds its output open
+    ///     is not waited for past its time limit: the wait is stopped and the command reported as timed
+    ///     out, naming the limit.
+    /// </summary>
+    [Fact]
+    public async Task GitClient_IsWorkingTreeClean_HelperHoldsOutputAfterGitExits_StopsWaitingAndThrowsTimedOut()
+    {
+        // Arrange: git status answers and exits at once, but a helper it started keeps its output open
+        // well past a one-second local limit (and a one-second stop time)
+        var stub = GitStub.Create(statusOutputHolderSeconds: GitStub.HangSeconds);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(
+                stub.Path,
+                _logger,
+                new GitClientTimeouts(TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(1)));
+
+            // Act
+            var failure = Assert.Throws<GitCommandTimeoutException>(() => client.IsWorkingTreeClean(repoDir, TestContext.Current.CancellationToken));
+
+            // Assert: reported as a timeout of the local limit rather than waiting for the helper
+            Assert.Equal(TimeSpan.FromSeconds(1), failure.Timeout);
+            Assert.Contains("git status", failure.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            // The helper has ended (killed or run out) before the stub is deleted; whether it was
+            // killed depends on the platform, so it is not asserted
+            _ = await stub.RanToTheEndOfItsHangAsync();
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Test that a pull runs under the pull limit, not the much shorter local-command limit: a pull
     ///     that takes longer than the local limit completes.
     /// </summary>

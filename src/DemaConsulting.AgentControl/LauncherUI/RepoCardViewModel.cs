@@ -207,17 +207,31 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private int _upgradeCheckGeneration;
 
     /// <summary>
-    ///     Identifies the most recently started cheap refresh (synchronous or background) and every
-    ///     direct pin or branch re-read, so the facts of an older background read are never applied
-    ///     over newer ones.
+    ///     The number handed to the most recent cheap-facts request (a background read, a synchronous
+    ///     refresh, a direct apply or a pin re-read); see <see cref="_appliedCheapGeneration"/>.
     /// </summary>
     private int _cheapRefreshGeneration;
 
     /// <summary>
-    ///     Identifies the most recently started working-tree check (synchronous or background), so the
-    ///     answer of an older background check is never applied over a newer one.
+    ///     The number of the newest cheap facts applied to the card. A background read's facts are
+    ///     applied only when their number is higher, so the facts of an older read never replace newer
+    ///     ones, while a newer request that was given up (and so applied nothing) never voids an older
+    ///     read.
+    /// </summary>
+    private int _appliedCheapGeneration;
+
+    /// <summary>
+    ///     The number handed to the most recent working-tree request (synchronous or background); see
+    ///     <see cref="_appliedGitStatusGeneration"/>.
     /// </summary>
     private int _gitStatusGeneration;
+
+    /// <summary>
+    ///     The number of the newest working-tree answer applied to the card. A background answer is
+    ///     applied only when its number is higher, so an older answer never replaces a newer one, while
+    ///     a newer request that was given up never voids an older check.
+    /// </summary>
+    private int _appliedGitStatusGeneration;
 
 
     /// <summary>
@@ -2105,8 +2119,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
         // Results of checks, background reads and picture loads that are still on their way are dropped
         _upgradeCheckGeneration++;
-        _cheapRefreshGeneration++;
-        _gitStatusGeneration++;
+        _appliedCheapGeneration = ++_cheapRefreshGeneration;
+        _appliedGitStatusGeneration = ++_gitStatusGeneration;
         _imageGeneration++;
         _loadedImageFile = null;
         IsCheckingUpgrade = false;
@@ -2378,8 +2392,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     waits or runs; the card keeps showing its previous state meanwhile.
     ///     </para>
     ///     <para>
-    ///     The answer is dropped when the card was retired meanwhile or a newer read of the same kind
-    ///     (through the queue or synchronous) started, so the newest read always has the last word. A
+    ///     The answer is dropped when the card was retired meanwhile or the answer of a newer read of
+    ///     the same kind (through the queue, synchronous, or a direct apply) has already been applied,
+    ///     so the newest answer always has the last word. A newer request that was given up applies
+    ///     nothing and so never voids an older read; for one repo and kind the queue starts reads in
+    ///     request order (a waiting read is joined, a running one is never overtaken by itself). A
     ///     git command that hung and was stopped is shown as the card's status message; an ordinary git
     ///     failure (not a repository, git missing) is shown as unknown state, as before. Must be called
     ///     on the UI thread; the returned task completes there too.
@@ -2555,8 +2572,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
             reportsProgress,
             cancellationToken);
 
-        // Given up, retired meanwhile, or a newer read started: that one has the last word
-        if (facts is null || _isRetired || generation != _cheapRefreshGeneration)
+        // Given up, retired meanwhile, or a newer result has already been applied: that one has the
+        // last word
+        if (facts is null || _isRetired || generation <= _appliedCheapGeneration)
         {
             return;
         }
@@ -2564,7 +2582,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
         if (gitFactsOnly)
         {
             // Only what git says about the branch and the committed agent folders; a folder that is
-            // gone meanwhile is left to the next full read
+            // gone meanwhile is left to the next full read. Numbered as applied either way, so an older
+            // full read that lands later cannot put back the state from before the untrack.
+            _appliedCheapGeneration = generation;
             if (!facts.IsMissing)
             {
                 ShowGitProblem(facts.GitProblem);
@@ -2574,7 +2594,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             return;
         }
 
-        ApplyCheapFacts(facts);
+        ApplyNumberedCheapFacts(facts, generation);
     }
 
     /// <summary>
@@ -2741,9 +2761,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <remarks>
     ///     Called on the UI thread, by <see cref="RefreshCheap"/>, by the queued reads of
     ///     <see cref="RefreshRepoStateAsync"/> and by the owning <see cref="MainWindowViewModel"/> for a
-    ///     card it creates from facts read in the background while repos were added. Any upgrade check
-    ///     still in flight is made irrelevant (it was started against the old pin), and any background
-    ///     cheap read still in flight is superseded. A git timeout is shown as the card's status message
+    ///     card it creates from facts read in the background while repos were added. A direct apply is
+    ///     newer than everything in flight: any upgrade check still in flight is made irrelevant (it was
+    ///     started against the old pin), and any background cheap read still in flight is superseded
+    ///     (its facts are dropped when they arrive). A git timeout is shown as the card's status message
     ///     (and cleared again by a later read that got an answer). Starts the background picture
     ///     refresh. A retired card is left as it is.
     /// </remarks>
@@ -2753,13 +2774,25 @@ internal sealed class RepoCardViewModel : ViewModelBase
     internal void ApplyCheapFacts(RepoCheapFacts facts)
     {
         ArgumentNullException.ThrowIfNull(facts);
+        ApplyNumberedCheapFacts(facts, ++_cheapRefreshGeneration);
+    }
+
+    /// <summary>
+    ///     Applies cheap facts with the number of the request that read them, recording it as the
+    ///     newest applied number.
+    /// </summary>
+    /// <param name="facts">The facts to apply.</param>
+    /// <param name="generation">The number of the request that read <paramref name="facts"/>;
+    ///     higher than every number applied so far.</param>
+    private void ApplyNumberedCheapFacts(RepoCheapFacts facts, int generation)
+    {
         if (_isRetired)
         {
             return;
         }
 
-        // These facts are now the newest: an older background read must not replace them
-        _cheapRefreshGeneration++;
+        // These facts are now the newest applied: an older background read must not replace them
+        _appliedCheapGeneration = generation;
 
         // The card's repo state is known from now on; the values below replace "not read yet"
         HasRepoState = true;
@@ -2786,7 +2819,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // running is ignored. Callers that need an immediate fresh check after a
             // missing-to-present transition (rather than waiting for the next lazy/deferred
             // trigger) request one explicitly - see MainWindowViewModel.ApplySettings.
-            _gitStatusGeneration++;
+            _appliedGitStatusGeneration = ++_gitStatusGeneration;
             GitStatusChecked = false;
             GitStatusUnavailable = false;
             RaisePackageChipChanged();
@@ -2904,12 +2937,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
             reportsProgress: false,
             cancellationToken);
 
-        // Given up, retired meanwhile, or a newer check started: that one has the last word
-        if (answer is null || _isRetired || generation != _gitStatusGeneration)
+        // Given up, retired meanwhile, or a newer answer has already been applied: that one has the
+        // last word
+        if (answer is null || _isRetired || generation <= _appliedGitStatusGeneration)
         {
             return;
         }
 
+        _appliedGitStatusGeneration = generation;
         ApplyGitStatus(answer);
     }
 
@@ -4033,7 +4068,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             // the card never shows the old pin's upgrade state next to the new pin. The source it
             // came from is remembered in the user's own settings (never in the pin). The pin just
             // read is newer than any background cheap read still in flight.
-            _cheapRefreshGeneration++;
+            _appliedCheapGeneration = ++_cheapRefreshGeneration;
             ApplyPin(written.Pin, written.PinLoadError);
             SupplyingSource = package.SourceAlias;
             EvaluatePinnedSource();
@@ -5034,7 +5069,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     private void RefreshGitStatus()
     {
         // A direct check is newer than any background check still in flight
-        _gitStatusGeneration++;
+        _appliedGitStatusGeneration = ++_gitStatusGeneration;
         var settings = _getSettings();
         ApplyGitStatus(ReadWorkingTreeClean(RepoPath, CreateGitClient(settings), CancellationToken.None));
     }

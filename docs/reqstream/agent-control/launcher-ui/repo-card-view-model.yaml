@@ -13,14 +13,18 @@ sections:
           The RepoCardViewModel class shall offer a refresh of its pin, branch and committed agent
           folders that does not make its caller wait for the disk or git, keeps showing the previous
           state until the new one is known, and applies nothing when the card was removed meanwhile
-          or a newer refresh has started.
+          or the result of a newer refresh has already been applied, and still apply its result when
+          a newer refresh was given up before it applied anything.
         justification: |
           Many cards are refreshed at once after a settings save; the window must stay usable, and
-          an older, slower read must never overwrite what a newer one found.
+          an older, slower read must never overwrite what a newer one found. A newer refresh the
+          user canceled found nothing, so it must not throw away what an older read finds, or the
+          card would never learn its state.
         tests:
           - RepoCardViewModel_RefreshCheapInBackgroundAsync_ReadHeld_ReturnsAndAppliesWhenReleased
           - RepoCardViewModel_RefreshCheapInBackgroundAsync_NewerRefreshStarted_OlderResultDropped
           - RepoCardViewModel_RefreshCheapInBackgroundAsync_Retired_AppliesNothing
+          - RepoCardViewModel_RefreshAsync_CanceledWhileEarlierReadPending_EarlierReadStillApplied
 
       - id: AgentControl-RepoCardViewModel-GitStatusInBackground
         title: >-
@@ -1595,6 +1599,7 @@ sections:
         tests:
           - RepoCardViewModel_RefreshRepoStateAsync_WhileQueued_ShowsRefreshingAndClearsAfter
           - RepoCardViewModel_Status_BeforeFirstRead_IsRefreshing
+          - RepoCardViewModel_RefreshAsync_CanceledWhileEarlierReadPending_EarlierReadStillApplied
 
       - id: AgentControl-RepoCardViewModel-GitTimeoutShown
         title: >-

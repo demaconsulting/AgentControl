@@ -23,7 +23,8 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 /// <summary>
 ///     View model of the main window's global progress strip: the thin bar, the short status text and
 ///     the Cancel button shown directly under the app bar while a bulk operation (adding several
-///     repositories, refreshing every card after Settings were saved) runs.
+///     repositories, reading the cards at start-up, refreshing every card after Settings were saved)
+///     runs.
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -35,8 +36,10 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 ///     </para>
 ///     <para>
 ///     Operations may overlap (an add while the cards refresh after a Settings save): the strip shows
-///     the most recently begun operation that is still running, and when it ends the previous one is
-///     shown again; with none running the strip is idle. Not thread-safe: like every view model here
+///     the most recently begun running operation that can still be canceled or, when none can, the
+///     most recently begun running operation. That way an add's Cancel stays offered while the cards
+///     refresh after a Settings save, and the refresh is shown once the add has ended or was canceled;
+///     with none running the strip is idle. Not thread-safe: like every view model here
 ///     it is created and changed on the UI thread only (operations report from the continuations of
 ///     their background work, which resume on the UI thread).
 ///     </para>
@@ -44,7 +47,7 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 internal sealed class GlobalProgressViewModel : ViewModelBase
 {
     /// <summary>
-    ///     The operations that are running, oldest first; the last one is the one shown.
+    ///     The operations that are running, oldest first; see <see cref="Shown"/> for the one shown.
     /// </summary>
     private readonly List<GlobalProgressOperation> _operations = [];
 
@@ -168,7 +171,8 @@ internal sealed class GlobalProgressViewModel : ViewModelBase
     ///     <see langword="null"/> for an operation that cannot be canceled (no Cancel button). It runs
     ///     on the UI thread, at most once.</param>
     /// <returns>The operation; its owner reports through it and disposes it when the work has ended
-    ///     (however it ended), which removes it from the strip.</returns>
+    ///     (however it ended), which removes it from the strip. It is shown at once unless an older
+    ///     operation that can still be canceled is running (see <see cref="Shown"/>).</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="text"/> is
     ///     <see langword="null"/>.</exception>
     public GlobalProgressOperation Begin(string text, Action? cancel = null)
@@ -182,19 +186,23 @@ internal sealed class GlobalProgressViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Shows an operation's new state when it is the one shown.
+    ///     Shows the strip's state again after an operation changed.
     /// </summary>
+    /// <remarks>
+    ///     Always republishes: a cancel of the shown operation can change which operation is shown. A
+    ///     change of an operation that is not shown changes nothing visible (the bound properties
+    ///     announce real changes only).
+    /// </remarks>
     /// <param name="operation">The operation that changed.</param>
     internal void OnOperationChanged(GlobalProgressOperation operation)
     {
-        if (_operations.Count > 0 && ReferenceEquals(_operations[^1], operation))
-        {
-            Publish();
-        }
+        ArgumentNullException.ThrowIfNull(operation);
+        Publish();
     }
 
     /// <summary>
-    ///     Removes an operation that has ended, showing the previous one again (or going idle).
+    ///     Removes an operation that has ended, showing the one that should be shown next (see
+    ///     <see cref="Shown"/>) or going idle.
     /// </summary>
     /// <param name="operation">The operation that ended.</param>
     internal void End(GlobalProgressOperation operation)
@@ -206,12 +214,34 @@ internal sealed class GlobalProgressViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Copies the shown operation's state (the most recently begun one still running) to the bound
-    ///     properties, or clears them when none is running.
+    ///     Gets the operation the strip shows: the most recently begun running operation that can still
+    ///     be canceled or, when none can, the most recently begun running operation;
+    ///     <see langword="null"/> when none is running.
+    /// </summary>
+    private GlobalProgressOperation? Shown
+    {
+        get
+        {
+            for (var index = _operations.Count - 1; index >= 0; index--)
+            {
+                if (_operations[index].IsCancelable)
+                {
+                    return _operations[index];
+                }
+            }
+
+            return _operations.Count > 0 ? _operations[^1] : null;
+        }
+    }
+
+    /// <summary>
+    ///     Copies the shown operation's state (see <see cref="Shown"/>) to the bound properties, or clears
+    ///     them when none is running.
     /// </summary>
     private void Publish()
     {
-        if (_operations.Count == 0)
+        var shown = Shown;
+        if (shown is null)
         {
             IsActive = false;
             Text = string.Empty;
@@ -222,7 +252,6 @@ internal sealed class GlobalProgressViewModel : ViewModelBase
             return;
         }
 
-        var shown = _operations[^1];
         Text = shown.Text;
         IsIndeterminate = shown.IsIndeterminate;
         Maximum = Math.Max(1, shown.Total);
@@ -234,13 +263,7 @@ internal sealed class GlobalProgressViewModel : ViewModelBase
     /// <summary>
     ///     Runs the shown operation's cancel action (the strip's Cancel button).
     /// </summary>
-    private void CancelShown()
-    {
-        if (_operations.Count > 0)
-        {
-            _operations[^1].RequestCancel();
-        }
-    }
+    private void CancelShown() => Shown?.RequestCancel();
 }
 
 /// <summary>
@@ -319,6 +342,15 @@ internal sealed class GlobalProgressOperation : IDisposable
     public bool CanCancel => _cancel is not null && _allowCancel && !_cancelRequested && !_ended;
 
     /// <summary>
+    ///     Gets a value indicating whether the operation has a cancel action that was not run yet and
+    ///     has not ended, whether or not it accepts a cancel at this point; such an operation is shown
+    ///     in preference to newer ones (see <see cref="GlobalProgressViewModel"/>), so an add in a step
+    ///     that cannot be canceled (saving) stays shown, without Cancel, rather than flipping to a newer
+    ///     operation.
+    /// </summary>
+    internal bool IsCancelable => _cancel is not null && !_cancelRequested && !_ended;
+
+    /// <summary>
     ///     Gets or sets whether the operation accepts a cancel at this point; an owner turns it off for
     ///     a step that must run to its end once started (saving) and back on afterwards. Has no effect
     ///     on an operation without a cancel action.
@@ -374,7 +406,7 @@ internal sealed class GlobalProgressOperation : IDisposable
 
     /// <summary>
     ///     Runs the cancel action once, when the operation can be canceled now; the Cancel button then
-    ///     disappears.
+    ///     disappears, and the strip may show another running operation instead.
     /// </summary>
     internal void RequestCancel()
     {
@@ -389,7 +421,8 @@ internal sealed class GlobalProgressOperation : IDisposable
     }
 
     /// <summary>
-    ///     Ends the operation: the strip shows the previous running operation, or goes idle.
+    ///     Ends the operation: the strip shows the running operation that should be shown next, or goes
+    ///     idle.
     /// </summary>
     public void Dispose()
     {

@@ -89,28 +89,34 @@ that nothing is applied while the work is held and that the calling thread made 
 pull, the git tracking steps, `HasInstalledFiles` and the installed-files hash keep their own `Task.Run`.
 
 **Refresh queue**: the optional constructor parameter `refreshQueue` (`RepoRefreshQueue`, see its own design) is the
-queue every read of the card's repo state goes through - its cheap facts and its `git status` - so that across all
-cards at most two reads run at once. `MainWindowViewModel` hands its one shared queue to every card; a card created
-without one (`null`, as in tests) creates a private queue over the optional `backgroundWork` runner
-(`IBackgroundWorkRunner`, the `BackgroundWorkRunner` supporting type; `null` means
-`ThreadPoolBackgroundWorkRunner.Instance`) and shuts it down when it is retired (**_ownsRefreshQueue**); tests pass a
-gated runner that holds each read until released. **_retiredCancellation** (and its token **_retiredToken**) is
-signaled by `Retire`, so the card's reads that still wait in the queue are given up and take no slot.
-**_refreshesInFlight** (`int`, changed with `Interlocked`) counts the card's reads that wait in the queue or run; it
-backs **IsRefreshing** (`bool`, raises `PropertyChanged` when it turns on or off,
-`AgentControl-RepoCardViewModel-RefreshingState`). **RefreshStateTask**, **CheapRefreshTask** and
+queue every read of the card's repo state goes through - its cheap facts and its `git status` - so that across all cards
+at most two reads run at once. `MainWindowViewModel` hands its one shared queue to every card; a card created without
+one (`null`, as in tests) creates a private queue over the optional `backgroundWork` runner (`IBackgroundWorkRunner`,
+the `BackgroundWorkRunner` supporting type; `null` means `ThreadPoolBackgroundWorkRunner.Instance`) and shuts it down
+when it is retired (**_ownsRefreshQueue**); tests pass a gated runner that holds each read until released.
+**_retiredCancellation** (and its token **_retiredToken**) is signaled by `Retire`, so the card's reads that still wait
+in the queue are given up and take no slot. **_refreshesInFlight** (`int`, changed with `Interlocked`) counts the card's
+reads that wait in the queue or run; it backs **IsRefreshing** (`bool`, raises `PropertyChanged` when it turns on or
+off, `AgentControl-RepoCardViewModel-RefreshingState`). **RefreshStateTask**, **CheapRefreshTask** and
 **GitStatusRefreshTask** (`Task`, internal) are the latest combined, cheap-facts and working-tree reads, for callers
 (tests) that wait for the card to settle; they never fault. **_gitTimeouts** (`GitClientTimeouts?`, the optional
 constructor parameter `gitTimeouts`, `null` meaning `GitClientTimeouts.Default`) are the time limits of every
 `GitClient` the card creates (`CreateGitClient`). **_shownGitProblem** (`string?`) is the git timeout message the card
 last put in `StatusMessage`, so a later read that gets an answer removes it again
-(`AgentControl-RepoCardViewModel-GitTimeoutShown`). **_cheapRefreshGeneration** and
-**_gitStatusGeneration** (`int`) number the most recent cheap read and working-tree check: every synchronous refresh,
-every pin applied after an apply, every direct `RefreshGitStatus`, every read queued through the refresh queue,
-`ApplyCheapFacts`, a missing repo (for the Git status) and `Retire` advance them, and a background read applies its
-answer only while its own number is still the current one, so an older, slower read never overwrites what a newer one
-found. **CheapRefreshTask** and **GitStatusRefreshTask** (internal `Task`, never faulting) are the most recent
-background reads, so callers (tests) can wait for a card to settle, as with `RepoImageRefreshTask`.
+(`AgentControl-RepoCardViewModel-GitTimeoutShown`). **_cheapRefreshGeneration** and **_gitStatusGeneration** (`int`) are
+the numbers handed to the most recent cheap-facts and working-tree request: every synchronous refresh, every pin applied
+after an apply, every direct `RefreshGitStatus`, every read queued through the refresh queue, `ApplyCheapFacts`, a
+missing repo (for the Git status) and `Retire` take the next number. **_appliedCheapGeneration** and
+**_appliedGitStatusGeneration** (`int`) are the numbers of the newest cheap facts and working-tree answer applied. A
+background read applies its answer only when its own number is higher than the applied one, then records it, so an
+older, slower read never overwrites what a newer one found, while a newer request that was given up (a canceled Refresh)
+applies nothing and so never voids an older read: the card still leaves "Refreshing" when the older read lands. A direct
+apply (the synchronous refresh, a pin applied after an apply, `RefreshGitStatus`, a missing repo, `Retire`) takes a new
+number and records it as applied at once, so it supersedes every read in flight. Requesters that joined one queued read
+get the same answer; the first to apply records its number and the other applies the same facts again only when its
+number is higher (harmless: the facts are identical). **CheapRefreshTask** and **GitStatusRefreshTask** (internal
+`Task`, never faulting) are the most recent background reads, so callers (tests) can wait for a card to settle, as with
+`RepoImageRefreshTask`.
 
 **RepoCheapFacts** (immutable `record`, in `RepoCardViewModel.cs`: `IsMissing`, `Pin`, `PinLoadError`,
 `CurrentBranch`, `HeadHash`, `HasCommittedAgentFiles`, `GitQueryFailed`): what a cheap refresh learns from the disk and
@@ -425,8 +431,8 @@ missing-to-present transition (that would duplicate the check already performed 
 subsequent working-tree check), so a caller that refreshes an already-realized card's cheap facts alone (see
 `MainWindowViewModel.ApplySettingsAsync`) must request a working-tree check itself afterward (`RefreshRepoStateAsync`
 with `workingTree`) to get an immediate fresh check instead of leaving the card in a "not yet checked" state until its
-next manual refresh (`AgentControl-RepoCardViewModel-PullDisabledExplanation`). The missing-repo path also advances
-`_gitStatusGeneration`, so a working-tree check still running is ignored.
+next manual refresh (`AgentControl-RepoCardViewModel-PullDisabledExplanation`). The missing-repo path also takes the
+next `_gitStatusGeneration` and records it as applied, so a working-tree check still running is ignored.
 
 **ReadCheapFacts** (internal, static): Reads, on any thread, what a cheap refresh needs about a repo: whether the
 folder exists, the pin file (`RepoPinStore.Load`; a failure becomes `PinLoadError`), the branch, the `HEAD` hash and
@@ -445,8 +451,10 @@ folders being added.
 **ApplyCheapFacts** (internal): Applies `RepoCheapFacts` to the card on the UI thread - the former body of
 `RefreshCheap`, split into `ApplyPin` (pin fields, or clearing them with "Failed to read pin file: ..." in
 `StatusMessage`), `ApplyBranchFacts` (branch and committed-files badge, remembering the answer in the per-card cache
-under its `HEAD`), `EvaluatePinnedSource`, the package chip and the background picture refresh. It advances
-`_cheapRefreshGeneration` (these facts are now the newest) and calls `InvalidateUpgradeCheck`; a `GitProblem` is put in
+under its `HEAD`), `EvaluatePinnedSource`, the package chip and the background picture refresh. It takes the next
+`_cheapRefreshGeneration` and records it as `_appliedCheapGeneration` (these facts are now the newest applied, so a
+background read still in flight is dropped when it lands), and calls `InvalidateUpgradeCheck`; a queued read applies
+through the private `ApplyNumberedCheapFacts`, which records the read's own number instead; a `GitProblem` is put in
 `StatusMessage`, and a git problem shown before is removed once facts without one arrive (`ShowGitProblem`; a status
 message of anything else, such as an action's outcome, is left alone); a retired card is left as it is; `null` throws
 `ArgumentNullException`. Also called by `MainWindowViewModel` for a card it creates from the
@@ -467,8 +475,13 @@ through the shared refresh queue, off the UI thread, and applies what was found 
   (`CreateGitClient`) and the cache, counts the read in `_refreshesInFlight` and queues it (key: the repo path and
   `CheapFacts` or `WorkingTree`; requester token linked from the caller's and the retirement token). A read of the same
   kind already waiting for this repo is joined. When the read ends, the count drops; the answer is dropped when it was
-  given up, the card was retired or the generation moved on (a newer read through the queue, or a synchronous refresh or
-  direct pin or branch re-read), otherwise `ApplyCheapFacts` or `ApplyGitStatus`. The card keeps showing its previous
+  given up, the card was retired or the answer of a newer request of the same kind has already been applied (its
+  number is not higher than the applied one: a newer read through the queue that finished first, or a synchronous
+  refresh or direct pin or branch re-read), otherwise its number is recorded as applied and it is applied
+  (`ApplyNumberedCheapFacts` or `ApplyGitStatus`; a `gitFactsOnly` read records its number too, so an older full read
+  cannot put back the state from before the untrack). A newer request that was given up applies nothing and so never
+  voids an older read: for one repo and kind the queue starts reads in request order (a waiting read is joined, a
+  running one is never overtaken by itself), so the newest applied answer wins. The card keeps showing its previous
   state until then.
 - *Callers*: `MainWindowViewModel`'s start-up reads and card refresh after a settings save (`Background`, counted), a
   re-added repo whose facts were not read (`Visible`), `MainWindow` when a card's row is first attached (`Visible`,
@@ -501,15 +514,16 @@ priority it needs); the wrapper remains for tests.
 
 **Retire** (internal): Stops the card for good because its repo was removed from the recent-repos list; called by
 `MainWindowViewModel.RemoveRepo` once the removal was saved (an add creates a card only after its save succeeded, so it
-never has one to retire). It marks the card retired, advances `_upgradeCheckGeneration`, `_cheapRefreshGeneration`,
-`_gitStatusGeneration` and `_imageGeneration` so results still on their way (including background cheap reads and
-working-tree checks) are dropped, clears "checking", cancels the running operation (`CancelOperation`; the operation
-ends cancelled, which is never reported as an error), signals `_retiredCancellation` so its reads still waiting in the
-refresh queue are given up (and shuts down a private queue, stopping its running git), sets every event of the card
-(`ErrorOccurred`, `ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `FavoriteChanged`, `GroupChanged`,
-`CardColorChanged`, `LaunchRecorded`, `NewGroupRequested`, `RemoveRequested`, `SelectPackageRequested`,
-`ContentChangeConfirmationRequested`, `CommittedFilesConversionRequested`, `AgentFilesChoiceRequested`) to `null` so
-that nothing it still does can show an error box, release notes or a prompt, and clears the picture, which disposes it
+never has one to retire). It marks the card retired, advances `_upgradeCheckGeneration` and `_imageGeneration`, and
+takes the next `_cheapRefreshGeneration` and `_gitStatusGeneration`, recording them as applied, so results still on
+their way (including background cheap reads and working-tree checks) are dropped, clears "checking", cancels the running
+operation (`CancelOperation`; the operation ends cancelled, which is never reported as an error), signals
+`_retiredCancellation` so its reads still waiting in the refresh queue are given up (and shuts down a private queue,
+stopping its running git), sets every event of the card (`ErrorOccurred`, `ReleaseNotesReady`,
+`AgentsMdTemplateOfferRequested`, `FavoriteChanged`, `GroupChanged`, `CardColorChanged`, `LaunchRecorded`,
+`NewGroupRequested`, `RemoveRequested`, `SelectPackageRequested`, `ContentChangeConfirmationRequested`,
+`CommittedFilesConversionRequested`, `AgentFilesChoiceRequested`) to `null` so that nothing it still does can show an
+error box, release notes or a prompt, and clears the picture, which disposes it
 (`AgentControl-RepoCardViewModel-RetiredCardReportsNothing`, `-RetireCancelsRunningWork`). A retired card ignores
 `RefreshCheap` and `RefreshUpgradeStatusAsync` (`-RetiredCardChecksNothing`), is never reused, and `Retire` is
 idempotent; adding the repo again creates a new card.
@@ -517,7 +531,8 @@ idempotent; adding the repo again creates a new card.
 **RefreshDirtyStatus**: Re-checks working-tree cleanliness via `GitClient`, updating `CanPull`,
 `GitStatusUnavailable`, and `GitStatusChecked`, synchronously (`ReadWorkingTreeClean` then `ApplyGitStatus`). Not
 called by `RefreshCheap` or the constructor — computed lazily instead. The window no longer uses this synchronous
-form; it advances `_gitStatusGeneration`, so it supersedes a background check still running.
+form; it takes the next `_gitStatusGeneration` and records it as applied, so it supersedes a background check
+still running.
 
 **RefreshDirtyStatusInBackgroundAsync** (internal): `RefreshRepoStateAsync(Background, cheapFacts: false,
 workingTree: true)`; also `GitStatusRefreshTask`. The private static `ReadWorkingTreeClean` runs
@@ -823,14 +838,14 @@ of identity, `AgentControl-RepoCardViewModel-RecordContentIdentity`), and then, 
 steps that follow), saves the pin (so `AgentsMdTemplateDeclined` and any unknown fields are preserved; a `Source` or
 `SourceRevision` an older file carried is dropped by the save), reads the release notes and reads the pin back; a
 failure to save the pin or to read the release notes is carried back and rethrown on the UI thread, after the
-`.gitignore` warning. Back on the UI thread it applies the pin read back (`ApplyPin`, after advancing the cheap-read
-generation so an older background read cannot overwrite it), makes the applied source the card's supplier, refreshes the
-upgrade status, calls `MaybeOfferAgentsMdTemplateAsync` and finally raises `ReleaseNotesReady` with the new package's
-release notes. The offer is raised *before* the release notes so the view can show the modal question at once and hold
-the release notes back until it is answered (`MainWindow.ShowReleaseNotesAsync`): the notes window then opens in front
-as the completion of the upgrade instead of being covered by, or lost behind, the question
-(`AgentControl-RepoCardViewModel-AgentsMdOfferBeforeReleaseNotes`). The acquired package reader stays open until the
-sequence ends.
+`.gitignore` warning. Back on the UI thread it applies the pin read back (`ApplyPin`, after taking the next cheap-read
+generation and recording it as applied, so an older background read cannot overwrite it), makes the applied source the
+card's supplier, refreshes the upgrade status, calls `MaybeOfferAgentsMdTemplateAsync` and finally raises
+`ReleaseNotesReady` with the new package's release notes. The offer is raised *before* the release notes so the view can
+show the modal question at once and hold the release notes back until it is answered
+(`MainWindow.ShowReleaseNotesAsync`): the notes window then opens in front as the completion of the upgrade instead of
+being covered by, or lost behind, the question (`AgentControl-RepoCardViewModel-AgentsMdOfferBeforeReleaseNotes`). The
+acquired package reader stays open until the sequence ends.
 
 **Converting committed agent files** (inside `ApplyPackageAndShowReleaseNotesAsync`): Putting a repo under
 package management is impossible while git tracks its managed folders, because `.gitignore` has no effect on tracked

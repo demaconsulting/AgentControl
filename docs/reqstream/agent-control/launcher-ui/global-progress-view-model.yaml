@@ -3,7 +3,7 @@
 #
 # GlobalProgressViewModel backs the main window's global progress strip under the app bar: the
 # thin bar, the short status text and the Cancel button shown while a bulk operation (adding
-# repositories, refreshing the cards after a settings save) runs. Which operations report to it
+# repositories, reading the cards at start-up, refreshing the cards after a settings save) runs. Which operations report to it
 # is the MainWindowViewModel unit's.
 
 sections:
@@ -64,14 +64,17 @@ sections:
 
       - id: AgentControl-GlobalProgressViewModel-OverlappingOperations
         title: >-
-          The GlobalProgressViewModel class shall show the most recently begun operation that is
-          still running when operations overlap, and the previous one again, in its latest state,
-          when that one ends.
+          The GlobalProgressViewModel class shall show, when operations overlap, the most recently
+          begun running operation that can still be canceled or, when none can, the most recently
+          begun running operation, and the operation that should be shown next, in its latest state,
+          when the shown one ends or was canceled.
         justification: |
-          An add can start while the cards still refresh after a settings save; the strip must show
-          one operation at a time and never lose the other.
+          An add can start while the cards still refresh after a settings save, and the cards can
+          start refreshing while an add runs; the strip must show one operation at a time and never
+          lose the other, and the add's Cancel must stay offered while the cards refresh.
         tests:
           - GlobalProgressViewModel_OverlappingOperations_ShowsLatestThenPrevious
+          - GlobalProgressViewModel_OverlappingOperations_CancelableOperationStaysShownOverNewerOne
 
       - id: AgentControl-GlobalProgressViewModel-AccessibleName
         title: >-

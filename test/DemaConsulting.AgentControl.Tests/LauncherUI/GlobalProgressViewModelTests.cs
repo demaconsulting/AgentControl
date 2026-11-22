@@ -177,6 +177,47 @@ public sealed class GlobalProgressViewModelTests
     }
 
     /// <summary>
+    ///     Test that a running operation that can still be canceled stays shown, with its Cancel, over a
+    ///     newer operation that cannot be canceled, and that the newer one is shown once the older one was
+    ///     canceled or ended.
+    /// </summary>
+    [Fact]
+    public void GlobalProgressViewModel_OverlappingOperations_CancelableOperationStaysShownOverNewerOne()
+    {
+        // Arrange: an add (cancelable), then a refresh that cannot be canceled begins
+        var progress = new GlobalProgressViewModel();
+        var cancels = 0;
+        var add = progress.Begin("Adding repositories...", () => cancels++);
+        using var refresh = progress.Begin("Refreshing repositories 0 of 3...");
+
+        // Assert: the add stays shown, with its Cancel
+        Assert.Equal("Adding repositories...", progress.Text);
+        Assert.True(progress.CanCancel);
+
+        // Act / Assert: the add in a step that cannot be canceled stays shown, without Cancel
+        add.AllowCancel = false;
+        Assert.Equal("Adding repositories...", progress.Text);
+        Assert.False(progress.CanCancel);
+        add.AllowCancel = true;
+        Assert.True(progress.CanCancel);
+
+        // Act: the add is canceled
+        progress.CancelCommand.Execute(null);
+
+        // Assert: canceled once; the refresh is shown, without Cancel
+        Assert.Equal(1, cancels);
+        Assert.Equal("Refreshing repositories 0 of 3...", progress.Text);
+        Assert.False(progress.CanCancel);
+
+        // Act: the add ends
+        add.Dispose();
+
+        // Assert: the refresh is still shown
+        Assert.True(progress.IsActive);
+        Assert.Equal("Refreshing repositories 0 of 3...", progress.Text);
+    }
+
+    /// <summary>
     ///     Test that the strip goes idle once every operation has ended, and that ending twice or
     ///     reporting after the end changes nothing.
     /// </summary>

@@ -11,7 +11,8 @@ package AgentControl {
          * folders dropped from the file manager, Git repository roots only, checked off the UI
          * thread and saved once per batch, queued and cancelable, with a Retry/Discard question when
          * the save fails, one combined summary), the global progress strip under the app bar for
-         * bulk work (adding repos, refreshing the cards after Settings are saved),
+         * bulk work (adding repos, reading the cards at start-up, refreshing the cards after
+         * Settings are saved),
          * the About dialog with its banner, per-repo cards, the
          * package-selection window (opened as Select Package or, for a pinned repo, Change package),
          * the settings window, the package-source editor window (including its signed-package

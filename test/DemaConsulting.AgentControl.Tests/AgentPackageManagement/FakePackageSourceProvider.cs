@@ -57,6 +57,12 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
     private int _acquireCalls;
 
     /// <summary>
+    ///     The tests waiting for a number of <see cref="ListVersionsAsync"/> calls (see
+    ///     <see cref="WaitForListVersionsCallsAsync"/>); also the lock that guards it.
+    /// </summary>
+    private readonly List<(int Count, TaskCompletionSource Reached)> _listVersionsWaiters = [];
+
+    /// <summary>
     ///     Initializes a fake serving the given packages.
     /// </summary>
     /// <param name="alias">The source alias this fake reports.</param>
@@ -93,6 +99,27 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
     ///     Gets the number of <see cref="ListVersionsAsync"/> calls so far.
     /// </summary>
     public int ListVersionsCalls => Volatile.Read(ref _listVersionsCalls);
+
+    /// <summary>
+    ///     Waits until <see cref="ListVersionsAsync"/> was called at least <paramref name="count"/>
+    ///     times, without polling.
+    /// </summary>
+    /// <param name="count">The number of calls.</param>
+    /// <returns>A task that completes once that many calls were made.</returns>
+    public Task WaitForListVersionsCallsAsync(int count)
+    {
+        lock (_listVersionsWaiters)
+        {
+            if (Volatile.Read(ref _listVersionsCalls) >= count)
+            {
+                return Task.CompletedTask;
+            }
+
+            var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _listVersionsWaiters.Add((count, reached));
+            return reached.Task;
+        }
+    }
 
     /// <summary>
     ///     Gets the number of <see cref="AcquireAsync"/> calls so far.
@@ -168,6 +195,25 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
     }
 
     /// <summary>
+    ///     Counts one more <see cref="ListVersionsAsync"/> call and completes the waits it satisfies.
+    /// </summary>
+    private void NotifyListVersionsCall()
+    {
+        List<TaskCompletionSource> reached;
+        lock (_listVersionsWaiters)
+        {
+            var calls = Interlocked.Increment(ref _listVersionsCalls);
+            reached = [.. _listVersionsWaiters.Where(waiter => waiter.Count <= calls).Select(waiter => waiter.Reached)];
+            _listVersionsWaiters.RemoveAll(waiter => waiter.Count <= calls);
+        }
+
+        foreach (var waiter in reached)
+        {
+            waiter.TrySetResult();
+        }
+    }
+
+    /// <summary>
     ///     Takes a copy of the packages served now.
     /// </summary>
     /// <returns>The packages.</returns>
@@ -183,7 +229,7 @@ internal sealed class FakePackageSourceProvider : IPackageSourceProvider
     public async Task<IReadOnlyList<DiscoveredPackage>> ListVersionsAsync(
         string packageId, CancellationToken cancellationToken)
     {
-        Interlocked.Increment(ref _listVersionsCalls);
+        NotifyListVersionsCall();
         LastListVersionsToken = cancellationToken;
 
         // Snapshot the gate so a later change does not affect this call; waiting honors

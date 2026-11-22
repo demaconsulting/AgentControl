@@ -132,7 +132,13 @@ pin's package and version and the branch are applied
 while a newer synchronous refresh reads version 2 and the pin then changes to version 3 leaves version 2 shown when
 the older read finally runs (`RepoCardViewModel_RefreshCheapInBackgroundAsync_NewerRefreshStarted_OlderResultDropped`).
 A card retired while its background read is held applies nothing
-(`RepoCardViewModel_RefreshCheapInBackgroundAsync_Retired_AppliesNothing`). These cover
+(`RepoCardViewModel_RefreshCheapInBackgroundAsync_Retired_AppliesNothing`). A card never read, whose earlier background
+reads are held in a one-slot queue (the cheap read running, the working-tree read waiting), gets a Refresh that queues
+its cheap read behind the running one and joins the waiting working-tree read; the Refresh is canceled before anything
+ran, then the earlier reads are released: they are still applied, so the card has its repo state, is no longer
+`Refreshing`, shows the branch `main`, has its Git status checked, and is neither refreshing nor busy
+(`RepoCardViewModel_RefreshAsync_CanceledWhileEarlierReadPending_EarlierReadStillApplied`; without apply-time
+numbering the canceled request voided the earlier reads and the card stayed `Refreshing`). These cover
 `AgentControl-RepoCardViewModel-CheapRefreshInBackground`.
 
 **RepoCardViewModel_GitStatusInBackground_NotCheckedUntilGitAnswers**: With `git status` held at the gate on a clean
@@ -152,7 +158,10 @@ pin and committed agent files (stub git), not read yet, reports `Refreshing` (te
 "Refreshing:"), a dimmed branch chip reading `...` with the tooltip "Reading the current Git branch...", no "No agent
 package" chip, no committed-files warning, not dirty and not missing; after its state is read it reports `NoPackage`,
 the branch `main` and its tooltip, the "No agent package" chip and the committed-files warning
-(`RepoCardViewModel_Status_BeforeFirstRead_IsRefreshing`). These cover `AgentControl-RepoCardViewModel-RefreshingState`.
+(`RepoCardViewModel_Status_BeforeFirstRead_IsRefreshing`). A card whose canceled Refresh overlapped its earlier
+pending reads still leaves `Refreshing` once those reads land
+(`RepoCardViewModel_RefreshAsync_CanceledWhileEarlierReadPending_EarlierReadStillApplied`). These cover
+`AgentControl-RepoCardViewModel-RefreshingState`.
 
 **RepoCardViewModel_PromoteAndAwait_ActionsActOnFreshState**: Three cards share a one-slot queue (released one read
 at a time); the launched card's start-up read waits behind two others; Launch makes it busy with nothing launched, and

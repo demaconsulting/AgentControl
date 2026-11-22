@@ -205,13 +205,15 @@ after Settings are saved.
   (`GlobalProgressText`) and a Cancel `Button` (`GlobalProgressCancelButton`, accessible name "Cancel adding
   repositories", visible only while `CanCancel`).
 - *Role*: Provider.
-- *Contract*: Shows the most recently begun bulk operation that is still running: "Adding repositories..." while the
+- *Contract*: Shows the most recently begun running bulk operation that can still be canceled or, when none can, the
+  most recently begun running one: "Adding repositories..." while the
   folders of an add are counted, "Adding {completed} of {total} repositories..." as each folder has been checked,
   "Saving..." while the add saves (no Cancel then), and "Refreshing repositories {completed} of {total}..." while the
   shared refresh queue reads the cards at start-up or after a settings save (no Cancel). A single card's Refresh,
   Pull or action shows on its card, not in the strip. Cancel stops the running add and every queued
-  add before anything is saved or added, with no message afterwards (`AgentControl-LauncherUI-GlobalProgress`,
-  `AgentControl-LauncherUI-AddCancel`).
+  add before anything is saved or added, with no message afterwards; an add stays shown, with its Cancel, while the
+  cards refresh after a settings save, and the refresh is shown once the add has ended or was canceled
+  (`AgentControl-LauncherUI-GlobalProgress`, `AgentControl-LauncherUI-AddCancel`).
 - *Constraints*: Fully collapsed when idle, so the idle window is unchanged; the strip, its text and its bar use
   the theme brushes `GlobalProgressStripBackground`, `GlobalProgressTextForeground`, `GlobalProgressForeground` and
   `GlobalProgressTrack`, defined for both themes and checked for contrast.
@@ -386,7 +388,9 @@ made on a worker thread: they are applied only once written, and a failure chang
 through `AddSaveFailed` whether to retry or discard (see *Background work and the global progress strip*), and the
 Settings window stays open with the reason. A change made in the window while a confirmed save runs is applied at once
 and written after it, together with it, so the file never loses either. When the window closes,
-`MainWindowViewModel.Dispose` writes what is not written yet, on a worker thread, waiting at most five seconds. When a
+`MainWindowViewModel.Dispose` writes what is not written yet, on a worker thread, waiting at most five seconds; a
+change made while an add was still saving at the close is written together with the add once the add's write
+succeeded, so the close never takes the add out of the file again. When a
 repo is removed, `RemoveRepo` applies and schedules the removal and then calls `RepoCardViewModel.Retire`: the card
 cancels its running operation, ignores the results of upgrade checks and picture loads still in flight, clears all its
 events (so nothing it still does can show an error box, release notes or a prompt), and disposes its picture;
@@ -519,8 +523,10 @@ the per-card `CommittedAgentFilesCache`, is lock-guarded (`AgentControl-GitInteg
   credential-helper question on workers and asks that question only once the typed address has stayed unchanged for a
   short delay (see the `SourceEditorViewModel` design). The headless tests guard the UI thread, so a pin read, a hash,
   an extraction or a git start that slips back onto it fails them.
-- *The strip*: `GlobalProgressViewModel` (see its design) shows one operation at a time - the most recently begun one
-  still running - so an add started while the cards refresh is shown, and the refresh again when the add ends.
+- *The strip*: `GlobalProgressViewModel` (see its design) shows one operation at a time - the most recently begun
+  running one that can still be canceled, otherwise the most recently begun running one - so an add started while the
+  cards refresh is shown, and the refresh again when the add ends; and a refresh that starts during an add (after a
+  settings save) does not take the add's Cancel away: the refresh is shown once the add has ended or was canceled.
 
 `SelectPackageWindowViewModel` backs the package-selection dialog opened from a card's **Select Package...** (a repo
 with no pin) or **Change package...** (a repo with a pin). It shows three columns - source, package, version. For Change

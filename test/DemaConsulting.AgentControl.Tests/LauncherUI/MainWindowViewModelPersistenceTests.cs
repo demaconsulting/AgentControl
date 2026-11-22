@@ -553,6 +553,39 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that closing the window while an add is being saved, after another change was made, writes
+    ///     both: the change made meanwhile is written together with the add once the add's write
+    ///     succeeded, rather than over it without the add. Runs on the headless UI thread, so - as in the
+    ///     application - the add's own completion cannot run while the close blocks that thread.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_Dispose_WhileAddSavingAfterAnotherChange_WritesAddAndChange() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: writes held at a gate
+        var fixture = CreateFixture("alpha");
+        var alpha = fixture.Card("alpha");
+        var gamma = CreateDirectory("gamma");
+        fixture.Saving.Gate.Reset();
+
+        // Act: start the add and wait until its save is held, make a change (deferred while the add
+        // saves), then let the save go and close in the same UI-thread turn
+        var add = fixture.ViewModel.EnqueueAddReposAsync([gamma], null);
+        await fixture.Saving.WaitForStartAsync();
+        alpha.IsFavorite = true;
+        fixture.Saving.Gate.Set();
+        fixture.ViewModel.Dispose();
+
+        // Assert: the file holds both the add and the change
+        var saved = SettingsStore.Load(fixture.ConfigDirectory).RecentRepos;
+        Assert.Equal(2, saved.Count);
+        Assert.Contains(saved, repo => repo.Path == gamma);
+        Assert.True(saved.Single(repo => repo.Path == alpha.RepoPath).IsFavorite);
+
+        // The add's completion was queued on the UI thread and is dropped with the test's application
+        _ = add;
+    });
+
+    /// <summary>
     ///     Test that a failed save with nobody to ask (no subscriber to the question) discards the add.
     /// </summary>
     [Fact]

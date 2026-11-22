@@ -28,6 +28,9 @@ N/A - standard test environment (no window, no files and no processes are involv
   cancel action; Cancel is offered again when the step allows it.
 - With overlapping operations the most recently begun one is shown, and when it ends the previous one is shown again
   in its latest state (including reports it made meanwhile).
+- An older running operation that can still be canceled stays shown, with its Cancel (or without it during a step that
+  does not allow a cancel), over a newer one that cannot be canceled; once it was canceled or ended the newer one is
+  shown.
 
 #### Test Scenarios
 
@@ -59,7 +62,11 @@ runs; when the step allows a cancel again, Cancel is offered. This scenario is t
 **GlobalProgressViewModel_OverlappingOperations**: A refresh without a cancel action is begun and then an add with one;
 the refresh reports 1 of its total while the add is shown, and the strip keeps showing the add with Cancel; when the
 add ends the strip shows the refresh again, determinate with its value of 1, its text and no Cancel. This scenario is
-tested by `GlobalProgressViewModel_OverlappingOperations_ShowsLatestThenPrevious`, covering
+tested by `GlobalProgressViewModel_OverlappingOperations_ShowsLatestThenPrevious`. An add with a counting cancel action
+is begun and then a refresh without one; the strip keeps showing the add with Cancel; while the add disallows a cancel
+it is still shown, without Cancel, and Cancel is offered again when it allows one; executing Cancel counts one cancel
+and the strip then shows the refresh, without Cancel; once the add ends the refresh is still shown. This is tested by
+`GlobalProgressViewModel_OverlappingOperations_CancelableOperationStaysShownOverNewerOne`. Both cover
 `AgentControl-GlobalProgressViewModel-OverlappingOperations`.
 
 **GlobalProgressViewModel_AccessibleName**: The accessible name is empty while idle and equals the shown operation's

@@ -6,7 +6,8 @@
 
 `GlobalProgressViewModel` backs the main window's global progress strip, directly under the app bar: a thin progress
 bar, one short line of status text and a Cancel button, shown only while a bulk operation that is not tied to one repo
-card runs - adding several repositories, or refreshing every card after the settings were saved. Its single
+card runs - adding several repositories, reading the cards at start-up, or refreshing every card after the settings
+were saved. Its single
 responsibility is to show which bulk operation runs and how far it has got, and to forward the user's Cancel to it; it
 knows nothing of repos, settings or threads. The `GlobalProgressOperation` class in the same file is part of this unit:
 it is the handle through which one operation's owner reports and ends it. Its behavior is specified by the unit
@@ -35,21 +36,28 @@ and is 0 while indeterminate. Idle: indeterminate, 0 of 1 (`AgentControl-GlobalP
 strip shows its Cancel button, and the button's command, enabled only while `CanCancel`; a change of `CanCancel` raises
 the command's `CanExecuteChanged` (`AgentControl-GlobalProgressViewModel-CancelOnce`, `-NoCancelWhenNotCancelable`).
 
-**_operations** (`List<GlobalProgressOperation>`, private): the running operations, oldest first; the last one is the
-one shown. Every bound property above is a copy of the shown operation's state, refreshed by the private `Publish`.
+**_operations** (`List<GlobalProgressOperation>`, private): the running operations, oldest first. **Shown**
+(`GlobalProgressOperation?`, private) is the one shown: the most recently begun running operation that can still be
+canceled (`IsCancelable`) or, when none can, the most recently begun running operation; `null` when none runs. So an
+add's Cancel stays offered while the cards refresh after a Settings save, and the refresh is shown once the add has
+ended or was canceled. Every bound property above is a copy of the shown operation's state, refreshed by the private
+`Publish`.
 
 **GlobalProgressOperation** (`IDisposable`): one bulk operation, created only by `Begin`. **Text**, **IsIndeterminate**
 (initially `true`), **Completed** and **Total** (`int`, meaningful only when determinate) are its own state.
 **AllowCancel** (`bool`, initially `true`) lets its owner refuse a cancel for a step that must run to its end once
 started (the add's save) and accept it again afterwards; it has no effect on an operation without a cancel action.
 **CanCancel** is `true` only when the operation has a cancel action, `AllowCancel` is set, it was not canceled already
-and it has not ended. Private flags record whether the cancel action has run (it runs at most once) and whether the
+and it has not ended. **IsCancelable** (internal `bool`) is `true` when the operation has a cancel action that has
+not run and it has not ended, whether or not `AllowCancel` is set: such an operation is shown in preference to newer
+ones, so an add in its "Saving..." step stays shown, without Cancel, rather than flipping to the refresh. Private flags
+record whether the cancel action has run (it runs at most once) and whether the
 operation has ended.
 
-Invariants: exactly when `_operations` is empty the strip is idle; the shown state is always the most recently begun
-operation still running. Like every view model of the subsystem it is created and changed on the UI thread only (the
-operations report from the continuations of their background work, which resume on the UI thread); it is not
-thread-safe.
+Invariants: exactly when `_operations` is empty the strip is idle; the shown state is always that of `Shown` - the most
+recently begun running operation that can still be canceled, otherwise the most recently begun running operation. Like
+every view model of the subsystem it is created and changed on the UI thread only (the operations report from the
+continuations of their background work, which resume on the UI thread); it is not thread-safe.
 
 #### Key Methods
 
@@ -58,8 +66,9 @@ thread-safe.
 - *Parameters*: `string text` (not null, `ArgumentNullException`), `Action? cancel` - what the strip's Cancel button
   does for this operation, run on the UI thread at most once, or `null` for an operation that cannot be canceled.
 - *Returns*: the `GlobalProgressOperation`; its owner reports through it and disposes it when the work has ended.
-- *Postconditions*: the operation is appended to `_operations` and becomes the shown one: `IsActive` is `true`,
-  `Text` its text, the bar indeterminate, `CanCancel` `true` exactly when a cancel action was given
+- *Postconditions*: the operation is appended to `_operations` and becomes the shown one, unless an older operation
+  that can still be canceled is running (`AgentControl-GlobalProgressViewModel-OverlappingOperations`): `IsActive` is
+  `true`, `Text` its text, the bar indeterminate, `CanCancel` `true` exactly when a cancel action was given
   (`AgentControl-GlobalProgressViewModel-ShowsOperation`).
 
 **GlobalProgressOperation.Report(completed, total, text)**: Reports a known amount of work: the operation becomes
@@ -76,14 +85,17 @@ or shows again (`AgentControl-GlobalProgressViewModel-NoCancelWhenNotCancelable`
 **CancelCommand** / **GlobalProgressOperation.RequestCancel** (internal): The command runs the shown operation's
 `RequestCancel`, which does nothing unless `CanCancel`; otherwise it marks the operation canceled (so `CanCancel` turns
 `false` and the button disappears) and then runs the cancel action - once, however often Cancel is pressed
-(`AgentControl-GlobalProgressViewModel-CancelOnce`).
+(`AgentControl-GlobalProgressViewModel-CancelOnce`). A canceled operation can no longer be canceled, so the strip may
+show another running operation instead (`-OverlappingOperations`).
 
 **GlobalProgressOperation.Dispose**: Ends the operation (idempotent): it is removed from `_operations` (`End`) and the
-strip shows the previous running operation again, in its latest state, or goes idle when none is left
+strip shows the running operation that should be shown next (`Shown`), in its latest state, or goes idle when none is
+left
 (`AgentControl-GlobalProgressViewModel-OverlappingOperations`, `-IdleHidden`). Reports after disposal are ignored.
 
-**OnOperationChanged** (internal): An operation's state changed; the strip is updated only when it is the shown one,
-so a background operation's reports never replace what is shown, and are shown once it is the last one again.
+**OnOperationChanged** (internal): An operation's state changed; the strip always republishes `Shown`, because a cancel
+of the shown operation can change which operation is shown. A background operation's reports never replace what is
+shown (the bound properties announce real changes only), and are shown once it is the shown one again.
 
 #### Error Handling
 

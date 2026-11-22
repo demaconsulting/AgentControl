@@ -1294,6 +1294,47 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that when the cards start refreshing after a Settings save while repos are being added,
+    ///     the strip keeps showing the add with its Cancel button, and shows the refresh once the add was
+    ///     canceled.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_EnqueueAddRepos_SettingsRefreshStartsDuringAdd_StripKeepsAddCancel()
+    {
+        // Arrange: one listed repo whose start-up read has finished, then a runner that holds every read
+        var gate = new GatedBackgroundWorkRunner();
+        var settings = new AppSettings { RecentRepos = [new RecentRepo { Path = CreateRepoDirectory() }] };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory(), backgroundWork: gate);
+        gate.Release();
+        await viewModel.WhenRepoStateSettledAsync();
+        gate.Close();
+
+        // Act: start an add (its folder check is held), then save Settings, which starts the cards'
+        // refresh wave
+        var add = viewModel.EnqueueAddReposAsync([CreateRepoDirectory()], null);
+        await gate.FirstCall;
+        await viewModel.ApplySettingsAsync(new AppSettings());
+
+        // Assert: the add is still shown, with its Cancel
+        Assert.StartsWith("Adding", viewModel.GlobalProgress.Text, StringComparison.Ordinal);
+        Assert.True(viewModel.GlobalProgress.CanCancel);
+
+        // Act: cancel the add
+        viewModel.GlobalProgress.CancelCommand.Execute(null);
+
+        // Assert: the refresh is shown now
+        Assert.StartsWith("Refreshing repositories", viewModel.GlobalProgress.Text, StringComparison.Ordinal);
+
+        // Act: let everything run
+        gate.Release();
+        var result = await add;
+        await viewModel.WhenRepoStateSettledAsync();
+
+        // Assert: the add was canceled
+        Assert.True(result.Canceled);
+    }
+
+    /// <summary>
     ///     Test that a background add of several folders saves the settings once and rebuilds the
     ///     displayed list once for the whole batch.
     /// </summary>

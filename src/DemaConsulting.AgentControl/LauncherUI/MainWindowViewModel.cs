@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.AgentToolLauncher;
 using DemaConsulting.AgentControl.GitIntegration;
@@ -331,11 +332,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly SettingsWriter _settingsWriter;
 
     /// <summary>
-    ///     How many confirmed saves (an add, the Settings window's Save) are running; while any is, a
-    ///     change made in the window is not handed to <see cref="_settingsWriter"/> but remembered in
-    ///     <see cref="_saveDeferred"/> (see <see cref="ScheduleSettingsSave"/>).
+    ///     The confirmed saves (an add, the Settings window's Save) that are running, oldest first; while
+    ///     any is, a change made in the window is not handed to <see cref="_settingsWriter"/> but
+    ///     remembered in <see cref="_saveDeferred"/> (see <see cref="ScheduleSettingsSave"/>). The close
+    ///     (see <see cref="Dispose"/>) waits for their writes and writes their changes together with the
+    ///     changes made meanwhile.
     /// </summary>
-    private int _confirmedSavesRunning;
+    private readonly List<RunningConfirmedSave> _runningConfirmedSaves = [];
 
     /// <summary>
     ///     Whether the live settings hold something that has to be written once the confirmed saves
@@ -1462,7 +1465,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private Task ApplyAddCommitAsync(AddBatchCommit commit) =>
         commit.Steps.Count == 0
             ? Task.CompletedTask
-            : SaveConfirmedAsync(CreateAddCandidate(commit), () => AdoptAddCommit(commit));
+            : SaveConfirmedAsync(settings => ApplyAddChange(settings, commit), () => AdoptAddCommit(commit));
 
     /// <summary>
     ///     Carries out a prepared add synchronously, for the synchronous adds (<see cref="AddRepos"/>,
@@ -1488,7 +1491,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AdoptAddCommit(commit);
 
         // A confirmed save that is still running was built without this add: write the result after it
-        _saveDeferred |= _confirmedSavesRunning > 0;
+        _saveDeferred |= _runningConfirmedSaves.Count > 0;
     }
 
     /// <summary>
@@ -1497,12 +1500,21 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     /// <param name="commit">The prepared add.</param>
     /// <returns>The candidate settings.</returns>
-    private AppSettings CreateAddCandidate(AddBatchCommit commit)
+    private AppSettings CreateAddCandidate(AddBatchCommit commit) =>
+        ApplyAddChange(_settings.CreateSnapshot(), commit);
+
+    /// <summary>
+    ///     Applies an add's change to settings that are not the live ones (a candidate or the snapshot
+    ///     written at the close) and repairs their group colors and order.
+    /// </summary>
+    /// <param name="target">The settings to change.</param>
+    /// <param name="commit">The prepared add.</param>
+    /// <returns><paramref name="target"/>, changed.</returns>
+    private static AppSettings ApplyAddChange(AppSettings target, AddBatchCommit commit)
     {
-        var candidate = _settings.CreateSnapshot();
-        ApplyAddSteps(candidate, commit);
-        candidate.RepairGroupSettings();
-        return candidate;
+        ApplyAddSteps(target, commit);
+        target.RepairGroupSettings();
+        return target;
     }
 
     /// <summary>
@@ -2023,19 +2035,29 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         // The candidate: the new settings with the user's repos and organizing choices as they are
-        // now, as a snapshot the writer can write while the window keeps running
+        // now, as a snapshot the writer can write while the window keeps running. Written in the
+        // background; adopted only once it is on disk, so a failed write (thrown through the task)
+        // leaves the live settings as they were and a later save can never write the rejected values
+        return SaveConfirmedAsync(settings => WithOrganizingFrom(updated, settings), () => AdoptSettings(updated));
+    }
+
+    /// <summary>
+    ///     Builds what a Settings save writes: a snapshot of the new settings with the repos and
+    ///     organizing choices of other settings (the live ones, or the snapshot written at the close).
+    /// </summary>
+    /// <param name="updated">The new settings from the Settings window; left untouched.</param>
+    /// <param name="organizing">A snapshot holding the repos and organizing choices to keep; nobody
+    ///     changes it any more.</param>
+    /// <returns>The settings to write.</returns>
+    private static AppSettings WithOrganizingFrom(AppSettings updated, AppSettings organizing)
+    {
         var candidate = updated.CreateSnapshot();
-        var organizing = _settings.CreateSnapshot();
         candidate.RecentRepos = organizing.RecentRepos;
         candidate.HasUserRepoOrder = organizing.HasUserRepoOrder;
         candidate.CollapsedGroups = organizing.CollapsedGroups;
         candidate.GroupColors = organizing.GroupColors;
         candidate.GroupOrder = organizing.GroupOrder;
-
-        // Written in the background; adopted only once it is on disk, so a failed write (thrown
-        // through the task) leaves the live settings as they were and a later save can never write
-        // the rejected values
-        return SaveConfirmedAsync(candidate, () => AdoptSettings(updated));
+        return candidate;
     }
 
     /// <summary>
@@ -2528,10 +2550,14 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     /// <remarks>
     ///     The settings are written by the background writer on a worker thread; the calling thread
-    ///     waits for it at most <see cref="SettingsFlushTimeout"/>. That is the one wait for the disk
-    ///     left on the UI thread, and it comes after the window has closed, so no interaction is held
-    ///     up; the write never needs the UI thread, so the wait cannot deadlock. Settings that could
-    ///     not be written in time are logged, because nobody can be told any more.
+    ///     waits for it at most <see cref="SettingsFlushTimeout"/> in all. When a confirmed save (an
+    ///     add, the Settings window's Save) is still running and changes were made meanwhile, that wait
+    ///     first covers the confirmed write: the changes made meanwhile are then written together with
+    ///     the confirmed save's change once it was written (a confirmed save that failed or is still
+    ///     running is left out, so nothing that was not saved is written). That is the one wait for the
+    ///     disk left on the UI thread, and it comes after the window has closed, so no interaction is
+    ///     held up; the writes never need the UI thread, so the wait cannot deadlock. Settings that
+    ///     could not be written in time are logged, because nobody can be told any more.
     /// </remarks>
     public void Dispose()
     {
@@ -2569,15 +2595,36 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _refreshProgress?.Dispose();
         _refreshProgress = null;
 
-        // The settings changes made while a confirmed save still runs are written now (the add that
-        // was saving at the close is left to that save), then everything waiting is written
+        // The settings changes made while a confirmed save still runs are written now, together with
+        // the change of every confirmed save whose write succeeded meanwhile (its adoption can no longer
+        // run on the closing UI thread), then everything waiting is written - all within one bounded
+        // wait
+        var started = Stopwatch.GetTimestamp();
         if (_saveDeferred)
         {
             _saveDeferred = false;
-            _settingsWriter.Schedule(_settings.CreateSnapshot());
+            var pending = _runningConfirmedSaves.ToArray();
+            if (pending.Length > 0)
+            {
+                WaitQuietly(Task.WhenAll(pending.Select(save => save.Write)), SettingsFlushTimeout);
+            }
+
+            var snapshot = _settings.CreateSnapshot();
+            foreach (var save in pending.Where(save => save.Write.IsCompletedSuccessfully))
+            {
+                snapshot = save.ApplyTo(snapshot);
+            }
+
+            _settingsWriter.Schedule(snapshot);
         }
 
-        if (!_settingsWriter.Flush(SettingsFlushTimeout))
+        var remaining = SettingsFlushTimeout - Stopwatch.GetElapsedTime(started);
+        if (remaining < TimeSpan.Zero)
+        {
+            remaining = TimeSpan.Zero;
+        }
+
+        if (!_settingsWriter.Flush(remaining))
         {
             Logger.LogWarning("The latest settings changes could not be written when the window closed");
         }
@@ -2782,7 +2829,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </remarks>
     private void ScheduleSettingsSave()
     {
-        if (_confirmedSavesRunning > 0)
+        if (_runningConfirmedSaves.Count > 0)
         {
             _saveDeferred = true;
             return;
@@ -2803,27 +2850,33 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     <see cref="ScheduleSettingsSave"/>): when the last confirmed save has ended, the live
     ///     settings - holding both - are scheduled to be written. A confirmed save that ends while
     ///     another one still runs schedules that write too, because the other one's candidate does not
-    ///     hold it.
+    ///     hold it. The save is tracked in <see cref="_runningConfirmedSaves"/> until it has ended, so
+    ///     the close can write its change with the changes made meanwhile (see <see cref="Dispose"/>).
     /// </remarks>
-    /// <param name="candidate">The settings to write: a snapshot nobody changes any more.</param>
+    /// <param name="applyTo">Applies the change to settings that are not the live ones and returns
+    ///     the result: applied to a snapshot of the live settings it builds the candidate to write, and
+    ///     at the close it is applied to the snapshot written then.</param>
     /// <param name="adopt">Applies the saved change to the live settings, the cards and the list.</param>
     /// <returns>A task that completes when the candidate was written and adopted.</returns>
     /// <exception cref="InvalidOperationException">Thrown (through the task) when the settings file
     ///     cannot be written; nothing was adopted.</exception>
-    private async Task SaveConfirmedAsync(AppSettings candidate, Action adopt)
+    private async Task SaveConfirmedAsync(Func<AppSettings, AppSettings> applyTo, Action adopt)
     {
-        _confirmedSavesRunning++;
+        var candidate = applyTo(_settings.CreateSnapshot());
+        var write = _settingsWriter.SaveNowAsync(candidate);
+        var running = new RunningConfirmedSave(write, applyTo);
+        _runningConfirmedSaves.Add(running);
         var adopted = false;
         try
         {
-            await _settingsWriter.SaveNowAsync(candidate);
+            await write;
             adopt();
             adopted = true;
         }
         finally
         {
-            _confirmedSavesRunning--;
-            if (_confirmedSavesRunning > 0)
+            _runningConfirmedSaves.Remove(running);
+            if (_runningConfirmedSaves.Count > 0)
             {
                 // Another confirmed save is still running, built without this one's change
                 _saveDeferred |= adopted;
@@ -2835,6 +2888,30 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
         }
     }
+
+    /// <summary>
+    ///     Waits a bounded time for a task, ignoring how it ended.
+    /// </summary>
+    /// <param name="task">The task.</param>
+    /// <param name="timeout">How long to wait at most.</param>
+    private static void WaitQuietly(Task task, TimeSpan timeout)
+    {
+        try
+        {
+            task.Wait(timeout);
+        }
+        catch (AggregateException)
+        {
+            // A failed write is left out by the caller; nothing to report here
+        }
+    }
+
+    /// <summary>
+    ///     A confirmed save that is running (see <see cref="SaveConfirmedAsync"/>).
+    /// </summary>
+    /// <param name="Write">The confirmed write of the background settings writer.</param>
+    /// <param name="ApplyTo">Applies the save's change to settings that are not the live ones.</param>
+    private sealed record RunningConfirmedSave(Task Write, Func<AppSettings, AppSettings> ApplyTo);
 
     /// <summary>
     ///     Applies a change to one repo's entry on behalf of its card and saves it in the background

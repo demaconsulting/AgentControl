@@ -147,14 +147,19 @@ sections:
         title: >-
           The GitClient class shall stop a git command that has not finished within its time limit -
           one minute for a command on the local repository, ten minutes for a pull - together with
-          every process it started, and report it as timed out with the limit it exceeded.
+          every process it started, and report it as timed out with the limit it exceeded; it shall
+          likewise stop waiting for, and report as timed out, a git command that exited while a
+          process it started still holds its output open past that limit.
         justification: |
           A git command on a network share, on a huge working tree or held by a stuck lock may never
           answer; without a limit it holds its caller, and the process keeps running unnoticed. A
-          pull talks to a remote and may wait for the user to sign in, so it gets a longer limit.
+          pull talks to a remote and may wait for the user to sign in, so it gets a longer limit. A
+          helper git started (a credential manager, an SSH client) can outlive git and keep its
+          output open; waiting for that output without a limit would hold the caller just the same.
         tests:
           - GitClient_IsWorkingTreeClean_GitHangsPastTimeout_StopsItAndThrowsTimedOut
           - GitClient_Pull_UsesPullTimeoutNotLocalTimeout
+          - GitClient_IsWorkingTreeClean_HelperHoldsOutputAfterGitExits_StopsWaitingAndThrowsTimedOut
 
       - id: AgentControl-GitClient-CancelStopsGit
         title: >-

@@ -114,11 +114,14 @@ sections:
       - id: AgentControl-MainWindowViewModel-AddReposCancel
         title: >-
           The MainWindowViewModel class shall stop an add, and every add queued after it, when it is
-          canceled before it saves, saving nothing and adding nothing.
+          canceled before it saves, saving nothing and adding nothing, and shall keep offering that
+          cancel in the global progress strip also while the cards are refreshed at the same time.
         justification: |
-          A canceled add must leave no trace in the list or the settings.
+          A canceled add must leave no trace in the list or the settings, and a refresh of the cards
+          that starts during an add (after a settings save) must not take the add's Cancel away.
         tests:
           - MainWindowViewModel_EnqueueAddRepos_Canceled_SavesNothingAndAddsNothing
+          - MainWindowViewModel_EnqueueAddRepos_SettingsRefreshStartsDuringAdd_StripKeepsAddCancel
 
       - id: AgentControl-MainWindowViewModel-AddReposQueued
         title: >-
@@ -907,12 +910,17 @@ sections:
       - id: AgentControl-MainWindowViewModel-SettingsFlushedOnClose
         title: >-
           The MainWindowViewModel class shall, when the window closes, write the settings changes that
-          are not written yet, the write running off the closing thread with a bounded wait.
+          are not written yet, the write running off the closing thread with a bounded wait; when a
+          confirmed save (an add) is still running at the close, it shall wait for it within the same
+          bounded wait and write the changes made meanwhile together with that save's change once it
+          was written.
         justification: |
           A change made just before closing must still be kept, and the close must neither hang on a
-          busy file nor make a blocking call on the UI thread.
+          busy file nor make a blocking call on the UI thread. Written over a running add without
+          its change, the close would take the add out of the file again.
         tests:
           - MainWindowViewModel_Dispose_OnGuardedThread_WritesPendingChangeWithoutBlockingCall
+          - MainWindowViewModel_Dispose_WhileAddSavingAfterAnotherChange_WritesAddAndChange
 
       - id: AgentControl-MainWindowViewModel-RemoveRepoRetiresCard
         title: >-

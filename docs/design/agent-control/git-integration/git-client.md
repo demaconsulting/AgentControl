@@ -140,10 +140,19 @@ token (`GetTrackedAgentFolders`, `UntrackAgentFolders` and `RestoreAgentFolderTr
   started - a credential manager, an SSH client - end too) and wait for the exit up to the limit; (5) when the limit
   passed, kill the tree, wait up to `Stop` for it to end, log a warning and throw `GitCommandTimeoutException` ("'git
   {subcommand}' did not finish within {n} seconds and was stopped."); (6) when the token was signaled, throw
-  `OperationCanceledException` (the output of a killed process means nothing); (7) otherwise read the output and
-  return the result.
+  `OperationCanceledException` (the output of a killed process means nothing); (7) otherwise read the output
+  (`ReadOutput`) and return the result. The output streams normally close when git exits, but a process git started
+  that inherited them can keep them open after git exited, so the wait for them is bounded: by what is left of the
+  limit, but at least `Stop`, so a git that exits at the very end of its limit still gets to hand over its output.
+  When they are still open after that, `ReadOutput` kills what git started (`TryKillProcessTreeAfterExit`, best
+  effort: on Windows the processes git started can still be found through the handle it holds; elsewhere they were
+  handed to another parent when git exited and may survive), waits up to `Stop` once more, abandons the reads (their
+  faults are observed, so they are never reported as unobserved), logs a warning and throws
+  `GitCommandTimeoutException` with the same message; a token signaled during that wait kills what git started too and
+  throws `OperationCanceledException`.
 - *Postconditions*: no git process this call started is left running when it throws for a timeout or a
-  cancellation, unless the kill itself failed (logged).
+  cancellation, unless the kill itself failed (logged), and a process git started that outlives git never holds the
+  caller past the limit (plus `Stop`): an abandoned read never blocks the caller.
 
 **IsRepositoryRoot** (static): Determines whether a folder is the top folder of a Git repository.
 
@@ -166,8 +175,9 @@ git subcommand exits non-zero (except `Pull`, whose non-zero exit is reported vi
 `GitCommandResult.Succeeded` rather than thrown, since a failed pull is an expected outcome).
 `IsRepositoryRoot` throws `ArgumentException` for a null/empty/whitespace `folderPath` and otherwise never throws: a
 missing or unreadable folder is reported as `false`.
-A command that outlives its limit throws `GitCommandTimeoutException` (an `InvalidOperationException`), and a
-canceled one `OperationCanceledException`; both stop the process tree first. The constructor throws
+A command that outlives its limit, or whose output is still held open past the limit by a process it started after it
+exited, throws `GitCommandTimeoutException` (an `InvalidOperationException`), and a canceled one
+`OperationCanceledException`; both stop the process tree first. The constructor throws
 `ArgumentOutOfRangeException` for a limit that is not positive. On a thread guarded by `BlockingCallGuard` every method
 except `IsRepositoryRoot` throws `BlockingCallOnGuardedThreadException` without starting git (or reading `.git/HEAD`);
 callers must not catch it as an ordinary failure.
