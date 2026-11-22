@@ -30,12 +30,19 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 /// </summary>
 /// <remarks>
 ///     Each test uses unique temporary repo and configuration directories. Runs in the
-///     <c>RealProcess</c> collection because every card's eager refresh spawns real git subprocesses.
+///     <c>RealProcess</c> collection because every card's repo state is read in the background (real git
+///     subprocesses) from the moment the view model is built; every view model a test builds is tracked, and
+///     its reads have finished (and it is disposed) before the folders are removed.
 /// </remarks>
 [Collection("RealProcess")]
 public sealed class RepoGroupingTests : IDisposable
 {
     private readonly List<string> _tempPaths = [];
+
+    /// <summary>
+    ///     The view models built by the running test, settled and disposed before the folders go.
+    /// </summary>
+    private readonly List<MainWindowViewModel> _viewModels = [];
 
     /// <summary>
     ///     Test that with no repo in a group the list is flat and header-free, exactly as before
@@ -160,7 +167,7 @@ public sealed class RepoGroupingTests : IDisposable
         Assert.Equal(["Work"], SettingsStore.Load(configDir).CollapsedGroups);
 
         // Act: a new session reads the remembered state
-        var reopened = new MainWindowViewModel(SettingsStore.Load(configDir), configDirectory: configDir);
+        var reopened = Track(new MainWindowViewModel(SettingsStore.Load(configDir), configDirectory: configDir));
 
         // Assert
         Assert.Equal(["[Work 2 collapsed]", "[Ungrouped 1]", "c"], Describe(reopened));
@@ -496,7 +503,7 @@ public sealed class RepoGroupingTests : IDisposable
         };
 
         // Act
-        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+        var viewModel = Track(new MainWindowViewModel(settings, configDirectory: CreateTempDirectory()));
 
         // Assert: repaired on the fly, no collapse state, nothing thrown
         Assert.Equal(
@@ -884,7 +891,25 @@ public sealed class RepoGroupingTests : IDisposable
                 })
             ]
         };
-        return new MainWindowViewModel(settings, configDirectory: configDir);
+        var viewModel = Track(new MainWindowViewModel(settings, configDirectory: configDir));
+
+        // The cards' repo state is read in the background at construction; these tests are about the
+        // list, so they start once it has settled (and no git still runs in a repo folder when the
+        // folders are removed). Waited for on a pool thread, so no synchronization context is needed.
+        Task.Run(viewModel.WhenRepoStateSettledAsync).GetAwaiter().GetResult();
+        return viewModel;
+    }
+
+    /// <summary>
+    ///     Remembers a view model the test built, so its background reads have finished and it is disposed
+    ///     before the test's folders are removed.
+    /// </summary>
+    /// <param name="viewModel">The view model.</param>
+    /// <returns>The same view model.</returns>
+    private MainWindowViewModel Track(MainWindowViewModel viewModel)
+    {
+        _viewModels.Add(viewModel);
+        return viewModel;
     }
 
     /// <summary>
@@ -917,6 +942,14 @@ public sealed class RepoGroupingTests : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
+        // No read may still hold a file in a repo folder when the folders are removed. Waited for on a
+        // pool thread, so no synchronization context is needed.
+        foreach (var viewModel in _viewModels)
+        {
+            Task.Run(viewModel.WhenRepoStateSettledAsync).GetAwaiter().GetResult();
+            viewModel.Dispose();
+        }
+
         foreach (var path in _tempPaths.Where(Directory.Exists))
         {
             Directory.Delete(path, recursive: true);

@@ -163,6 +163,7 @@ reviews:
       - "test/**/LauncherUI/PackageSourceStatusPresentationTests.cs"
       - "test/**/LauncherUI/DialogWindowTests.cs"
       - "test/**/LauncherUI/HeadlessTestApp.cs"
+      - "test/**/LauncherUI/HeadlessTestAppTests.cs"
       - "test/**/LauncherUI/MainWindowTests.cs"
       - "test/**/LauncherUI/RepoGroupWindowTests.cs"
       - "test/**/LauncherUI/RepoReorderWindowTests.cs"

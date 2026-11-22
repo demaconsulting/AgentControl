@@ -55,5 +55,6 @@ rather than silently producing duplicate, inconsistent cache entries.
 - **RepoCardViewModel** — `ReadCheapFacts` (on a worker thread of the shared refresh queue for a background cheap
   refresh, or on the calling thread for the synchronous one) consults `TryGetCached` after resolving the current `HEAD`
   hash via `GitClient.GetHeadCommitHash` and calls `Set` on a cache miss after invoking
-  `GitClient.HasCommittedAgentFiles`; `ApplyBranchFacts` (UI thread) stores the answer it applies, and
-  `RefreshBranchAndCommittedFiles` consults the cache the same way for a direct re-read.
+  `GitClient.HasCommittedAgentFiles`; `ApplyBranchFacts` (UI thread) stores the answer it applies. After the card
+  takes the agent folders out of git's index, `RefreshGitStateAfterUntrackAsync` calls `Invalidate` for the repo and
+  then re-reads git's answers through the queue (`gitFactsOnly`), which consults the cache the same way.

@@ -119,6 +119,13 @@ created here over `_backgroundWork` (two reads at a time) unless the constructor
 one, and handed to every card; `Dispose` shuts down a queue created here. Its `ProgressChanged` is handled by
 `OnRefreshQueueProgressChanged`.
 
+**_upgradeCheckSlots**: `SemaphoreSlim` of `MaxConcurrentUpgradeChecks` (four) — the one limit every background
+upgrade check shares (`CheckUpgradesAsync` for start-up, Settings, added repos and the re-check after Settings, and
+`RecheckUpgradesAsync`), so overlapping checks never read more than four package sources at once between them. It is
+never disposed: a check that is still unwinding when the window closes may release its slot.
+
+**PendingStartupRefresh**: `Task` (internal) — the cards' start-up reads queued by the constructor; never faults.
+
 **_refreshProgress**: `GlobalProgressOperation?` — the strip's operation for the queue's current wave of counted reads
 ("Refreshing repositories {completed} of {total}...", no cancel action); `null` while no wave runs.
 
@@ -267,22 +274,34 @@ that already has a user order is kept whatever the launch times are (`-OrderKept
   `RepoRefreshQueue? refreshQueue = null` and `GitClientTimeouts? gitTimeouts = null`. Must be called on the UI
   thread: the refresh queue it creates posts its progress to the synchronization context current then.
 - *Preconditions*: `settings` is not null; `upgradeRecheckInterval`, when given, is positive.
-- *Postconditions*: One `RepoCardViewModel` exists per `RecentRepo` in `settings.RecentRepos`;
-  each card's cheap refresh (`RefreshCheap`) has run; `DisplayedItems` and `DisplayedRepoCards`
-  reflect the initial sort/filter/grouping (`AgentControl-MainWindowViewModel-PopulateRecentRepos`).
+- *Postconditions*: One `RepoCardViewModel` exists per `RecentRepo` in `settings.RecentRepos`, built from the settings
+  alone - no disk access and no git; `DisplayedItems` and `DisplayedRepoCards`
+  reflect the initial sort/filter/grouping (`AgentControl-MainWindowViewModel-PopulateRecentRepos`); every card's
+  cheap-facts read is queued (`PendingStartupRefresh`) and the strip shows the wave.
   No package source has been read (`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`) and no timer runs yet.
 
-Only the cheap per-card checks run eagerly at construction — the working-tree dirty check is
-deferred/lazy, per architecture.md's repo-fact caching strategy, so startup stays fast even
-with many tracked repos. The constructor still runs the cheap checks synchronously, before the window exists (so no
-progress strip is shown at start-up); the working-tree checks of the cards the window then shows run in the
-background, through the shared refresh queue (`RepoCardViewModel.RefreshRepoStateAsync`).
+`StartStartupRefresh` queues each card's cheap facts (`RepoCardViewModel.RefreshRepoStateAsync(Background,
+cheapFacts: true, workingTree: false, reportsProgress: true)`) in display order - `DisplayedRepoCards` first, then the
+cards that are collapsed or filtered out - so the cards shown are read first and the strip shows "Refreshing
+repositories {completed} of {total}..." without Cancel until the wave ends
+(`AgentControl-MainWindowViewModel-StartupReadsQueued`). Each card shows that it is refreshing and its git-derived facts
+as not known yet until its read lands (`RepoCardViewModel.HasRepoState`). The working-tree dirty check is not part of
+start-up (deferred/lazy, per architecture.md's repo-fact caching strategy): the cards the window shows get it through
+the queue when they are first attached. Even the pin file is read in the background, because a repo on an offline
+network share can take tens of seconds to answer one file read; the pin the settings remember is shown meanwhile.
+
+**WhenRepoStateSettledAsync** (internal): Waits until no card's cheap-facts or working-tree read waits or runs,
+looping while new reads start (a card's working-tree check started when the window showed it); never faults. A test
+seam for code that must act on settled cards.
 
 **BeginUpgradeRefresh**: Starts checking every card's upgrade availability in the background.
 
 - *Returns*: A task that completes when the checks have finished (the window ignores it; tests
   await it).
-- *Postconditions*: Each card's `RefreshUpgradeStatusAsync` runs a few cards at a time, so a slow or unreachable source
+- *Postconditions*: Each card's `RefreshUpgradeStatusAsync` runs once the card's queued or running cheap-facts read was
+  applied (`RepoCardViewModel.WhenCheapFactsSettledAsync`, awaited before the card takes a slot: applying cheap facts
+  makes a check in flight irrelevant, so a check started earlier would be thrown away), at most four at a time across
+  every background check (`_upgradeCheckSlots`), so a slow or unreachable source
   holds up only the cards' own checks, never the window, and a check still running for earlier settings (including a
   periodic round) is cancelled. The window calls it once it is shown; `AddRepo` checks the new card's upgrade status the
   same way, and `ApplySettings` starts a new round against the new sources
@@ -297,7 +316,10 @@ background, through the shared refresh queue (`RepoCardViewModel.RefreshRepoStat
   of `IsBusy` and the synchronous start of `RefreshUpgradeStatusAsync` (which claims the card's newest check generation
   and sets `IsCheckingUpgrade`) run with no `await` between them, and the continuation after the slot wait resumes on
   the UI thread (the check is started there and its `await`s capture the UI synchronization context), the thread where
-  the card's commands set `IsBusy`; so no action can start between the test and the start of the check. A card whose
+  the card's commands set `IsBusy`; so no action can start between the test and the start of the check. The wait for
+  the card's state comes before the slot wait, never between the test and the start. An action started while the
+  check waits for the card's state makes the card busy (its own promote-and-await sets `IsBusy` first), so the check
+  skips it. A card whose
   background check is running is not busy and is checked: the newer check's result replaces the older one's, which
   `RecheckAfterSettingsClosed` relies on. A skipped card keeps its state until the action checks it (Refresh, Upgrade,
   Select Package and Pull do) or until the next periodic round.
@@ -319,14 +341,16 @@ background, through the shared refresh queue (`RepoCardViewModel.RefreshRepoStat
   interval and the expiry are tested without waiting; the cache and the timer share the one clock.
 - *Round* (`BeginPeriodicRecheck` / `RecheckUpgradesAsync`): does nothing when the view model is disposed, when the
   previous round has not finished (`_recheckCancellation` is non-null) or when the launch-time check (`PendingRefresh`)
-  has not finished, so a slow source never piles up work. Otherwise it takes the cards that have a pin, are not busy and
-  whose folder is not missing (a retired card is no longer in `RepoCards`, and a card that became busy while waiting its
+  has not finished, so a slow source never piles up work. Otherwise it takes the cards that `CanRecheckUpgrade` accepts:
+  their state was read (`HasRepoState`), they have a pin, are not busy and
+  their folder is not missing (a retired card is no longer in `RepoCards`, and a card that became busy while waiting its
   turn is skipped when its turn comes), **clears the cache** (the previous round's entries may still be inside their
   five minutes, and the round exists to see what the sources offer now) and checks them with
   `RefreshUpgradeStatusAsync(token)` - `allowPrompt` false, `relistSources` false, i.e. exactly the launch-time check:
   no sign-in dialog ever opens, and a failure - a server that needs a sign-in, an unreachable source - is shown in the
   card's own state (`IsUpgradeStatusUnknown`, `SourceProblem`) as at launch, never as a dialog. The cards are grouped by
-  pinned package name: groups run a few at a time, the cards of one group one after another, so the first card of a
+  pinned package name: groups run in the shared slots (`_upgradeCheckSlots`, each group waiting for its cards' pending
+  cheap-facts reads before it takes one), the cards of one group one after another, so the first card of a
   package reads each source and the others are answered from what it just fetched (each source is read once per package
   per round, not once per card). That also has to hold when a source cannot be read: `PackageVersionCache` never caches
   a failure, so the round creates a `SourceFailureMemo` and passes it through
@@ -368,7 +392,8 @@ failed upgrade check, once the Settings window has closed
   (`WithoutPrompt`) - or the network may come back, so without this the cards would keep showing "Sign-in needed" or a
   failed check until the next periodic round. A disposed view model starts nothing. After a save nothing is started,
   because `ApplySettings` always ends with `BeginUpgradeRefresh`, which checks every card: checking again would read
-  every source twice. Otherwise it takes the cards that `CanRecheckUpgrade` accepts (pinned, not busy, folder present)
+  every source twice. Otherwise it takes the cards that `CanRecheckUpgrade` accepts (state read, pinned, not busy,
+  folder present)
   and that have `HasSourceProblem` or `IsUpgradeStatusUnknown`, or `IsCheckingUpgrade` (a background check is reading
   a source for the card at this moment: that read began before the sign-in, and if it fails it would put "Sign-in
   needed" on the card when it finishes, so a newer check is started and the card's generation counter ignores the
@@ -497,8 +522,10 @@ would - and reports what became of each (`AgentControl-MainWindowViewModel-AddRe
   not stop the others; the whole batch is saved **once** and the list rebuilt once; a collapsed target group is opened
   in that same save when anything was added to or moved into it. When the save fails (`InvalidOperationException`)
   nothing at all changed and every folder that would have been added or moved gets the `SaveFailed` outcome with the
-  redacted reason (all-or-nothing); the other folders keep their outcome. The new cards' upgrade checks start in the
-  background; their working-tree checks run when their cards are first shown.
+  redacted reason (all-or-nothing); the other folders keep their outcome. Only the folders are checked here (the file
+  system, no git: `InspectFolder` with `readCheapFacts: false`), so no git runs on the calling thread; the new cards'
+  repo state is read through the shared queue (`Visible`), their upgrade checks follow it, and their working-tree
+  checks run when their cards are first shown. No part of the application calls the synchronous adds.
 
 **EnqueueAddReposAsync**: The add the window uses - folders from the picker or dropped from the file manager - run in
 the background after any add that is already running or queued, with progress in `GlobalProgress`

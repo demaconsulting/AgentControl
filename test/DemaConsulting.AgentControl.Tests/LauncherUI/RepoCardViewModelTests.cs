@@ -29,6 +29,7 @@ using DemaConsulting.AgentControl.Startup;
 using DemaConsulting.AgentControl.Tests.AgentPackageManagement;
 using DemaConsulting.AgentControl.Tests.AgentToolLauncher;
 using DemaConsulting.AgentControl.Tests.GitIntegration;
+using DemaConsulting.AgentControl.Utilities;
 using Material.Icons;
 
 namespace DemaConsulting.AgentControl.Tests.LauncherUI;
@@ -553,13 +554,16 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Act: the pull completes, then the card is retired, which cancels its operation
         var pulling = card.PullCommand.ExecuteAsync();
         await started.Task.WaitAsync(TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
+        var statusCheckWhenRetired = card.GitStatusRefreshTask;
         card.Retire();
         await pulling;
 
-        // Assert: the pull's outcome stands, the retired card did not read the working tree, and it is idle
+        // Assert: the pull's outcome stands; the working tree was read with the rest of the repo state,
+        // before the source, and the retired card read nothing more; it is idle
         Assert.Equal("Pull succeeded.", card.StatusMessage);
         Assert.False(card.LastActionFailed);
-        Assert.False(card.GitStatusChecked);
+        Assert.True(card.GitStatusChecked);
+        Assert.Same(statusCheckWhenRetired, card.GitStatusRefreshTask);
         Assert.False(card.IsBusy);
     }
 
@@ -2987,6 +2991,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         // Arrange: a source whose version listing never answers unless cancelled
         var provider = new DelegatePackageSourceProvider((_, token) => WaitForCancellationAsync(token));
         var card = CreateCardWithProvider(CreateTempDirectory(), null, null, provider);
+        card.RefreshCheap();
         string? error = null;
         card.ErrorOccurred += (_, message) => error = message;
         var selection = new PackageReference("Default", "contoso-agents", "1.1.0");
@@ -3164,6 +3169,7 @@ public sealed class RepoCardViewModelTests : IDisposable
         };
         var starter = new FakeAgentToolProcessStarter();
         var card = CreateCardWithProvider(CreateTempDirectory(), "contoso-agents", "1.0.0", provider, settings, starter);
+        card.RefreshCheap();
         var recorded = false;
         card.LaunchRecorded += (_, _) => recorded = true;
 
@@ -3931,6 +3937,460 @@ public sealed class RepoCardViewModelTests : IDisposable
         Assert.Equal("main", card.CurrentBranch);
     }
 
+    /// <summary>
+    ///     Test that a card whose repo state has not been read yet shows it as unknown - the "Refreshing"
+    ///     status, a dimmed "..." branch chip, no "No agent package" chip and no committed-files or dirty
+    ///     warning - and shows the facts once the state was read.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_Status_BeforeFirstRead_IsRefreshing()
+    {
+        // Arrange: a repo with no pin and committed agent files (stub git), shown on a new card
+        var stub = GitStub.Create(lsFilesOutput: ".github/agents/a.md");
+        _tempPaths.Add(stub.Path);
+        var settings = new AppSettings { GitExecutablePath = stub.Path };
+        var card = new RepoCardViewModel(new RecentRepo { Path = CreateTempDirectory() }, () => settings, new PackageVersionCache());
+
+        // Assert: nothing git-derived is shown as a fact
+        Assert.False(card.HasRepoState);
+        Assert.Equal(RepoCardStatus.Refreshing, card.Status);
+        Assert.Equal("Refreshing", card.StatusText);
+        Assert.StartsWith("Refreshing:", card.StatusTooltip, StringComparison.Ordinal);
+        Assert.True(card.ShowBranchChip);
+        Assert.True(card.IsBranchUnknown);
+        Assert.Equal("...", card.BranchChipText);
+        Assert.Equal("Reading the current Git branch...", card.BranchTooltip);
+        Assert.False(card.ShowNoPackageChip);
+        Assert.False(card.HasCommittedAgentFiles);
+        Assert.False(card.IsWorkingTreeDirty);
+        Assert.False(card.IsMissing);
+
+        // Act: the state is read
+        card.RefreshCheap();
+
+        // Assert: the facts are shown
+        Assert.True(card.HasRepoState);
+        Assert.Equal(RepoCardStatus.NoPackage, card.Status);
+        Assert.True(card.ShowBranchChip);
+        Assert.False(card.IsBranchUnknown);
+        Assert.Equal("main", card.BranchChipText);
+        Assert.Equal("Current git branch: main", card.BranchTooltip);
+        Assert.True(card.ShowNoPackageChip);
+        Assert.True(card.HasCommittedAgentFiles);
+    }
+
+    /// <summary>
+    ///     Test that Refresh reads the card's repo state through the shared queue at the priority of a
+    ///     user action - ahead of a background read that was waiting before it - and shows that the card
+    ///     is refreshing until the state was applied.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Refresh_EnqueuedAtUserActionAndShowsRefreshing()
+    {
+        // Arrange: three cards sharing a one-slot queue; the first card's background read holds the slot
+        // and the second card's background read waits behind it
+        var stub = GitStub.Create();
+        _tempPaths.Add(stub.Path);
+        var settings = new AppSettings { GitExecutablePath = stub.Path };
+        var runner = new SteppedBackgroundWorkRunner();
+        using var queue = new RepoRefreshQueue(runner, maxConcurrentReads: 1);
+        var running = CreateQueuedCard(CreateTempDirectory(), settings, queue);
+        var waiting = CreateQueuedCard(CreateTempDirectory(), settings, queue);
+        var refreshed = CreateQueuedCard(CreateTempDirectory(), settings, queue);
+        _ = running.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
+        var waitingRead = waiting.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
+        await runner.WaitForCallsAsync(1);
+
+        // Act: Refresh on the third card
+        var refresh = refreshed.RefreshAsync(TestContext.Current.CancellationToken);
+        var refreshedRead = refreshed.CheapRefreshTask;
+
+        // Assert: the card is busy and shows that it is refreshing
+        Assert.True(refreshed.IsBusy);
+        Assert.True(refreshed.IsRefreshing);
+        Assert.False(refreshed.HasRepoState);
+
+        // Act: the slot frees and the queue starts its next read, which is let run
+        runner.ReleaseNext();
+        await runner.WaitForCallsAsync(2);
+        runner.ReleaseNext();
+        var firstApplied = await Task.WhenAny(refreshedRead, waitingRead);
+
+        // Assert: the refreshed card's read went ahead of the background read that waited before it
+        Assert.Same(refreshedRead, firstApplied);
+        Assert.True(refreshed.HasRepoState);
+        Assert.False(waiting.HasRepoState);
+
+        // Act: let everything finish
+        runner.ReleaseAll();
+        await refresh;
+        await waitingRead;
+
+        // Assert: the whole state was read and the card no longer says it is refreshing
+        Assert.False(refreshed.IsRefreshing);
+        Assert.False(refreshed.IsBusy);
+        Assert.Equal("main", refreshed.CurrentBranch);
+        Assert.True(refreshed.GitStatusChecked);
+        Assert.True(waiting.HasRepoState);
+    }
+
+    /// <summary>
+    ///     Test that the part of Refresh that runs on the caller's (UI) thread makes no git call: with
+    ///     that thread guarded, the refresh records no blocking call and still reads the repo's state.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Refresh_SynchronousPart_MakesNoGitCallOnGuardedThread()
+    {
+        // Arrange: a card whose reads are held at a gate
+        var stub = GitStub.Create();
+        _tempPaths.Add(stub.Path);
+        var settings = new AppSettings { GitExecutablePath = stub.Path };
+        var gate = new GatedBackgroundWorkRunner();
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = CreateTempDirectory() }, () => settings, new PackageVersionCache(), backgroundWork: gate);
+        BlockingCallGuard.TakeViolations();
+
+        // Act: Refresh starts on a guarded thread
+        Task refresh;
+        using (BlockingCallGuard.GuardCurrentThread())
+        {
+            refresh = card.RefreshCommand.ExecuteAsync();
+        }
+
+        var violations = BlockingCallGuard.TakeViolations();
+        gate.Release();
+        await refresh;
+
+        // Assert: no blocking call on the guarded thread, and the state was read in the background
+        Assert.Empty(violations);
+        Assert.True(card.HasRepoState);
+        Assert.Equal("main", card.CurrentBranch);
+        Assert.True(card.GitStatusChecked);
+    }
+
+    /// <summary>
+    ///     Test that a Refresh while the card's state read already waits in the queue joins that read
+    ///     instead of queuing a second one.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Refresh_WhileAlreadyQueued_CoalescesIntoOneRead()
+    {
+        // Arrange: a one-slot queue held by another card's read, and the card's background read waiting
+        var stub = GitStub.Create();
+        _tempPaths.Add(stub.Path);
+        var settings = new AppSettings { GitExecutablePath = stub.Path };
+        var runner = new SteppedBackgroundWorkRunner();
+        using var queue = new RepoRefreshQueue(runner, maxConcurrentReads: 1);
+        var other = CreateQueuedCard(CreateTempDirectory(), settings, queue);
+        var card = CreateQueuedCard(CreateTempDirectory(), settings, queue);
+        _ = other.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
+        await runner.WaitForCallsAsync(1);
+        var background = card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
+
+        // Act: Refresh while that read waits, then let everything run
+        var refresh = card.RefreshAsync(TestContext.Current.CancellationToken);
+        runner.ReleaseAll();
+        await refresh;
+        await background;
+
+        // Assert: three reads in all - the other card's, one of the card's state (joined) and its working
+        // tree - and the card's state was applied
+        Assert.Equal(3, runner.Calls);
+        Assert.True(card.HasRepoState);
+        Assert.True(card.GitStatusChecked);
+        Assert.False(card.IsRefreshing);
+    }
+
+    /// <summary>
+    ///     Test that the refresh after a pull reads the repo through the shared queue at the priority of a
+    ///     user action: the pull finishes, with its refresh, while a background read that waited before it
+    ///     is still held.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Pull_AfterPull_RefreshEnqueuedAtUserAction()
+    {
+        // Arrange: a clean repo whose card knows its state, and a one-slot queue held by another card's
+        // read with a third card's background read waiting
+        var stub = GitStub.Create(statusOutput: "", pullOutput: "Already up to date.");
+        _tempPaths.Add(stub.Path);
+        var settings = new AppSettings { GitExecutablePath = stub.Path };
+        var runner = new SteppedBackgroundWorkRunner();
+        using var queue = new RepoRefreshQueue(runner, maxConcurrentReads: 1);
+        var pulled = CreateQueuedCard(CreateTempDirectory(), settings, queue);
+        pulled.RefreshCheap();
+        pulled.RefreshDirtyStatus();
+        Assert.True(pulled.CanPull);
+        var running = CreateQueuedCard(CreateTempDirectory(), settings, queue);
+        var waiting = CreateQueuedCard(CreateTempDirectory(), settings, queue);
+        _ = running.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
+        var waitingRead = waiting.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
+        await runner.WaitForCallsAsync(1);
+
+        // Act: pull; its refresh is queued after git pull (the card then says it is refreshing); the
+        // queue's next two reads are let run
+        var pull = pulled.PullCommand.ExecuteAsync();
+        await WaitUntilAsync(() => pulled.IsRefreshing);
+        runner.ReleaseNext();
+        await runner.WaitForCallsAsync(2);
+        runner.ReleaseNext();
+        await runner.WaitForCallsAsync(3);
+        runner.ReleaseNext();
+        var firstDone = await Task.WhenAny(pull, waitingRead);
+
+        // Assert: the pull and its refresh finished while the background read was still held
+        Assert.Same(pull, firstDone);
+        Assert.False(waiting.HasRepoState);
+        Assert.Equal("Pull succeeded.", pulled.StatusMessage);
+        Assert.True(pulled.GitStatusChecked);
+        Assert.False(pulled.IsRefreshing);
+
+        // Act
+        runner.ReleaseAll();
+        await waitingRead;
+
+        // Assert
+        Assert.True(waiting.HasRepoState);
+    }
+
+    /// <summary>
+    ///     Test that Launch on a card whose state read waits in the queue moves that read to the front,
+    ///     waits for it (busy, nothing launched meanwhile) and then acts on what it read: the repo's
+    ///     committed agent files are left alone and the tool is launched without trying to restore them.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Launch_WhileStateQueued_PromotesAndUsesFreshCommittedFilesState()
+    {
+        // Arrange: a pinned repo with committed agent files (stub git) whose startup read waits behind two
+        // other cards' reads in a one-slot queue
+        var stub = GitStub.Create(lsFilesOutput: ".github/agents/a.md");
+        _tempPaths.Add(stub.Path);
+        var settings = new AppSettings { GitExecutablePath = stub.Path };
+        var runner = new SteppedBackgroundWorkRunner();
+        using var queue = new RepoRefreshQueue(runner, maxConcurrentReads: 1);
+        var running = CreateQueuedCard(CreateTempDirectory(), settings, queue);
+        var waiting = CreateQueuedCard(CreateTempDirectory(), settings, queue);
+        var repo = CreateTempDirectory();
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var starter = new FakeAgentToolProcessStarter();
+        var launched = CreateQueuedCard(repo, settings, queue, starter);
+        var errors = new List<string>();
+        launched.ErrorOccurred += (_, message) => errors.Add(message);
+        _ = running.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
+        var waitingRead = waiting.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
+        _ = launched.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
+        await runner.WaitForCallsAsync(1);
+
+        // Act: launch while the card's read waits
+        var launch = launched.LaunchCommand.ExecuteAsync();
+
+        // Assert: busy, nothing launched yet
+        Assert.True(launched.IsBusy);
+        Assert.Empty(starter.Started);
+
+        // Act: the slot frees and the queue's next read is let run
+        runner.ReleaseNext();
+        await runner.WaitForCallsAsync(2);
+        runner.ReleaseNext();
+        var firstDone = await Task.WhenAny(launch, waitingRead);
+
+        // Assert: the launch went ahead of the read that waited before it, saw the committed agent files
+        // (so nothing was restored and no error raised) and launched the tool
+        Assert.Same(launch, firstDone);
+        Assert.False(waiting.HasRepoState);
+        Assert.True(launched.HasCommittedAgentFiles);
+        Assert.Single(starter.Started);
+        Assert.Empty(errors);
+        Assert.Equal("Launched.", launched.StatusMessage);
+
+        // Act
+        runner.ReleaseAll();
+        await waitingRead;
+    }
+
+    /// <summary>
+    ///     Test that Launch on a card whose state was never read reads it first and, when the read finds
+    ///     the repo's folder missing, launches nothing and says why.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Launch_FreshStateShowsMissing_DoesNotLaunchAndSays()
+    {
+        // Arrange: a card over a folder that does not exist, not read yet
+        var missing = Path.Combine(Path.GetTempPath(), "agentcontrol_missing_repo_" + Guid.NewGuid());
+        var starter = new FakeAgentToolProcessStarter();
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = missing }, () => new AppSettings(), new PackageVersionCache(),
+            processStarter: starter, shellDetector: FakeAgentToolProcessStarter.CreateShellDetector());
+        Assert.False(card.IsMissing);
+
+        // Act
+        await card.LaunchCommand.ExecuteAsync();
+
+        // Assert: the read found the folder missing; nothing was launched and the card says so
+        Assert.True(card.IsMissing);
+        Assert.Empty(starter.Started);
+        Assert.Equal("This repo's folder could not be found; nothing was done.", card.StatusMessage);
+        Assert.False(card.IsBusy);
+    }
+
+    /// <summary>
+    ///     Test that Pull on a card whose working-tree check waits in the queue waits for it and decides
+    ///     again on its answer: a tree that turned dirty is not pulled.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Pull_WhileStatusQueued_WaitsAndRechecksCanPull()
+    {
+        // Arrange: a card that saw a clean tree; the tree then turns dirty and a new check is held
+        var clean = GitStub.Create(statusOutput: "", pullOutput: "Updated.");
+        var dirty = GitStub.Create(statusOutput: " M file.txt", pullOutput: "Updated.");
+        _tempPaths.Add(clean.Path);
+        _tempPaths.Add(dirty.Path);
+        var settings = new AppSettings { GitExecutablePath = clean.Path };
+        var gate = new GatedBackgroundWorkRunner();
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = CreateTempDirectory() }, () => settings, new PackageVersionCache(), backgroundWork: gate);
+        card.RefreshCheap();
+        card.RefreshDirtyStatus();
+        Assert.True(card.CanPull);
+        settings.GitExecutablePath = dirty.Path;
+        _ = card.RefreshDirtyStatusInBackgroundAsync();
+        await gate.FirstCall;
+
+        // Act: pull while the check is held
+        var pull = card.PullCommand.ExecuteAsync();
+
+        // Assert: waiting, busy, not pulled
+        Assert.True(card.IsBusy);
+        Assert.False(pull.IsCompleted);
+
+        // Act
+        gate.Release();
+        await pull;
+
+        // Assert: the fresh answer (dirty) stopped the pull, and the card says why
+        Assert.False(card.CanPull);
+        Assert.True(card.IsWorkingTreeDirty);
+        Assert.Equal(
+            "Pull is not available: the working tree has uncommitted changes or its Git status could not be read.",
+            card.StatusMessage);
+        Assert.False(card.IsBusy);
+    }
+
+    /// <summary>
+    ///     Test that Upgrade on a card whose state read waits in the queue waits for it and, when that read
+    ///     finds another pin than the card showed, upgrades nothing and says so.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_Upgrade_WhileStateQueued_WaitsForState()
+    {
+        // Arrange: a card pinned to 1.0.0 that offers an upgrade to 2.0.0; the pin then changes to 2.0.0
+        // on disk and the card's re-read is held
+        var stub = GitStub.Create();
+        _tempPaths.Add(stub.Path);
+        var repo = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "2.0.0");
+        var settings = new AppSettings { PackageSourcePath = sourceDir, GitExecutablePath = stub.Path };
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var gate = new GatedBackgroundWorkRunner();
+        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), backgroundWork: gate);
+        card.RefreshCheap();
+        await card.RefreshUpgradeStatusAsync(TestContext.Current.CancellationToken);
+        Assert.True(card.IsUpgradeAvailable);
+        RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "2.0.0" });
+        _ = card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
+        await gate.FirstCall;
+
+        // Act: upgrade while the read is held
+        var upgrade = card.UpgradeCommand.ExecuteAsync();
+
+        // Assert: waiting, busy, nothing extracted
+        Assert.True(card.IsBusy);
+        Assert.False(upgrade.IsCompleted);
+
+        // Act
+        gate.Release();
+        await upgrade;
+
+        // Assert: the fresh pin was seen; nothing was upgraded and the card says why
+        Assert.Equal("2.0.0", card.PinnedPackageVersion);
+        Assert.False(Directory.Exists(Path.Combine(repo, ".github", "agents")));
+        Assert.Equal("The pinned package changed; check for an upgrade again.", card.StatusMessage);
+        Assert.False(card.IsBusy);
+    }
+
+    /// <summary>
+    ///     Test that applying a selected package to a card whose state was never read reads it first
+    ///     (busy, nothing applied meanwhile) and then applies the package.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_ApplySelectedPackage_WhileStateQueued_WaitsForState()
+    {
+        // Arrange: a card not read yet, whose reads are held, and a source with the package
+        var stub = GitStub.Create();
+        _tempPaths.Add(stub.Path);
+        var repo = CreateTempDirectory();
+        var sourceDir = CreateTempDirectory();
+        CreatePackageZip(sourceDir, "contoso-agents", "1.0.0");
+        var settings = new AppSettings { PackageSourcePath = sourceDir, GitExecutablePath = stub.Path };
+        var gate = new GatedBackgroundWorkRunner();
+        var card = new RepoCardViewModel(new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), backgroundWork: gate);
+
+        // Act: apply while the card's own read of its state is held
+        var apply = card.ApplySelectedPackageAsync(
+            new PackageReference(PackageSourceDefinition.DefaultAlias, "contoso-agents", "1.0.0"),
+            TestContext.Current.CancellationToken);
+        await gate.FirstCall;
+
+        // Assert: waiting, busy, nothing applied
+        Assert.True(card.IsBusy);
+        Assert.False(apply.IsCompleted);
+        Assert.False(File.Exists(Path.Combine(repo, ".agentcontrol.json")));
+
+        // Act
+        gate.Release();
+        await apply;
+
+        // Assert: the state was read and the package applied
+        Assert.True(card.HasRepoState);
+        Assert.Equal("1.0.0", RepoPinStore.Load(repo)?.Version);
+        Assert.Equal("1.0.0", card.PinnedPackageVersion);
+        Assert.False(card.IsBusy);
+    }
+
+    /// <summary>
+    ///     Waits, polling, until a condition that background work makes true holds (or about thirty seconds
+    ///     passed), then asserts it.
+    /// </summary>
+    /// <param name="condition">The condition to wait for.</param>
+    /// <returns>A task that completes when the condition holds.</returns>
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        for (var attempt = 0; attempt < 1200 && !condition(); attempt++)
+        {
+            await Task.Delay(25, TestContext.Current.CancellationToken);
+        }
+
+        Assert.True(condition());
+    }
+
+    /// <summary>
+    ///     Creates a card over a repo folder whose repo-state reads go through the given shared queue,
+    ///     launch-safe (a fake starter and shell).
+    /// </summary>
+    /// <param name="repo">The repo folder.</param>
+    /// <param name="settings">The settings the card reads.</param>
+    /// <param name="queue">The shared refresh queue.</param>
+    /// <param name="starter">The process starter, or <see langword="null"/> for a new fake.</param>
+    /// <returns>The card.</returns>
+    private static RepoCardViewModel CreateQueuedCard(
+        string repo, AppSettings settings, RepoRefreshQueue queue, FakeAgentToolProcessStarter? starter = null) =>
+        new(
+            new RecentRepo { Path = repo },
+            () => settings,
+            new PackageVersionCache(),
+            processStarter: starter ?? new FakeAgentToolProcessStarter(),
+            shellDetector: FakeAgentToolProcessStarter.CreateShellDetector(),
+            refreshQueue: queue);
     /// <summary>
     ///     Creates a unique temporary directory tracked for cleanup in <see cref="Dispose"/>.
     /// </summary>

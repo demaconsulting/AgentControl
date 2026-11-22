@@ -38,7 +38,7 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 ///     interfering with each other or with a real <c>%APPDATA%\AgentControl\</c>. Runs in the
 ///     <c>RealProcess</c> collection (disabled parallelization) because constructing a view
 ///     model with recent repos now spawns real git subprocesses via <see cref="GitStub"/> or the
-///     system git executable as part of each card's eager <c>RefreshCheap()</c>.
+///     system git executable as part of each card's background repo-state read.
 /// </remarks>
 [Collection("RealProcess")]
 public sealed class MainWindowViewModelTests : IDisposable
@@ -709,7 +709,7 @@ public sealed class MainWindowViewModelTests : IDisposable
 
     /// <summary>
     ///     Test that the constructor's initial refresh pass does not invoke the working-tree
-    ///     dirty-check subprocess for any card (only the cheap checks run eagerly at launch).
+    ///     dirty-check subprocess for any card (only the cheap facts are read at launch, in the background).
     /// </summary>
     [Fact]
     public void MainWindowViewModel_Constructor_DoesNotInvokeWorkingTreeDirtyCheckSubprocess()
@@ -915,6 +915,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var repoPath = Path.Combine(Path.GetTempPath(), "agentcontrol_reappear_" + Guid.NewGuid());
         var settings = new AppSettings { RecentRepos = [new RecentRepo { Path = repoPath }] };
         var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+        await viewModel.WhenRepoStateSettledAsync();
         Assert.True(viewModel.RepoCards[0].IsMissing);
 
         // Act: the repo path now exists with a clean working tree, and settings are reapplied
@@ -1028,8 +1029,9 @@ public sealed class MainWindowViewModelTests : IDisposable
             RecentRepos = [new RecentRepo { Path = repoPath }]
         };
 
-        // Act: construct
+        // Act: construct, and let the cards' repo state be read in the background
         var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
+        await viewModel.WhenRepoStateSettledAsync();
 
         // Assert: the pin is known but no upgrade has been determined yet
         Assert.Equal("1.0.0", viewModel.RepoCards[0].PinnedPackageVersion);
@@ -1637,6 +1639,11 @@ public sealed class MainWindowViewModelTests : IDisposable
             configDirectory: CreateTempDirectory(),
             backgroundWork: gate);
 
+        // The window's startup read of the card runs first; the next reads are held
+        gate.Release();
+        await viewModel.WhenRepoStateSettledAsync();
+        gate.Close();
+
         // Act: apply settings; the card refresh is held
         viewModel.ApplySettings(new AppSettings());
         await gate.FirstCall;
@@ -1703,11 +1710,17 @@ public sealed class MainWindowViewModelTests : IDisposable
             configDirectory: CreateTempDirectory(),
             backgroundWork: gate);
 
+        // The window's startup reads of the cards run first; the next reads are held
+        gate.Release();
+        await viewModel.WhenRepoStateSettledAsync();
+        gate.Close();
+        var callsBefore = gate.Calls;
+
         // Act: settings are saved (four card reads) and two folders are added (two folder checks)
         viewModel.ApplySettings(new AppSettings());
         var add = viewModel.EnqueueAddReposAsync([CreateRepoDirectory(), CreateRepoDirectory()], null);
         await gate.FirstCall;
-        var handedOverWhileHeld = gate.Calls;
+        var handedOverWhileHeld = gate.Calls - callsBefore;
 
         // Assert: two reads in all, not two per caller, and the strip counts the cards' refresh
         Assert.Equal(2, handedOverWhileHeld);
@@ -1720,11 +1733,161 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         // Assert: every read ran, never more than two at once, and the strip is gone
         Assert.Equal(6, viewModel.RepoCards.Count);
-        Assert.Equal(6, gate.Calls);
+        Assert.Equal(6, gate.Calls - callsBefore);
         Assert.Equal(2, gate.MaxInFlight);
         Assert.False(viewModel.GlobalProgress.IsActive);
     }
 
+    /// <summary>
+    ///     Test that the view model is built at once, without waiting for the disk or git: while the
+    ///     cards' startup reads are held, it is usable, only two reads run, the strip shows "Refreshing
+    ///     repositories 0 of 3..." without Cancel, and every card shows its git-derived facts as not known
+    ///     yet rather than as values.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_Constructor_GitHeld_ReturnsWithCardsRefreshingAndProgressShown()
+    {
+        // Arrange: three listed repos (stub git) and a runner that holds every read
+        var stub = GitStub.Create(lsFilesOutput: ".github/agents/a.md");
+        _tempPaths.Add(stub.Path);
+        var gate = new GatedBackgroundWorkRunner();
+        var repos = Enumerable.Range(0, 3).Select(_ => CreateTempDirectory()).ToList();
+        var settings = new AppSettings
+        {
+            GitExecutablePath = stub.Path,
+            RecentRepos = [.. repos.Select(path => new RecentRepo { Path = path })]
+        };
+
+        // Act: build the view model while the reads are held
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory(), backgroundWork: gate);
+        await gate.FirstCall;
+        viewModel.FilterText = Path.GetFileName(repos[1]);
+
+        // Assert: built and usable (the filter applied) with two reads running and the progress shown
+        Assert.Equal(3, viewModel.RepoCards.Count);
+        Assert.Equal(repos[1], Assert.Single(viewModel.DisplayedRepoCards).RepoPath);
+        Assert.Equal(RepoRefreshQueue.DefaultMaxConcurrentReads, gate.Calls);
+        Assert.False(viewModel.PendingStartupRefresh.IsCompleted);
+        Assert.True(viewModel.GlobalProgress.IsActive);
+        Assert.Equal("Refreshing repositories 0 of 3...", viewModel.GlobalProgress.Text);
+        Assert.False(viewModel.GlobalProgress.CanCancel);
+
+        // Assert: every card shows that it is refreshing, and nothing git-derived as a fact
+        Assert.All(viewModel.RepoCards, card =>
+        {
+            Assert.True(card.IsRefreshing);
+            Assert.False(card.HasRepoState);
+            Assert.Equal(RepoCardStatus.Refreshing, card.Status);
+            Assert.True(card.ShowBranchChip);
+            Assert.Equal("...", card.BranchChipText);
+            Assert.False(card.ShowNoPackageChip);
+            Assert.False(card.HasCommittedAgentFiles);
+            Assert.False(card.IsMissing);
+        });
+
+        // Act: let the reads run
+        gate.Release();
+        await viewModel.PendingStartupRefresh;
+
+        // Assert: the facts are shown and the strip is gone
+        Assert.All(viewModel.RepoCards, card =>
+        {
+            Assert.False(card.IsRefreshing);
+            Assert.True(card.HasRepoState);
+            Assert.Equal("main", card.BranchChipText);
+            Assert.True(card.HasCommittedAgentFiles);
+        });
+        Assert.False(viewModel.GlobalProgress.IsActive);
+    }
+
+    /// <summary>
+    ///     Test that closing the window (disposing the view model) while the cards' startup reads are
+    ///     held gives the reads up: those still waiting never start, those running are not applied when
+    ///     they end, no card shows a read state or keeps refreshing, and the strip is gone.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_Dispose_StartupReadsHeld_GivesThemUpAndAppliesNothing()
+    {
+        // Arrange: three listed repos (stub git), and a runner that holds every read; two reads run
+        var stub = GitStub.Create(lsFilesOutput: ".github/agents/a.md");
+        _tempPaths.Add(stub.Path);
+        var gate = new GatedBackgroundWorkRunner();
+        var settings = new AppSettings
+        {
+            GitExecutablePath = stub.Path,
+            RecentRepos = [.. Enumerable.Range(0, 3).Select(_ => new RecentRepo { Path = CreateTempDirectory() })]
+        };
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory(), backgroundWork: gate);
+        await gate.FirstCall;
+        Assert.True(viewModel.GlobalProgress.IsActive);
+
+        // Act: close the window, then let the held reads end
+        viewModel.Dispose();
+        gate.Release();
+        await viewModel.PendingStartupRefresh;
+
+        // Assert: only the two reads that were running ever started, and nothing was applied
+        Assert.Equal(RepoRefreshQueue.DefaultMaxConcurrentReads, gate.Calls);
+        Assert.All(viewModel.RepoCards, card =>
+        {
+            Assert.False(card.HasRepoState);
+            Assert.False(card.IsRefreshing);
+            Assert.False(card.HasCommittedAgentFiles);
+        });
+        Assert.False(viewModel.GlobalProgress.IsActive);
+    }
+
+    /// <summary>
+    ///     Test that the cards fill in one by one as their startup reads complete, top of the list first,
+    ///     with the strip counting them, and that a missing folder and a pin are shown once read.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_Constructor_ReadsComplete_CardsFillInAndProgressClears()
+    {
+        // Arrange: a pinned repo, a plain repo and a folder that does not exist; reads released one by one
+        var stub = GitStub.Create();
+        _tempPaths.Add(stub.Path);
+        var pinned = CreateTempDirectory();
+        RepoPinStore.Save(pinned, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
+        var missing = Path.Combine(Path.GetTempPath(), "agentcontrol_missing_repo_" + Guid.NewGuid());
+        var settings = new AppSettings
+        {
+            GitExecutablePath = stub.Path,
+            RecentRepos =
+            [
+                new RecentRepo { Path = pinned },
+                new RecentRepo { Path = CreateTempDirectory() },
+                new RecentRepo { Path = missing }
+            ]
+        };
+        var runner = new SteppedBackgroundWorkRunner();
+        var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory(), backgroundWork: runner);
+        var cards = viewModel.RepoCards.ToList();
+        await runner.WaitForCallsAsync(2);
+
+        // Act: the first card's read completes
+        runner.ReleaseNext();
+        await cards[0].CheapRefreshTask;
+
+        // Assert: the first card is filled in, the others still refreshing, and the strip counts it
+        Assert.True(cards[0].HasRepoState);
+        Assert.Equal("contoso-agents", cards[0].PinnedPackageName);
+        Assert.Equal("main", cards[0].CurrentBranch);
+        Assert.False(cards[0].IsRefreshing);
+        Assert.False(cards[1].HasRepoState);
+        Assert.False(cards[2].HasRepoState);
+        Assert.Equal("Refreshing repositories 1 of 3...", viewModel.GlobalProgress.Text);
+
+        // Act: the rest complete
+        runner.ReleaseAll();
+        await viewModel.PendingStartupRefresh;
+
+        // Assert: every card is filled in (the missing folder shown as missing) and the strip is gone
+        Assert.All(cards, card => Assert.True(card.HasRepoState));
+        Assert.True(cards[2].IsMissing);
+        Assert.Equal(RepoCardStatus.Problem, cards[2].Status);
+        Assert.False(viewModel.GlobalProgress.IsActive);
+    }
     /// <summary>
     ///     An <see cref="IProgress{T}"/> that records every report at once (thread-safe), unlike
     ///     <see cref="Progress{T}"/>, which posts.

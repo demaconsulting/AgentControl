@@ -47,7 +47,7 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 /// </summary>
 /// <remarks>
 ///     Runs in the <c>RealProcess</c> collection because showing cards spawns real git subprocesses as
-///     part of each card's eager refresh.
+///     part of each card's background repo-state read.
 /// </remarks>
 [Collection("RealProcess")]
 public sealed class UsabilityWindowTests : IDisposable
@@ -1276,6 +1276,11 @@ public sealed class UsabilityWindowTests : IDisposable
         var window = new MainWindow { DataContext = viewModel, Width = width, Height = 1600 };
         window.Show();
         Dispatcher.UIThread.RunJobs();
+
+        // The cards' repo state is read in the background and the window's upgrade check follows it; the
+        // tests act on settled cards, and no check is left running on the UI thread when a test ends
+        HeadlessTestApp.RunJobsUntilRepoStateSettled(viewModel);
+        HeadlessTestApp.RunJobsUntil(() => viewModel.PendingRefresh.IsCompleted, "The window's upgrade check did not finish.");
         return (window, viewModel);
     }
 

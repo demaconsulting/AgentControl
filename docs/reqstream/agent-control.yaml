@@ -150,7 +150,9 @@ sections:
           meanwhile after the running one, and, when the added repos cannot be saved, let the user
           retry the save or discard the add, which leaves the list as it was saved; it shall read
           the repos a few at a time, and stop a git command that does not answer and say so on the
-          repo's card.
+          repo's card; a card whose state is not read yet shall be shown as refreshing rather than
+          with unknown facts, and an action or a Refresh on a card shall read the card's state ahead
+          of the other repos and act on it, without the window waiting.
         tags: [system]
         justification: |
           Adding many repos at once (a drop of a whole folder of clones) or refreshing a long list
@@ -170,6 +172,9 @@ sections:
           - AgentControl-LauncherUI-GitStatusInBackground
           - AgentControl-LauncherUI-BoundedRepoReads
           - AgentControl-LauncherUI-GitTimeoutShown
+          - AgentControl-LauncherUI-RefreshingCardState
+          - AgentControl-LauncherUI-ActionWaitsForCardState
+          - AgentControl-LauncherUI-RefreshThroughQueue
           - AgentControl-GitIntegration-QueriesFromAnyThread
           - AgentControl-GitIntegration-LocalGitTimeout
         tests:
@@ -1602,7 +1607,8 @@ sections:
       - id: AgentControl-System-Startup
         title: >-
           The tool shall load persisted settings and display the recent-repos window when
-          launched.
+          launched, showing the repo cards at once and filling in each repo's branch and status in
+          the background, with the progress shown under the app bar.
         tags: [system]
         justification: |
           The application must present the developer's existing recent-repos list and
@@ -1611,6 +1617,7 @@ sections:
         children:
           - AgentControl-Program-Bootstrap
           - AgentControl-Program-ErrorHandling
+          - AgentControl-LauncherUI-StartupCardsAtOnce
         tests:
           - windows@MainWindow_Launch_WindowVisibleWithExpectedAutomationId
 

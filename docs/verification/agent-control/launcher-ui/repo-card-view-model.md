@@ -143,8 +143,48 @@ its check is held applies nothing - still not checked and cannot pull
 user-action priority with the reads held at the gate; the card says it is refreshing and has applied nothing (no
 branch, not checked); once released both answers are applied, the card no longer says it is refreshing, and the change
 was announced exactly twice - on, then off
-(`RepoCardViewModel_RefreshRepoStateAsync_WhileQueued_ShowsRefreshingAndClearsAfter`). This covers
-`AgentControl-RepoCardViewModel-RefreshingState`.
+(`RepoCardViewModel_RefreshRepoStateAsync_WhileQueued_ShowsRefreshingAndClearsAfter`). A new card over a repo with no
+pin and committed agent files (stub git), not read yet, reports `Refreshing` (text "Refreshing", a tooltip starting
+"Refreshing:"), a dimmed branch chip reading `...` with the tooltip "Reading the current Git branch...", no "No agent
+package" chip, no committed-files warning, not dirty and not missing; after its state is read it reports `NoPackage`,
+the branch `main` and its tooltip, the "No agent package" chip and the committed-files warning
+(`RepoCardViewModel_Status_BeforeFirstRead_IsRefreshing`). These cover `AgentControl-RepoCardViewModel-RefreshingState`.
+
+**RepoCardViewModel_PromoteAndAwait_ActionsActOnFreshState**: Three cards share a one-slot queue (released one read
+at a time); the launched card's start-up read waits behind two others; Launch makes it busy with nothing launched, and
+once the running read is released the next one the queue starts is the launched card's: the launch completes before
+the read that waited earlier, sees the committed agent files (no restore, no error) and launches
+(`RepoCardViewModel_Launch_WhileStateQueued_PromotesAndUsesFreshCommittedFilesState`). A card over a missing folder,
+never read, reads its state on Launch and launches nothing, saying the folder could not be found
+(`RepoCardViewModel_Launch_FreshStateShowsMissing_DoesNotLaunchAndSays`). A card that saw a clean tree has a new
+working-tree check held when the tree turned dirty; Pull waits busy, and once released the dirty answer stops it with
+"Pull is not available: ..." (`RepoCardViewModel_Pull_WhileStatusQueued_WaitsAndRechecksCanPull`). A card offering an
+upgrade from 1.0.0 has a re-read held after the pin changed to 2.0.0; Upgrade waits busy, and once released nothing is
+extracted and the card says the pinned package changed
+(`RepoCardViewModel_Upgrade_WhileStateQueued_WaitsForState`). Applying a selected package to a card never read waits
+busy for the card's own read with nothing applied, then applies it
+(`RepoCardViewModel_ApplySelectedPackage_WhileStateQueued_WaitsForState`). These cover
+`AgentControl-RepoCardViewModel-PromoteAndAwait`.
+
+**RepoCardViewModel_RefreshQueuedAtUserAction_AheadJoinedAndOffTheCallersThread**: With a one-slot queue held by one
+card's read and another card's background read waiting, Refresh on a third card makes it busy and refreshing, and the
+next read the queue starts is the refreshed card's (it completes while the earlier background read is still held);
+once all run the card has its branch and working tree and is no longer refreshing
+(`RepoCardViewModel_Refresh_EnqueuedAtUserActionAndShowsRefreshing`). Refresh started on a thread guarded by
+`BlockingCallGuard` records no blocking call, and the state is read in the background
+(`RepoCardViewModel_Refresh_SynchronousPart_MakesNoGitCallOnGuardedThread`). A Refresh while the card's background read
+waits joins it: three reads ran in all (the other card's, the card's state once, its working tree)
+(`RepoCardViewModel_Refresh_WhileAlreadyQueued_CoalescesIntoOneRead`). These cover
+`AgentControl-RepoCardViewModel-RefreshQueuedAtUserAction`.
+
+**RepoCardViewModel_PostPullRefreshQueued_AheadOfBackgroundReads**: With a one-slot queue held by one card's read and
+another card's background read waiting, a clean card pulls; releasing the queue's next reads one at a time, the pull
+and its refresh finish while the earlier background read is still held ("Pull succeeded.", working tree checked, no
+longer refreshing) (`RepoCardViewModel_Pull_AfterPull_RefreshEnqueuedAtUserAction`). After a package apply took the
+tracked agent folders out of git's index, the card's re-read of git is held in the queue while the card is still busy
+and refreshing, with the committed-files warning still shown; once released the warning is gone and the working tree
+is checked (`RepoCardViewModel_ApplyPackage_UntrackedFolders_RefreshesThroughQueue`). These cover
+`AgentControl-RepoCardViewModel-PostPullRefreshQueued`.
 
 **RepoCardViewModel_GitTimeoutShown_MessageUntilGitAnswers**: A card with a one-second git limit refreshes a repo whose
 stub git hangs on `rev-parse HEAD`; its status message says that git did not answer within 1 seconds and was stopped

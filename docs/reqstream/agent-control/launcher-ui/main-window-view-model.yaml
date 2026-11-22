@@ -439,20 +439,27 @@ sections:
         title: >-
           The MainWindowViewModel class shall not read any package source while it is being
           constructed, shall check every card's upgrade availability in the background when
-          asked, when a repo is added and after settings are applied - a few cards at a time,
-          with a source that cannot be read hiding nothing the readable sources offer, and
-          skipping a card that is busy with an action of its own when its turn comes.
+          asked, when a repo is added and after settings are applied - each card once its queued
+          or running repo-state read was applied, at most four source reads at a time across all
+          of these checks, with a source that cannot be read hiding nothing the readable sources
+          offer, and skipping a card that is busy with an action of its own when its turn comes.
         justification: |
           Starting the window must not wait for package sources, which may be slow network
           locations; one offline source must not hide the upgrade state of repos served by
           other sources. A background check running beside an action the user started on the
           card would break the card's one-action-at-a-time rule and could replace the action's
-          result with its own.
+          result with its own. A card's repo state is read in the background, and applying it
+          makes a check started against the older state irrelevant, so a check started before the
+          read landed would be lost. Checks that overlap (startup, an add, Settings, the periodic
+          round) must not multiply the number of sources read at once.
         tests:
           - MainWindowViewModel_Constructor_DoesNotReadSourcesUntilUpgradeRefreshBegins
           - MainWindowViewModel_BeginUpgradeRefresh_OneSourceUnreachable_ReadableSourceStillOffersUpgrades
           - MainWindowViewModel_AddRepo_PinnedRepo_UpgradeCheckRunsInBackground
           - MainWindowViewModel_LaunchCheck_WaitingCardBecomesBusy_IsNotChecked
+          - MainWindowViewModel_Startup_UpgradeCheckWaitsForCardState
+          - MainWindowViewModel_Startup_BusyCardSkippedByUpgradeCheck
+          - MainWindowViewModel_UpgradeChecks_OverlappingChecks_ShareOneLimit
 
       - id: AgentControl-MainWindowViewModel-ConnectionTestProvider
         title: >-
@@ -986,3 +993,20 @@ sections:
         tests:
           - MainWindowViewModel_AddReposAsync_ManyFolders_AtMostTwoInspectedAtOnce
           - MainWindowViewModel_ApplySettings_RefreshUsesSharedQueueLimit
+
+      - id: AgentControl-MainWindowViewModel-StartupReadsQueued
+        title: >-
+          The MainWindowViewModel class shall build its repo cards from the settings without reading
+          the disk or running git, queue each card's repo-state read through the shared refresh queue
+          in display order (the cards shown first), and report the progress of those reads as
+          "Refreshing repositories {n} of {total}..." without Cancel until they are done, and give up
+          the reads that have not been applied when the window closes.
+        justification: |
+          Reading every repo (a pin file and three git processes each) before the window could show
+          kept the window from appearing for a long list or a slow or offline drive. The window must
+          appear at once and fill the cards in, showing that it is still working. Once the window is
+          closed nothing is shown any more, so its reads must neither start nor be applied.
+        tests:
+          - MainWindowViewModel_Constructor_GitHeld_ReturnsWithCardsRefreshingAndProgressShown
+          - MainWindowViewModel_Constructor_ReadsComplete_CardsFillInAndProgressClears
+          - MainWindowViewModel_Dispose_StartupReadsHeld_GivesThemUpAndAppliesNothing

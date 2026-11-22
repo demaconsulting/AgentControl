@@ -296,9 +296,19 @@ internal sealed record RepoDropTarget(RepoGroupKind Kind, string Name, RepoCardV
 internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
     /// <summary>
-    ///     The most upgrade checks that read package sources at the same time.
+    ///     The most upgrade checks that read package sources at the same time, across every check that
+    ///     runs (startup, added repos, after Settings, the periodic round); see
+    ///     <see cref="_upgradeCheckSlots"/>.
     /// </summary>
     private const int MaxConcurrentUpgradeChecks = 4;
+
+    /// <summary>
+    ///     The one limit every background upgrade check shares, so overlapping checks (the startup
+    ///     check, an added repo's, the one after Settings closed and a periodic round) never read more
+    ///     than <see cref="MaxConcurrentUpgradeChecks"/> package sources at once between them. Never
+    ///     disposed: a check that is still unwinding when the window closes may release its slot.
+    /// </summary>
+    private readonly SemaphoreSlim _upgradeCheckSlots = new(MaxConcurrentUpgradeChecks);
 
     /// <summary>
     ///     Saves settings to disk; see the constructor.
@@ -570,14 +580,69 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RepoCards.Add(card);
         }
 
-        // Per architecture.md's repo-fact caching strategy, only the cheap checks run eagerly at
-        // app launch - the working-tree dirty check is deferred/lazy (see RefreshDirtyStatus).
-        foreach (var card in RepoCards)
-        {
-            card.RefreshCheap();
-        }
-
         UpdateDisplayedRepoCards();
+
+        // Nothing is read from the disk or git here: the cards are shown at once from the settings
+        // and read in the background through the shared queue (see StartStartupRefresh)
+        PendingStartupRefresh = StartStartupRefresh();
+    }
+
+    /// <summary>
+    ///     Gets the task of the cards' startup read (see <see cref="StartStartupRefresh"/>), so a caller
+    ///     (a test) can wait for it; never faults.
+    /// </summary>
+    internal Task PendingStartupRefresh { get; }
+
+    /// <summary>
+    ///     Queues the startup read of every card's repo state - the folder, the pin file, the branch and
+    ///     the committed agent folders - in the shared refresh queue at background priority, in display
+    ///     order, counted in the progress wave.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///     The window is shown at once, from the settings alone: no disk access and no git on the UI
+    ///     thread before or after it appears. Each card shows that its state is being read
+    ///     (<see cref="RepoCardViewModel.HasRepoState"/>, <see cref="RepoCardViewModel.IsRefreshing"/>)
+    ///     until its read lands, and the global strip shows "Refreshing repositories {n} of
+    ///     {total}..." meanwhile (see <see cref="OnRefreshQueueProgressChanged"/>). Even the pin file is
+    ///     read in the background: a repo on an offline network share can take tens of seconds to
+    ///     answer a single file read. The pinned package the settings remember is shown until then.
+    ///     </para>
+    ///     <para>
+    ///     The cards shown come first (top of the list first), then the collapsed and filtered-out
+    ///     ones; a card the window realizes moves its read ahead of the background ones (see
+    ///     <c>MainWindow.RepoCard_AttachedToVisualTree</c>), and a user action on a card moves it to
+    ///     the front (see <see cref="RepoCardViewModel.EnsureCurrentRepoStateAsync"/>). The working-tree
+    ///     check is not part of startup; it is made for the cards the window shows.
+    ///     </para>
+    /// </remarks>
+    /// <returns>A task that completes when every card's startup read was applied or dropped.</returns>
+    private Task StartStartupRefresh()
+    {
+        var reads = DisplayedRepoCards.Concat(RepoCards).Distinct()
+            .Select(card => card.RefreshRepoStateAsync(
+                RepoRefreshPriority.Background, cheapFacts: true, workingTree: false, reportsProgress: true, CancellationToken.None))
+            .ToList();
+        return Task.WhenAll(reads);
+    }
+
+    /// <summary>
+    ///     Waits until no card's repo-state read waits in the shared queue or runs, including reads that
+    ///     start while it waits (for example a card's working-tree check started when the window showed
+    ///     it); a test seam for code that must see the cards' settled state.
+    /// </summary>
+    /// <returns>A task that completes when every card's state has settled; never faults.</returns>
+    internal async Task WhenRepoStateSettledAsync()
+    {
+        while (true)
+        {
+            var cards = RepoCards.ToList();
+            await Task.WhenAll(cards.Select(card => card.WhenRepoStateSettledAsync()));
+            if (RepoCards.All(card => card.CheapRefreshTask.IsCompleted && card.GitStatusRefreshTask.IsCompleted))
+            {
+                return;
+            }
+        }
     }
 
     /// <summary>
@@ -723,8 +788,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <remarks>
     ///     The synchronous single add, kept for callers that add one known folder; the window adds
     ///     through <see cref="EnqueueAddReposAsync"/>, which reads the folder off the UI thread. Both
-    ///     use the same checks and the same all-or-nothing commit. The working-tree check of the new
-    ///     card is not made here: it runs in the background when the card is first shown.
+    ///     use the same checks and the same all-or-nothing commit. Only the folder is checked here
+    ///     (the file system, no git): the new card's repo state is read in the background through the
+    ///     shared queue, as at startup, and its working-tree check runs when the card is first shown.
     /// </remarks>
     /// <param name="repoPath">Absolute path to the repository root to add.</param>
     /// <returns>
@@ -786,8 +852,10 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     when anything was added to or moved into it. Everything the batch changes is saved
     ///     <b>once</b> and the list is rebuilt once; when that save fails nothing at all changed and
     ///     every folder that would have been added or moved is reported as
-    ///     <see cref="AddRepoResult.SaveFailed"/> with the reason. The upgrade checks of the new repos
-    ///     start in the background; their working-tree checks run when their cards are first shown.
+    ///     <see cref="AddRepoResult.SaveFailed"/> with the reason. Only the folders are checked here (the
+    ///     file system, no git): the new cards' repo state is read in the background through the shared
+    ///     queue, their upgrade checks follow it, and their working-tree checks run when their cards are
+    ///     first shown.
     /// </remarks>
     /// <param name="repoPaths">The folders' absolute paths, in the order to add them.</param>
     /// <param name="groupName">The group to put the repos in, or <see langword="null"/> for none;
@@ -807,7 +875,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // The same steps as the background add, inline: plan, read every folder, commit once
         var plan = PlanAddBatch(repoPaths);
         var facts = plan.Folders
-            .Select(folder => InspectFolder(folder.Path, folder.Listed, plan.GitExecutablePath, _gitTimeouts, CancellationToken.None))
+            .Select(folder => InspectFolder(folder.Path, folder.Listed, plan.GitExecutablePath, _gitTimeouts, CancellationToken.None, readCheapFacts: false))
             .ToList();
         var commit = PrepareAddCommit(facts, target);
         try
@@ -1146,7 +1214,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var plan = PlanAddBatch([repoPath]);
         var folder = plan.Folders[0];
         var commit = PrepareAddCommit(
-            [InspectFolder(folder.Path, folder.Listed, plan.GitExecutablePath, _gitTimeouts, CancellationToken.None)], groupName);
+            [InspectFolder(folder.Path, folder.Listed, plan.GitExecutablePath, _gitTimeouts, CancellationToken.None, readCheapFacts: false)], groupName);
         var result = commit.Outcomes[0].Result;
         if (result != AddRepoResult.MovedExisting)
         {
@@ -1209,6 +1277,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="gitTimeouts">The time limits of the git commands, or <see langword="null"/> for
     ///     <see cref="GitClientTimeouts.Default"/>.</param>
     /// <param name="cancellationToken">Stops a running git when signaled (the window closed).</param>
+    /// <param name="readCheapFacts">Whether the new card's cheap facts are read here (with git);
+    ///     <see langword="false"/> checks the folder only and leaves the facts to the card's own read
+    ///     through the shared queue, so a caller on the UI thread runs no git.</param>
     /// <returns>The facts.</returns>
     /// <exception cref="OperationCanceledException">Thrown when
     ///     <paramref name="cancellationToken"/> was signaled; git was stopped.</exception>
@@ -1217,7 +1288,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         bool listed,
         string gitExecutablePath,
         GitClientTimeouts? gitTimeouts = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool readCheapFacts = true)
     {
         var normalized = NormalizeRepoPath(path);
         if (!Directory.Exists(path))
@@ -1231,7 +1303,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return new RepoFolderFacts(path, normalized, RepoFolderKind.NotAGitRepositoryRoot, listed, null);
         }
 
-        var cheap = listed ? null : RepoCardViewModel.ReadCheapFacts(
+        var cheap = listed || !readCheapFacts ? null : RepoCardViewModel.ReadCheapFacts(
             normalized, new GitClient(gitExecutablePath, timeouts: gitTimeouts), cache: null, cancellationToken);
         return new RepoFolderFacts(path, normalized, RepoFolderKind.GitRoot, listed, cheap);
     }
@@ -1356,7 +1428,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
             else
             {
-                _ = card.RefreshCheapInBackgroundAsync(CancellationToken.None);
+                _ = card.RefreshRepoStateAsync(
+                    RepoRefreshPriority.Visible, cheapFacts: true, workingTree: false, cancellationToken: CancellationToken.None);
             }
 
             AttachCardEvents(card);
@@ -2261,12 +2334,15 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // a few at a time. A source that cannot be read is not cached (a later round, and the
             // user's own actions, try it again), so the round remembers its failures: the cards after
             // the first get the same failure without reading that source again.
-            using var throttle = new SemaphoreSlim(MaxConcurrentUpgradeChecks);
             var groups = cards
                 .GroupBy(card => card.PinnedPackageName, StringComparer.OrdinalIgnoreCase)
                 .Select(async group =>
                 {
-                    await throttle.WaitAsync(token);
+                    // A card whose repo state is being read again must have it applied before its
+                    // check starts (applying it drops a check in flight); waited for before taking a
+                    // slot, so a slow read never holds one
+                    await Task.WhenAll(group.Select(card => card.WhenCheapFactsSettledAsync()));
+                    await _upgradeCheckSlots.WaitAsync(token);
                     try
                     {
                         foreach (var card in group)
@@ -2280,7 +2356,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     }
                     finally
                     {
-                        throttle.Release();
+                        _upgradeCheckSlots.Release();
                     }
                 })
                 .ToList();
@@ -2304,12 +2380,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     ///     Determines whether a periodic round checks a card: one that is busy with an action of its
-    ///     own, whose folder is missing, or that pins no package has nothing to re-check.
+    ///     own, whose repo state has not been read yet (its startup check follows the read), whose
+    ///     folder is missing, or that pins no package has nothing to re-check.
     /// </summary>
     /// <param name="card">The card.</param>
     /// <returns><see langword="true"/> when the card's upgrade availability is re-checked.</returns>
     private static bool CanRecheckUpgrade(RepoCardViewModel card) =>
-        !card.IsBusy && !card.IsMissing && card.PinnedPackageName is not null;
+        !card.IsBusy && card.HasRepoState && !card.IsMissing && card.PinnedPackageName is not null;
 
     /// <summary>
     ///     Stops the periodic upgrade re-check (see <see cref="StartPeriodicUpgradeRecheck"/>) and
@@ -2375,6 +2452,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     check's result replaces the older one's.
     ///     </para>
     ///     <para>
+    ///     A card's check waits until the card's repo-state read that is queued or running (at
+    ///     startup, every card's) was applied, because applying it drops an upgrade check in flight;
+    ///     the wait happens before the card takes one of the slots, which every background check
+    ///     shares (<see cref="_upgradeCheckSlots"/>), so overlapping checks never read more than
+    ///     <see cref="MaxConcurrentUpgradeChecks"/> sources at once between them.
+    ///     </para>
+    ///     <para>
     ///     Counted in <see cref="_launchChecksInFlight"/> from the call until it has unwound, so a
     ///     check that was superseded (and canceled) but is still inside a provider call that ignores
     ///     cancellation keeps holding off the periodic round, even though
@@ -2394,10 +2478,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var failures = RegisterFailureMemo();
         try
         {
-            using var throttle = new SemaphoreSlim(MaxConcurrentUpgradeChecks);
             var checks = cards.Select(async card =>
             {
-                await throttle.WaitAsync(cancellationToken);
+                // The card's repo state is read first (at startup it is still queued): applying it
+                // drops any upgrade check in flight, so the check starts only once the read landed.
+                // Waited for before taking a slot, so a slow read never holds one.
+                await card.WhenCheapFactsSettledAsync();
+                await _upgradeCheckSlots.WaitAsync(cancellationToken);
                 try
                 {
                     // Decided when the card's turn comes, not when it was queued: the user may have
@@ -2413,7 +2500,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 }
                 finally
                 {
-                    throttle.Release();
+                    _upgradeCheckSlots.Release();
                 }
             });
 

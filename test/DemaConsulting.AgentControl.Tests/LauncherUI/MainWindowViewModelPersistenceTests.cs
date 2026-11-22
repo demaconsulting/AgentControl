@@ -33,7 +33,7 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 /// <remarks>
 ///     A failing save is produced by making <c>settings.json</c> a directory, which no write can
 ///     replace; deleting that directory makes saving work again. Runs in the <c>RealProcess</c>
-///     collection because every card's eager refresh spawns real git subprocesses.
+///     collection because every card's background repo-state read spawns real git subprocesses.
 /// </remarks>
 [Collection("RealProcess")]
 public sealed class MainWindowViewModelPersistenceTests : IDisposable
@@ -360,6 +360,7 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
         // Arrange: a collapsed "Work" group, a listed repo outside it, and a new folder; the file is
         // saved once so its content can be compared afterwards
         var fixture = CreateFixture(("alpha", "Work"), ("beta", null), ("omega", null));
+        await fixture.ViewModel.WhenRepoStateSettledAsync();
         fixture.ViewModel.ToggleGroupCollapsed("Work");
         var beta = fixture.Card("beta");
         var newRepo = CreateDirectory("gamma");

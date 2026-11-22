@@ -128,6 +128,24 @@ scrolls, by raising the platform's drag events (card and group drags through the
 tells whether the timer runs. Whether Avalonia's `DispatcherTimer` ticks while the operating system's own drag loop
 runs on Windows (OLE `DoDragDrop`) cannot be shown headlessly and must be confirmed by a UI run.
 
+**Lazy start-up and the UI-thread guard.** The view model reads every card's repo state in the background from its
+constructor, so a test that must act on settled cards waits for them: plain tests await
+`MainWindowViewModel.WhenRepoStateSettledAsync` (or the card's `RefreshCheapInBackgroundAsync`), and headless tests,
+which run on the UI thread and cannot block on it, call `HeadlessTestApp.RunJobsUntilRepoStateSettled`, which runs the
+posted jobs until the reads have landed. Tests that hold the reads use `GatedBackgroundWorkRunner.Close` to let the
+start-up reads run and hold the next ones, and `SteppedBackgroundWorkRunner` (same file) to release the reads one at a
+time in the order the queue started them, which shows which read the queue chose next (with a one-slot queue).
+`HeadlessTestApp` marks the session's UI thread as guarded (`BlockingCallGuard.MarkCurrentThreadGuarded`) and, after
+every `Run` and `RunAsync`, fails the test when a guarded blocking call - any `GitClient` command - was recorded on that
+thread, so every headless test also verifies that no git runs on the UI thread
+(`Quality-UiThreadRegressionGuard`); `HeadlessTestApp_UiThread_GitCallIsRefusedAndRecorded` proves that the guard is
+really on there. The headless session gives every test body an application of its own and drops what the UI thread
+still had queued when the body ended, so work a test started on the UI thread must have finished before the test ends -
+otherwise it never finishes and never releases what it holds (for example the one-at-a-time gate of the git version
+check, which a later test would then wait for forever). Window tests that show cards therefore also wait for the
+cards' repo state (`HeadlessTestApp.RunJobsUntilRepoStateSettled`) and the window's upgrade check
+(`HeadlessTestApp.RunJobsUntil`).
+
 **A git that hangs.** `MainWindowViewModel` takes optional git time limits (`GitClientTimeouts`), passed to every card;
 the headless test of `AgentControl-LauncherUI-GitTimeoutShown` uses a one-second local limit and a stub git whose
 working-tree query sleeps past it, so the timeout happens within the test without any timing assertion: the test
@@ -138,8 +156,8 @@ awaits the card's working-tree check and asserts what the card shows.
 Unit tests run under xUnit v3 using unique temporary configuration and repo directories per
 test (hermetic, parallel-safe). Tests that construct a `MainWindowViewModel` or
 `RepoCardViewModel` run in the `RealProcess` xUnit collection (disabled parallelization)
-because eager `RefreshCheap()` calls spawn real subprocesses via `GitStub` or the system git
-executable.
+because constructing a view model with repos starts background git reads through the shared
+refresh queue, which spawn real subprocesses via `GitStub` or the system git executable.
 
 ### Acceptance Criteria
 
@@ -337,6 +355,30 @@ the card's status message is visible and says that git did not answer within 1 s
 Refresh to try again, and the card's Git state is unknown (not clean, no Pull)
 (`MainWindow_CardShown_GitHangs_CardSaysGitWasStopped`). This covers `AgentControl-LauncherUI-GitTimeoutShown` (child
 `AgentControl-RepoCardViewModel-GitTimeoutShown`).
+
+**LauncherUI_StartupCardsAtOnce_WindowFreeWhileCardsRead**: A headless main window is shown over three repos (stub git)
+whose start-up reads are held: the UI thread runs another job, each card shows "refreshing..." and its branch as `...`,
+no card shows the "No agent package" chip, and the strip says "Refreshing repositories 0 of 3..."; once the reads run
+and the cards settle, the indicators are hidden, the branches read `main`, the "No agent package" chips are shown and
+the strip is gone (`MainWindow_Startup_GitHeld_WindowRespondsCardsShowRefreshingAndStrip`). This covers
+`AgentControl-LauncherUI-StartupCardsAtOnce` (children `AgentControl-MainWindowViewModel-StartupReadsQueued`,
+`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck` and `AgentControl-RepoCardViewModel-RefreshingState`) and
+`AgentControl-LauncherUI-RefreshingCardState`.
+
+**LauncherUI_ActionWaitsForCardState_LaunchWaitsWithoutBlocking**: A headless main window is shown over one repo with
+committed agent files (stub git) whose start-up read is held, with a recording process starter; the Launch button is
+clicked: the UI thread runs another job, the card is busy and refreshing, and nothing is launched; once the read runs,
+the card shows the committed agent files and the tool was launched once ("Launched.")
+(`MainWindow_LaunchWhileCardStateHeld_WaitsWithoutBlockingThenLaunches`). This covers
+`AgentControl-LauncherUI-ActionWaitsForCardState` (child `AgentControl-RepoCardViewModel-PromoteAndAwait`).
+
+**LauncherUI_RefreshThroughQueue_SignInChipReadsGitFirst**: A headless main window over a card whose source needs a
+sign-in, its start-up reads done and the next reads held; after the source answers again the "Sign-in needed" chip is
+clicked: the card is busy, says it is refreshing ("refreshing..." visible), and the source has not been read while the
+git work is held; once released the source is read, the chip is gone, an upgrade is offered and the card no longer
+says it is refreshing (`MainWindow_SignInChip_RefreshesThroughQueue`). This covers
+`AgentControl-LauncherUI-RefreshThroughQueue` (children `AgentControl-RepoCardViewModel-RefreshQueuedAtUserAction` and
+`-PostPullRefreshQueued`).
 
 **LauncherUI_DragAutoScroll_ListKeepsScrollingWhileADragIsHeldNearItsEdges**: The step function gives no scroll in
 the middle of the list and at a zone's inner boundary, 4.25 DIP per tick one pixel inside a 32-DIP zone, 12 at the

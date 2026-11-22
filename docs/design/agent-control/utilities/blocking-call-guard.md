@@ -71,7 +71,10 @@ The tests that enable it:
 
 - **BlockingCallGuardTests**, **UtilitiesSubsystemTests** and **GitClientTests** - scopes around synchronous code and
   dedicated threads.
+- **HeadlessTestApp** (the headless window tests' session) - marks the session's UI thread guarded for the life of the
+  test process and, after every `Run`/`RunAsync`, drains the thread's record on that thread and fails the test when it
+  holds anything, so a git command made on the UI thread by any headless test fails it.
+- **RepoCardViewModelTests** - a scope around the synchronous part of a Refresh.
 
 The guard is designed so that later work can add guard points (the settings save, the pin file, package hashing and
-extraction, the remote git and credential helper processes) and can mark the headless UI test thread guarded, failing
-a test whose code made a blocking call on it.
+extraction, the remote git and credential helper processes).

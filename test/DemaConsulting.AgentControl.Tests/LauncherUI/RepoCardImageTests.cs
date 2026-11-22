@@ -35,7 +35,7 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 /// </summary>
 /// <remarks>
 ///     Runs in the <c>RealProcess</c> collection because showing a card spawns real git
-///     subprocesses as part of the card's eager refresh.
+///     subprocesses as part of the card's background repo-state read.
 /// </remarks>
 [Collection("RealProcess")]
 public sealed class RepoCardImageTests : IDisposable
@@ -62,7 +62,7 @@ public sealed class RepoCardImageTests : IDisposable
         Assert.True(card.ShowAvatarInitials);
 
         // Act: the initial load
-        card.RefreshCheap();
+        await card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         await card.RepoImageRefreshTask;
 
         // Assert: the picture shows instead of the initials
@@ -73,7 +73,7 @@ public sealed class RepoCardImageTests : IDisposable
         Assert.Equal(1, decodes);
 
         // Act: refresh again with nothing changed
-        card.RefreshCheap();
+        await card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         await card.RepoImageRefreshTask;
 
         // Assert: cached - no second decode, same bitmap
@@ -82,7 +82,7 @@ public sealed class RepoCardImageTests : IDisposable
 
         // Act: the repo replaces its icon
         File.WriteAllBytes(Path.Combine(repo, "icon.png"), TestPng.Create(128, 64));
-        card.RefreshCheap();
+        await card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         await card.RepoImageRefreshTask;
 
         // Assert: decoded again
@@ -99,13 +99,13 @@ public sealed class RepoCardImageTests : IDisposable
         // Arrange
         var repo = CreateRepo(("logo.png", TestPng.Create(64, 64)));
         var card = CreateCard(repo, file => RepoImageLocator.Decode(file));
-        card.RefreshCheap();
+        await card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         await card.RepoImageRefreshTask;
         Assert.True(card.HasRepoImage);
 
         // Act
         File.Delete(Path.Combine(repo, "logo.png"));
-        card.RefreshCheap();
+        await card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         await card.RepoImageRefreshTask;
 
         // Assert
@@ -130,7 +130,7 @@ public sealed class RepoCardImageTests : IDisposable
             });
 
         // Act
-        card.RefreshCheap();
+        await card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         await card.RepoImageRefreshTask;
 
         // Assert
@@ -156,9 +156,9 @@ public sealed class RepoCardImageTests : IDisposable
         });
 
         // Act: two refreshes
-        card.RefreshCheap();
+        await card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         await card.RepoImageRefreshTask;
-        card.RefreshCheap();
+        await card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         await card.RepoImageRefreshTask;
 
         // Assert: tile kept, one attempt only
@@ -170,7 +170,7 @@ public sealed class RepoCardImageTests : IDisposable
         var throwing = CreateCard(repo, _ => throw new InvalidOperationException("decoder exploded"));
 
         // Act
-        throwing.RefreshCheap();
+        await throwing.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         await throwing.RepoImageRefreshTask;
 
         // Assert: swallowed, tile kept
@@ -181,7 +181,7 @@ public sealed class RepoCardImageTests : IDisposable
         foreach (Exception failure in new Exception[] { new FormatException(), new OutOfMemoryException(), new DivideByZeroException() })
         {
             var unexpected = CreateCard(repo, _ => throw failure);
-            unexpected.RefreshCheap();
+            await unexpected.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
             await unexpected.RepoImageRefreshTask;
 
             // Assert: whatever it was, the background task did not fault and the tile is kept
@@ -214,9 +214,9 @@ public sealed class RepoCardImageTests : IDisposable
         });
 
         // Act: start the older refresh (blocked in its decoder), then a newer one that publishes
-        card.RefreshCheap();
+        await card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         var older = card.RepoImageRefreshTask;
-        card.RefreshCheap();
+        await card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         var newer = card.RepoImageRefreshTask;
         await newer;
         Assert.True(card.HasRepoImage);
@@ -244,14 +244,14 @@ public sealed class RepoCardImageTests : IDisposable
         // Arrange: a card showing a picture
         var repo = CreateRepo(("icon.png", TestPng.Create(64, 64)));
         var card = CreateCard(repo, file => RepoImageLocator.Decode(file));
-        card.RefreshCheap();
+        await card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         await card.RepoImageRefreshTask;
         var first = card.RepoImage!;
         Assert.True(first.PixelSize.Width > 0);
 
         // Act: the repo replaces its icon
         File.WriteAllBytes(Path.Combine(repo, "icon.png"), TestPng.Create(128, 64));
-        card.RefreshCheap();
+        await card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         await card.RepoImageRefreshTask;
         var second = card.RepoImage!;
 
@@ -262,7 +262,7 @@ public sealed class RepoCardImageTests : IDisposable
 
         // Act: the icon is removed
         File.Delete(Path.Combine(repo, "icon.png"));
-        card.RefreshCheap();
+        await card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         await card.RepoImageRefreshTask;
 
         // Assert: cleared, and the bitmap that was shown is released
@@ -271,7 +271,7 @@ public sealed class RepoCardImageTests : IDisposable
 
         // Act: a picture again, then the card is retired
         File.WriteAllBytes(Path.Combine(repo, "logo.png"), TestPng.Create(64, 64));
-        card.RefreshCheap();
+        await card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         await card.RepoImageRefreshTask;
         var third = card.RepoImage!;
         card.Retire();
@@ -306,9 +306,9 @@ public sealed class RepoCardImageTests : IDisposable
         });
 
         // Act: the older refresh is blocked in its decoder, the newer one publishes, then the older finishes
-        card.RefreshCheap();
+        await card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         var older = card.RepoImageRefreshTask;
-        card.RefreshCheap();
+        await card.RefreshCheapInBackgroundAsync(TestContext.Current.CancellationToken);
         await card.RepoImageRefreshTask;
         var published = card.RepoImage!;
         release.Set();
@@ -339,7 +339,8 @@ public sealed class RepoCardImageTests : IDisposable
         window.Show();
         try
         {
-            // Act: wait for the background loads, then let the bindings settle
+            // Act: wait for the background loads (the cards' repo state first), then let the bindings settle
+            await viewModel.WhenRepoStateSettledAsync();
             foreach (var card in viewModel.RepoCards)
             {
                 await card.RepoImageRefreshTask;

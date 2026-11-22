@@ -1585,12 +1585,17 @@ sections:
         title: >-
           The RepoCardViewModel class shall report that it is refreshing while a read of its repo
           state (its pin, branch and committed agent folders, or its working tree) waits to run or
-          runs, announce when that changes, and stop reporting it once the reads were applied.
+          runs, announce when that changes, and stop reporting it once the reads were applied; until
+          its repo state was first read it shall report its status as Refreshing, its branch as not
+          known yet, and neither the "No agent package" chip nor the committed-agent-files warning.
         justification: |
           With reads queued a couple at a time a card may wait a while for its state; the user must
-          see that its state is being refreshed rather than take the shown state as current.
+          see that its state is being refreshed rather than take the shown state as current. A card
+          shown before its first read knows nothing git-derived yet, so showing "no branch", "no
+          agent package" or a healthy status would state as facts what is only not known.
         tests:
           - RepoCardViewModel_RefreshRepoStateAsync_WhileQueued_ShowsRefreshingAndClearsAfter
+          - RepoCardViewModel_Status_BeforeFirstRead_IsRefreshing
 
       - id: AgentControl-RepoCardViewModel-GitTimeoutShown
         title: >-
@@ -1603,3 +1608,51 @@ sections:
           after git answers again would be wrong.
         tests:
           - RepoCardViewModel_RefreshRepoStateAsync_GitTimesOut_ShowsGitProblemOnCard
+
+      - id: AgentControl-RepoCardViewModel-PromoteAndAwait
+        title: >-
+          The RepoCardViewModel class shall, when Launch, Pull, Upgrade or Select Package is started
+          while a read of its repo state waits to run or runs, be busy, move that read ahead of the
+          other reads that wait, wait for it without blocking its caller, and then act on what it
+          read: do nothing and say why when the folder turned out to be missing, the working tree is
+          not clean (Pull) or the pin changed (Upgrade); a card whose state was never read shall read
+          it first.
+        justification: |
+          A card is shown before its repo state is read, and that state can be re-read at any time.
+          An action must not use state that is unknown or about to change - launch without seeing
+          committed agent files, pull a tree that turned dirty, or upgrade from a pin that is no
+          longer the one shown - and the window must stay usable while it waits.
+        tests:
+          - RepoCardViewModel_Launch_WhileStateQueued_PromotesAndUsesFreshCommittedFilesState
+          - RepoCardViewModel_Launch_FreshStateShowsMissing_DoesNotLaunchAndSays
+          - RepoCardViewModel_Pull_WhileStatusQueued_WaitsAndRechecksCanPull
+          - RepoCardViewModel_Upgrade_WhileStateQueued_WaitsForState
+          - RepoCardViewModel_ApplySelectedPackage_WhileStateQueued_WaitsForState
+
+      - id: AgentControl-RepoCardViewModel-RefreshQueuedAtUserAction
+        title: >-
+          The RepoCardViewModel class shall read its repo state for Refresh through the shared refresh
+          queue at the priority of a user action - ahead of reads that wait at a lower priority, and
+          joined with a read of its state that already waits - make no git call on the caller's
+          thread, and check the package sources only after that read was applied.
+        justification: |
+          The user asked for the refresh, so it must not wait behind the background reads of other
+          repos, must not start a second read of a repo that is already waiting, and must not freeze
+          the window with git; the upgrade check needs the pin the read finds.
+        tests:
+          - RepoCardViewModel_Refresh_EnqueuedAtUserActionAndShowsRefreshing
+          - RepoCardViewModel_Refresh_SynchronousPart_MakesNoGitCallOnGuardedThread
+          - RepoCardViewModel_Refresh_WhileAlreadyQueued_CoalescesIntoOneRead
+
+      - id: AgentControl-RepoCardViewModel-PostPullRefreshQueued
+        title: >-
+          The RepoCardViewModel class shall, after a Git Pull and after it took agent folders out of
+          git's index, re-read its repo state through the shared refresh queue at the priority of a
+          user action while it is still busy, showing that it is refreshing.
+        justification: |
+          A pull or an untrack changes what the card shows (pin, branch, committed agent folders,
+          working tree); reading it again must not freeze the window with git and must not wait
+          behind the background reads of other repos.
+        tests:
+          - RepoCardViewModel_Pull_AfterPull_RefreshEnqueuedAtUserAction
+          - RepoCardViewModel_ApplyPackage_UntrackedFolders_RefreshesThroughQueue

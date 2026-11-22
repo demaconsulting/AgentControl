@@ -41,7 +41,7 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 /// </summary>
 /// <remarks>
 ///     Runs in the <c>RealProcess</c> collection because adding a repo card spawns real git
-///     subprocesses as part of the card's eager refresh.
+///     subprocesses as part of the card's background repo-state read.
 /// </remarks>
 [Collection("RealProcess")]
 public sealed class MainWindowTests : IDisposable
@@ -76,7 +76,7 @@ public sealed class MainWindowTests : IDisposable
     ///     stops it.
     /// </summary>
     [Fact]
-    public void MainWindow_ViewModelAttachedThenWindowClosed_StartsPeriodicRecheckAndDisposesViewModel() => HeadlessTestApp.Run(() =>
+    public void MainWindow_ViewModelAttachedThenWindowClosed_StartsPeriodicRecheckAndDisposesViewModel() => HeadlessTestApp.RunAsync(async () =>
     {
         // Arrange: a view model on a fake clock with a pinned repo and an in-memory source, attached to a window
         var clock = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
@@ -95,6 +95,8 @@ public sealed class MainWindowTests : IDisposable
             registryFactory: _ => new PackageSourceRegistry(settings.Sources, _ => feed));
         var window = new MainWindow { DataContext = viewModel };
         window.Show();
+        await viewModel.WhenRepoStateSettledAsync();
+        await viewModel.PendingRefresh;
         Dispatcher.UIThread.RunJobs();
         Assert.False(viewModel.RepoCards[0].IsUpgradeAvailable);
 
@@ -475,6 +477,7 @@ public sealed class MainWindowTests : IDisposable
         window.Show();
         try
         {
+            HeadlessTestApp.RunJobsUntilRepoStateSettled(viewModel);
             await WaitUntilAsync(() => viewModel.PendingRefresh.IsCompleted);
             var card = Assert.Single(viewModel.RepoCards);
             Assert.True(card.SourceNeedsSignIn);
@@ -527,6 +530,7 @@ public sealed class MainWindowTests : IDisposable
         window.Show();
         try
         {
+            HeadlessTestApp.RunJobsUntilRepoStateSettled(viewModel);
             await WaitUntilAsync(() => viewModel.PendingRefresh.IsCompleted);
             var card = Assert.Single(viewModel.RepoCards);
             Assert.True(card.SourceNeedsSignIn);
@@ -571,7 +575,7 @@ public sealed class MainWindowTests : IDisposable
     ///     explains the problem in its tooltip, and not as the clickable sign-in chip.
     /// </summary>
     [Fact]
-    public void MainWindow_SourceProblemOtherThanSignIn_ShowsTheTooltipChipNotTheButton() => HeadlessTestApp.Run(() =>
+    public void MainWindow_SourceProblemOtherThanSignIn_ShowsTheTooltipChipNotTheButton() => HeadlessTestApp.RunAsync(async () =>
     {
         // Arrange: a pinned repo and no package source configured
         var repo = CreateTempDirectory();
@@ -579,9 +583,11 @@ public sealed class MainWindowTests : IDisposable
         var settings = new AppSettings { Sources = [], RecentRepos = [new RecentRepo { Path = repo }] };
         var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
 
-        // Act
+        // Act: show the window; the card's state is read and its source checked in the background
         var window = new MainWindow { DataContext = viewModel };
         window.Show();
+        await viewModel.WhenRepoStateSettledAsync();
+        await viewModel.PendingRefresh;
         Dispatcher.UIThread.RunJobs();
 
         // Assert: the plain chip with its explanation, and no sign-in chip
@@ -613,6 +619,7 @@ public sealed class MainWindowTests : IDisposable
         window.Show();
         try
         {
+            HeadlessTestApp.RunJobsUntilRepoStateSettled(viewModel);
             await WaitUntilAsync(() => viewModel.PendingRefresh.IsCompleted);
             var card = Assert.Single(viewModel.RepoCards);
             Assert.True(card.SourceNeedsSignIn);
@@ -652,6 +659,7 @@ public sealed class MainWindowTests : IDisposable
         window.Show();
         try
         {
+            HeadlessTestApp.RunJobsUntilRepoStateSettled(viewModel);
             await WaitUntilAsync(() => viewModel.PendingRefresh.IsCompleted);
             var card = Assert.Single(viewModel.RepoCards);
             Assert.True(card.SourceNeedsSignIn);
@@ -1009,6 +1017,12 @@ public sealed class MainWindowTests : IDisposable
 
         try
         {
+            // The window's startup reads of the card run first; the next reads are held
+            gate.Release();
+            await viewModel.WhenRepoStateSettledAsync();
+            Dispatcher.UIThread.RunJobs();
+            gate.Close();
+
             // Act: save the settings
             DialogWindowTests.Click(window, "OpenSettingsButton");
             Dispatcher.UIThread.RunJobs();
@@ -1185,6 +1199,182 @@ public sealed class MainWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that the window is shown and usable at once while the cards' startup reads are held: the UI
+    ///     thread runs other work, every card says it is refreshing with its branch shown as not known yet,
+    ///     and the strip counts the reads; once they run, the cards fill in and the indicators go.
+    /// </summary>
+    [Fact]
+    public void MainWindow_Startup_GitHeld_WindowRespondsCardsShowRefreshingAndStrip() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: three repos (stub git), every background read held
+        var stub = Tests.GitIntegration.GitStub.Create();
+        _tempPaths.Add(stub.Path);
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = new MainWindowViewModel(
+            new AppSettings
+            {
+                GitExecutablePath = stub.Path,
+                RecentRepos = [.. Enumerable.Range(0, 3).Select(_ => new RecentRepo { Path = CreateTempDirectory() })]
+            },
+            configDirectory: CreateTempDirectory(),
+            backgroundWork: gate);
+
+        // Act: show the window while the reads are held
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 1200 };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            await gate.FirstCall;
+            var ran = false;
+            await Dispatcher.UIThread.InvokeAsync(() => ran = true);
+            Dispatcher.UIThread.RunJobs();
+            var refreshing = window.GetVisualDescendantsOf<TextBlock>("RepoRefreshingText").ToList();
+            var branches = window.GetVisualDescendantsOf<TextBlock>("CurrentBranchText").ToList();
+
+            // Assert: the window is free; each card says it is refreshing and shows its branch as not
+            // known yet; no card claims it has no agent package; the strip counts the reads
+            Assert.True(ran);
+            Assert.Equal(3, refreshing.Count);
+            Assert.All(refreshing, text => Assert.True(text.IsEffectivelyVisible));
+            Assert.Equal(3, branches.Count);
+            Assert.All(branches, text => Assert.True(text.IsEffectivelyVisible));
+            Assert.All(branches, text => Assert.Equal("...", text.Text));
+            Assert.All(window.GetVisualDescendantsOf<Button>("NoPackageChip"), chip => Assert.False(chip.IsVisible));
+            Assert.True(window.FindControl<Border>("GlobalProgressStrip")!.IsVisible);
+            Assert.Equal("Refreshing repositories 0 of 3...", window.FindControl<TextBlock>("GlobalProgressText")!.Text);
+
+            // Act: the reads run
+            gate.Release();
+            HeadlessTestApp.RunJobsUntilRepoStateSettled(viewModel);
+
+            // Assert: the cards are filled in and the indicators are gone
+            Assert.All(refreshing, text => Assert.False(text.IsVisible));
+            Assert.All(branches, text => Assert.Equal("main", text.Text));
+            Assert.All(window.GetVisualDescendantsOf<Button>("NoPackageChip"), chip => Assert.True(chip.IsVisible));
+            Assert.False(window.FindControl<Border>("GlobalProgressStrip")!.IsVisible);
+        }
+        finally
+        {
+            gate.Release();
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that clicking Launch on a card whose repo state is still being read makes the card wait
+    ///     for that read - busy, nothing launched, the window free - and then launch on what it read (the
+    ///     repo's committed agent files are left alone).
+    /// </summary>
+    [Fact]
+    public void MainWindow_LaunchWhileCardStateHeld_WaitsWithoutBlockingThenLaunches() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a repo with committed agent files (stub git) whose startup read is held, and a
+        // launch-safe starter
+        var stub = Tests.GitIntegration.GitStub.Create(lsFilesOutput: ".github/agents/a.md");
+        _tempPaths.Add(stub.Path);
+        var gate = new GatedBackgroundWorkRunner();
+        var starter = new Tests.AgentToolLauncher.FakeAgentToolProcessStarter();
+        var viewModel = new MainWindowViewModel(
+            new AppSettings { GitExecutablePath = stub.Path, RecentRepos = [new RecentRepo { Path = CreateTempDirectory() }] },
+            configDirectory: CreateTempDirectory(),
+            processStarter: starter,
+            shellDetector: Tests.AgentToolLauncher.FakeAgentToolProcessStarter.CreateShellDetector(),
+            backgroundWork: gate);
+        var card = Assert.Single(viewModel.RepoCards);
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 700 };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            await gate.FirstCall;
+
+            // Act: click Launch while the card's state is held
+            ClickWithMouse(window, Assert.Single(window.GetVisualDescendantsOf<Button>("LaunchButton")));
+            var ran = false;
+            await Dispatcher.UIThread.InvokeAsync(() => ran = true);
+
+            // Assert: the window is free; the card is busy and refreshing, and nothing was launched
+            Assert.True(ran);
+            Assert.True(card.IsBusy);
+            Assert.True(card.IsRefreshing);
+            Assert.Empty(starter.Started);
+
+            // Act: the read runs
+            gate.Release();
+            await WaitUntilAsync(() => !card.IsBusy);
+
+            // Assert: launched on what was read - the committed agent files were seen and left alone
+            Assert.True(card.HasCommittedAgentFiles);
+            Assert.Single(starter.Started);
+            Assert.Equal("Launched.", card.StatusMessage);
+        }
+        finally
+        {
+            gate.Release();
+            window.Close();
+        }
+    });
+    /// <summary>
+    ///     Test that clicking the "Sign-in needed" chip reads the card's repo state through the shared
+    ///     queue first - the card busy and refreshing, the source not read while git is held - and then
+    ///     checks the source, which clears the chip.
+    /// </summary>
+    [Fact]
+    public void MainWindow_SignInChip_RefreshesThroughQueue() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a window whose only card needs a sign-in, with its startup reads done and the next
+        // reads held
+        var feed = CreateSignInNeededFeed();
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = CreateViewModelOver(feed, CreateTempDirectory(), gate);
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 700 };
+        window.Show();
+        try
+        {
+            gate.Release();
+            HeadlessTestApp.RunJobsUntilRepoStateSettled(viewModel);
+            await WaitUntilAsync(() => viewModel.PendingRefresh.IsCompleted);
+            gate.Close();
+            var card = Assert.Single(viewModel.RepoCards);
+            Assert.True(card.SourceNeedsSignIn);
+            Dispatcher.UIThread.RunJobs();
+            var chip = Assert.Single(window.GetVisualDescendantsOf<Button>("SignInNeededChip"));
+            var callsBefore = feed.ListVersionsCalls;
+            feed.ListVersionsException = null;
+            feed.Publish("contoso-agents", "1.1.0");
+
+            // Act: click the chip; the card's repo reads are held
+            ClickWithMouse(window, chip);
+            await gate.FirstCall;
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: busy and refreshing, and the source is not read before the git work is done
+            Assert.True(card.IsBusy);
+            Assert.True(card.IsRefreshing);
+            Assert.True(Assert.Single(window.GetVisualDescendantsOf<TextBlock>("RepoRefreshingText")).IsVisible);
+            Assert.Equal(callsBefore, feed.ListVersionsCalls);
+
+            // Act: the reads run
+            gate.Release();
+            await WaitUntilAsync(() => !card.IsBusy);
+
+            // Assert: the source was read after the git work and the chip is gone
+            Assert.True(feed.ListVersionsCalls > callsBefore);
+            Assert.False(card.SourceNeedsSignIn);
+            Assert.True(card.IsUpgradeAvailable);
+            Assert.False(card.IsRefreshing);
+            Assert.False(chip.IsVisible);
+        }
+        finally
+        {
+            gate.Release();
+            window.Close();
+        }
+    });
+    /// <summary>
     ///     Gets the center of the empty-state panel (shown while no repo is listed), in window coordinates.
     /// </summary>
     /// <param name="window">The main window.</param>
@@ -1214,8 +1404,11 @@ public sealed class MainWindowTests : IDisposable
     /// </summary>
     /// <param name="feed">The in-memory source.</param>
     /// <param name="sourceFolder">An existing folder used as the zip source's location.</param>
+    /// <param name="backgroundWork">Runs the cards' repo-state reads, or <see langword="null"/> for the
+    ///     thread pool.</param>
     /// <returns>The view model.</returns>
-    private MainWindowViewModel CreateViewModelOver(Tests.AgentPackageManagement.FakePackageSourceProvider feed, string sourceFolder)
+    private MainWindowViewModel CreateViewModelOver(
+        Tests.AgentPackageManagement.FakePackageSourceProvider feed, string sourceFolder, IBackgroundWorkRunner? backgroundWork = null)
     {
         var repo = CreateTempDirectory();
         RepoPinStore.Save(repo, new RepoPin { PackageName = "contoso-agents", Version = "1.0.0" });
@@ -1227,7 +1420,8 @@ public sealed class MainWindowTests : IDisposable
         return new MainWindowViewModel(
             settings,
             configDirectory: CreateTempDirectory(),
-            registryFactory: current => new PackageSourceRegistry(current.Sources, _ => feed));
+            registryFactory: current => new PackageSourceRegistry(current.Sources, _ => feed),
+            backgroundWork: backgroundWork);
     }
 
     /// <summary>

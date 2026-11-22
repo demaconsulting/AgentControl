@@ -151,6 +151,42 @@ public sealed class RepoCardCommittedFilesTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that once the agent folders were taken out of git's index, the card re-reads what git says
+    ///     through the shared refresh queue - still busy, showing that it is refreshing - and clears the
+    ///     committed-files badge when that read lands.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_ApplyPackage_UntrackedFolders_RefreshesThroughQueue()
+    {
+        // Arrange: a card that shows the committed-files badge, whose queued reads are held
+        var runner = new SteppedBackgroundWorkRunner();
+        var (_, card, _) = CreateTrackedRepo(backgroundWork: runner);
+        card.RefreshCheap();
+        Assert.True(card.HasCommittedAgentFiles);
+        card.CommittedFilesConversionRequested += (_, request) => request.Respond(true);
+
+        // Act: apply; once git's index changed, the card's re-read is queued and held
+        var apply = card.ApplySelectedPackageAsync(
+            new PackageReference("Default", "contoso-agents", "1.0.0"), TestContext.Current.CancellationToken);
+        await runner.WaitForCallsAsync(1);
+
+        // Assert: still busy and refreshing; the badge is not cleared before git answered
+        Assert.True(card.IsBusy);
+        Assert.True(card.IsRefreshing);
+        Assert.False(apply.IsCompleted);
+        Assert.True(card.HasCommittedAgentFiles);
+
+        // Act
+        runner.ReleaseAll();
+        await apply;
+
+        // Assert: git's answer cleared the badge, and the card is done
+        Assert.False(card.HasCommittedAgentFiles);
+        Assert.False(card.IsRefreshing);
+        Assert.False(card.IsBusy);
+        Assert.True(card.GitStatusChecked);
+    }
+    /// <summary>
     ///     Test that Upgrade goes through the same conversion: it asks, and once accepted stops git
     ///     tracking the folders and applies the newer version.
     /// </summary>
@@ -373,9 +409,11 @@ public sealed class RepoCardCommittedFilesTests : IDisposable
     ///     has templates and skills folders only as untracked files on disk.
     /// </summary>
     /// <param name="versions">The versions the stub source offers.</param>
+    /// <param name="backgroundWork">Runs the card's repo-state reads, or <see langword="null"/> for the
+    ///     thread pool.</param>
     /// <returns>The fixture, a card over its working repository and the stub source.</returns>
     private (GitRepositoryFixture Fixture, RepoCardViewModel Card, CountingProvider Provider) CreateTrackedRepo(
-        string[]? versions = null)
+        string[]? versions = null, IBackgroundWorkRunner? backgroundWork = null)
     {
         var result = CreateRepo(
             new Dictionary<string, string>
@@ -385,7 +423,8 @@ public sealed class RepoCardCommittedFilesTests : IDisposable
                 [".github/workflows/ci.yml"] = "ci",
                 ["README.md"] = "readme"
             },
-            versions);
+            versions,
+            backgroundWork);
 
         // Present on disk but not tracked: only the tracked folders are to be reported and untracked
         Directory.CreateDirectory(Path.Combine(result.Fixture.WorkPath, ".github", "templates"));
@@ -398,15 +437,17 @@ public sealed class RepoCardCommittedFilesTests : IDisposable
     /// </summary>
     /// <param name="files">The files to commit.</param>
     /// <param name="versions">The versions the stub source offers.</param>
+    /// <param name="backgroundWork">Runs the card's repo-state reads, or <see langword="null"/> for the
+    ///     thread pool.</param>
     /// <returns>The fixture, a card over its working repository and the stub source.</returns>
     private (GitRepositoryFixture Fixture, RepoCardViewModel Card, CountingProvider Provider) CreateRepo(
-        Dictionary<string, string> files, string[]? versions = null)
+        Dictionary<string, string> files, string[]? versions = null, IBackgroundWorkRunner? backgroundWork = null)
     {
         var fixture = GitRepositoryFixture.CreateOrSkip();
         _fixtures.Add(fixture);
         fixture.Commit(files, "Initial commit");
         var provider = new CountingProvider(versions ?? ["1.0.0"]);
-        return (fixture, CreateCard(fixture.WorkPath, provider), provider);
+        return (fixture, CreateCard(fixture.WorkPath, provider, backgroundWork), provider);
     }
 
     /// <summary>
@@ -414,8 +455,11 @@ public sealed class RepoCardCommittedFilesTests : IDisposable
     /// </summary>
     /// <param name="repo">The repo folder.</param>
     /// <param name="provider">The stub source.</param>
+    /// <param name="backgroundWork">Runs the card's repo-state reads, or <see langword="null"/> for the
+    ///     thread pool.</param>
     /// <returns>The card.</returns>
-    private static RepoCardViewModel CreateCard(string repo, CountingProvider provider)
+    private static RepoCardViewModel CreateCard(
+        string repo, CountingProvider provider, IBackgroundWorkRunner? backgroundWork = null)
     {
         var settings = new AppSettings
         {
@@ -423,7 +467,8 @@ public sealed class RepoCardCommittedFilesTests : IDisposable
         };
         var registry = new PackageSourceRegistry(settings.Sources, _ => provider);
         return new RepoCardViewModel(
-            new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), null, _ => registry);
+            new RecentRepo { Path = repo }, () => settings, new PackageVersionCache(), null, _ => registry,
+            backgroundWork: backgroundWork);
     }
 
     /// <summary>

@@ -129,9 +129,10 @@ public sealed class RepoCardSignatureTests : IDisposable
     ///     only for a card whose source requires signatures.
     /// </summary>
     [Fact]
-    public void MainWindow_PackageChip_ShowsShieldOnlyWhenSignaturesAreRequired() => HeadlessTestApp.Run(() =>
+    public void MainWindow_PackageChip_ShowsShieldOnlyWhenSignaturesAreRequired()
     {
-        // Arrange: two repos supplied by two sources (each offering the package), one requiring signatures
+        // Arrange: two repos supplied by two sources (each offering the package), one requiring signatures;
+        // the feeds and the pinned repos are written before the UI thread is entered
         var signedFeed = CreateTempDirectory();
         var openFeed = CreateTempDirectory();
         NuGetFeedBuilder.CreateAgentPackage(signedFeed, "contoso-agents", "1.0.0");
@@ -153,23 +154,34 @@ public sealed class RepoCardSignatureTests : IDisposable
             new RecentRepo { Path = signedRepo, PinnedPackageName = "contoso-agents", PinnedPackageVersion = "1.0.0", PinnedSource = "Signed" },
             new RecentRepo { Path = openRepo, PinnedPackageName = "contoso-agents", PinnedPackageVersion = "1.0.0", PinnedSource = "Open" }
         ];
-        var viewModel = new MainWindowViewModel(settings, StartupOptions.Parse(["--config-dir", CreateTempDirectory()]), CreateTempDirectory());
-        var window = new MainWindow { DataContext = viewModel };
-        window.Show();
-        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        var startupOptions = StartupOptions.Parse(["--config-dir", CreateTempDirectory()]);
+        var configDirectory = CreateTempDirectory();
 
-        // Act: find the shield icons in the realized chips
-        var shields = window.GetVisualDescendants()
-            .OfType<Material.Icons.Avalonia.MaterialIcon>()
-            .Where(icon => icon.Name == "PackageSignatureIcon")
-            .ToList();
+        HeadlessTestApp.Run(() =>
+        {
+            var viewModel = new MainWindowViewModel(settings, startupOptions, configDirectory);
+            var window = new MainWindow { DataContext = viewModel };
+            window.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
 
-        // Assert: one shield per card, visible only for the signed source, with the right tooltip
-        Assert.Equal(2, shields.Count);
-        var visible = Assert.Single(shields, shield => shield.IsVisible);
-        Assert.Equal("Signature required (signer pinned: A3AF7AF1…7641)", ToolTip.GetTip(visible));
-        window.Close();
-    });
+            // The cards read their pins in the background and the window's upgrade check follows; the
+            // shield depends on both, and no check may be left running on the UI thread when the test ends
+            HeadlessTestApp.RunJobsUntilRepoStateSettled(viewModel);
+            HeadlessTestApp.RunJobsUntil(() => viewModel.PendingRefresh.IsCompleted, "The window's upgrade check did not finish.");
+
+            // Act: find the shield icons in the realized chips
+            var shields = window.GetVisualDescendants()
+                .OfType<Material.Icons.Avalonia.MaterialIcon>()
+                .Where(icon => icon.Name == "PackageSignatureIcon")
+                .ToList();
+
+            // Assert: one shield per card, visible only for the signed source, with the right tooltip
+            Assert.Equal(2, shields.Count);
+            var visible = Assert.Single(shields, shield => shield.IsVisible);
+            Assert.Equal("Signature required (signer pinned: A3AF7AF1…7641)", ToolTip.GetTip(visible));
+            window.Close();
+        });
+    }
 
     /// <summary>
     ///     Creates a card supplied by a source alias (remembered in the user's own settings, not in the pin),

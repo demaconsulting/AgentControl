@@ -8,7 +8,12 @@ the calling thread, every test guards its own thread only inside a `using` scope
 dedicated `Thread` it creates and joins (the lifetime mark is never put on a thread-pool thread), so no guard outlives
 a test or reaches a thread another test uses. A worker thread synchronized with a `ManualResetEventSlim` checks that
 the guard does not reach other threads; no timing is involved. That the code which blocks consults the guard is
-verified at its own level (`GitClientTests.cs`).
+verified at its own level (`GitClientTests.cs`). That the headless test harness really guards its UI thread, so every
+headless window test also catches a git call made there, is verified by `HeadlessTestAppTests.cs`
+(`HeadlessTestApp_UiThread_GitCallIsRefusedAndRecorded`: inside `HeadlessTestApp.Run` the thread is guarded, a
+`GitClient` working-tree query is refused with `BlockingCallOnGuardedThreadException` before git starts, and the record
+holds `git status` once; the test drains the record so the harness does not fail it). It covers
+`Quality-UiThreadRegressionGuard`.
 
 #### Test Environment
 

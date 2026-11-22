@@ -33,8 +33,8 @@ file-system reads). Two, not one, so a single slow repo - on a network share, wi
 that hangs until its time limit (see *GitClient*) - cannot stall every other read, including a user action promoted
 behind it. Two, not more, because the reads compete for the same disk and are scanned by antivirus at process start:
 more parallel `git status` runs give little and make the machine sluggish. The application's other process budgets
-are separate: the upgrade checks read package sources under their own limit (`MainWindowViewModel`), and user actions
-run one at a time per card.
+are separate: the upgrade checks read package sources under one shared limit of four (`MainWindowViewModel`), and
+user actions run one at a time per card.
 
 Private state, all guarded by one lock:
 
@@ -136,9 +136,16 @@ lock, because the tasks complete asynchronously.
 
 Which work goes through the queue, and at which priority:
 
+- *Start-up*: every card, in display order - `CheapFacts` at `Background`, counted.
 - *Settings saved*: every card, in display order - `CheapFacts` at `Background`, counted; then `WorkingTree` at
   `Background` when the folder came back or the git executable changed.
 - *A card first shown in the window*: `WorkingTree` at `Visible`, and the card's waiting reads promoted to `Visible`.
 - *Folders being added*: `FolderInspection` at `Visible`, not counted (the add shows its own count).
-- *A re-added repo whose facts were not read*: `CheapFacts` at `Background`.
-- *Refresh, and after a pull*: their working-tree check, `WorkingTree` at `Background`.
+- *A re-added repo whose facts were not read* (and a repo added through the synchronous adds): `CheapFacts` at
+  `Visible`.
+- *Refresh (and the "Sign-in needed" chip), and after a pull*: `CheapFacts` and `WorkingTree` at `UserAction` (the
+  working tree alone after a pull whose refresh was canceled).
+- *After the card took agent folders out of git's index*: `CheapFacts` (only git's answers applied) and `WorkingTree`
+  at `UserAction`.
+- *An action that needs current state* (Launch, Pull, Upgrade, Select Package): the card's waiting reads promoted to
+  `UserAction`, or `CheapFacts` at `UserAction` for a card never read.

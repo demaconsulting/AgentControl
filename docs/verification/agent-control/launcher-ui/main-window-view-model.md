@@ -3,29 +3,26 @@
 #### Verification Approach
 
 `MainWindowViewModel` is verified with unit tests defined in `MainWindowViewModelTests.cs` (including adding one folder
-or several and the Git-repository check), `RepoGroupingTests.cs`
-(sections, collapse, filter, rename and removal of groups, group colors), `RepoOrderingTests.cs` (the user's own order:
-stability, new
-repos, the legacy seed, Move, drag and drop, filtering, persistence, and the order of the groups),
-`MainWindowViewModelPersistenceTests.cs` (every
-change the user makes when the settings file cannot be written, including the Retry/Discard question of a background
-add) and `MainWindowViewModelRecheckTests.cs` (the periodic
-upgrade re-check, on a fake clock). The background add and the background card refresh after a settings save are
-verified through the view model's two constructor seams rather than timing: `backgroundWork` takes a
-`GatedBackgroundWorkRunner` (a test helper that counts every piece of work and holds it until the test releases it), so
-a test asserts what holds while the folders are still being checked - the add has returned to its caller, nothing is
-added, the global progress shows the count - and `saveSettings` takes a delegate that counts saves and can fail on
-demand, so "one save per batch", Cancel, Retry and Discard are deterministic. Tests that apply settings or add in the
-background await `PendingRefresh` or the add's task before asserting. Each test constructs a real `MainWindowViewModel`
-against a unique temporary
-configuration directory (via `SettingsStore`) and unique temporary repo directories, so tests are hermetic and can run
-in parallel with each other, subject to the `RealProcess` xUnit collection (which disables parallelization) since
-constructing a view model with recent repos spawns real git subprocesses via `GitStub` or the system git executable as
-part of each card's eager `RefreshCheap()`. The temporary repo folders that tests add are made the top folder of a Git
-repository as far as the add is concerned by a `.git` folder whose `HEAD` names a branch (`ref: refs/heads/main`), so
-the real `GitClient.IsRepositoryRoot` accepts them and the branch is read without starting git; the tests of the Git
-check create folders without `.git`, with a `.git` file, and subfolders. No Avalonia `Window` is constructed; only the
-view-model class itself is under test.
+or several and the Git-repository check), `RepoGroupingTests.cs` (sections, collapse, filter, rename and removal of
+groups, group colors), `RepoOrderingTests.cs` (the user's own order: stability, new repos, the legacy seed, Move, drag
+and drop, filtering, persistence, and the order of the groups), `MainWindowViewModelPersistenceTests.cs` (every change
+the user makes when the settings file cannot be written, including the Retry/Discard question of a background add) and
+`MainWindowViewModelRecheckTests.cs` (the periodic upgrade re-check, on a fake clock). The background add and the
+background card refresh after a settings save are verified through the view model's two constructor seams rather than
+timing: `backgroundWork` takes a `GatedBackgroundWorkRunner` (a test helper that counts every piece of work and holds it
+until the test releases it), so a test asserts what holds while the folders are still being checked - the add has
+returned to its caller, nothing is added, the global progress shows the count - and `saveSettings` takes a delegate that
+counts saves and can fail on demand, so "one save per batch", Cancel, Retry and Discard are deterministic. Tests that
+apply settings or add in the background await `PendingRefresh` or the add's task before asserting. Each test constructs
+a real `MainWindowViewModel` against a unique temporary configuration directory (via `SettingsStore`) and unique
+temporary repo directories, so tests are hermetic and can run in parallel with each other, subject to the `RealProcess`
+xUnit collection (which disables parallelization) since constructing a view model with recent repos starts background
+git reads through the shared refresh queue, which spawn real git subprocesses via `GitStub` or the system git
+executable. The temporary repo folders that tests add are made the top folder of a Git repository as far as the add is
+concerned by a `.git` folder whose `HEAD` names a branch (`ref: refs/heads/main`), so the real
+`GitClient.IsRepositoryRoot` accepts them and the branch is read without starting git; the tests of the Git check create
+folders without `.git`, with a `.git` file, and subfolders. No Avalonia `Window` is constructed; only the view-model
+class itself is under test.
 
 #### Test Environment
 
@@ -94,8 +91,8 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 **MainWindowViewModel_PopulateRecentRepos_ConstructorCreatesCardsAndSkipsEagerGitCheck**: The
 constructor is called with settings containing recent repos; a card is created per repo, and
 a git stub's invocation log confirms the working-tree dirty-check subprocess (`status
---porcelain`) is never invoked eagerly during construction (only the cheap checks run at
-launch). This scenario is tested by
+--porcelain`) is never invoked during construction (only the cheap facts are read, in the
+background, at launch). This scenario is tested by
 `MainWindowViewModel_Constructor_SettingsHaveRecentRepos_PopulatesRepoCards` and
 `MainWindowViewModel_Constructor_DoesNotInvokeWorkingTreeDirtyCheckSubprocess`, covering
 `AgentControl-MainWindowViewModel-PopulateRecentRepos`.
@@ -416,6 +413,32 @@ handed to the runner and the strip shows the refresh; once released every read r
 six repos are listed and the strip is gone (`MainWindowViewModel_ApplySettings_RefreshUsesSharedQueueLimit`). These
 cover `AgentControl-MainWindowViewModel-SharedRepoReads`.
 
+**MainWindowViewModel_StartupReadsQueued_BuiltAtOnceAndFilledIn**: With three listed repos (stub git) and every read
+held, the view model is built and usable (a filter applies), two reads have been handed to the runner, the start-up
+refresh is pending, the strip says "Refreshing repositories 0 of 3..." without Cancel, and every card is refreshing
+with status `Refreshing`, branch `...`, no "No agent package" chip, no committed-files warning and not missing; once
+released the cards show their branch and committed files and the strip is gone
+(`MainWindowViewModel_Constructor_GitHeld_ReturnsWithCardsRefreshingAndProgressShown`). Releasing the reads one at a
+time, the first card (top of the list) is filled in first - its pin and branch, no longer refreshing - while the other
+two are not, with the strip at "1 of 3"; once all are released every card is filled in, the missing folder shows as a
+problem and the strip is gone (`MainWindowViewModel_Constructor_ReadsComplete_CardsFillInAndProgressClears`). When
+the window closes (the view model is disposed) while the start-up reads are held and the held reads are then released,
+the start-up refresh completes, only the two reads that were running were ever handed to the runner, no card shows a
+read state or is still refreshing, and the strip is gone
+(`MainWindowViewModel_Dispose_StartupReadsHeld_GivesThemUpAndAppliesNothing`). These cover
+`AgentControl-MainWindowViewModel-StartupReadsQueued`.
+
+**MainWindowViewModel_BackgroundUpgradeCheck_WaitsForCardStateAndSharesOneLimit**: The window's upgrade check started
+while a pinned card's start-up read is held reads no source and does not show the card as checking; once released the
+read lands and the check's result (an upgrade to 1.1.0) stands
+(`MainWindowViewModel_Startup_UpgradeCheckWaitsForCardState`). A Refresh the user starts while the check waits for the
+card's read makes the card busy; the check ends while the card is busy without reading the source for it, and the
+source is read exactly once, by the Refresh (`MainWindowViewModel_Startup_BusyCardSkippedByUpgradeCheck`). While the
+window's check holds four cards at their held source reads, two pinned repos are added: their checks do not start (no
+card of them is checking) until slots free, and every card gets its upgrade once the source answers
+(`MainWindowViewModel_UpgradeChecks_OverlappingChecks_ShareOneLimit`). These cover
+`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck` with the other scenarios of that requirement.
+
 **MainWindowViewModel_BackgroundUpgradeCheck_ConstructionReadsNoSourceAndFailuresAreIsolated**:
 Constructing the view model with a pinned repo reads no package source until the upgrade refresh
 begins; when the refresh runs with one source unreachable, the other (readable) source still offers its upgrade
@@ -569,20 +592,19 @@ are applied and read back from the settings file in the stored (canonical) spell
 scenario is tested by `MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten`, covering
 `AgentControl-MainWindowViewModel-ChangeAppliedWhenSaved`.
 
-**MainWindowViewModel_FailedSave_ChangesNothing**: Tested by `MainWindowViewModelPersistenceTests.cs` (the
-`RealProcess` collection, because every card's eager refresh spawns git). A failing save is produced by making
+**MainWindowViewModel_FailedSave_ChangesNothing**: Tested by `MainWindowViewModelPersistenceTests.cs` (the `RealProcess`
+collection, because every card's background repo-state read spawns git). A failing save is produced by making
 `settings.json` in the configuration folder a directory, which no write can replace; deleting that directory makes
 saving work again. With saving broken, each change is made and nothing is checked to have changed: a favorite (card,
-settings and displayed list as before), a move to a group, a card color, a recorded launch (the stamp stays unset and
-no launch is recorded), a collapse (through the API, and through the header's button), a group rename and a group
-removal (the group, its members and its collapsed state as before), adding a repo (nothing added to the cards, the
-displayed list or the settings) and removing a repo (still listed, the settings unchanged). This scenario is tested by
+settings and displayed list as before), a move to a group, a card color, a recorded launch (the stamp stays unset and no
+launch is recorded), a collapse (through the API, and through the header's button), a group rename and a group removal
+(the group, its members and its collapsed state as before), adding a repo (nothing added to the cards, the displayed
+list or the settings) and removing a repo (still listed, the settings unchanged). This scenario is tested by
 `MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt`,
 `MainWindowViewModel_MoveToGroupSaveFails_ChangesNothingAndReports`,
 `MainWindowViewModel_CardColorSaveFails_ChangesNothingAndReports`,
 `MainWindowViewModel_LaunchRecordSaveFails_StampNotRecordedAndReports`,
-`MainWindowViewModel_CollapseSaveFails_SectionStaysExpanded`,
-`MainWindowViewModel_RenameGroupSaveFails_GroupUnchanged`,
+`MainWindowViewModel_CollapseSaveFails_SectionStaysExpanded`, `MainWindowViewModel_RenameGroupSaveFails_GroupUnchanged`,
 `MainWindowViewModel_RemoveGroupSaveFails_GroupUnchanged`, `MainWindowViewModel_AddRepoSaveFails_NothingAdded` and
 `MainWindowViewModel_RemoveRepoSaveFails_RepoStaysListedAndWorking`, covering
 `AgentControl-MainWindowViewModel-FailedSaveChangesNothing`.

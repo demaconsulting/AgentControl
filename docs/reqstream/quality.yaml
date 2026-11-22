@@ -138,3 +138,5 @@ sections:
           affected.
         children:
           - AgentControl-Utilities-BlockingCallGuard
+        tests:
+          - HeadlessTestApp_UiThread_GitCallIsRefusedAndRecorded

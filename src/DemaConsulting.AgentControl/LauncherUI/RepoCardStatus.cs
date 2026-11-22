@@ -63,5 +63,12 @@ internal enum RepoCardStatus
     ///     be read) so it is not known whether an upgrade exists (grey); the card does not claim
     ///     "up to date" on the strength of a check that did not succeed.
     /// </summary>
-    Unknown
+    Unknown,
+
+    /// <summary>
+    ///     The card's repo state (its folder, pin file and Git state) has not been read yet, so
+    ///     nothing that depends on it - a missing folder, the pin, an upgrade - is known (grey). The
+    ///     card is shown at once and filled in when the background read lands.
+    /// </summary>
+    Refreshing
 }

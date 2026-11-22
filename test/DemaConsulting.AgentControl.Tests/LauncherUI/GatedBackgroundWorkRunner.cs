@@ -36,14 +36,15 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 internal sealed class GatedBackgroundWorkRunner : IBackgroundWorkRunner
 {
     /// <summary>
-    ///     Opens when <see cref="Release"/> is called.
+    ///     Opens when <see cref="Release"/> is called; replaced by a closed one by <see cref="Close"/>.
     /// </summary>
-    private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
-    ///     Completes the first time a piece of work reaches the gate.
+    ///     Completes the first time a piece of work reaches the gate (since the last
+    ///     <see cref="Close"/>).
     /// </summary>
-    private readonly TaskCompletionSource _firstCall = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TaskCompletionSource _firstCall = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
     ///     How many pieces of work were handed over.
@@ -72,14 +73,27 @@ internal sealed class GatedBackgroundWorkRunner : IBackgroundWorkRunner
     public int MaxInFlight => Volatile.Read(ref _maxInFlight);
 
     /// <summary>
-    ///     Gets a task that completes once the first piece of work has reached the gate.
+    ///     Gets a task that completes once the first piece of work has reached the gate (since the last
+    ///     <see cref="Close"/>).
     /// </summary>
-    public Task FirstCall => _firstCall.Task;
+    public Task FirstCall => Volatile.Read(ref _firstCall).Task;
 
     /// <summary>
     ///     Opens the gate: held work, and every later piece of work, runs.
     /// </summary>
-    public void Release() => _gate.TrySetResult();
+    public void Release() => Volatile.Read(ref _gate).TrySetResult();
+
+    /// <summary>
+    ///     Closes the gate again, so work handed over from now on is held until the next
+    ///     <see cref="Release"/> (work released earlier is not affected), and <see cref="FirstCall"/>
+    ///     waits for the next piece. Lets a test let one phase run (for example the window's startup
+    ///     reads) and hold the next one. <see cref="Calls"/> and <see cref="MaxInFlight"/> keep counting.
+    /// </summary>
+    public void Close()
+    {
+        Volatile.Write(ref _firstCall, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+        Volatile.Write(ref _gate, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+    }
 
     /// <inheritdoc />
     public async Task<T> RunAsync<T>(Func<T> work, CancellationToken cancellationToken)
@@ -90,10 +104,11 @@ internal sealed class GatedBackgroundWorkRunner : IBackgroundWorkRunner
         Interlocked.Increment(ref _calls);
         var inFlight = Interlocked.Increment(ref _inFlight);
         UpdateMaxInFlight(inFlight);
-        _firstCall.TrySetResult();
+        var gate = Volatile.Read(ref _gate);
+        Volatile.Read(ref _firstCall).TrySetResult();
         try
         {
-            await _gate.Task.ConfigureAwait(false);
+            await gate.Task.ConfigureAwait(false);
             return await Task.Run(work, CancellationToken.None).ConfigureAwait(false);
         }
         finally
@@ -119,5 +134,147 @@ internal sealed class GatedBackgroundWorkRunner : IBackgroundWorkRunner
 
             max = seen;
         }
+    }
+}
+
+/// <summary>
+///     A test <see cref="IBackgroundWorkRunner"/> that holds every piece of background work until the
+///     test releases it, one piece at a time in the order the pieces arrived, so a test can tell which
+///     read the shared refresh queue started next (a queue with one slot hands over one read at a
+///     time).
+/// </summary>
+/// <remarks>
+///     <see cref="WaitForCallsAsync"/> waits until a given number of pieces were handed over;
+///     <see cref="ReleaseNext"/> lets the oldest held piece run; <see cref="ReleaseAll"/> lets every held
+///     piece, and every later one, run. Released work runs on the thread pool. Safe for concurrent use.
+/// </remarks>
+internal sealed class SteppedBackgroundWorkRunner : IBackgroundWorkRunner
+{
+    /// <summary>
+    ///     Guards every field below.
+    /// </summary>
+    private readonly Lock _lock = new();
+
+    /// <summary>
+    ///     The gates of the pieces that are held, oldest first.
+    /// </summary>
+    private readonly Queue<TaskCompletionSource> _held = new();
+
+    /// <summary>
+    ///     The tests waiting for a number of pieces to have been handed over.
+    /// </summary>
+    private readonly List<(int Count, TaskCompletionSource Reached)> _waiters = [];
+
+    /// <summary>
+    ///     How many pieces were handed over.
+    /// </summary>
+    private int _calls;
+
+    /// <summary>
+    ///     Whether <see cref="ReleaseAll"/> was called, after which nothing is held.
+    /// </summary>
+    private bool _allReleased;
+
+    /// <summary>
+    ///     Gets how many pieces of work were handed over so far.
+    /// </summary>
+    public int Calls
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _calls;
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Waits until at least <paramref name="count"/> pieces of work were handed over.
+    /// </summary>
+    /// <param name="count">The number of pieces.</param>
+    /// <returns>A task that completes once that many pieces arrived.</returns>
+    public Task WaitForCallsAsync(int count)
+    {
+        lock (_lock)
+        {
+            if (_calls >= count)
+            {
+                return Task.CompletedTask;
+            }
+
+            var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _waiters.Add((count, reached));
+            return reached.Task;
+        }
+    }
+
+    /// <summary>
+    ///     Lets the oldest held piece of work run.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when no piece is held.</exception>
+    public void ReleaseNext()
+    {
+        TaskCompletionSource gate;
+        lock (_lock)
+        {
+            gate = _held.Count > 0
+                ? _held.Dequeue()
+                : throw new InvalidOperationException("No background work is held.");
+        }
+
+        gate.TrySetResult();
+    }
+
+    /// <summary>
+    ///     Lets every held piece of work, and every later one, run.
+    /// </summary>
+    public void ReleaseAll()
+    {
+        List<TaskCompletionSource> gates;
+        lock (_lock)
+        {
+            _allReleased = true;
+            gates = [.. _held];
+            _held.Clear();
+        }
+
+        foreach (var gate in gates)
+        {
+            gate.TrySetResult();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<T> RunAsync<T>(Func<T> work, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(work);
+
+        // Counted and held (unless everything was released), announcing the count to waiting tests
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        List<TaskCompletionSource> reached;
+        lock (_lock)
+        {
+            _calls++;
+            if (_allReleased)
+            {
+                gate.TrySetResult();
+            }
+            else
+            {
+                _held.Enqueue(gate);
+            }
+
+            reached = [.. _waiters.Where(waiter => waiter.Count <= _calls).Select(waiter => waiter.Reached)];
+            _waiters.RemoveAll(waiter => waiter.Count <= _calls);
+        }
+
+        foreach (var waiter in reached)
+        {
+            waiter.TrySetResult();
+        }
+
+        await gate.Task.ConfigureAwait(false);
+        return await Task.Run(work, CancellationToken.None).ConfigureAwait(false);
     }
 }

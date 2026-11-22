@@ -36,7 +36,7 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 ///     Each test uses unique temporary repo and configuration directories, and a fake process starter
 ///     so a launch starts nothing. A failing save is produced by making <c>settings.json</c> a
 ///     directory (see <c>Fixture.BreakSaving</c>). Runs in the <c>RealProcess</c> collection because
-///     every card's eager refresh spawns real git subprocesses.
+///     every card's background repo-state read spawns real git subprocesses.
 /// </remarks>
 [Collection("RealProcess")]
 public sealed class RepoOrderingTests : IDisposable

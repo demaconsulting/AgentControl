@@ -37,7 +37,7 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 /// </summary>
 /// <remarks>
 ///     Runs in the <c>RealProcess</c> collection because showing cards spawns real git subprocesses
-///     as part of each card's eager refresh.
+///     as part of each card's background repo-state read.
 /// </remarks>
 [Collection("RealProcess")]
 public sealed class RepoGroupWindowTests : IDisposable
@@ -1060,6 +1060,9 @@ public sealed class RepoGroupWindowTests : IDisposable
         var window = new MainWindow { DataContext = viewModel, Height = 1600 };
         window.Show();
         Dispatcher.UIThread.RunJobs();
+
+        // The cards' repo state is read in the background; the tests act on settled cards
+        HeadlessTestApp.RunJobsUntilRepoStateSettled(viewModel);
         return (window, viewModel);
     }
 

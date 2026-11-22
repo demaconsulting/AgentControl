@@ -747,6 +747,14 @@
                                             Text="checking for updates..."
                                             FontSize="12" FontStyle="Italic" Opacity="0.7"
                                             VerticalAlignment="Center" />
+                                <!-- The card's repo state (folder, pin file, Git state) is queued or being
+                                     read: the values shown are the previous ones, or not known yet -->
+                                <TextBlock Name="RepoRefreshingText"
+                                            AutomationProperties.AutomationId="RepoRefreshingText"
+                                            IsVisible="{Binding IsRefreshing}"
+                                            Text="refreshing..."
+                                            FontSize="12" FontStyle="Italic" Opacity="0.7"
+                                            VerticalAlignment="Center" />
 
                                 <!-- No agent package pinned: clicking selects one -->
                                 <Button Name="NoPackageChip"
@@ -763,16 +771,18 @@
                                     </Border>
                                 </Button>
 
-                                <!-- Branch -->
+                                <!-- Branch: a dimmed "..." until the card's repo state was read, so a branch
+                                     that is not known yet never reads as "no branch" -->
                                 <Border Name="BranchChip"
                                          Classes="Chip"
-                                         IsVisible="{Binding HasBranch}"
+                                         Classes.unknown="{Binding IsBranchUnknown}"
+                                         IsVisible="{Binding ShowBranchChip}"
                                          ToolTip.Tip="{Binding BranchTooltip}">
                                     <StackPanel Orientation="Horizontal" Spacing="4">
                                         <materialIcons:MaterialIcon Kind="SourceBranch" />
                                         <TextBlock Name="CurrentBranchText"
                                                     AutomationProperties.AutomationId="CurrentBranchText"
-                                                    Text="{Binding CurrentBranch}" />
+                                                    Text="{Binding BranchChipText}" />
                                     </StackPanel>
                                 </Border>
 

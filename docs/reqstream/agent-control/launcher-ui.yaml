@@ -2525,3 +2525,63 @@ sections:
           - AgentControl-RepoCardViewModel-GitTimeoutShown
         tests:
           - MainWindow_CardShown_GitHangs_CardSaysGitWasStopped
+
+      - id: AgentControl-LauncherUI-StartupCardsAtOnce
+        title: >-
+          The LauncherUI subsystem shall show the window and the repo cards at once from the
+          settings, without waiting for the disk or git, read each card's repo state in the
+          background - the cards shown first - with each card marked as refreshing until its state
+          was read, show the progress of those reads under the app bar, and check each card's
+          upgrade availability once its state was read.
+        justification: |
+          Reading every repo before the window appeared made the tool look hung at start for a long
+          list or a slow or offline drive. The user must get the window at once, see which cards are
+          still being read, and see the cards fill in.
+        children:
+          - AgentControl-MainWindowViewModel-StartupReadsQueued
+          - AgentControl-MainWindowViewModel-BackgroundUpgradeCheck
+          - AgentControl-RepoCardViewModel-RefreshingState
+        tests:
+          - MainWindow_Startup_GitHeld_WindowRespondsCardsShowRefreshingAndStrip
+
+      - id: AgentControl-LauncherUI-RefreshingCardState
+        title: >-
+          The LauncherUI subsystem shall show a card whose repo state has not been read yet as
+          refreshing, with its branch shown as not known yet and without the "No agent package" chip
+          or the committed-agent-files warning, and show the card's facts once its state was read.
+        justification: |
+          A card shown before its state is read must not state as facts what is only not known yet
+          ("no branch", "no agent package", a healthy status).
+        children:
+          - AgentControl-RepoCardViewModel-RefreshingState
+        tests:
+          - MainWindow_Startup_GitHeld_WindowRespondsCardsShowRefreshingAndStrip
+
+      - id: AgentControl-LauncherUI-ActionWaitsForCardState
+        title: >-
+          The LauncherUI subsystem shall make an action on a card (Launch, Pull, Upgrade, Select
+          Package) whose repo state is waiting to be read or being read wait for that read - moved
+          ahead of the other reads, with the card busy and the window usable - and act on what it
+          found.
+        justification: |
+          A card is shown before its state is read; an action must neither block the window nor act
+          on state that is unknown or about to change.
+        children:
+          - AgentControl-RepoCardViewModel-PromoteAndAwait
+        tests:
+          - MainWindow_LaunchWhileCardStateHeld_WaitsWithoutBlockingThenLaunches
+
+      - id: AgentControl-LauncherUI-RefreshThroughQueue
+        title: >-
+          The LauncherUI subsystem shall read a card's repo state for its Refresh (the card menu's
+          Refresh and the "Sign-in needed" chip) and after a Git Pull ahead of the background reads,
+          joined with a read of the card that already waits, show the card as refreshing meanwhile,
+          check the package sources only after that read, and keep the window usable.
+        justification: |
+          The user asked for these refreshes, so they must not wait behind the background reads of
+          other repos, must not read a repo twice, and must not freeze the window with git.
+        children:
+          - AgentControl-RepoCardViewModel-RefreshQueuedAtUserAction
+          - AgentControl-RepoCardViewModel-PostPullRefreshQueued
+        tests:
+          - MainWindow_SignInChip_RefreshesThroughQueue

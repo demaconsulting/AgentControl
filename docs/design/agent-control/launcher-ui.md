@@ -265,11 +265,11 @@ outcome of the last Launch/Pull/Upgrade action (`StatusMessage`) is shown
 under the repo path; a repo whose folder is missing offers no upgrade; the Launch button is labeled with a
 short name of the configured agent tool
 (falling back to plain "Launch" for a long or unknown name) and Git Pull is an item of the card's "..." menu
-(`AgentControl-LauncherUI-RepoCardChips`). A lightweight `RefreshCheap` path (branch
-resolution, cached committed-files badge, pin and source problem - it never reads a package
-source) is kept separate from the full `Refresh` path (which also
-checks working-tree cleanliness) so the main window's frequent UI refresh does not eagerly invoke a
-git subprocess for every card. Removal never mutates state directly: `RemoveCommand` raises
+(`AgentControl-LauncherUI-RepoCardChips`). A lightweight read of the card's *cheap facts* (folder, pin, branch,
+cached committed-files badge and source problem - it never reads a package source) is kept separate from the
+working-tree check (`git status`, which scans the whole tree), and both run through the shared refresh queue off the
+UI thread (see *Background work and the global progress strip*); only the full `Refresh` reads both and then checks
+the package sources. Removal never mutates state directly: `RemoveCommand` raises
 `RemoveRequested` and `MainWindowViewModel` shows a `ConfirmationWindow`, removing the card only if
 the user confirms (`AgentControl-LauncherUI-RemoveRepo`).
 
@@ -280,12 +280,12 @@ card's own changes are saved, see below), subscribes to the card events that cha
 launch never moves a card); the window's code-behind subscribes to
 the events that need a dialog.
 
-- *`RepoCardViewModel` and `RepoImageLocator`*: the card is the only caller. `RefreshCheap` starts the picture
-  refresh on a worker thread, which calls `RepoImageLocator.Find` for the repo's root and, when the returned
+- *`RepoCardViewModel` and `RepoImageLocator`*: the card is the only caller. Applying the card's cheap facts starts the
+  picture refresh on a worker thread, which calls `RepoImageLocator.Find` for the repo's root and, when the returned
   `RepoImageFile` differs from the one already shown, decodes it (`RepoImageLocator.Decode` by default; the decoder is
   an injectable delegate so tests need no Avalonia platform). The `RepoImageFile` is the cache key, the card owns and
-  disposes the `Bitmap` it publishes in `RepoImage`, and `Retire` clears it. The locator knows nothing of cards;
-  any failure reaches the card as "no picture".
+  disposes the `Bitmap` it publishes in `RepoImage`, and `Retire` clears it. The locator knows nothing of cards; any
+  failure reaches the card as "no picture".
 - *`MainWindowViewModel` and `RepoGroupHeaderViewModel`*: the main view-model creates, and keeps one instance per
   section (Favorites, each group, Ungrouped), and updates its `Count`, collapsed state, toggle availability, group
   color (`UpdateColor`) and move availability (`UpdateOrder`) in place
@@ -400,16 +400,63 @@ context). The view models never touch the dispatcher and need no locking; the on
 thread touches, the per-card `CommittedAgentFilesCache`, is lock-guarded
 (`AgentControl-GitIntegration-QueriesFromAnyThread`).
 
-- *One shared queue* (`AgentControl-LauncherUI-BoundedRepoReads`): every lazy repo read - an add's folder checks, the
-  cards' refresh after a settings save, the working-tree check of a card shown, a re-added repo's facts and the
-  working-tree check after a Refresh or a Pull - goes through `RepoRefreshQueue` instead of starting its own tasks, so
+- *One shared queue* (`AgentControl-LauncherUI-BoundedRepoReads`): every lazy repo read - the cards' startup reads, an
+  add's folder checks, the cards' refresh after a settings save, the working-tree check of a card shown, a re-added
+  repo's facts, the repo state of a Refresh (and of the "Sign-in needed" chip), of a Pull and after an untrack, and the
+  read an action waits for - goes through `RepoRefreshQueue` instead of starting its own tasks, so
   the number of git processes is independent of the number of repos and callers. The limit is two: one read is at
   most one git process; two keep the work moving when one repo is slow (a network share, a huge tree, a git that hangs
   until its time limit), more would only compete for the same disk. A read already waiting for the same repo and kind
   is joined, not queued again; a user action goes before a card on screen, which goes before background work; a card
   shows that it is refreshing (`RepoCardViewModel.IsRefreshing`) while one of its reads waits or runs. The total
-  process budget without a user action is the queue's two reads plus the upgrade checks' own limit of four source
-  reads (each at most one git process for a Git source); a user action adds at most one process per busy card.
+  process budget without a user action is the queue's two reads plus the upgrade checks' one shared limit of four
+  source reads (each at most one git process for a Git source; see *Upgrade checks* below); a user action adds at most
+  one process per busy card.
+- *Start-up* (`AgentControl-LauncherUI-StartupCardsAtOnce`): the `MainWindowViewModel` constructor builds the cards from
+  the settings alone - no disk access and no git - so the window appears at once; the pinned package the settings
+  remember is shown until the pin file is read (even that read can take tens of seconds on an offline share). The
+  constructor then queues every card's cheap facts at background priority, in display order (the cards shown, top first,
+  then the collapsed and filtered-out ones), counted in the progress wave, so the strip shows "Refreshing repositories
+  {completed} of {total}..." without Cancel. A card the window realizes moves its read ahead of the background ones
+  (`Visible`), and its working-tree check follows; the list only realizes the rows it shows, so "visible first" comes
+  from the realized rows and the display order without tracking the scroll position. The only work left before the
+  window exists is loading the settings file (with a one-time order seeding save), creating the log folder and the
+  credential profile check: one small local file or folder each, needed to build the window.
+- *The card's refreshing state* (`AgentControl-LauncherUI-RefreshingCardState`): until a card's cheap facts were first
+  applied (`RepoCardViewModel.HasRepoState`), the card knows nothing git-derived, so it does not show it as a fact: its
+  status is `Refreshing` (grey accent, "Refreshing" for screen readers), its branch chip shows a dimmed `...`
+  (`ShowBranchChip`, `BranchChipText`, `IsBranchUnknown` with the `Chip.unknown` style), the "No agent package" chip
+  and the committed-files warning are hidden, and the working tree is "not checked yet". The italic "refreshing..."
+  indicator (`RepoRefreshingText`, next to "checking for updates...") is shown while any of the card's reads waits or
+  runs. A later re-read keeps the known values with the indicator next to them, so the accent does not flicker.
+- *Actions wait for the card's state* (`AgentControl-LauncherUI-ActionWaitsForCardState`): Launch, Pull, Upgrade and
+  Select Package (the apply) take the card's busy row first, then promote the card's waiting reads to the front of the
+  queue and await them (`EnsureCurrentRepoStateAsync`; a card whose state was never read reads it now), and decide
+  again on what was found: a missing folder, a working tree git now reports dirty (Pull) or a pin other than the one
+  shown (Upgrade) stops the action with a status message. A card whose state is known and has nothing pending acts at
+  once, with no git round trip of its own. This was chosen over re-reading on every action (an extra git call per
+  click for state that is current) and over refusing the action until the state is known (the user would have to
+  click again): the window is never blocked, the wait is bounded by the reads already running and git's time limit,
+  and no action uses unknown or stale-pending data. The launch-time committed-files decision and the pre-launch sync
+  therefore see the card's fresh state. Because the card is busy meanwhile, the background upgrade checks skip it.
+- *Refresh and Pull through the queue* (`AgentControl-LauncherUI-RefreshThroughQueue`): a card's Refresh (the menu
+  item and the "Sign-in needed" chip) reads its cheap facts and working tree through the queue at `UserAction`
+  priority - ahead of background work, joined with a read of the card that already waits - and only then checks the
+  package sources (allowing the sign-in prompt); a missing folder reads its cheap facts first, so a folder that came
+  back is also checked for its working tree. The refresh after a Pull (and the working-tree check after a canceled
+  one) and the re-read of git's answers after the card untracked agent folders go through the queue the same way,
+  while the card is still busy. No git runs on the UI thread for any of them.
+- *Upgrade checks*: every background upgrade check (start-up, added repos, after Settings, the periodic round) waits
+  for the card's pending cheap-facts read before it takes a slot, because applying cheap facts makes a check in flight
+  irrelevant (it was started against the old pin); the slots are one `SemaphoreSlim` of four shared by all of these
+  checks, so overlapping checks do not multiply the source reads. The busy-card skip is unchanged: whether a card is
+  busy is read right before its check starts, with no await in between; the periodic round and the re-check after
+  Settings also skip a card whose state was never read.
+- *Regression guard*: `BlockingCallGuard` is switched on for the headless test session's UI thread
+  (`HeadlessTestApp`), so a git command (`GitClient`) made on the UI thread fails the test that made it; the
+  synchronous `RefreshCheap`/`RefreshDirtyStatus` remain only for callers off the UI thread (tests), and the
+  synchronous test-only adds (`AddRepo`, `AddRepoToGroup`, `AddRepos`) check only the folder and leave the card's
+  state to the queue.
 - *A git that hangs* (`AgentControl-LauncherUI-GitTimeoutShown`): every git command runs under a time limit
   (`GitClient`, 60 seconds for the local repository); a command past it is stopped and the card's status message says
   that git did not answer and was stopped, that the repo's Git state is unknown and that Refresh tries again, until a
@@ -455,9 +502,7 @@ thread touches, the per-card `CommittedAgentFilesCache`, is lock-guarded
   to the visual tree (priority `Visible`, and the card's other waiting reads are promoted), after a Refresh and after
   a Pull (also a canceled one), the card runs `git status` through the shared queue (`RefreshRepoStateAsync`); until it
   answers the card keeps its previous state, and a card never
-  checked shows its Git status as not checked yet, never as having uncommitted changes. Start-up is otherwise
-  unchanged: the constructor still runs every card's cheap refresh before the window exists, so no strip is shown at
-  start-up; only the on-screen working-tree checks after it run in the background.
+  checked shows its Git status as not checked yet, never as having uncommitted changes.
 - *The strip*: `GlobalProgressViewModel` (see its design) shows one operation at a time - the most recently begun one
   still running - so an add started while the cards refresh is shown, and the refresh again when the add ends.
 

@@ -640,8 +640,11 @@ an unwanted or repeated file write.
    `App.OnFrameworkInitializationCompleted` loads settings via `SettingsStore.Load` (using
    the parsed configuration-directory override when present) and shows the main window,
    backed by `MainWindowViewModel`, which populates a `RepoCardViewModel` for each recent
-   repo (`AgentControl-System-Startup`).
-3. On each repo card's lightweight refresh, `RepoCardViewModel` reads the pin file
+   repo from the settings alone - no disk access and no git - so the window appears at once; every card's repo state
+   is then read in the background through the shared `RepoRefreshQueue` (two reads at a time, the cards shown first),
+   each card marked as refreshing and the strip under the app bar counting the reads, and each card's upgrade check
+   follows its read (`AgentControl-System-Startup`).
+3. On each repo card's lightweight refresh (a queued read, off the UI thread), `RepoCardViewModel` reads the pin file
    (`RepoPinStore.Load`), resolves the current branch and committed-agent-files badge
    (`GitClient`, `CommittedAgentFilesCache`), and checks upgrade availability
    (`PackageSourceRegistry`/`PackageVersionCache`) by asking the user's configured sources which of them offer the
@@ -653,7 +656,10 @@ an unwanted or repeated file write.
    (`AgentControl-System-ResponsiveOperations`). In the same refresh it asks `RepoImageLocator` on a worker thread for
    the repo's picture (an untrusted file; see *Risk Control Measures*), and a repo whose folder is missing is marked
    so, keeping only the "Check again" refresh available (`AgentControl-System-MissingRepoRecheck`).
-4. User actions on a card dispatch to the relevant subsystem: Pull to `GitClient.Pull` (gated on a clean working tree,
+4. User actions on a card first wait, without blocking the window, for the card's repo-state read that is queued or
+   running (moved to the front of the queue), then dispatch to the relevant subsystem; Refresh reads the card's state
+   through the queue ahead of the background reads and then checks the sources
+   (`AgentControl-System-ResponsiveRepoListWork`): Pull to `GitClient.Pull` (gated on a clean working tree,
    `AgentControl-System-Pull`); Launch to `RepoCardViewModel`'s pre-launch check
    (`PackageContentExtractor.HasInstalledFiles`, then `PackageContentIdentity.ComputeInstalledFilesIdentity` compared
    with the pin's identity - no package access when the files match; a silent install, a keep-or-update question or a
@@ -761,9 +767,10 @@ an unwanted or repeated file write.
   cards after a settings save, the working-tree check of shown cards) run off the UI thread through an injectable
   background runner and hand back immutable results; every change to view-model state, the settings and the list is
   made on the UI thread in the continuation, so view models need no locking and no dispatcher. Bulk work shows its
-  progress in one global strip under the app bar (`AgentControl-System-ResponsiveRepoListWork`). The start-up pass
-  that reads every card before the window exists is unchanged; only the on-screen working-tree checks after it run in
-  the background.
+  progress in one global strip under the app bar (`AgentControl-System-ResponsiveRepoListWork`). At start-up the
+  cards are built from the settings alone and shown at once (`AgentControl-System-Startup`); every read of
+  a repo's state - at start-up, after an add or a settings save, for a card coming on screen, and for Refresh, Pull and
+  the card actions - goes through the one shared `RepoRefreshQueue`, which runs at most 2 reads at a time.
 - Only Git repositories are tracked: a folder is added as a repo only when it is the top folder of a Git repository
   (a `.git` folder or file directly in it), because a tracked repo is synced, pulled and launched as a Git working tree
   and the agent folders must go to its top (`AgentControl-System-AddGitReposOnly`).

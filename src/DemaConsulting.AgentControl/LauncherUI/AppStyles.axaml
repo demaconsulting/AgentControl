@@ -630,6 +630,11 @@
         <Setter Property="BorderBrush" Value="{DynamicResource ChipRedBorder}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource ChipRedForeground}" />
     </Style>
+    <!-- A chip whose value is not known yet (the card's repo state is still being read): dimmed, so
+         its placeholder never reads as a fact -->
+    <Style Selector="Border.Chip.unknown">
+        <Setter Property="Opacity" Value="0.6" />
+    </Style>
     <Style Selector="Border.Chip TextBlock">
         <Setter Property="FontSize" Value="12" />
         <Setter Property="VerticalAlignment" Value="Center" />

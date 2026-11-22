@@ -52,7 +52,7 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 ///     dropped the same way, with a data transfer that carries storage items for their paths. The real
 ///     operating-system drag is
 ///     covered only by the UI tests. Runs in the <c>RealProcess</c> collection because showing cards
-///     spawns real git subprocesses as part of each card's eager refresh.
+///     spawns real git subprocesses as part of each card's background repo-state read.
 /// </remarks>
 [Collection("RealProcess")]
 public sealed class RepoReorderWindowTests : IDisposable
@@ -605,6 +605,7 @@ public sealed class RepoReorderWindowTests : IDisposable
             restarted = new MainWindow { DataContext = viewModel, Width = 900, Height = 1600 };
             restarted.Show();
             Dispatcher.UIThread.RunJobs();
+            HeadlessTestApp.RunJobsUntilRepoStateSettled(viewModel);
 
             // Assert
             Assert.Equal(["d", "b", "c", "a"], expected);
@@ -846,6 +847,7 @@ public sealed class RepoReorderWindowTests : IDisposable
             restarted = new MainWindow { DataContext = viewModel, Width = 900, Height = 1600 };
             restarted.Show();
             Dispatcher.UIThread.RunJobs();
+            HeadlessTestApp.RunJobsUntilRepoStateSettled(viewModel);
 
             // Assert
             Assert.Equal(["Gamma", "Beta", "Alpha"], expected);
@@ -1758,6 +1760,9 @@ public sealed class RepoReorderWindowTests : IDisposable
         var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 1600 };
         window.Show();
         Dispatcher.UIThread.RunJobs();
+
+        // The cards' repo state is read in the background; the tests act on settled cards
+        HeadlessTestApp.RunJobsUntilRepoStateSettled(viewModel);
         return (window, viewModel, configDirectory);
     }
 
