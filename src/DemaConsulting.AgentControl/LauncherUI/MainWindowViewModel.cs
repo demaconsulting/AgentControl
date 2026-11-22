@@ -325,6 +325,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     internal static readonly TimeSpan SettingsFlushTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
+    ///     The longest the window's closing waits for the settings that are not written yet:
+    ///     <see cref="SettingsFlushTimeout"/> unless a test supplied a shorter one (see the
+    ///     constructor).
+    /// </summary>
+    private readonly TimeSpan _settingsFlushTimeout;
+
+    /// <summary>
     ///     Writes the settings in the background, one write at a time, the latest state winning; every
     ///     settings save of the window goes through it, so none runs on the UI thread. See the
     ///     constructor.
@@ -565,11 +572,16 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     are written in the background, or <see langword="null"/> for
     ///     <see cref="SettingsWriter.DefaultDelay"/>; measured on <paramref name="timeProvider"/>. Create
     ///     the view model on the UI thread: a failed background write is reported there.</param>
+    /// <param name="settingsFlushTimeout">The longest the window's closing waits for the settings
+    ///     that are not written yet (see <see cref="Dispose"/>), or <see langword="null"/> for
+    ///     <see cref="SettingsFlushTimeout"/>. Supplied so tests can close without waiting for a write
+    ///     they hold.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="settings"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when
     ///     <paramref name="upgradeRecheckInterval"/> is zero or negative, or
-    ///     <paramref name="settingsWriteDelay"/> is negative.</exception>
+    ///     <paramref name="settingsWriteDelay"/> or <paramref name="settingsFlushTimeout"/> is
+    ///     negative.</exception>
     public MainWindowViewModel(
         AppSettings settings,
         StartupOptions? startupOptions = null,
@@ -585,14 +597,17 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IBackgroundWorkRunner? backgroundWork = null,
         RepoRefreshQueue? refreshQueue = null,
         GitClientTimeouts? gitTimeouts = null,
-        TimeSpan? settingsWriteDelay = null)
+        TimeSpan? settingsWriteDelay = null,
+        TimeSpan? settingsFlushTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(
             upgradeRecheckInterval ?? DefaultUpgradeRecheckInterval, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfLessThan(settingsWriteDelay ?? TimeSpan.Zero, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfLessThan(settingsFlushTimeout ?? TimeSpan.Zero, TimeSpan.Zero);
 
         _settings = settings;
+        _settingsFlushTimeout = settingsFlushTimeout ?? SettingsFlushTimeout;
 
         // A first run, or settings built in memory, still have to get the order older versions
         // displayed; a stored user order is left alone
@@ -2553,11 +2568,14 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     waits for it at most <see cref="SettingsFlushTimeout"/> in all. When a confirmed save (an
     ///     add, the Settings window's Save) is still running and changes were made meanwhile, that wait
     ///     first covers the confirmed write: the changes made meanwhile are then written together with
-    ///     the confirmed save's change once it was written (a confirmed save that failed or is still
-    ///     running is left out, so nothing that was not saved is written). That is the one wait for the
-    ///     disk left on the UI thread, and it comes after the window has closed, so no interaction is
-    ///     held up; the writes never need the UI thread, so the wait cannot deadlock. Settings that
-    ///     could not be written in time are logged, because nobody can be told any more.
+    ///     the confirmed save's change once it was written (a confirmed save that failed is left out,
+    ///     so nothing that was not saved is written). When a confirmed write is still running after
+    ///     the whole wait, the changes made meanwhile are not written at all (and that is logged): a
+    ///     snapshot written after that write would not hold its change and would take it out of the
+    ///     file again. That is the one wait for the disk left on the UI thread, and it comes after the
+    ///     window has closed, so no interaction is held up; the writes never need the UI thread, so the
+    ///     wait cannot deadlock. Settings that could not be written in time are logged, because nobody
+    ///     can be told any more.
     /// </remarks>
     public void Dispose()
     {
@@ -2606,19 +2624,30 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var pending = _runningConfirmedSaves.ToArray();
             if (pending.Length > 0)
             {
-                WaitQuietly(Task.WhenAll(pending.Select(save => save.Write)), SettingsFlushTimeout);
+                WaitQuietly(Task.WhenAll(pending.Select(save => save.Write)), _settingsFlushTimeout);
             }
 
-            var snapshot = _settings.CreateSnapshot();
-            foreach (var save in pending.Where(save => save.Write.IsCompletedSuccessfully))
+            if (pending.Any(save => !save.Write.IsCompleted))
             {
-                snapshot = save.ApplyTo(snapshot);
+                // A confirmed write is still running: a snapshot written after it would not hold its
+                // change and would take it out of the file again, so the changes made meanwhile are
+                // left out instead
+                Logger.LogWarning(
+                    "The settings changes made while a save was running were not written when the window closed, because that save had not ended");
             }
+            else
+            {
+                var snapshot = _settings.CreateSnapshot();
+                foreach (var save in pending.Where(save => save.Write.IsCompletedSuccessfully))
+                {
+                    snapshot = save.ApplyTo(snapshot);
+                }
 
-            _settingsWriter.Schedule(snapshot);
+                _settingsWriter.Schedule(snapshot);
+            }
         }
 
-        var remaining = SettingsFlushTimeout - Stopwatch.GetElapsedTime(started);
+        var remaining = _settingsFlushTimeout - Stopwatch.GetElapsedTime(started);
         if (remaining < TimeSpan.Zero)
         {
             remaining = TimeSpan.Zero;

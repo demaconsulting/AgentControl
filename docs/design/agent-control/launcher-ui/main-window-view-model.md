@@ -284,11 +284,14 @@ written (`-AddKeepsOtherChanges`).
 waits for the running confirmed writes, then takes a snapshot of the live settings and applies to it the change of
 every confirmed save whose write succeeded (`ApplyTo`) - their adoption can no longer run on the closing UI thread -
 and schedules that snapshot, so the close never writes the changes made meanwhile over the add without it. A
-confirmed save that failed or is still running after the wait is left out, so nothing that was not saved is written,
-and one whose adoption already ran has left the list, so nothing is applied twice. The writes run on a worker thread
-and the closing UI thread only waits, which is the one wait for the disk left on the UI thread and comes after the
-window has closed; the remaining flush wait is what is left of the budget, and settings that could not be written in
-time are logged (`-SettingsFlushedOnClose`).
+confirmed save that failed is left out, so nothing that was not saved is written, and one whose adoption already ran
+has left the list, so nothing is applied twice. When a confirmed write is still running after the whole wait, no
+snapshot is scheduled at all and a warning is logged: the writer would write it after that write, without its change,
+and take the add out of the file again, so the changes made meanwhile are the lesser loss. The writes run on a worker
+thread and the closing UI thread only waits, which is the one wait for the disk left on the UI thread and comes after
+the window has closed; the remaining flush wait is what is left of the budget, and settings that could not be written
+in time are logged (`-SettingsFlushedOnClose`). The constructor's `settingsFlushTimeout` lets a test shorten the
+budget, so the case of a write still running after it is tested without waiting.
 
 *Test seam*: `FlushSettingsAsync()` (internal) flushes the writer and completes when the writes accepted so far have
 ended, so a test reads the settings file only once it holds every change.

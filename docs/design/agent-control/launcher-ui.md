@@ -390,7 +390,8 @@ Settings window stays open with the reason. A change made in the window while a 
 and written after it, together with it, so the file never loses either. When the window closes,
 `MainWindowViewModel.Dispose` writes what is not written yet, on a worker thread, waiting at most five seconds; a
 change made while an add was still saving at the close is written together with the add once the add's write
-succeeded, so the close never takes the add out of the file again. When a
+succeeded, and left out (and logged) when the add's write is still running after the wait, so the close never takes
+the add out of the file again. When a
 repo is removed, `RemoveRepo` applies and schedules the removal and then calls `RepoCardViewModel.Retire`: the card
 cancels its running operation, ignores the results of upgrade checks and picture loads still in flight, clears all its
 events (so nothing it still does can show an error box, release notes or a prompt), and disposes its picture;

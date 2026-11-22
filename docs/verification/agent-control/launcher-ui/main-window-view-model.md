@@ -676,6 +676,14 @@ and the favorite. This scenario is tested by
 `MainWindowViewModel_Dispose_WhileAddSavingAfterAnotherChange_WritesAddAndChange`, covering
 `AgentControl-MainWindowViewModel-SettingsFlushedOnClose`.
 
+**MainWindowViewModel_Dispose_AddWriteStillRunning_AddNotOverwritten**: On the headless UI thread, with a close that
+does not wait and writes held at a gate, an add is started and its save is held; a favorite is marked meanwhile
+(deferred while the add saves); a flush is asked for (it waits for its turn behind the held write); the view model is
+disposed while the write is still held, and only then is the gate opened. Once the flush has ended, exactly one write
+(the add's) has run and the settings file holds both repos, the added one included: the close wrote nothing over the
+add. This scenario is tested by `MainWindowViewModel_Dispose_AddWriteStillRunningAfterTheWait_AddNotOverwritten`,
+covering `AgentControl-MainWindowViewModel-SettingsFlushedOnClose`.
+
 **MainWindowViewModel_RemoveRepo_RetiresTheCard**: A repo's card is asked to report an error (its select-package
 action with no package source configured) and does; the repo is removed and the same action is tried again: nothing is
 reported for the removed card. What a retired card does with work that is still running is verified by the

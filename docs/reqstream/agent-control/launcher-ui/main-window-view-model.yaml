@@ -913,14 +913,17 @@ sections:
           are not written yet, the write running off the closing thread with a bounded wait; when a
           confirmed save (an add) is still running at the close, it shall wait for it within the same
           bounded wait and write the changes made meanwhile together with that save's change once it
-          was written.
+          was written, and shall not write the changes made meanwhile when that save's write is still
+          running after the wait.
         justification: |
           A change made just before closing must still be kept, and the close must neither hang on a
           busy file nor make a blocking call on the UI thread. Written over a running add without
-          its change, the close would take the add out of the file again.
+          its change, the close would take the add out of the file again; when the add's write is
+          still running after the wait, the change made meanwhile is the lesser loss.
         tests:
           - MainWindowViewModel_Dispose_OnGuardedThread_WritesPendingChangeWithoutBlockingCall
           - MainWindowViewModel_Dispose_WhileAddSavingAfterAnotherChange_WritesAddAndChange
+          - MainWindowViewModel_Dispose_AddWriteStillRunningAfterTheWait_AddNotOverwritten
 
       - id: AgentControl-MainWindowViewModel-RemoveRepoRetiresCard
         title: >-

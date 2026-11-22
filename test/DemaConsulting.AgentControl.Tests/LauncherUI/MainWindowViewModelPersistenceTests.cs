@@ -588,6 +588,43 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that closing the window while an add's write is still running after the whole close
+    ///     wait, after another change was made, writes nothing over the add: the change made meanwhile is
+    ///     left out rather than written after the add's write without the add. The add's write is held
+    ///     at a gate that opens only after the close returned, and the close waits for nothing, so no
+    ///     timing is involved.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_Dispose_AddWriteStillRunningAfterTheWait_AddNotOverwritten() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: writes held at a gate, and a close that does not wait
+        var fixture = CreateFixture(new AppSettings(), [("alpha", null)], settingsFlushTimeout: TimeSpan.Zero);
+        var alpha = fixture.Card("alpha");
+        var gamma = CreateDirectory("gamma");
+        fixture.Saving.Gate.Reset();
+
+        // Act: start the add and wait until its write is held, make a change (deferred while the add
+        // saves), ask for a flush (it waits for its turn behind the held write, so it writes whatever
+        // the close hands the writer), close while the write is still held, then let it go
+        var add = fixture.ViewModel.EnqueueAddReposAsync([gamma], null);
+        await fixture.Saving.WaitForStartAsync();
+        alpha.IsFavorite = true;
+        var flushed = fixture.ViewModel.FlushSettingsAsync();
+        fixture.ViewModel.Dispose();
+        fixture.Saving.Gate.Set();
+        await flushed;
+
+        // Assert: only the add's write ran, and the file holds the add
+        Assert.Equal(1, fixture.Saving.Saves);
+        var saved = SettingsStore.Load(fixture.ConfigDirectory).RecentRepos;
+        Assert.Equal(2, saved.Count);
+        Assert.Contains(saved, repo => repo.Path == gamma);
+
+        // The add's completion was queued on the UI thread and is dropped with the test's application
+        _ = add;
+    });
+
+    /// <summary>
     ///     Test that a failed save with nobody to ask (no subscriber to the question) discards the add.
     /// </summary>
     [Fact]
@@ -851,12 +888,15 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
     /// <param name="timeProvider">The clock of the view model (and so of its settings writer), or
     ///     <see langword="null"/> for the system clock.</param>
     /// <param name="applyTheme">The theme applier, or <see langword="null"/> for none.</param>
+    /// <param name="settingsFlushTimeout">The longest the close waits for the settings, or
+    ///     <see langword="null"/> for the application's wait.</param>
     /// <returns>The fixture.</returns>
     private Fixture CreateFixture(
         AppSettings settings,
         (string Name, string? Group)[] repos,
         TimeProvider? timeProvider = null,
-        Action<ThemePreference>? applyTheme = null)
+        Action<ThemePreference>? applyTheme = null,
+        TimeSpan? settingsFlushTimeout = null)
     {
         var configDirectory = CreateDirectory("config");
         settings.RecentRepos =
@@ -876,7 +916,8 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
                 timeProvider: timeProvider,
                 // Launch-safe by construction: a fixture never starts a real process
                 processStarter: starter, shellDetector: FakeAgentToolProcessStarter.CreateShellDetector(),
-                saveSettings: snapshot => saving.Save(snapshot, configDirectory));
+                saveSettings: snapshot => saving.Save(snapshot, configDirectory),
+                settingsFlushTimeout: settingsFlushTimeout);
         }
         finally
         {
