@@ -168,6 +168,12 @@ dotnet test --collect "XPlat Code Coverage"
 `pwsh ./build.ps1 -SkipUiTests` to build everything but run only the headless test projects while you keep working on
 the machine; the UI tests still run in CI.
 
+While iterating, `pwsh ./build.ps1 -Affected -SkipUiTests` builds and tests only the projects affected by the files
+changed since `origin/main` (or `-Base <ref>`) plus uncommitted and untracked files. Any `src/` change also selects the
+UI tests, which `-SkipUiTests` builds but does not run. Add `-DryRun` to print the selection. Changes to project
+files, `global.json`, `.editorconfig`, or the tool manifest fall back to the full build. Run the full
+`pwsh ./build.ps1 -SkipUiTests` (or the full build when the desktop is free) once before pushing.
+
 #### Self-Validation Tests
 
 ```bash
@@ -222,6 +228,10 @@ All tests must pass with zero warnings.
 ```pwsh
 # After making changes: applies dotnet format, markdown, and YAML fixes silently
 pwsh ./fix.ps1
+
+# While iterating: only the fixers and checks whose inputs changed (add -DryRun to lint.ps1 to preview)
+pwsh ./fix.ps1 -Changed
+pwsh ./lint.ps1 -Changed
 
 # Before submitting a pull request: all linters must pass
 pwsh ./lint.ps1

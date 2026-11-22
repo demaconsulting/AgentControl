@@ -84,9 +84,17 @@ commands that send real mouse or keyboard input.
 - **`pip-requirements.txt`** - Python dependencies for yamllint and yamlfix
 - **`docs/sysml2/`** - SysML2 architecture model; authoritative source for software structure
 - **`fix.ps1`** - Applies all auto-fixers silently (dotnet format, LintMark, YAML). Always exits 0.
+- **`lint.ps1`** - Runs every lint check (the CI merge gate).
 - **`build.ps1`** - Builds the solution and runs all tests. `-SkipUiTests` still builds everything but runs only the
   headless test projects, skipping the FlaUI UI tests that take over the desktop. Use `pwsh ./build.ps1 -SkipUiTests`
   when the user is working on the machine, unless they have given permission to drive the desktop.
+- **Scoped runs** - While iterating, check only what changed since `origin/main` (or `-Base <ref>`), including
+  uncommitted and untracked files: `pwsh ./build.ps1 -Affected -SkipUiTests` builds and tests only the affected
+  projects (any `src/` change also selects the UI tests, so keep `-SkipUiTests`), and `pwsh ./lint.ps1 -Changed` /
+  `pwsh ./fix.ps1 -Changed` run only the checks and fixers whose inputs changed. Add `-DryRun` to `build.ps1` or
+  `lint.ps1` to print the selection. Build-wide changes (project files, `global.json`, `.editorconfig`, the tool
+  manifest) fall back to the full run. Before pushing, run the full `pwsh ./build.ps1 -SkipUiTests` (or the full
+  build when the desktop is free) and the full `pwsh ./lint.ps1` once; with no switches the scripts do the full job.
 
 # Standards Application (ALL Agents Must Follow)
 
