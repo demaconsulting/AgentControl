@@ -169,17 +169,19 @@ public sealed class RepoOrderTests
             return;
         }
 
-        // Arrange
+        // Arrange: wait until the cards have been read, so the progress strip no longer moves the list under the
+        // drag
         using var context = new AgentControlTestContext(customizeSettings: SeedThreeRepos);
         var mainWindow = context.Launch();
         mainWindow.SetForeground();
+        Assert.True(CardRefreshWait.WaitUntilCardsAreRead(mainWindow, TimeSpan.FromSeconds(60)));
         Assert.Equal(["repo", "second", "third"], RepoNames(mainWindow));
 
         // Act: grab the first card by its status bar and drop it below the last card
         var accents = Accents(mainWindow);
         var grab = Center(accents[0]);
         var below = new System.Drawing.Point(grab.X, accents[2].BoundingRectangle.Bottom - 6);
-        Drag(grab, below);
+        Drag(mainWindow, grab, below);
 
         // Assert: last, stored, and still last after a restart
         Assert.True(Retry.WhileFalse(
@@ -222,13 +224,14 @@ public sealed class RepoOrderTests
         });
         var mainWindow = context.Launch();
         mainWindow.SetForeground();
+        Assert.True(CardRefreshWait.WaitUntilCardsAreRead(mainWindow, TimeSpan.FromSeconds(60)));
         Assert.Equal(["Work, 1 repo, expanded", "Ungrouped, 2 repos, expanded"], HeaderNames(mainWindow));
 
         // Act: grab the middle card (the last card's status bar sits in the list's bottom auto-scroll zone in the
         // default window, which would scroll the list during the drag) and drop it on the Work header
         var accents = Accents(mainWindow);
         var header = Find(mainWindow, "GroupHeaderToggleButton", candidate => candidate.Name.StartsWith("Work", StringComparison.Ordinal));
-        Drag(Center(accents[1]), Center(header));
+        Drag(mainWindow, Center(accents[1]), Center(header));
 
         // Assert: Work now has two repos, Ungrouped one, and the group is stored for the dropped repo
         Assert.True(Retry.WhileFalse(
@@ -295,16 +298,17 @@ public sealed class RepoOrderTests
             return;
         }
 
-        // Arrange
+        // Arrange: wait until the cards have been read, so the progress strip no longer moves the list under the drag
         using var context = new AgentControlTestContext(customizeSettings: SeedTwoGroups);
         var mainWindow = context.Launch();
         mainWindow.SetForeground();
+        Assert.True(CardRefreshWait.WaitUntilCardsAreRead(mainWindow, TimeSpan.FromSeconds(60)));
 
         // Act: grab the Alpha header and drop it on the lower half of the Beta header
         var alpha = Find(mainWindow, "GroupHeaderToggleButton", candidate => candidate.Name.StartsWith("Alpha", StringComparison.Ordinal));
         var beta = Find(mainWindow, "GroupHeaderToggleButton", candidate => candidate.Name.StartsWith("Beta", StringComparison.Ordinal));
         var below = new System.Drawing.Point(Center(beta).X, beta.BoundingRectangle.Bottom - 3);
-        Drag(Center(alpha), below);
+        Drag(mainWindow, Center(alpha), below);
 
         // Assert: Beta first, Alpha still expanded, and the order stored
         Assert.True(Retry.WhileFalse(
@@ -346,7 +350,7 @@ public sealed class RepoOrderTests
 
         // Act: grab the first card by its status bar, move to just above the list's bottom edge, hold still, drop
         var grab = Center(Accents(mainWindow)[0]);
-        DragAndHold(grab, new System.Drawing.Point(grab.X, list.Bottom - 6), TimeSpan.FromSeconds(3));
+        DragAndHold(mainWindow, grab, new System.Drawing.Point(grab.X, list.Bottom - 6), TimeSpan.FromSeconds(3));
 
         // Assert: the card landed beyond the cards that were in view, which only the scrolling can do
         Assert.True(Retry.WhileFalse(
@@ -385,7 +389,7 @@ public sealed class RepoOrderTests
         // Act: grab the first group's header, move to just above the list's bottom edge, hold still, drop
         var first = Find(mainWindow, "GroupHeaderToggleButton", candidate => candidate.Name.StartsWith(GroupName(0) + ",", StringComparison.Ordinal));
         var grab = Center(first);
-        DragAndHold(grab, new System.Drawing.Point(grab.X, list.Bottom - 6), TimeSpan.FromSeconds(3));
+        DragAndHold(mainWindow, grab, new System.Drawing.Point(grab.X, list.Bottom - 6), TimeSpan.FromSeconds(3));
 
         // Assert: the group landed after every group that was in view, which only the scrolling can do, and it is
         // still collapsed
@@ -395,6 +399,55 @@ public sealed class RepoOrderTests
             TimeSpan.FromMilliseconds(200)).Result);
         Assert.Equal(ManyRepoCount, StoredGroupOrder(context).Count);
         Assert.Contains($"\"{GroupName(0)}\"", ReadCollapsedGroupsJson(context), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     Dragging the last card of a list scrolled to its end to the top edge of the list and holding the
+    ///     pointer still there scrolls the list back up, and the drop puts the card before any card that was
+    ///     in view when the drag started.
+    /// </summary>
+    [Fact]
+    public void RepoList_DragCardHeldStillAtTopEdge_ScrollsUpAndDropsBeforeTheFirstView()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: many ungrouped repos, the cards read, and the list scrolled to its end with the wheel
+        using var context = new AgentControlTestContext(customizeSettings: (settings, self) => SeedManyRepos(settings, self, groups: false));
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+        Assert.True(CardRefreshWait.WaitUntilCardsAreRead(mainWindow, TimeSpan.FromSeconds(90)));
+        var order = StoredOrder(context);
+        Assert.Equal(ManyRepoCount, order.Count);
+        var list = Find(mainWindow, "RepoListBox").BoundingRectangle;
+        Assert.True(DialogInputProbe.BringToForeground(mainWindow));
+        Mouse.MoveTo(new System.Drawing.Point(list.Left + (list.Width / 2), list.Top + (list.Height / 2)));
+        Mouse.Scroll(-100);
+        Assert.True(Retry.WhileFalse(
+            () => LastIndexInView(mainWindow, "RepoNameText", list, element => order.IndexOf(element.Name)) == ManyRepoCount - 1,
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        var firstInView = FirstIndexInView(mainWindow, "RepoNameText", list, element => order.IndexOf(element.Name));
+        Assert.InRange(firstInView, 1, ManyRepoCount - 2);
+
+        // Act: grab the last card by its status bar, move to just below the list's top edge, hold still, drop
+        var accent = Accents(mainWindow).Last(element => element.BoundingRectangle.Bottom <= list.Bottom);
+        var dragged = mainWindow.FindAllDescendants(cf => cf.ByAutomationId("RepoNameText"))
+            .Single(element => element.BoundingRectangle.Top >= accent.BoundingRectangle.Top &&
+                               element.BoundingRectangle.Top < accent.BoundingRectangle.Bottom)
+            .Name;
+        var grab = Center(accent);
+        DragAndHold(mainWindow, grab, new System.Drawing.Point(grab.X, list.Top + 6), TimeSpan.FromSeconds(3));
+
+        // Assert: the card landed before the cards that were in view, which only the scrolling can do
+        Assert.True(Retry.WhileFalse(
+            () => StoredOrder(context).IndexOf(dragged) is var index && index >= 0 && index < firstInView,
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.Equal(ManyRepoCount, StoredOrder(context).Count);
     }
 
     /// <summary>
@@ -452,6 +505,26 @@ public sealed class RepoOrderTests
             .Select(indexOf)
             .DefaultIfEmpty(-1)
             .Max();
+
+    /// <summary>
+    ///     Finds, among the elements with an AutomationId that are inside the list's bounds (also partly),
+    ///     the lowest position in an order.
+    /// </summary>
+    /// <param name="mainWindow">The main window.</param>
+    /// <param name="automationId">The AutomationId of one element per row.</param>
+    /// <param name="list">The list's bounds on the screen.</param>
+    /// <param name="indexOf">The position of an element's row in the order, or -1.</param>
+    /// <returns>The lowest position of a row in view, or -1 when none is.</returns>
+    private static int FirstIndexInView(
+        AutomationElement mainWindow, string automationId, System.Drawing.Rectangle list, Func<AutomationElement, int> indexOf) =>
+        mainWindow.FindAllDescendants(cf => cf.ByAutomationId(automationId))
+            .Where(element => !element.IsOffscreen &&
+                              element.BoundingRectangle.Bottom > list.Top &&
+                              element.BoundingRectangle.Top < list.Bottom)
+            .Select(indexOf)
+            .Where(index => index >= 0)
+            .DefaultIfEmpty(-1)
+            .Min();
 
     /// <summary>
     ///     Reads the <c>CollapsedGroups</c> part of the settings file as raw JSON.
@@ -529,13 +602,15 @@ public sealed class RepoOrderTests
     }
 
     /// <summary>
-    ///     Presses the left mouse button at a point, moves to another point in small steps (an
-    ///     operating-system drag needs a moving pointer) and releases it there.
+    ///     Brings the main window to the foreground, presses the left mouse button at a point, moves to another
+    ///     point in small steps (an operating-system drag needs a moving pointer) and releases it there.
     /// </summary>
+    /// <param name="mainWindow">The main window, which must be in front so the real input reaches it.</param>
     /// <param name="from">Where to press.</param>
     /// <param name="to">Where to release.</param>
-    private static void Drag(System.Drawing.Point from, System.Drawing.Point to)
+    private static void Drag(Window mainWindow, System.Drawing.Point from, System.Drawing.Point to)
     {
+        Assert.True(DialogInputProbe.BringToForeground(mainWindow));
         Mouse.MoveTo(from);
         Mouse.Down(MouseButton.Left);
         Thread.Sleep(150);
@@ -553,15 +628,18 @@ public sealed class RepoOrderTests
     }
 
     /// <summary>
-    ///     Presses the left mouse button at a point, moves to another point in small steps, then holds the
-    ///     pointer perfectly still there for a while before releasing it (a held drag reports no movement,
-    ///     so only the application's own timer can keep the list scrolling meanwhile).
+    ///     Brings the main window to the foreground, presses the left mouse button at a point, moves to another
+    ///     point in small steps, then holds the pointer perfectly still there for a while before releasing it (a
+    ///     held drag reports no movement, so only the application's own timer can keep the list scrolling
+    ///     meanwhile).
     /// </summary>
+    /// <param name="mainWindow">The main window, which must be in front so the real input reaches it.</param>
     /// <param name="from">Where to press.</param>
     /// <param name="to">Where to hold and release.</param>
     /// <param name="hold">How long to hold still before releasing.</param>
-    private static void DragAndHold(System.Drawing.Point from, System.Drawing.Point to, TimeSpan hold)
+    private static void DragAndHold(Window mainWindow, System.Drawing.Point from, System.Drawing.Point to, TimeSpan hold)
     {
+        Assert.True(DialogInputProbe.BringToForeground(mainWindow));
         Mouse.MoveTo(from);
         Mouse.Down(MouseButton.Left);
         Thread.Sleep(150);

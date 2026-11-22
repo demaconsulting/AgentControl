@@ -290,6 +290,18 @@ cases, the insertion line, the contrast of its colors, the filter turning reorde
 drag is held near the list's edges (`AgentControl-LauncherUI-DragAutoScroll`) are verified at the
 `LauncherUI` subsystem and unit levels, where the drop events are raised on a headless window.
 
+**AgentControl_RepoReorder_DragHeldStillAtListEdge_ScrollsAndDropsOutOfTheFirstView**: In the published application,
+with more repos than the window shows and every card read, the first card is dragged with the real mouse to just
+above the list's bottom edge and the pointer is held perfectly still there for three seconds before the button is
+released: the card is stored after every card that was in view when the drag started. In another run the list is
+first scrolled to its end with the mouse wheel, and the last card is held still just below the list's top edge: it is
+stored before every card that was in view. While the pointer is held still the operating system's drag loop reports no
+movement, so only the application's own auto-scroll timer, which keeps firing during that loop, can bring those places
+into view. These scenarios are tested by
+`windows@RepoList_DragCardHeldStillAtBottomEdge_ScrollsAndDropsBeyondTheFirstView` and
+`windows@RepoList_DragCardHeldStillAtTopEdge_ScrollsUpAndDropsBeforeTheFirstView`, covering
+`AgentControl-System-RepoReorder`.
+
 **AgentControl_RepoOrderRemembered_RestartKeepsTheOrder**: After a real mouse drag has reordered the cards, the
 application is closed and started again over the same settings; the cards are in the dragged order, and the settings
 file holds the repos in that order. This scenario is tested by
@@ -747,6 +759,14 @@ of the Beta header: Alpha is listed after Beta and is not collapsed by the drag.
 `windows@RepoList_DragGroupHeaderBelowAnother_ReordersGroups`, covering `AgentControl-System-GroupReorder`. That
 Favorites and Ungrouped keep their places and that reordering is off while the filter has text are verified in the
 headless window tests of the `LauncherUI` subsystem.
+
+**AgentControl_GroupReorder_DragHeaderHeldStillAtBottomEdge_ScrollsAndDropsBeyondTheFirstView**: In the published
+application, with more collapsed groups than the window shows, the first group's header is dragged with the real mouse
+to just above the list's bottom edge and the pointer is held perfectly still there for three seconds before the button
+is released: the group is stored after every group whose header was in view when the drag started, and it is still
+collapsed. This scenario is tested by
+`windows@RepoList_DragGroupHeaderHeldStillAtBottomEdge_ScrollsAndDropsBeyondTheFirstView`, covering
+`AgentControl-System-GroupReorder`.
 
 **AgentControl_ListChangesKept_FavoriteCollapseColorsAndGroupOrderAreKept**: The favorite star, a section's
 collapse, a card color, a group color and the order of the groups are each changed in the real application and found

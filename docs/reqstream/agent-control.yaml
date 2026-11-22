@@ -279,6 +279,8 @@ sections:
           - windows@CardMenu_MoveDown_ReordersCardAndStoresOrderInSettings
           - windows@RepoList_DragCardBelowAnother_ReordersAndKeepsOrderAfterRestart
           - windows@RepoList_DragCardOntoGroupHeader_MovesItIntoTheGroup
+          - windows@RepoList_DragCardHeldStillAtBottomEdge_ScrollsAndDropsBeyondTheFirstView
+          - windows@RepoList_DragCardHeldStillAtTopEdge_ScrollsUpAndDropsBeforeTheFirstView
 
       - id: AgentControl-System-RepoOrderRemembered
         title: >-
@@ -498,6 +500,7 @@ sections:
         tests:
           - windows@GroupHeaderMenu_MoveDown_ReordersGroupsAndKeepsOrderAfterRestart
           - windows@RepoList_DragGroupHeaderBelowAnother_ReordersGroups
+          - windows@RepoList_DragGroupHeaderHeldStillAtBottomEdge_ScrollsAndDropsBeyondTheFirstView
 
       - id: AgentControl-System-CardColorKeepsStatus
         title: >-

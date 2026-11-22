@@ -946,30 +946,33 @@ live in `MainWindowViewModel` and the window only translates input and shows fee
   light and the dark theme and are checked for contrast by `ThemeResourceTests`. A refused place (the drag effect
   `None`) shows no line, and neither does the dragged card's own row.
 - *Auto-scroll while dragging* (`AgentControl-LauncherUI-DragAutoScroll`): a drag of a card, a group header or folders
-  held near the top or bottom edge of the list, over the app bar above it (the `AppBar` border has
-  `DragDrop.AllowDrop` with drag-enter/over handlers that refuse the drop, effect `None`, and a drag-leave handler) or
-  below it (the `RepoListArea` margins) keeps the list scrolling, even while the pointer does not move. Every
-  drag-over of the list, the list area and the app bar calls `UpdateAutoScroll` with the drag's data and the pointer
-  position relative to the window: it remembers both and starts a `DispatcherTimer` (40 ms interval, 25 ticks a
-  second) when the pointer is in a scroll zone, never restarting a running timer (so frequent drag-over events do not
-  starve its ticks), or stops it when the pointer left the zones. Each tick (`AutoScrollTick`) recomputes the step for
-  the remembered position, scrolls the list's `ScrollViewer` by it within its extent (stopping at the top or bottom),
-  lays the list out again and redraws the drop feedback for whatever row is now under the pointer
-  (`UpdateDragFeedback`, the same feedback a drag-over would show). The step is the pure function
-  `ComputeAutoScrollStep(pointerY, viewportHeight)`, with the pointer's height relative to the viewport: the zone is
-  `AutoScrollEdge` = 32 DIP inside each edge (half the viewport when it is shorter than two zones, so the nearer edge
-  wins) and extends beyond the edge; the depth into the zone is measured from its inner boundary, and the step grows
-  linearly from `AutoScrollMinStep` = 4 DIP per tick at the zone's boundary to the cap `AutoScrollMaxStep` = 36 DIP per
-  tick, reached at a depth of `AutoScrollEdge` + `AutoScrollOvershoot` (32 + 96 = 128 DIP) - from 100 to 900 DIP a
-  second; negative scrolls up, 0 (the middle of the list, a non-positive or unknown height) does not scroll, and a
-  step or an offset change below `MinimumScrollDistance` (0.5 DIP) stops the timer. Clearing the feedback is split:
-  `HideDropFeedback` removes the line or tint only (used inside the drag-over paths, where the drag goes on), while
-  `ClearDropFeedback` also stops the auto-scroll (drag-leave, drop, the end of a card or group drag). A drag-leave
-  stops the auto-scroll only when the pointer really left the element (`IsInside` is false), not when it moved from
-  one row or child control to the next; leaving the window raises a drag-leave on the last element and stops it.
-  `IsAutoScrolling` exposes whether the timer runs, for tests. Whether a `DispatcherTimer` ticks during the operating
-  system's own drag loop on Windows is confirmed by a UI run, not by the headless tests, which call `AutoScrollTick`
-  directly.
+  held near the top or bottom edge of the list, over the app bar above it (the `AppBar` border has `DragDrop.AllowDrop`
+  with drag-enter/over handlers that refuse the drop, effect `None`, and a drag-leave handler) or below it (the
+  `RepoListArea` margins) keeps the list scrolling, even while the pointer does not move. Every drag-over of the list,
+  the list area and the app bar calls `UpdateAutoScroll` with the drag's data and the pointer position relative to the
+  window: it remembers both and starts a `DispatcherTimer` (40 ms interval, 25 ticks a second) when the pointer is in a
+  scroll zone, never restarting a running timer (so frequent drag-over events do not starve its ticks), or stops it when
+  the pointer left the zones. Each tick (`AutoScrollTick`) recomputes the step for the remembered position, scrolls the
+  list's `ScrollViewer` by it within its extent (stopping at the top or bottom), lays the list out again and redraws the
+  drop feedback for whatever row is now under the pointer (`UpdateDragFeedback`, the same feedback a drag-over would
+  show). The step is the pure function `ComputeAutoScrollStep(pointerY, viewportHeight)`, with the pointer's height
+  relative to the viewport: the zone is `AutoScrollEdge` = 32 DIP inside each edge (half the viewport when it is shorter
+  than two zones, so the nearer edge wins) and extends beyond the edge; the depth into the zone is measured from its
+  inner boundary, and the step grows linearly from `AutoScrollMinStep` = 4 DIP per tick at the zone's boundary to the
+  cap `AutoScrollMaxStep` = 36 DIP per tick, reached at a depth of `AutoScrollEdge` + `AutoScrollOvershoot` (32 + 96 =
+  128 DIP) - from 100 to 900 DIP a second; negative scrolls up, 0 (the middle of the list, a non-positive or unknown
+  height) does not scroll, and a step or an offset change below `MinimumScrollDistance` (0.5 DIP) stops the timer.
+  Clearing the feedback is split: `HideDropFeedback` removes the line or tint only (used inside the drag-over paths,
+  where the drag goes on), while `ClearDropFeedback` also stops the auto-scroll (drag-leave, drop, the end of a card or
+  group drag). A drag-leave stops the auto-scroll only when the pointer really left the element (`IsInside` is false),
+  not when it moved from one row or child control to the next; leaving the window raises a drag-leave on the last
+  element and stops it. `IsAutoScrolling` exposes whether the timer runs, for tests. On Windows the `DispatcherTimer`
+  keeps ticking while the application's own card or group-header drag runs the operating system's modal OLE drag loop
+  (`DoDragDrop`) on the UI thread; a drag from File Explorer does not block the UI thread at all. The headless tests
+  call `AutoScrollTick` directly; the end-to-end UI tests that hold a real drag perfectly still at the list's bottom and
+  top edges (`RepoList_DragCardHeldStillAtBottomEdge_...`, `..._AtTopEdge_...`,
+  `RepoList_DragGroupHeaderHeldStillAtBottomEdge_...`) confirm the ticks, because only a tick can scroll the list while
+  the drag reports no movement.
 - *No reordering while filtering* (`AgentControl-LauncherUI-ReorderOffWhileFiltering`): while the filter box has text
   only some repos are shown, so their positions cannot be changed. `MainWindowViewModel.IsReorderEnabled` is then
   `false`: no drag starts, the **Reorder** submenu and its four Move items are disabled with the tooltip
