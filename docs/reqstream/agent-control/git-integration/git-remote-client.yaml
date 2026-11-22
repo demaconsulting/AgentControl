@@ -325,12 +325,15 @@ sections:
       - id: AgentControl-GitRemoteClient-TimeoutAndCancel
         title: >-
           The GitRemoteClient class shall stop a git process, and everything it started, that
-          exceeds its time limit or whose token is cancelled.
+          exceeds its time limit or whose token is cancelled, and shall not start git once the
+          token is cancelled.
         justification: |
-          A stuck remote or helper must not hold an operation or leave a process behind.
+          A stuck remote or helper must not hold an operation or leave a process behind, and an
+          operation that was already cancelled must not start one.
         tests:
           - GitRemoteClient_ListTags_ExceedsTimeLimit_KillsProcessAndReportsTimedOut
           - GitRemoteClient_ListTags_Cancelled_KillsProcessAndThrowsOperationCanceled
+          - GitRemoteClient_ListTags_CancelledWhilePreparingWorkFolders_StartsNoGit
 
       - id: AgentControl-GitRemoteClient-TimeoutReportedAsTimedOut
         title: >-

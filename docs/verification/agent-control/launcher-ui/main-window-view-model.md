@@ -89,6 +89,10 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
   adding and removing a repo) is applied and written when the settings can be saved; when they cannot, nothing changes
   (settings, cards, displayed list, file), a later unrelated save does not write the failed change, the user is told
   (changes from a card or a header button) or the operation fails to its caller (the others).
+- A confirmed save (an add, the Settings window's settings) that is still being written when the window closes is
+  decided once, by the close, and changes nothing of the closed view model when it ends afterwards: no card is built,
+  the live settings are not replaced and the theme is not applied; the file holds its change exactly when its write
+  succeeded.
 
 #### Test Scenarios
 
@@ -683,6 +687,18 @@ disposed while the write is still held, and only then is the gate opened. Once t
 (the add's) has run and the settings file holds both repos, the added one included: the close wrote nothing over the
 add. This scenario is tested by `MainWindowViewModel_Dispose_AddWriteStillRunningAfterTheWait_AddNotOverwritten`,
 covering `AgentControl-MainWindowViewModel-SettingsFlushedOnClose`.
+
+**MainWindowViewModel_Dispose_ConfirmedSaveEndsAfterTheClose_ChangesNothing**: On the headless UI thread, writes are
+held at a gate. An add is started and its save is held; a favorite is marked meanwhile; the gate is opened and the view
+model disposed in the same UI-thread turn, and only then does the add's own completion run: the cards, the live repo
+list and the displayed list are as the close left them (no card for the added repo), exactly two writes ran (the add's
+and the close's) and the file holds both repos and the favorite - the add was decided once, by the close
+(`MainWindowViewModel_Dispose_WhileAddSaving_AddCompletionChangesNothingAfterTheClose`). With a recording theme applier
+and a close that does not wait, the Settings window's settings (a Git executable and the dark theme) are applied and
+their write is held; the view model is disposed, then the gate is opened and the save's completion runs: the live
+settings are the same instance without the Git executable, no theme was applied, and the file holds the new settings
+(`MainWindowViewModel_Dispose_WhileSettingsSaving_SettingsCompletionAdoptsNothingAfterTheClose`). These cover
+`AgentControl-MainWindowViewModel-SettingsFlushedOnClose`.
 
 **MainWindowViewModel_RemoveRepo_RetiresTheCard**: A repo's card is asked to report an error (its select-package
 action with no package source configured) and does; the repo is removed and the same action is tried again: nothing is

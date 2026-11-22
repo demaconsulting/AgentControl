@@ -4,7 +4,8 @@
 
 `RepoRefreshQueue` (with the `RepoRefreshKind`, `RepoRefreshPriority`, `RepoRefreshKey` and `RepoRefreshProgress` types
 in its file) is verified with unit tests in `RepoRefreshQueueTests.cs`. Each test constructs a real queue over the
-thread-pool runner and requests fake reads: each read records that it started, counts how many reads run at that
+thread-pool runner (one shutdown test uses the gated runner of the `LauncherUI` tests instead, to hold a read before it
+begins) and requests fake reads: each read records that it started, counts how many reads run at that
 moment and blocks on a gate of its own (a `TaskCompletionSource`) until the test opens it, so the test decides exactly
 when each read ends and needs no timing assumption. Nothing else is mocked. The queues are created with no
 synchronization context current, so the progress is raised on the changing thread; one test creates its queue under a
@@ -28,7 +29,8 @@ N/A - standard test environment (no window, no files and no processes are involv
   a new wave with the next counted read, and is posted to the synchronization context captured at creation.
 - A waiting read whose only requester gives up is removed without running and leaves the wave.
 - Disposing the queue signals the running read's token, cancels the waiting read without running it, ends the
-  progress and refuses later requests.
+  progress and refuses later requests; a read the runner held before it began never begins and is reported as
+  canceled, and a read still running can keep using its token until it ends and is reported as canceled.
 - A read that throws faults only its own task.
 
 #### Test Scenarios
@@ -67,8 +69,13 @@ progress goes from 0 of 1 active to 0 of 0 inactive, and the read never runs. Th
 
 **RepoRefreshQueue_Shutdown**: A running read that stands in for git (it stops when its token is signaled) and a counted
 read waiting behind it; disposing the queue cancels both, a request made afterwards is canceled, no other read ran and
-the progress is inactive. This scenario is tested by
-`RepoRefreshQueue_Dispose_CancelsWaitingAndSignalsRunningAndRefusesNew`, covering
+the progress is inactive (`RepoRefreshQueue_Dispose_CancelsWaitingAndSignalsRunningAndRefusesNew`). Over a gated
+runner (`GatedBackgroundWorkRunner`) that holds a read before it begins, the queue is disposed and the runner then
+lets the read go: the read is canceled and never began - had it begun, reading its token's wait handle would have met
+a disposed source (`RepoRefreshQueue_Dispose_ReadHeldBeforeItBegins_NeverBeginsAndIsCanceled`). A read held while it
+runs is let go after the disposal and then reads its token's wait handle and registers on it, as git does: it is
+canceled, not failed with `ObjectDisposedException`
+(`RepoRefreshQueue_Dispose_ReadStillRunning_KeepsWorkingTokenAndIsCanceled`). These cover
 `AgentControl-RepoRefreshQueue-Shutdown`.
 
 **RepoRefreshQueue_FailureIsolated**: A read that throws `InvalidOperationException` faults its task with that

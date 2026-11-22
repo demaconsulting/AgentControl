@@ -2575,7 +2575,10 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     file again. That is the one wait for the disk left on the UI thread, and it comes after the
     ///     window has closed, so no interaction is held up; the writes never need the UI thread, so the
     ///     wait cannot deadlock. Settings that could not be written in time are logged, because nobody
-    ///     can be told any more.
+    ///     can be told any more. Every confirmed save still running at the close is decided by the
+    ///     close, once (see <see cref="SaveConfirmedAsync"/>): when it ends afterwards it adopts
+    ///     nothing, so the closed view model's settings, cards and list are not changed and no refresh
+    ///     is started; its change is on disk exactly when its write succeeded.
     /// </remarks>
     public void Dispose()
     {
@@ -2585,6 +2588,14 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         _disposed = true;
+
+        // Every confirmed save still running is decided by the close, here and once: its own completion
+        // then adopts nothing into the closed view model (see SaveConfirmedAsync). Those whose write has
+        // succeeded by the time the close writes are written with its snapshot below; the others are
+        // left to their own write.
+        var pending = _runningConfirmedSaves.Where(save => save.TryDecide()).ToArray();
+        _runningConfirmedSaves.Clear();
+
         _recheckTimer?.Dispose();
         _recheckTimer = null;
         CancelPeriodicRecheck();
@@ -2614,14 +2625,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _refreshProgress = null;
 
         // The settings changes made while a confirmed save still runs are written now, together with
-        // the change of every confirmed save whose write succeeded meanwhile (its adoption can no longer
-        // run on the closing UI thread), then everything waiting is written - all within one bounded
-        // wait
+        // the change of every confirmed save whose write succeeded meanwhile (the close decided those
+        // saves above, so their own completion adopts nothing), then everything waiting is written -
+        // all within one bounded wait
         var started = Stopwatch.GetTimestamp();
         if (_saveDeferred)
         {
             _saveDeferred = false;
-            var pending = _runningConfirmedSaves.ToArray();
             if (pending.Length > 0)
             {
                 WaitQuietly(Task.WhenAll(pending.Select(save => save.Write)), _settingsFlushTimeout);
@@ -2881,12 +2891,16 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     another one still runs schedules that write too, because the other one's candidate does not
     ///     hold it. The save is tracked in <see cref="_runningConfirmedSaves"/> until it has ended, so
     ///     the close can write its change with the changes made meanwhile (see <see cref="Dispose"/>).
+    ///     Whether the change is adopted is decided once (<see cref="RunningConfirmedSave.TryDecide"/>):
+    ///     by this method when the write ends while the window is open, otherwise by the close, after
+    ///     which this method adopts nothing and changes nothing of the closed view model.
     /// </remarks>
     /// <param name="applyTo">Applies the change to settings that are not the live ones and returns
     ///     the result: applied to a snapshot of the live settings it builds the candidate to write, and
     ///     at the close it is applied to the snapshot written then.</param>
     /// <param name="adopt">Applies the saved change to the live settings, the cards and the list.</param>
-    /// <returns>A task that completes when the candidate was written and adopted.</returns>
+    /// <returns>A task that completes when the candidate was written and adopted (or, when the window
+    ///     closed while it was written, when it was written).</returns>
     /// <exception cref="InvalidOperationException">Thrown (through the task) when the settings file
     ///     cannot be written; nothing was adopted.</exception>
     private async Task SaveConfirmedAsync(Func<AppSettings, AppSettings> applyTo, Action adopt)
@@ -2895,26 +2909,59 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var write = _settingsWriter.SaveNowAsync(candidate);
         var running = new RunningConfirmedSave(write, applyTo);
         _runningConfirmedSaves.Add(running);
-        var adopted = false;
         try
         {
             await write;
+        }
+        catch
+        {
+            // Failed: nothing to adopt. Ended here unless the close took the decision already.
+            if (running.TryDecide())
+            {
+                EndConfirmedSave(running, adopted: false);
+            }
+
+            throw;
+        }
+
+        // The decision is made once: here, or by the close when the window closed while this save ran
+        // (see Dispose). Then the closed view model is left as it is: nothing is adopted, no card is
+        // built and no refresh is started after the close.
+        if (!running.TryDecide())
+        {
+            return;
+        }
+
+        var adopted = false;
+        try
+        {
             adopt();
             adopted = true;
         }
         finally
         {
-            _runningConfirmedSaves.Remove(running);
-            if (_runningConfirmedSaves.Count > 0)
-            {
-                // Another confirmed save is still running, built without this one's change
-                _saveDeferred |= adopted;
-            }
-            else if (_saveDeferred)
-            {
-                _saveDeferred = false;
-                ScheduleSettingsSave();
-            }
+            EndConfirmedSave(running, adopted);
+        }
+    }
+
+    /// <summary>
+    ///     Ends a confirmed save that decided for itself (see <see cref="SaveConfirmedAsync"/>): takes it
+    ///     out of the running ones and schedules the deferred write when it was the last.
+    /// </summary>
+    /// <param name="running">The save that ended.</param>
+    /// <param name="adopted">Whether its change was adopted.</param>
+    private void EndConfirmedSave(RunningConfirmedSave running, bool adopted)
+    {
+        _runningConfirmedSaves.Remove(running);
+        if (_runningConfirmedSaves.Count > 0)
+        {
+            // Another confirmed save is still running, built without this one's change
+            _saveDeferred |= adopted;
+        }
+        else if (_saveDeferred)
+        {
+            _saveDeferred = false;
+            ScheduleSettingsSave();
         }
     }
 
@@ -2938,9 +2985,37 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <summary>
     ///     A confirmed save that is running (see <see cref="SaveConfirmedAsync"/>).
     /// </summary>
-    /// <param name="Write">The confirmed write of the background settings writer.</param>
-    /// <param name="ApplyTo">Applies the save's change to settings that are not the live ones.</param>
-    private sealed record RunningConfirmedSave(Task Write, Func<AppSettings, AppSettings> ApplyTo);
+    /// <remarks>
+    ///     What becomes of the save's change - adopted into the live settings, written with the close's
+    ///     snapshot, or left out - is decided exactly once, by whichever comes first: the save's own
+    ///     completion or the close (see <see cref="Dispose"/>). <see cref="TryDecide"/> hands that
+    ///     decision to one caller only.
+    /// </remarks>
+    /// <param name="write">The confirmed write of the background settings writer.</param>
+    /// <param name="applyTo">Applies the save's change to settings that are not the live ones.</param>
+    private sealed class RunningConfirmedSave(Task write, Func<AppSettings, AppSettings> applyTo)
+    {
+        /// <summary>
+        ///     One once the decision was taken.
+        /// </summary>
+        private int _decided;
+
+        /// <summary>
+        ///     Gets the confirmed write of the background settings writer.
+        /// </summary>
+        public Task Write { get; } = write;
+
+        /// <summary>
+        ///     Gets the function that applies the save's change to settings that are not the live ones.
+        /// </summary>
+        public Func<AppSettings, AppSettings> ApplyTo { get; } = applyTo;
+
+        /// <summary>
+        ///     Takes the decision about the save's change, unless it was taken already.
+        /// </summary>
+        /// <returns><see langword="true"/> for the first caller only.</returns>
+        public bool TryDecide() => Interlocked.Exchange(ref _decided, 1) == 0;
+    }
 
     /// <summary>
     ///     Applies a change to one repo's entry on behalf of its card and saves it in the background

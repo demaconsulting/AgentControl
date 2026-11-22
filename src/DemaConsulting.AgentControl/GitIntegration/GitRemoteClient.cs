@@ -215,6 +215,19 @@ internal sealed record GitRemoteOptions(
     ///     confirmed; <see langword="null"/> for the default (10 seconds). For tests.
     /// </summary>
     internal TimeSpan? StopTimeout { get; init; }
+
+    /// <summary>
+    ///     Gets a test seam called on the worker thread once the work folders were prepared, before
+    ///     git is started, so a test can hold the start there and cancel meanwhile;
+    ///     <see langword="null"/> for none.
+    /// </summary>
+    internal Action? WorkFoldersPrepared { get; init; }
+
+    /// <summary>
+    ///     Gets a test seam called right before a git process is started, so a test can see whether
+    ///     one would be; <see langword="null"/> for none.
+    /// </summary>
+    internal Action<ProcessStartInfo>? ProcessStarting { get; init; }
 }
 
 /// <summary>
@@ -1370,8 +1383,8 @@ internal sealed partial class GitRemoteClient
     /// </summary>
     /// <param name="operation">A short name of the operation, for diagnostics.</param>
     /// <param name="startInfo">The start information.</param>
-    /// <param name="cancellationToken">Cancels the start before it begins; a started process is
-    ///     returned.</param>
+    /// <param name="cancellationToken">Cancels the start before git is started, also while the work
+    ///     folders are prepared; a started process is returned.</param>
     /// <returns>The running process; the caller disposes it. The awaiting method continues on a
     ///     worker thread (it awaits without the caller's context).</returns>
     /// <exception cref="GitRemoteException">Thrown with <see cref="GitFailureKind.GitNotFound"/> when
@@ -1383,6 +1396,11 @@ internal sealed partial class GitRemoteClient
             () =>
             {
                 EnsureWorkFolders();
+                _options.WorkFoldersPrepared?.Invoke();
+
+                // Preparing the folders can take a while (a slow or network disk): a caller that
+                // canceled meanwhile gets no git process at all, rather than one that is killed
+                cancellationToken.ThrowIfCancellationRequested();
                 return StartProcess(operation, startInfo);
             },
             cancellationToken);
@@ -1405,6 +1423,7 @@ internal sealed partial class GitRemoteClient
     private Process StartProcess(string operation, ProcessStartInfo startInfo)
     {
         BlockingCallGuard.ThrowIfGuarded($"git {operation}");
+        _options.ProcessStarting?.Invoke(startInfo);
         try
         {
             return Process.Start(startInfo) ?? throw new InvalidOperationException("The git process did not start.");

@@ -29,8 +29,10 @@ fixed message that never repeats git's text.
 empty hooks folder and the empty template folder, created when needed), `Interactive`, `Logger`, `ExtraConfiguration`
 and
 `ExtraEnvironment` (test seams, applied last), `ListTimeout`/`FetchTimeout` (defaults: 30 s / 3 min in the background,
-5 min when interactive, so a credential-manager dialog can be answered), and two internal test seams: `KillProcessTree`
-(replaces the termination of a process tree) and `StopTimeout` (how long a stopped process is waited for; default 10 s).
+5 min when interactive, so a credential-manager dialog can be answered), and four internal test seams: `KillProcessTree`
+(replaces the termination of a process tree), `StopTimeout` (how long a stopped process is waited for; default 10 s),
+`WorkFoldersPrepared` (called on the worker once the work folders were prepared, before git is started) and
+`ProcessStarting` (called right before a git process is started).
 
 #### Key Methods
 
@@ -190,7 +192,10 @@ test, an upgrade, a version listing) therefore never creates a folder or starts 
 parsing and the `openDestination` callbacks of `ReadBlobsAsync` run on the pool too
 (`AgentControl-GitRemoteClient-StartsOffCallerThread`). `StartProcess` asks `BlockingCallGuard.ThrowIfGuarded` first
 (the operation `git <command>`), so a start that slips back onto a thread the tests guard fails them. A token that is
-already cancelled stops the run before git starts. The `core.sshCommand` lookup is cached per client, not for the
+already cancelled stops the run before git starts, and the token is checked again on the worker after the work
+folders were prepared and right before `StartProcess`, so a cancellation that arrives while the folders are created (a
+slow or network disk) starts no git process at all instead of one that must be killed. The `core.sshCommand` lookup is
+cached per client, not for the
 application's lifetime: it runs off the UI thread like every other run, and a lifetime cache would miss a change the
 user makes while the application runs.
 

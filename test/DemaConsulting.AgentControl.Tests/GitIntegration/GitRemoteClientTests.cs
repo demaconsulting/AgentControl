@@ -693,6 +693,43 @@ public sealed class GitRemoteClientTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a cancellation that arrives while the work folders are being prepared, before git
+    ///     was started, starts no git process at all and is reported as a cancellation.
+    /// </summary>
+    [Fact]
+    public async Task GitRemoteClient_ListTags_CancelledWhilePreparingWorkFolders_StartsNoGit()
+    {
+        // Arrange: the start is held once the folders were prepared, and every start of git is counted
+        var stub = NewStub();
+        stub.Respond("ls-remote", $"{Sha}\trefs/tags/v1.0.0\n");
+        var prepared = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var starts = 0;
+        var client = new GitRemoteClient(new GitRemoteOptions(() => stub.Path, NewFolder())
+        {
+            WorkFoldersPrepared = () =>
+            {
+                prepared.TrySetResult();
+                resume.Task.Wait(TestContext.Current.CancellationToken);
+            },
+            ProcessStarting = _ => Interlocked.Increment(ref starts)
+        });
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+
+        // Act: list, cancel while the start is held after the folders, then let it go on
+        var listing = client.ListTagsAsync(
+            new GitRemoteTarget("https://example.invalid/r.git", GitTransport.Https), "refs/tags/*", cancellation.Token);
+        await prepared.Task.WaitAsync(TestContext.Current.CancellationToken);
+        await cancellation.CancelAsync();
+        resume.TrySetResult();
+
+        // Assert: canceled, and git was never started
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => listing);
+        Assert.Equal(0, Volatile.Read(ref starts));
+        Assert.Empty(stub.ReadInvocations());
+    }
+
+    /// <summary>
     ///     Test that when a process that exceeded its time limit cannot be confirmed to have stopped
     ///     (the termination does nothing, so it keeps running), the failure is surfaced as
     ///     <c>ProcessNotStopped</c> instead of being swallowed as an ordinary timeout, and the call

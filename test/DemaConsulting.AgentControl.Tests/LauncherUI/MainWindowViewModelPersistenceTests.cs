@@ -625,6 +625,73 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that an add whose save is still running when the window closes is decided once, by the
+    ///     close: the close writes it with the change made meanwhile, and when the add's own completion
+    ///     runs afterwards it adopts nothing - no card is built, the live settings and the displayed
+    ///     list stay as the close left them, and nothing more is written.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_Dispose_WhileAddSaving_AddCompletionChangesNothingAfterTheClose() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: writes held at a gate
+        var fixture = CreateFixture("alpha");
+        var alpha = fixture.Card("alpha");
+        var gamma = CreateDirectory("gamma");
+        fixture.Saving.Gate.Reset();
+
+        // Act: start the add and wait until its save is held, make a change (deferred while the add
+        // saves), let the save go and close in the same UI-thread turn, then let the add's own
+        // completion run on the UI thread
+        var add = fixture.ViewModel.EnqueueAddReposAsync([gamma], null);
+        await fixture.Saving.WaitForStartAsync();
+        alpha.IsFavorite = true;
+        fixture.Saving.Gate.Set();
+        fixture.ViewModel.Dispose();
+        var shownAtClose = Describe(fixture.ViewModel);
+        await add;
+
+        // Assert: the closed view model was not changed by the add's completion
+        Assert.Equal(["alpha"], fixture.ViewModel.RepoCards.Select(card => card.RepoName));
+        Assert.Equal([alpha.RepoPath], fixture.Settings.RecentRepos.Select(repo => repo.Path));
+        Assert.Equal(shownAtClose, Describe(fixture.ViewModel));
+
+        // Assert: the add was written once, by the close, with the change made meanwhile
+        Assert.Equal(2, fixture.Saving.Saves);
+        var saved = SettingsStore.Load(fixture.ConfigDirectory).RecentRepos;
+        Assert.Equal([alpha.RepoPath, gamma], saved.Select(repo => repo.Path));
+        Assert.True(saved.Single(repo => repo.Path == alpha.RepoPath).IsFavorite);
+    });
+
+    /// <summary>
+    ///     Test that a Settings save whose write is still running when the window closes adopts nothing
+    ///     when it ends afterwards: the live settings are not replaced and the theme is not applied,
+    ///     while the write itself still puts the new settings on disk.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_Dispose_WhileSettingsSaving_SettingsCompletionAdoptsNothingAfterTheClose() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: writes held at a gate, a recording theme applier, and a close that does not wait
+        var applied = new List<ThemePreference>();
+        var fixture = CreateFixture(
+            new AppSettings(), [("alpha", null)], applyTheme: applied.Add, settingsFlushTimeout: TimeSpan.Zero);
+        fixture.Saving.Gate.Reset();
+
+        // Act: apply new settings and wait until their write is held, close, then let the write
+        // complete and the save's own completion run on the UI thread
+        var apply = fixture.ViewModel.ApplySettingsAsync(new AppSettings { GitExecutablePath = "new-git", Theme = ThemePreference.Dark });
+        await fixture.Saving.WaitForStartAsync();
+        fixture.ViewModel.Dispose();
+        fixture.Saving.Gate.Set();
+        await apply;
+
+        // Assert: nothing adopted into the closed view model, and the write put the settings on disk
+        Assert.Same(fixture.Settings, fixture.ViewModel.Settings);
+        Assert.Null(fixture.ViewModel.Settings.GitExecutablePath);
+        Assert.Empty(applied);
+        Assert.Equal("new-git", SettingsStore.Load(fixture.ConfigDirectory).GitExecutablePath);
+    });
+
+    /// <summary>
     ///     Test that a failed save with nobody to ask (no subscriber to the question) discards the add.
     /// </summary>
     [Fact]

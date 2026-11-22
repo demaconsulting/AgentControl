@@ -301,6 +301,68 @@ public class RepoRefreshQueueTests
     }
 
     /// <summary>
+    ///     Test that a read that the background runner holds before it begins when the queue is
+    ///     disposed never begins once the runner lets it go: it is reported as canceled (not as a
+    ///     failure, and no <see cref="ObjectDisposedException"/> reaches it).
+    /// </summary>
+    [Fact]
+    public async Task RepoRefreshQueue_Dispose_ReadHeldBeforeItBegins_NeverBeginsAndIsCanceled()
+    {
+        // Arrange: a runner that holds the read before it begins
+        var runner = new GatedBackgroundWorkRunner();
+        var queue = CreateQueue(maxConcurrentReads: 1, backgroundWork: runner);
+        var begun = 0;
+        var read = Enqueue(queue, Key("held"), RepoRefreshPriority.Background, token =>
+        {
+            // Stands in for git: uses its token as git does (a disposed source would refuse this)
+            Interlocked.Increment(ref begun);
+            _ = token.WaitHandle;
+            token.ThrowIfCancellationRequested();
+            return 1;
+        });
+        await runner.FirstCall.WaitAsync(TestContext.Current.CancellationToken);
+
+        // Act: shut down while the read is held, then let the runner go on
+        queue.Dispose();
+        runner.Release();
+
+        // Assert: reported as canceled, and the read never began
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read);
+        await queue.WhenIdleAsync().WaitAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(0, Volatile.Read(ref begun));
+    }
+
+    /// <summary>
+    ///     Test that a read still running when the queue is disposed can keep using its token until it
+    ///     ends (the token source is not disposed under it), and is reported as canceled.
+    /// </summary>
+    [Fact]
+    public async Task RepoRefreshQueue_Dispose_ReadStillRunning_KeepsWorkingTokenAndIsCanceled()
+    {
+        // Arrange: a read that is held while it runs, then uses its token as git does
+        var queue = CreateQueue(maxConcurrentReads: 1);
+        var running = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var read = Enqueue(queue, Key("running"), RepoRefreshPriority.Background, token =>
+        {
+            running.TrySetResult();
+            resume.Task.Wait(TestContext.Current.CancellationToken);
+            _ = token.WaitHandle;
+            using var registration = token.Register(() => { });
+            token.ThrowIfCancellationRequested();
+            return 1;
+        });
+        await running.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        // Act: shut down while it runs, then let it go on
+        queue.Dispose();
+        resume.TrySetResult();
+
+        // Assert: reported as canceled, not as a failure
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read);
+    }
+
+    /// <summary>
     ///     Test that a read that throws faults only its own requesters' task; other reads still deliver
     ///     their results.
     /// </summary>
@@ -372,14 +434,16 @@ public class RepoRefreshQueueTests
     ///     changing thread.
     /// </summary>
     /// <param name="maxConcurrentReads">The queue's limit.</param>
+    /// <param name="backgroundWork">Runs the reads, or <see langword="null"/> for the thread pool.</param>
     /// <returns>The queue.</returns>
-    private static RepoRefreshQueue CreateQueue(int maxConcurrentReads = RepoRefreshQueue.DefaultMaxConcurrentReads)
+    private static RepoRefreshQueue CreateQueue(
+        int maxConcurrentReads = RepoRefreshQueue.DefaultMaxConcurrentReads, IBackgroundWorkRunner? backgroundWork = null)
     {
         var previous = SynchronizationContext.Current;
         SynchronizationContext.SetSynchronizationContext(null);
         try
         {
-            return new RepoRefreshQueue(maxConcurrentReads: maxConcurrentReads);
+            return new RepoRefreshQueue(backgroundWork, maxConcurrentReads);
         }
         finally
         {

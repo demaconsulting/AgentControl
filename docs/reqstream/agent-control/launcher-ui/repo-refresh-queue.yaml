@@ -82,12 +82,16 @@ sections:
       - id: AgentControl-RepoRefreshQueue-Shutdown
         title: >-
           The RepoRefreshQueue class shall, when shut down, signal the running reads to stop, cancel
-          the waiting ones without running them, end the progress, and refuse later requests.
+          the waiting ones and those not yet begun without running them, report the reads it stopped
+          as canceled, end the progress, and refuse later requests.
         justification: |
           When the window closes no repo is read any more, and a git that is still running is
-          stopped instead of being left behind.
+          stopped instead of being left behind. A read stopped by the close has not failed, so it
+          must not be reported as a failure.
         tests:
           - RepoRefreshQueue_Dispose_CancelsWaitingAndSignalsRunningAndRefusesNew
+          - RepoRefreshQueue_Dispose_ReadHeldBeforeItBegins_NeverBeginsAndIsCanceled
+          - RepoRefreshQueue_Dispose_ReadStillRunning_KeepsWorkingTokenAndIsCanceled
 
       - id: AgentControl-RepoRefreshQueue-FailureIsolated
         title: >-

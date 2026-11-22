@@ -194,14 +194,14 @@ internal sealed class RepoRefreshQueue : IDisposable
     ///     Signaled by <see cref="Dispose"/>; every running read gets its token.
     /// </summary>
     /// <remarks>
-    ///     Canceled before it is disposed, so a read still running afterwards sees its token signaled
-    ///     (a canceled token stays canceled once its source is disposed).
+    ///     Disposed only once it was canceled and every read that was running has unwound (see
+    ///     <see cref="ReleaseShutdownIfDone"/>), so a read never holds the token of a disposed source:
+    ///     registering on it or reading its wait handle keeps working until the read has ended.
     /// </remarks>
     private readonly CancellationTokenSource _shutdown = new();
 
     /// <summary>
-    ///     The token of <see cref="_shutdown"/>, taken once so it can still be handed out after the
-    ///     source was disposed.
+    ///     The token of <see cref="_shutdown"/>, taken once.
     /// </summary>
     private readonly CancellationToken _shutdownToken;
 
@@ -255,6 +255,16 @@ internal sealed class RepoRefreshQueue : IDisposable
     ///     Whether <see cref="Dispose"/> was called.
     /// </summary>
     private bool _disposed;
+
+    /// <summary>
+    ///     Whether <see cref="Dispose"/> has signaled <see cref="_shutdown"/>.
+    /// </summary>
+    private bool _shutdownSignaled;
+
+    /// <summary>
+    ///     Whether <see cref="_shutdown"/> was disposed (or is being disposed).
+    /// </summary>
+    private bool _shutdownReleased;
 
     /// <summary>
     ///     Initializes a new queue.
@@ -444,6 +454,11 @@ internal sealed class RepoRefreshQueue : IDisposable
     ///     cancels every waiting read, ends the progress wave and refuses later requests. Called when the
     ///     main window closes; calling it again does nothing.
     /// </summary>
+    /// <remarks>
+    ///     A read that was handed to the background runner but has not begun is not begun: it is
+    ///     reported as canceled. The token source is disposed once the last running read has unwound,
+    ///     so no read is left holding the token of a disposed source.
+    /// </remarks>
     public void Dispose()
     {
         List<QueuedRead> canceled;
@@ -471,9 +486,32 @@ internal sealed class RepoRefreshQueue : IDisposable
             queued.Cancel(_shutdownToken);
         }
 
-        _shutdown.Dispose();
+        lock (_lock)
+        {
+            _shutdownSignaled = true;
+        }
 
+        ReleaseShutdownIfDone();
         RaiseProgressChanged();
+    }
+
+    /// <summary>
+    ///     Disposes the shutdown token source once it was signaled and no read runs any more; only the
+    ///     first call that finds both does it.
+    /// </summary>
+    private void ReleaseShutdownIfDone()
+    {
+        lock (_lock)
+        {
+            if (!_shutdownSignaled || _running > 0 || _shutdownReleased)
+            {
+                return;
+            }
+
+            _shutdownReleased = true;
+        }
+
+        _shutdown.Dispose();
     }
 
     /// <summary>
@@ -578,6 +616,10 @@ internal sealed class RepoRefreshQueue : IDisposable
         RaiseProgressChanged();
         complete();
         StartReads();
+
+        // The read has unwound: once the queue was shut down and this was the last one, the token
+        // source can go
+        ReleaseShutdownIfDone();
     }
 
     /// <summary>
@@ -753,7 +795,15 @@ internal sealed class RepoRefreshQueue : IDisposable
             var current = Read;
             try
             {
-                var result = await runner.RunAsync(() => current(shutdownToken), CancellationToken.None).ConfigureAwait(false);
+                // The runner may hold the read before it begins (a busy pool, a gate in a test): a read
+                // that would begin after the shutdown is not begun, and is reported as canceled
+                var result = await runner.RunAsync(
+                    () =>
+                    {
+                        shutdownToken.ThrowIfCancellationRequested();
+                        return current(shutdownToken);
+                    },
+                    shutdownToken).ConfigureAwait(false);
 
                 // A read that ended after the queue shut down is not delivered: the window is gone
                 return shutdownToken.IsCancellationRequested

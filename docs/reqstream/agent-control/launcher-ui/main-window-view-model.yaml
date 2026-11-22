@@ -914,16 +914,20 @@ sections:
           confirmed save (an add) is still running at the close, it shall wait for it within the same
           bounded wait and write the changes made meanwhile together with that save's change once it
           was written, and shall not write the changes made meanwhile when that save's write is still
-          running after the wait.
+          running after the wait. A confirmed save (an add, the Settings window's settings) that ends
+          after the close shall change nothing of the closed view model.
         justification: |
           A change made just before closing must still be kept, and the close must neither hang on a
           busy file nor make a blocking call on the UI thread. Written over a running add without
           its change, the close would take the add out of the file again; when the add's write is
-          still running after the wait, the change made meanwhile is the lesser loss.
+          still running after the wait, the change made meanwhile is the lesser loss. A save that
+          ends after the close must not rebuild cards or start reads for a window that is gone.
         tests:
           - MainWindowViewModel_Dispose_OnGuardedThread_WritesPendingChangeWithoutBlockingCall
           - MainWindowViewModel_Dispose_WhileAddSavingAfterAnotherChange_WritesAddAndChange
           - MainWindowViewModel_Dispose_AddWriteStillRunningAfterTheWait_AddNotOverwritten
+          - MainWindowViewModel_Dispose_WhileAddSaving_AddCompletionChangesNothingAfterTheClose
+          - MainWindowViewModel_Dispose_WhileSettingsSaving_SettingsCompletionAdoptsNothingAfterTheClose
 
       - id: AgentControl-MainWindowViewModel-RemoveRepoRetiresCard
         title: >-

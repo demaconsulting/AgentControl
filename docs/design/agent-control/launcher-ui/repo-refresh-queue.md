@@ -46,7 +46,8 @@ Private state, all guarded by one lock:
   wait or run, the current wave and a change counter for its reports.
 - **_idle** (`TaskCompletionSource?`): completed when nothing waits or runs.
 - **_disposed** (`bool`) and **_shutdown** (`CancellationTokenSource`, its token kept in **_shutdownToken**): set and
-  signaled by `Dispose`.
+  signaled by `Dispose`; **_shutdownSignaled** and **_shutdownReleased** (`bool`) record that the token was signaled
+  and that the source was disposed, which happens once, when no read runs any more.
 
 Each queued read (private `QueuedRead<T>`) holds its key, request order, priority (raised by joins and promotions),
 whether it is counted, how many requesters still wait for it, the read delegate (replaced by the newest joining
@@ -78,10 +79,13 @@ or joins the waiting read with the same key, and returns at once.
 requested among equals - out of the waiting lists and starts it outside the lock
 (`AgentControl-RepoRefreshQueue-Limit`, `-Priority`).
 
-**RunReadAsync** (private): runs the read through the `IBackgroundWorkRunner` with the shutdown token, then, under the
+**RunReadAsync** (private): runs the read through the `IBackgroundWorkRunner` with the shutdown token (the runner's
+token too, and checked again on the worker right before the read begins, so a read the runner held until after the
+shutdown never begins and is delivered as canceled), then, under the
 lock, frees the slot, counts a counted read as completed (ending the wave when it was the last) and signals idle;
 reports the progress; and only then completes the requesters' task, so a requester that resumes sees the bookkeeping
-already done. Then it fills the free slot. A read that ended after the queue shut down is delivered as canceled; an
+already done. Then it fills the free slot and, after a shutdown, disposes the token source when it was the last read
+to unwind. A read that ended after the queue shut down is delivered as canceled; an
 exception of the read faults that read's task only (`AgentControl-RepoRefreshQueue-FailureIsolated`).
 
 **Promote(key, priority)**: Raises the priority of the waiting read with the key, if lower; returns whether such a
@@ -97,8 +101,11 @@ a dedicated event lock, always with the newest value and never twice for one cha
 settle).
 
 **Dispose()**: idempotent. Marks the queue disposed, takes every waiting read out (and out of the wave), ends the
-progress, signals the shutdown token - a running read's git process is stopped through it (see *GitClient*) - cancels
-the waiting reads' tasks and disposes the token source. Later requests are refused with a canceled task
+progress, signals the shutdown token - a running read's git process is stopped through it (see *GitClient*) - and
+cancels the waiting reads' tasks. The token source is disposed only once no read runs any more (at once when none
+does, otherwise by the last running read as it unwinds), so a running read never holds the token of a disposed
+source: registering on it or reading its wait handle keeps working, and its cancellation is reported as a
+cancellation rather than as an `ObjectDisposedException`. Later requests are refused with a canceled task
 (`AgentControl-RepoRefreshQueue-Shutdown`).
 
 **Giving up** (private `AwaitCancelableRequestAsync`, `OnRequesterGaveUp`): a requester whose token is signaled gets
