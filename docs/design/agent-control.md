@@ -263,18 +263,16 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   concurrent use (`AgentControl-GitIntegration-QueriesFromAnyThread`).
 - *Repo order* (`AgentControl-System-RepoOrder`, `AgentControl-System-RepoReorder`,
   `AgentControl-System-RepoOrderRemembered`): the order of the cards is the user's own and is the order of
-  `AppSettings.RecentRepos` itself, so a removed repo leaves the order with no extra bookkeeping. Favorites stay
-  first; within a section the repos show in that order; a new repo is appended (the bottom of its section); and
-  launching, refreshing or any other change never moves a card - `MainWindowViewModel` does not even listen to the
-  card's `LaunchRecorded`. The user reorders from a card's menu (Reorder > Move to top, up, down, bottom) or by
-  dragging a
-  card within a section, into another section (which sets the group or favorite flag as the menu and the star
-  would) or onto a header (the end of that section); `MainWindowViewModel.MoveCard`, `CanDrop` and `DropCard` hold
-  the rules and `MainWindow` only turns pointer input into a drop place and draws the insertion line or header
-  tint. Reordering is off while the filter has text. The order is saved with the other user choices (and, like
-  them, through the transactional change above), kept across restarts, and seeded once for a settings file written
-  before the order existed (favorites first, then most recently launched, by `AppSettings.EnsureRepoOrder`), so
-  nothing jumps on upgrade.
+  `AppSettings.RecentRepos` itself, so a removed repo leaves the order with no extra bookkeeping. Favorites stay first;
+  within a section the repos show in that order; a new repo is appended (the bottom of its section); and launching,
+  refreshing or any other change never moves a card - `MainWindowViewModel` does not even listen to the card's
+  `LaunchRecorded`. The user reorders from a card's menu (Reorder > Move to top, up, down, bottom) or by dragging a card
+  within a section, into another section (which sets the group or favorite flag as the menu and the star would) or onto
+  a header (the end of that section); `MainWindowViewModel.MoveCard`, `CanDrop` and `DropCard` hold the rules and
+  `MainWindow` only turns pointer input into a drop place and draws the insertion line or header tint. Reordering is off
+  while the filter has text. The order is saved with the other user choices (and, like them, applied at once and written
+  in the background), kept across restarts, and seeded once for a settings file written before the order existed
+  (favorites first, then most recently launched, by `AppSettings.EnsureRepoOrder`), so nothing jumps on upgrade.
 - *Card colors* (`AgentControl-System-CardColor`): the palette pop-up offers one swatch per entry of
   `CardColorPalette` (built from the single list of valid names, `RecentRepo.CardColorNames`) plus Automatic;
   `RepoCardViewModel.SetCardColor` records the name, or clears it for Automatic, and the tile - and only the tile -
@@ -289,7 +287,7 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   request before `ReleaseNotesReady`; the main window keeps the open question per card and opens the release notes
   only after it is answered, so the notes never cover the question.
 - *Appearance* (`AgentControl-System-Appearance`): the theme (system default, light or dark) is chosen in Settings
-  and saved with the other settings; after the save succeeded, `MainWindowViewModel.ApplySettings` hands it to the
+  and saved with the other settings; after the save succeeded, `MainWindowViewModel.ApplySettingsAsync` hands it to the
   application through an injected callback (so the view-model does not depend on the UI framework), which sets
   Avalonia's theme variant for every open window at once; the system default follows the operating system. The
   persisted choice is applied before the first window is shown. Every color of the application's own XAML is a
@@ -676,9 +674,12 @@ an unwanted or repeated file write.
    newest version across all the configured sources that offer the package, followed by the same
    extract/pin/`ReleaseNotesViewerViewModel` display sequence (`AgentControl-System-Upgrade`); Settings to
    `SettingsWindowViewModel.Save` (sources are added and edited through `SourceEditorViewModel`, which can test a
-   server's connection before it is saved), applied back through `MainWindowViewModel.ApplySettings`
-   (`AgentControl-System-Settings`); and, after a Select Package, Upgrade, or Launch-time restore or update genuinely
-   occurs, `RepoCardViewModel` decides whether to offer the package's optional root-level `AGENTS.md` template
+   server's connection before it is saved), applied back through `MainWindowViewModel.ApplySettingsAsync`, which saves
+   them on a worker thread through `SettingsWriter` (`AgentControl-System-Settings`); every change the user makes to the
+   list (favorite, group, colors, order, collapse, removal, a launch time) is applied at once and written in the
+   background by `SettingsWriter` through `SettingsStore.Save`, the newest state a moment after the last change
+   (`AgentControl-System-ListChangesKept`); and, after a Select Package, Upgrade, or Launch-time restore or update
+   genuinely occurs, `RepoCardViewModel` decides whether to offer the package's optional root-level `AGENTS.md` template
    (`PackageContentExtractor.ReadAgentsMdTemplate`), writes it via `AcceptAgentsMdTemplate`, or persists a decline via
    `RepoPinStore.Save` (`AgentControl-System-AgentsMdTemplate`).
 5. **Git repository source.** The normal flow of a Git source (`AgentControl-System-GitSources`) is: (a) the user adds
@@ -715,17 +716,20 @@ an unwanted or repeated file write.
 6. The user's own choices - favorite, group, card color, group color, the order of the groups, collapsed section,
    renaming or removing a group, adding or
    removing a repo, and a launch being recorded - flow from the card or the group header through
-   `MainWindowViewModel`'s transactional change: a candidate copy of the settings is changed and
-   `SettingsStore.Save` writes it; only when that succeeded is the live state changed and `DisplayedItems` rebuilt
+   `MainWindowViewModel.CommitSettingsChange`: the live settings are changed at once and `DisplayedItems` rebuilt
    (sections built from the repos' groups with `RepoGroupName` and arranged in the stored group order, the collapsed
-   ones leaving out their cards; the color and position of a group that no repo is in any more are dropped). A failed
-   save changes nothing and is reported to the user; a removed repo's card is retired after its removal was saved
-   (`AgentControl-System-Favorites`, `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
+   ones leaving out their cards; the color and position of a group that no repo is in any more are dropped), and a
+   snapshot of the settings is handed to `SettingsWriter`, which writes the newest one through `SettingsStore.Save` on
+   a worker thread a moment after the last change. A failed write keeps the change in effect, is reported to the user
+   once per failure streak and is written with the next change or at the close; a removed repo's card is retired once
+   it was removed (`AgentControl-System-ListChangesKept`,
+   `AgentControl-System-Favorites`, `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
    `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`,
    `AgentControl-System-AddRemoveRepo`). Folders to add - picked several at once or dropped from the file manager - are
    read off the UI thread (whether each exists, whether it is the top folder of a Git repository and, for a new repo,
    its pin, branch and committed agent folders), with the count shown in the progress strip; then, on the UI thread,
-   the batch is re-checked against the list as it is at that moment and committed with one save and one rebuild of
+   the batch is re-checked against the list as it is at that moment and committed with one confirmed save (written by
+   `SettingsWriter` on a worker thread, the add applied only once it is on disk) and one rebuild of
    `DisplayedItems` (a folder that is not the top folder of a Git repository is not added), and one summary of what
    was not added is shown (`AgentControl-System-AddSeveralRepos`, `AgentControl-System-AddGitReposOnly`,
    `AgentControl-System-ResponsiveRepoListWork`). A saved theme is applied to the running application after the save
@@ -760,9 +764,12 @@ an unwanted or repeated file write.
   (`AgentControl-System-PackageAuthenticity`). Signature verification is supported on Windows, Linux and macOS.
 - Personal choices stay personal: favorites, groups, card colors, group colors, the order of the groups, collapsed
   sections and the theme are written only
-  to the per-user settings file, never to a repo; a change is saved before it is applied, so memory, the list and the
-  file never disagree (`AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
-  `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`).
+  to the per-user settings file, never to a repo (`AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
+  `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`). A change is applied at once and written in the
+  background by `SettingsWriter` (the newest snapshot, a short delay after the last change, one write at a time on a
+  worker thread), so the window never waits for the settings file; a failed write is reported once per failure streak
+  and the change stays in effect and is written with the next change or when the window closes; an add and the
+  Settings window's values are confirmed writes, applied only once saved (`AgentControl-System-ListChangesKept`).
 - Responsiveness: blocking file-system and git reads made for many repos at once (adding folders, refreshing the
   cards after a settings save, the working-tree check of shown cards) run off the UI thread through an injectable
   background runner and hand back immutable results; every change to view-model state, the settings and the list is

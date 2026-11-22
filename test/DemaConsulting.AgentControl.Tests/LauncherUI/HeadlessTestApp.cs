@@ -133,6 +133,23 @@ public static class HeadlessTestApp
         RunJobsUntil(() => viewModel.WhenRepoStateSettledAsync().IsCompleted, "The cards' repo state did not settle.");
 
     /// <summary>
+    ///     Writes the settings that <paramref name="viewModel"/> has waiting to be written (see
+    ///     <see cref="MainWindowViewModel.FlushSettingsAsync"/>), running the UI thread's jobs until that is
+    ///     done, for a test that runs on the UI thread and reads the settings file right after a change.
+    /// </summary>
+    /// <remarks>
+    ///     The window's changes are written in the background a moment after they were made, so the file
+    ///     is read only once this returns. Fails the test when the write has not ended after about a
+    ///     minute.
+    /// </remarks>
+    /// <param name="viewModel">The main window's view model.</param>
+    internal static void RunJobsUntilSettingsWritten(MainWindowViewModel viewModel)
+    {
+        var flush = viewModel.FlushSettingsAsync();
+        RunJobsUntil(() => flush.IsCompleted, "The settings were not written.");
+    }
+
+    /// <summary>
     ///     Runs the UI thread's jobs until <paramref name="condition"/> holds, for a test that runs on the UI
     ///     thread and must wait for background work whose results are applied there.
     /// </summary>

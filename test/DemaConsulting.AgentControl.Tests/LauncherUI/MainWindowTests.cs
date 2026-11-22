@@ -217,12 +217,13 @@ public sealed class MainWindowTests : IDisposable
     });
 
     /// <summary>
-    ///     Test that a change that cannot be saved is reported in a message box and leaves the card as
-    ///     it was (here a favorite that could not be saved), and that a removal that cannot be saved
-    ///     keeps the repo listed and says so.
+    ///     Test that a change whose background save fails is kept (here a favorite) and reported in a
+    ///     message box that says so, that a removal whose save fails as well is applied without a second
+    ///     message (one per failure streak), and that neither waits for the settings file on the UI
+    ///     thread.
     /// </summary>
     [Fact]
-    public void MainWindow_SettingsCannotBeSaved_ShowsMessageAndKeepsStateAsItWas() => HeadlessTestApp.Run(() =>
+    public void MainWindow_SettingsCannotBeSaved_ChangeKeptAndMessageShownOnce() => HeadlessTestApp.Run(() =>
     {
         // Arrange: a configuration "directory" that is really a file, so every save fails
         var blockingFile = Path.Combine(CreateTempDirectory(), "not-a-directory");
@@ -233,29 +234,32 @@ public sealed class MainWindowTests : IDisposable
         window.Show();
         var card = Assert.Single(viewModel.RepoCards);
 
-        // Act: mark a favorite
+        // Act: mark a favorite; it is applied at once and its background write fails
         card.IsFavorite = true;
-        Dispatcher.UIThread.RunJobs();
+        Assert.True(card.IsFavorite);
+        HeadlessTestApp.RunJobsUntil(
+            () => window.OwnedWindows.OfType<MessageBoxWindow>().Any(), "The failed save was not reported.");
 
-        // Assert: a message was shown and nothing changed
+        // Assert: the message says the change stays, and the favorite is kept
         var message = Assert.Single(window.OwnedWindows.OfType<MessageBoxWindow>());
-        Assert.False(card.IsFavorite);
-        Assert.False(settings.RecentRepos[0].IsFavorite);
+        Assert.Contains(
+            "stay in effect", message.FindControl<TextBlock>("MessageText")!.Text, StringComparison.Ordinal);
+        Assert.True(card.IsFavorite);
+        Assert.True(settings.RecentRepos[0].IsFavorite);
         message.Close();
         Dispatcher.UIThread.RunJobs();
 
-        // Act: confirm removing the repo
+        // Act: confirm removing the repo; its write fails as well
         card.RemoveCommand.Execute(null);
         var confirmation = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
         DialogWindowTests.Click(confirmation, "ConfirmationYesButton");
         Dispatcher.UIThread.RunJobs();
+        HeadlessTestApp.RunJobsUntilSettingsWritten(viewModel);
 
-        // Assert: the repo is still listed and the user was told it was not removed
-        Assert.Single(viewModel.RepoCards);
-        Assert.Single(settings.RecentRepos);
-        var removalMessage = Assert.Single(window.OwnedWindows.OfType<MessageBoxWindow>());
-        removalMessage.Close();
-        Dispatcher.UIThread.RunJobs();
+        // Assert: the repo is removed, and no second message was shown
+        Assert.Empty(viewModel.RepoCards);
+        Assert.Empty(settings.RecentRepos);
+        Assert.Empty(window.OwnedWindows.OfType<MessageBoxWindow>());
         window.Close();
     });
 
@@ -1028,6 +1032,9 @@ public sealed class MainWindowTests : IDisposable
             Dispatcher.UIThread.RunJobs();
             var settingsWindow = Assert.Single(window.OwnedWindows.OfType<SettingsWindow>());
             Assert.IsType<SettingsWindowViewModel>(settingsWindow.DataContext).SaveCommand.Execute(null);
+
+            // The settings are written in the background; the Settings window closes once they are saved
+            await WaitUntilAsync(() => !window.OwnedWindows.OfType<SettingsWindow>().Any());
             Dispatcher.UIThread.RunJobs();
             var ran = false;
             await Dispatcher.UIThread.InvokeAsync(() => ran = true);

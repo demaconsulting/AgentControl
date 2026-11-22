@@ -1041,13 +1041,12 @@ sections:
       - id: AgentControl-RepoCardViewModel-ChangeSavedBeforeApplied
         title: >-
           The RepoCardViewModel class shall change its favorite status, its group, its card color
-          and its launch time only after its owner has saved the change, and shall remain as it was
-          (reporting the refusal of a group move or color choice to its caller) when the owner
-          refuses it.
+          and its launch time only through its owner, which has the change saved and may refuse it,
+          and shall remain as it was (reporting the refusal of a group move or color choice to its
+          caller) when the owner refuses it.
         justification: |
-          A card that shows a change the settings file does not have would be wrong after the next
-          start; applying a change only once it is saved keeps what the user sees equal to what is
-          kept.
+          The settings the card shows belong to the owner, which keeps them and writes them; a card
+          that changed its entry behind the owner's back would show something that is never saved.
         tests:
           - RepoCardViewModel_Changes_GoThroughTheOwnerAndAreNotAppliedWhenItRefuses
 

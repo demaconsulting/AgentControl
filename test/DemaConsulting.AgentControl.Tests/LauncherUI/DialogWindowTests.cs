@@ -368,7 +368,7 @@ public class DialogWindowTests
         // Arrange
         AppSettings? saved = null;
         var viewModel = new SettingsWindowViewModel(
-            new AppSettings { AgentTool = AgentToolKind.ClaudeCode }, updated => saved = updated);
+            new AppSettings { AgentTool = AgentToolKind.ClaudeCode }, updated => { saved = updated; return Task.CompletedTask; });
         var window = new SettingsWindow(viewModel);
         window.Show();
         try
@@ -403,7 +403,7 @@ public class DialogWindowTests
     {
         // Arrange
         AppSettings? saved = null;
-        var viewModel = new SettingsWindowViewModel(new AppSettings(), updated => saved = updated);
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), updated => { saved = updated; return Task.CompletedTask; });
         var window = new SettingsWindow(viewModel);
         var closed = false;
         window.Closed += (_, _) => closed = true;
@@ -446,7 +446,7 @@ public class DialogWindowTests
             {
                 Sources = [new PackageSourceDefinition { Alias = "Existing", Type = PackageSourceType.Zip, Location = @"C:\x" }]
             },
-            _ => { },
+            _ => Task.CompletedTask,
             (_, _) => Task.FromResult(true));
         var window = new SettingsWindow(viewModel);
         window.Show();
@@ -489,7 +489,7 @@ public class DialogWindowTests
     public void SettingsWindow_AddNuGetFolderClickedThenCancelled_AddsNothing() => HeadlessTestApp.Run(() =>
     {
         // Arrange
-        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => { }, (_, _) => Task.FromResult(true));
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => Task.CompletedTask, (_, _) => Task.FromResult(true));
         var window = new SettingsWindow(viewModel);
         window.Show();
 
@@ -523,7 +523,7 @@ public class DialogWindowTests
                 Sources = [new PackageSourceDefinition { Alias = "Contoso", Type = PackageSourceType.Zip, Location = @"C:\x" }],
                 RecentRepos = [new RecentRepo { Path = @"C:\r", PinnedPackageName = "p", PinnedSource = "Contoso" }]
             },
-            _ => { },
+            _ => Task.CompletedTask,
             (_, _) => Task.FromResult(true));
         var window = new SettingsWindow(viewModel);
         window.Show();
@@ -564,7 +564,7 @@ public class DialogWindowTests
             {
                 Sources = [new PackageSourceDefinition { Alias = "Slow", Type = PackageSourceType.Zip, Location = @"C:\x" }]
             },
-            _ => { },
+            _ => Task.CompletedTask,
             async (_, token) =>
             {
                 await Task.Delay(Timeout.Infinite, token);

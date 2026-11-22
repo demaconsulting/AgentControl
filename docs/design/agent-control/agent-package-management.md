@@ -364,7 +364,7 @@ parse so name/version splitting is unchanged.
 **Caching.** `PackageVersionCache` sits in front of the providers as an instance-level
 memoization layer: `MainWindowViewModel` constructs one shared instance so multiple
 `RepoCardViewModel`s pointed at the same source do not each re-query it independently, and
-`MainWindowViewModel.ApplySettings` invalidates only the sources that were edited or removed,
+`MainWindowViewModel.ApplySettingsAsync` invalidates only the sources that were edited or removed,
 since previously cached results for those become stale. Entries expire five minutes after they were
 fetched (a `TimeProvider` dates them, so tests move the clock by hand), because the application is
 left open while packages are published; a user action that must show what the sources offer now

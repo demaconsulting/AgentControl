@@ -37,15 +37,20 @@ sections:
           and its list of package sources to its owner and signal that settings were saved,
           except that it shall refuse to save, showing an explanation, a package source
           location that embeds a credential, and except that it shall keep the window open
-          showing the reason, without signaling a save, when its owner rejects the settings.
+          showing the reason, without signaling a save, when its owner rejects the settings. It
+          shall wait for its owner's save without blocking the window, signal the save only once it
+          has completed, and make Save unavailable until then.
         justification: |
           Persisting settings and notifying the caller must happen together so the main window
           can immediately apply the new configuration (e.g. invalidate cached package
           versions) after a save; a credential typed into a location must be stopped where the
           user can correct it, because AgentControl never stores secrets; a failed save must
-          be explained where the user can react rather than escape as an unhandled error.
+          be explained where the user can react rather than escape as an unhandled error. The
+          settings file can be busy for a moment; the window must stay responsive meanwhile, and a
+          second click must not save twice.
         tests:
           - SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved
+          - SettingsWindowViewModel_Save_WhileSaving_SaveDisabledAndSavedRaisedAfter
           - SettingsWindowViewModel_Save_SourceLocationWithEmbeddedCredential_IsRefusedWithErrorMessage
           - SettingsWindowViewModel_SaveCommand_OnSaveThrowsInvalidOperation_ShowsErrorAndDoesNotRaiseSaved
 

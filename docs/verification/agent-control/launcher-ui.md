@@ -116,7 +116,11 @@ tests (`HeadlessTestApp.RunAsync`), that the UI thread is free: `Dispatcher.UITh
 completes while the add or the refresh is still held. No test asserts on thread identity or elapsed time. The save seam
 of `MainWindowViewModel` takes a delegate that counts saves and throws `InvalidOperationException` on demand, so "one
 save per batch", Retry and Discard are deterministic (the earlier way of breaking a save, turning `settings.json` into
-a folder, still works for the older tests). The window tests that pick or drop folders run asynchronously and let the
+a folder, still works for the older tests). Every save goes through the view model's background settings writer, on a
+worker thread: a window test that reads the settings file right after a change first runs
+`HeadlessTestApp.RunJobsUntilSettingsWritten`, which flushes the writer while running the UI thread's jobs, and the
+headless UI thread is guarded, so a settings save made on it would fail the test (`SettingsStore.Save` asks the
+`BlockingCallGuard`). The window tests that pick or drop folders run asynchronously and let the
 queued add settle before asserting (`RepoReorderWindowTests.SettleAddsAsync`: run the posted add, await
 `PendingAddRepos`, run what it posted afterwards).
 
@@ -591,7 +595,7 @@ covering `AgentControl-LauncherUI-AgentsMdTemplateOffer`. The order of the quest
 scenario `LauncherUI_AgentsMdOfferBeforeReleaseNotes_QuestionFirstThenReleaseNotes` below.
 
 **LauncherUI_Settings_SaveAndApplyPreservesRecentReposAndUpdatesFields**: The settings
-dialog's `SaveCommand` invokes its `onSave` callback and raises `Saved` with the current
+dialog's `SaveCommand` invokes its `onSave` callback, waits for it, and raises `Saved` with the current
 property values, and applying the resulting settings on `MainWindowViewModel` preserves the
 existing recent-repos list while adopting the new field values. This scenario is tested by
 `SettingsWindowViewModel_SaveCommand_Execute_InvokesOnSaveWithCurrentValuesAndRaisesSaved` and
@@ -1211,25 +1215,27 @@ match and the collapse toggles disabled and explained meanwhile). The
 end-to-end checks of the same behavior are the system scenarios (`AgentControl-System-RepoGroups` and the
 requirements next to it).
 
-**LauncherUI_ChangesSaved_ChangeIsAppliedOnlyWhenSavedAndAFailedSaveChangesNothing**: Every change the user makes to
-a repo or a section (favorite, group, card color, launch time, collapse, rename or removal of a group, adding or
-removing a repo) is applied and written when the save succeeds; when the save fails - the tests put a directory
-where the settings file belongs - the live settings, the cards, the displayed list and the file stay as they were, a
-later unrelated save
-does not write the failed change, the user is told in a message, and the operations that return to a caller (collapse,
-rename, remove a group, add and remove a repo) refuse by reporting the failure. In the headless main window a
-settings change that cannot be saved shows the message and keeps the state as it was. This scenario is tested by
-`MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten` and
+**LauncherUI_ChangesSaved_AppliedAtOnceWrittenInTheBackgroundAndKeptWhenAWriteFails**: Every change the user makes to
+a repo or a section (favorite, group, card color, launch time, collapse, rename, removal, color or order of a group,
+the order of the repos, removing a repo) is applied at once and written to the settings file in the background - with
+the writes held, the change is in effect before anything is written; when a write fails - the tests make the save fail
+or put the settings file's directory where a file is - the change stays in effect in the live settings, the cards and
+the displayed list, the user is told once per failure streak in a message that does not hold up the window, and the
+next change, once writing works, writes it; an add and the Settings window's values that cannot be saved change
+nothing. In the headless main window a favorite that cannot be saved is kept and shows one message saying the change
+stays in effect, and a removal whose save fails as well is applied without a second message. This scenario is tested
+by `MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten`,
+`MainWindowViewModel_Favorite_SaveHeld_AppliedAtOnceAndWrittenAfterFlush` and
 `RepoCardViewModel_Changes_GoThroughTheOwnerAndAreNotAppliedWhenItRefuses`, covering
-`AgentControl-LauncherUI-ChangeAppliedWhenSaved`; by `MainWindow_SettingsCannotBeSaved_ShowsMessageAndKeepsStateAsItWas`
-and `MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt`, covering
+`AgentControl-LauncherUI-ChangeAppliedWhenSaved`; by `MainWindow_SettingsCannotBeSaved_ChangeKeptAndMessageShownOnce`
+and `MainWindowViewModel_FavoriteSaveFails_KeptReportedOnceAndSavedWithNextChange`, covering
 `AgentControl-LauncherUI-FailedSaveChangesNothing`; and by
-`MainWindow_SettingsCannotBeSaved_ShowsMessageAndKeepsStateAsItWas`, covering
-`AgentControl-LauncherUI-FailedSaveReported`. The unit tests of each operation are in
+`MainWindow_SettingsCannotBeSaved_ChangeKeptAndMessageShownOnce`, covering
+`AgentControl-LauncherUI-FailedSaveReported`. The headless test waits for the message with `RunJobsUntil`, because
+the failure is posted to the UI thread after the background write. The unit tests of each operation are in
 `MainWindowViewModelPersistenceTests.cs` (see the `MainWindowViewModel` verification design).
-
-**LauncherUI_RemovedRepoGoesQuiet_NothingIsReportedForARemovedCard**: When a repo is removed (after the removal was
-saved) its card is retired: a running upgrade check publishes nothing, a running operation is canceled and reports
+**LauncherUI_RemovedRepoGoesQuiet_NothingIsReportedForARemovedCard**: When a repo is removed (once it was
+removed) its card is retired: a running upgrade check publishes nothing, a running operation is canceled and reports
 nothing, and the card checks nothing when asked to refresh; the window releases the handlers it had on the card. This
 scenario is tested by `MainWindow_RepoRemoved_ReleasesTheCardHandlers` and
 `MainWindowViewModel_RemoveRepo_RetiresTheCard`, covering `AgentControl-LauncherUI-RemovedRepoGoesQuiet`.

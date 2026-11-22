@@ -751,7 +751,7 @@ public sealed class MainWindowViewModelRecheckTests : IDisposable
         };
         var viewModel = CreateViewModel(clock, feed, out var card);
         await viewModel.BeginUpgradeRefresh();
-        viewModel.ApplySettings(viewModel.Settings);
+        await viewModel.ApplySettingsAsync(viewModel.Settings);
         await viewModel.PendingRefresh;
         var callsAfterSave = feed.ListVersionsCalls;
 

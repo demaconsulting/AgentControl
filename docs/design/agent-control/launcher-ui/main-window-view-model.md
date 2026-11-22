@@ -21,7 +21,9 @@ design) and `GlobalProgressViewModel` (the progress strip under the app bar, in 
 work - adding repositories and refreshing the cards after a settings save - see its own design). It owns the one
 `RepoRefreshQueue` (see its own design) through which the folders of an add, the cards' refresh after a settings save
 and the cards' own reads are read off the UI thread, at most two at a time across all of them
-(`AgentControl-MainWindowViewModel-SharedRepoReads`), and every add is saved once for the whole batch.
+(`AgentControl-MainWindowViewModel-SharedRepoReads`), and every add is saved once for the whole batch. It owns a
+`SettingsWriter` (`Settings` subsystem, see its own design) through which every settings save is written in the
+background, so a change the user makes is applied at once and the window never waits for the settings file.
 
 #### Data Model
 
@@ -107,12 +109,23 @@ by the constructor; this view model is its only caller (`AgentControl-MainWindow
 **PendingAddRepos**: `Task` (internal) — the chain of adds that are running or queued; completed when no add runs.
 Never faults. Tests and the window's tests await it to let adds settle.
 
-**_saveSettings**, **_backgroundWork**: `Action<AppSettings>` and `IBackgroundWorkRunner` — constructor seams: how a
-candidate is written (`SettingsStore.Save` into the configuration directory by default; it must throw
-`InvalidOperationException` when the file cannot be written; tests count saves and make them fail) and how blocking
-reads run off the UI thread (`ThreadPoolBackgroundWorkRunner.Instance` by default, the runner of the refresh queue;
-tests hold the reads at a gate). Every save of the view model goes through `_saveSettings` (`CommitSettingsChange`,
-`ApplySettings`, `SaveSettings`).
+**_settingsWriter**: `SettingsWriter` (`Settings` subsystem) — writes every settings save of the view model in the
+background, one write at a time on a worker thread, created by the constructor over the `saveSettings` seam
+(`SettingsStore.Save` into the configuration directory by default; it must throw `InvalidOperationException` when the
+file cannot be written; tests count, hold and fail writes) on `_timeProvider`, with the constructor's
+`settingsWriteDelay` (`SettingsWriter.DefaultDelay`, 300 ms, by default). Its `WriteFailed` is handled by
+`OnSettingsWriteFailed`. No save of the view model runs on the UI thread.
+
+**_confirmedSavesRunning**, **_saveDeferred**: `int` and `bool` — how many confirmed saves (an add, the Settings
+window's Save) are running, and whether the live settings hold something to write once they have ended (see
+*Background saving*).
+
+**SettingsFlushTimeout**: `TimeSpan` (internal, five seconds) — the longest `Dispose` waits for the writes that are
+not done yet.
+
+**_backgroundWork**: `IBackgroundWorkRunner` — constructor seam for how blocking reads run off the UI thread
+(`ThreadPoolBackgroundWorkRunner.Instance` by default, the runner of the refresh queue; tests hold the reads at a
+gate).
 
 **_refreshQueue**, **_ownsRefreshQueue**: `RepoRefreshQueue` and `bool` — the queue every repo read goes through,
 created here over `_backgroundWork` (two reads at a time) unless the constructor's optional `refreshQueue` supplied
@@ -137,7 +150,7 @@ operation (`GlobalProgressOperation`, begun with "Adding repositories..." and `C
 one `CancellationTokenSource` and a count of adds not yet ended; `null` when no add runs. Ending the last add of the
 session disposes its progress operation and its cancellation.
 
-**_settingsRefreshGeneration**: `int` — identifies the most recent card refresh started by `ApplySettings`, so an
+**_settingsRefreshGeneration**: `int` — identifies the most recent card refresh started by `ApplySettingsAsync`, so an
 older one that is still running neither rebuilds the list nor starts the upgrade check.
 
 **AddSaveFailed**: `EventHandler<SettingsSaveRetryRequest>` (public event) — raised when the save at the end of a
@@ -175,10 +188,13 @@ its request events (toggle, rename, remove, add repository, move).
 group (from a card's menu) and for a rename (from a header), and this view model applies the name it completes with
 (`AgentControl-MainWindowViewModel-GroupManagement`, `AgentControl-RepoCardViewModel-MoveToGroup`).
 
-**SettingsSaveFailed**: `EventHandler<string>` (public event) — raised with a message for the user when a change that
-comes from a card or a header button (favorite, group, card color, group color, group order, launch stamp, collapse)
-could not be saved; the
-window shows it in a message box (`AgentControl-MainWindowViewModel-SaveFailureReported`).
+**SettingsSaveFailed**: `EventHandler<string>` (public event) — raised on the UI thread with a message for the user when
+the changes made in the window (favorite, group, card color, group color, group order, repo order, collapse, rename or
+removal of a group, removal of a repo, launch stamp) could not be written in the background: once per failure streak,
+saying that the changes stay in effect and are saved with the next change and when AgentControl closes; never after
+the window closed. The window shows it in a message box it does not wait for
+(`AgentControl-MainWindowViewModel-SaveFailureReported`). It is also raised, with its own message, when a synchronous
+`AddRepoToGroup` could not save the move of a listed repo.
 
 **_packageVersionCache**: `PackageVersionCache` — The package-version cache passed to every
 `RepoCardViewModel`, per architecture.md's repo-fact caching strategy; created with the view model's `TimeProvider`, so
@@ -221,42 +237,50 @@ what NuGet itself supplies.
 
 #### Key Methods
 
-**Transactional changes (candidate copy, save, commit, refresh)**: every change the user makes in the main window goes
-through the private `CommitSettingsChange(change)`, so memory, the displayed list and the settings file cannot drift
-apart:
+**Background saving (apply at once, write in the background)**: every change the user makes in the main window goes
+through the private `CommitSettingsChange(change)`:
 
-1. *Candidate copy*: a copy of the settings is made (`CreatePersistedCopy`, with each `RecentRepo` cloned by
-   `RecentRepo.Clone()` and the collapsed list, the group colors and the group order copied), and `change` is applied
-   to the **candidate** only; then `AppSettings.RepairGroupSettings` runs on the candidate, so a group that lost its
-   last repo forgets its color and position in the file.
-2. *Save*: the candidate is written through the `_saveSettings` seam (`SettingsStore.Save` in the application). If
-   that throws (a file that cannot be written, a source
-   location that embeds a credential), the exception leaves the method before anything live was touched.
-3. *Commit*: only after a successful save is the same `change` applied to the live settings, followed by the same
-   repair, so memory and the file agree. Because the change runs
-   twice, it must give the same result both times; callers decide anything that depends on live state (for example
-   whether a section is being collapsed or expanded) before the call.
-4. *Refresh*: the callers then bring the cards and the displayed list up to date.
+1. *Apply*: `change` is applied to the live settings at once, followed by `AppSettings.RepairGroupSettings`, so a
+   group that lost its last repo forgets its color and position.
+2. *Schedule*: `ScheduleSettingsSave` hands `_settingsWriter` a snapshot of the live settings
+   (`AppSettings.CreateSnapshot`, which shares nothing mutable with them). The writer writes the newest snapshot on a
+   worker thread shortly after the last change; the UI thread never waits for the settings file.
+3. *Refresh*: the callers then bring the cards and the displayed list up to date.
 
-A failed save therefore changes nothing - not the live settings, the cards, the displayed list or the file - and a
-later, unrelated save can never write the failed change because the live settings never held it
-(`AgentControl-MainWindowViewModel-FailedSaveChangesNothing`, `-FailedSaveNotPersistedLater`,
-`-ChangeAppliedWhenSaved`). The direct operations (`AddRepo`, `AddRepoToGroup`, `RemoveRepo`,
-`ToggleGroupCollapsed`, `RenameGroup`, `RemoveGroup`) let the `InvalidOperationException` of the failed save reach
-their caller, which shows a message (`-SaveFailureRefusesOperation`) - except that `AddRepoToGroup` reports a failed
-move of a repo that is already listed through `SettingsSaveFailed`; `AddRepos` turns it into `SaveFailed` outcomes and
-`EnqueueAddReposAsync` into the Retry/Discard question instead (see below). The changes that originate in a card are
-made
-through the private `CommitRepoChange(repo, change)`, handed to each card as its `commitChange` callback when
-`CreateCard` builds it: the callback applies the change to the repo's entry through `CommitSettingsChange`, returns
-`true` when it was saved (or when the repo is no longer in the list, which needs no saving), and on a failed save
-raises `SettingsSaveFailed` through `ReportSaveFailure`, returns `false` and changes nothing. The card applies its own
-property, and raises its change event, only when the callback returned `true` (see the `RepoCardViewModel` design). A
-header's collapse toggle is forwarded through `RunReportingSaveFailure`, which reports the failure the same way
-instead of letting the exception escape into the UI framework (`-SaveFailureReported`); `SetGroupColor`, `MoveGroup`
-and `DropGroup` report a failed save the same way and return `false`. `ApplySettings` keeps its own
-candidate-first flow, described below.
+The change therefore never fails: a write that fails leaves the change in effect - the settings in memory, the cards
+and the list - and the writer keeps the snapshot and writes it with the next change, the next flush or the close
+(`AgentControl-MainWindowViewModel-ChangeAppliedWhenSaved`, `-FailedSaveChangesNothing`). The writer reports the
+first failure of a streak through `WriteFailed`, which `OnSettingsWriteFailed` turns into `SettingsSaveFailed` with
+the reason (redacted by `SecretRedactor.SafeMessage`) and the note that the changes stay in effect; after the view
+model was disposed nothing is raised (`-SaveFailureReported`). The direct operations (`RemoveRepo`,
+`ToggleGroupCollapsed`, `RenameGroup`, `RemoveGroup`, `SetGroupColor`, `MoveGroup`, `DropGroup`, `MoveCard`,
+`DropCard`) no longer throw or return `false` for a failed save. The changes that originate in a card are made through
+the private `CommitRepoChange(repo, change)`, handed to each card as its `commitChange` callback when `CreateCard`
+builds it: it applies the change to the repo's live entry through `CommitSettingsChange` (or directly, without saving,
+when the repo is no longer in the list) and returns `true`; the card applies its own property and raises its change
+event (see the `RepoCardViewModel` design).
 
+*Confirmed saves*: an add and the Settings window's values must be on disk before they are applied, so their failure
+can be answered (Retry/Discard, or the Settings window staying open) and Discard has nothing to undo. They go through
+the private `SaveConfirmedAsync(candidate, adopt)`: the candidate is a snapshot of the live settings with the change
+applied, written by `_settingsWriter.SaveNowAsync` on a worker thread; `adopt` applies the change to the live settings,
+the cards and the list on the UI thread once the write succeeded; a failure leaves everything as it was and reaches
+the caller (`-SaveFailureRefusesOperation`). While a confirmed save runs, the candidate it writes does not hold a
+change made meanwhile in the window, and a snapshot taken then would not hold the confirmed change: written after it,
+it would take the add out of the file again. So `ScheduleSettingsSave` only records such a change
+(`_saveDeferred`) while `_confirmedSavesRunning` is above zero, and when the last confirmed save has ended (and
+adopted its change) the live settings - holding both - are scheduled. A confirmed save that ends while another one
+still runs sets `_saveDeferred` too, because the other one's candidate was built without it. The writer itself keeps
+a snapshot scheduled before a confirmed save when that save fails, so a change made before a discarded add is still
+written (`-AddKeepsOtherChanges`).
+
+*Close*: `Dispose` schedules a deferred change and flushes the writer with a bounded wait (`SettingsFlushTimeout`):
+the write runs on a worker thread and the closing UI thread only waits, which is the one wait for the disk left on the
+UI thread and comes after the window has closed; settings that could not be written in time are logged
+(`-SettingsFlushedOnClose`).
+
+*Test seam*: `FlushSettingsAsync()` (internal) flushes the writer and completes when the writes accepted so far have
+ended, so a test reads the settings file only once it holds every change.
 **Constructor**: Populates `RepoCards` from the loaded settings, in the stored order. Before building the cards it
 calls `AppSettings.EnsureRepoOrder`, so settings built directly (a first run, a test) are seeded exactly like a loaded
 file, once: a list that has no user order yet is arranged favorites first, then most recently launched, and the
@@ -271,9 +295,11 @@ that already has a user order is kept whatever the launch times are (`-OrderKept
   `TimeSpan? upgradeRecheckInterval = null`, `Func<AppSettings, PackageSourceRegistry>? registryFactory = null`,
   `IAgentToolProcessStarter? processStarter = null`, `ShellDetector? shellDetector = null`,
   `Action<AppSettings>? saveSettings = null`, `IBackgroundWorkRunner? backgroundWork = null`,
-  `RepoRefreshQueue? refreshQueue = null` and `GitClientTimeouts? gitTimeouts = null`. Must be called on the UI
-  thread: the refresh queue it creates posts its progress to the synchronization context current then.
-- *Preconditions*: `settings` is not null; `upgradeRecheckInterval`, when given, is positive.
+  `RepoRefreshQueue? refreshQueue = null`, `GitClientTimeouts? gitTimeouts = null` and
+  `TimeSpan? settingsWriteDelay = null`. Must be called on the UI thread: the refresh queue it creates posts its
+  progress, and the settings writer its failures, to the synchronization context current then.
+- *Preconditions*: `settings` is not null; `upgradeRecheckInterval`, when given, is positive; `settingsWriteDelay`,
+  when given, is not negative.
 - *Postconditions*: One `RepoCardViewModel` exists per `RecentRepo` in `settings.RecentRepos`, built from the settings
   alone - no disk access and no git; `DisplayedItems` and `DisplayedRepoCards`
   reflect the initial sort/filter/grouping (`AgentControl-MainWindowViewModel-PopulateRecentRepos`); every card's
@@ -304,10 +330,10 @@ seam for code that must act on settled cards.
   every background check (`_upgradeCheckSlots`), so a slow or unreachable source
   holds up only the cards' own checks, never the window, and a check still running for earlier settings (including a
   periodic round) is cancelled. The window calls it once it is shown; `AddRepo` checks the new card's upgrade status the
-  same way, and `ApplySettings` starts a new round against the new sources
+  same way, and `ApplySettingsAsync` starts a new round against the new sources
   (`AgentControl-MainWindowViewModel-BackgroundUpgradeCheck`); closing the Settings window without saving re-checks
   only the cards that show a problem (`RecheckAfterSettingsClosed`, below).
-- *Busy cards*: `CheckUpgradesAsync` (the check behind `BeginUpgradeRefresh`, `ApplySettings`, an added repo and
+- *Busy cards*: `CheckUpgradesAsync` (the check behind `BeginUpgradeRefresh`, `ApplySettingsAsync`, an added repo and
   `RecheckAfterSettingsClosed`) skips a card that `IsBusy` with an action of its own (Refresh, Upgrade, Select Package,
   Launch, Pull) when its turn comes, as a periodic round does: a check beside the action would break the card's
   one-action-at-a-time rule and, being the card's newest check, could replace the action's result with its own. The
@@ -391,21 +417,20 @@ failed upgrade check, once the Settings window has closed
   (`CreateConnectionTestProvider`) uses `Credentials`, the same `SessionCredentialStore` the cards read without a prompt
   (`WithoutPrompt`) - or the network may come back, so without this the cards would keep showing "Sign-in needed" or a
   failed check until the next periodic round. A disposed view model starts nothing. After a save nothing is started,
-  because `ApplySettings` always ends with `BeginUpgradeRefresh`, which checks every card: checking again would read
-  every source twice. Otherwise it takes the cards that `CanRecheckUpgrade` accepts (state read, pinned, not busy,
-  folder present)
-  and that have `HasSourceProblem` or `IsUpgradeStatusUnknown`, or `IsCheckingUpgrade` (a background check is reading
-  a source for the card at this moment: that read began before the sign-in, and if it fails it would put "Sign-in
-  needed" on the card when it finishes, so a newer check is started and the card's generation counter ignores the
-  older one's result), and checks them with `CheckUpgradesAsync` - the launch-style check (which, when a card's turn
-  comes, skips it if the user has meanwhile started an action on it; see *Busy cards* above): `allowPrompt` false (no
-  sign-in dialog), `relistSources` false (the cache is not cleared: a
-  failure is never cached, so these cards read their sources again, while a listing cached for another card still
-  serves), a shared `SourceFailureMemo`, a few at a time, counted in `_launchChecksInFlight` so no periodic round starts
-  over it. Like the check of added repos (`BeginCardsUpgradeRefresh`) it runs with the token of
-  `_refreshCancellation`, does not cancel a check that is running, is canceled by a later `StartUpgradeRefresh` or by
-  `Dispose`, and is merged into `PendingRefresh` (`Task.WhenAll(PendingRefresh, check)`); the cards' generation
-  counter keeps the newest result where it overlaps another check.
+  because `ApplySettingsAsync` always ends with `BeginUpgradeRefresh`, which checks every card: checking again would
+  read every source twice. Otherwise it takes the cards that `CanRecheckUpgrade` accepts (state read, pinned, not busy,
+  folder present) and that have `HasSourceProblem` or `IsUpgradeStatusUnknown`, or `IsCheckingUpgrade` (a background
+  check is reading a source for the card at this moment: that read began before the sign-in, and if it fails it would
+  put "Sign-in needed" on the card when it finishes, so a newer check is started and the card's generation counter
+  ignores the older one's result), and checks them with `CheckUpgradesAsync` - the launch-style check (which, when a
+  card's turn comes, skips it if the user has meanwhile started an action on it; see *Busy cards* above): `allowPrompt`
+  false (no sign-in dialog), `relistSources` false (the cache is not cleared: a failure is never cached, so these cards
+  read their sources again, while a listing cached for another card still serves), a shared `SourceFailureMemo`, a few
+  at a time, counted in `_launchChecksInFlight` so no periodic round starts over it. Like the check of added repos
+  (`BeginCardsUpgradeRefresh`) it runs with the token of `_refreshCancellation`, does not cancel a check that is
+  running, is canceled by a later `StartUpgradeRefresh` or by `Dispose`, and is merged into `PendingRefresh`
+  (`Task.WhenAll(PendingRefresh, check)`); the cards' generation counter keeps the newest result where it overlaps
+  another check.
 - *Failures recorded before the sign-in*: before choosing the cards (so also when none needs checking) it calls
   `ForgetRecordedSourceFailures`, which clears the `SourceFailureMemo` of every check that is running - a periodic round
   or a launch-style check started before Settings closed. Such a check may have recorded "sign-in needed" or
@@ -429,10 +454,11 @@ failed upgrade check, once the Settings window has closed
 - *Postconditions*: On success, a new card is appended at the end of `RepoCards` (and its entry at the end of
   `AppSettings.RecentRepos`), so it is at the bottom of its section (`-NewRepoAtEnd`), settings are persisted, and
   `DisplayedRepoCards` is recomputed (`AgentControl-MainWindowViewModel-AddRepo`). It is a one-folder batch of the
-  shared add steps (`AddRepoCore`): the folder is read inline, its entry is saved through `CommitSettingsChange`, and
-  only then is the card created from the facts read; if the save fails the exception reaches the caller and the list,
-  the cards and the file are exactly as they were. The new card's working tree is not checked here: that runs in the
-  background when its card is first shown.
+  shared add steps (`AddRepoCore`): the folder is read inline, its entry is saved with a confirmed write of the settings
+  writer (`ApplyAddCommitNow`, which waits for the write - made on a worker thread - only because this synchronous add,
+  which no window code calls, must return its result), and only then is the card created; if the save fails the
+  exception reaches the caller and the list, the cards and the settings are exactly as they were. The new card's
+  working tree is not checked here: that runs in the background when its card is first shown.
 
 Returns `false` without persisting when `repoPath` does not exist on disk, is already
 present (`IsSameRepoPath`: the same folder ignoring letter case and a trailing directory separator), or is not the top
@@ -460,13 +486,16 @@ never been synced (no pin) and a pin file that cannot be read (no pin).
    (`AgentControl-MainWindowViewModel-AddGitReposOnly`); otherwise `Added`, with a new `RecentRepo` (path in its
    `NormalizeRepoPath` form, the group, the pin from the facts). It returns the outcomes and the steps (new entries
    and moves) in request order.
-4. **ApplyAddCommit** (UI thread): a batch with no step saves nothing. Otherwise it calls `CommitSettingsChange` once
-   with `ApplyAddSteps`, a deterministic change that, in request order, appends each new entry and, for a moved repo,
-   sets the group on its entry and moves the entry to the bottom of its section (`MoveToSectionEnd`: after the
-   section's last other entry, or the end of the list; marks `HasUserRepoOrder` when the order changed), and removes
-   the target group from the collapsed sections when anything joined it (so a target group collapsed while the add ran
-   is opened). A failed save throws
-   `InvalidOperationException` with nothing changed. Only after the save: the new cards are created
+4. **ApplyAddCommitAsync** (UI thread; `ApplyAddCommitNow` for the synchronous adds): a batch with no step saves
+   nothing. Otherwise `CreateAddCandidate` applies `ApplyAddSteps` to a snapshot of the live settings - a
+   deterministic change that, in request order, appends each new entry and, for a moved repo, sets the group on its
+   entry and moves the entry to the bottom of its section (`MoveToSectionEnd`: after the section's last other entry,
+   or the end of the list; marks `HasUserRepoOrder` when the order changed), and removes the target group from the
+   collapsed sections when anything joined it (so a target group collapsed while the add ran is opened) - and the
+   candidate is written with one confirmed save (`SaveConfirmedAsync`, see *Background saving*), on a worker thread. A
+   failed save throws `InvalidOperationException` with nothing changed. Only after the save, `AdoptAddCommit` applies
+   the same steps to the live settings as they are then (so a change made while the add was saved is kept), and the
+   new cards are created
    (`CreateCard` + `ApplyCheapFacts`, or a background `RefreshCheapInBackgroundAsync` through the shared queue for a
    card whose facts were not
    read - a repo that was listed when the add was planned but removed before the commit), their events attached,
@@ -571,13 +600,15 @@ added, and the canceled requests return a canceled result, so the window shows n
 
 **CommitAddBatchAsync** (private): Commits a background add on the UI thread, asking the user when the save fails
 (`AgentControl-MainWindowViewModel-AddReposSaveFailure`). Each attempt re-resolves the target group and prepares the
-commit against the list as it is then (`PrepareAddCommit`, `ApplyAddCommit`); on `InvalidOperationException` it raises
-`AddSaveFailed` with a `SettingsSaveRetryRequest` whose message says the repositories could not be added because the
-settings could not be saved, gives the redacted reason and says what Retry and Discard do, and awaits the answer:
-Retry loops; Discard (or a disposed view model, or no subscriber, which answers Discard at once) returns the outcomes
-with every folder that would have been added or moved as `SaveFailed`. Because the commit is candidate-first, nothing
-needs undoing: memory, the cards, the list and the file still match, including the group, the place and the collapsed
-state of repos the add would have moved.
+commit against the list as it is then (`PrepareAddCommit`, `ApplyAddCommitAsync`); on `InvalidOperationException` it
+raises `AddSaveFailed` with a `SettingsSaveRetryRequest` whose message says the repositories could not be added because
+the settings could not be saved, gives the redacted reason and says what Retry and Discard do, and awaits the answer:
+Retry loops - the save is made again and, when it fails again, the question is asked again, until a save succeeds or
+the user discards; Discard (or a disposed view model, or no subscriber, which answers Discard at once) returns the
+outcomes with every folder that would have been added or moved as `SaveFailed`. Because the add is applied only once
+saved, nothing needs undoing: memory, the cards and the list are as they were before the add, including the group,
+the place and the collapsed state of repos the add would have moved. A change the user made in the window before or
+during the add is kept and written as usual (`-AddKeepsOtherChanges`, see *Background saving*).
 
 **DescribeAddOutcomes** (internal, static, pure): Words what the user needs to know about an add
 (`AgentControl-MainWindowViewModel-AddReposSummary`).
@@ -600,9 +631,10 @@ state of repos the add would have moved.
 - *Parameters*: `RepoCardViewModel card`.
 - *Returns*: `void`.
 - *Preconditions*: `card` is not null.
-- *Postconditions*: The removal is first saved (`CommitSettingsChange`); only then is the card removed from
-  `RepoCards`, **retired** and `DisplayedRepoCards` recomputed (`AgentControl-MainWindowViewModel-RemoveRepo`). A
-  failed save throws and leaves the repo listed and its card working.
+- *Postconditions*: The entry is removed from the live settings and the removal scheduled to be written
+  (`CommitSettingsChange`); the card is removed from `RepoCards`, **retired** and `DisplayedRepoCards` recomputed
+  (`AgentControl-MainWindowViewModel-RemoveRepo`). A failed write keeps the removal and is reported once
+  (see *Background saving*).
 
 Retiring (`RepoCardViewModel.Retire`, see its design) cancels what the card still has running and silences it, so a
 removed repo's pending upgrade check or operation can never show an error, release notes or a prompt
@@ -611,46 +643,46 @@ removed repo's pending upgrade check or operation can never show an error, relea
 Performs no confirmation itself: `MainWindow`'s code-behind is responsible for showing a
 `ConfirmationWindow` before calling this, in response to the card raising `RemoveRequested`.
 
-**ApplySettings**: Applies updated settings from the settings window.
+**ApplySettingsAsync**: Applies updated settings from the settings window.
 
 - *Parameters*: `AppSettings updated`.
-- *Returns*: `void`.
-- *Preconditions*: `updated` is not null.
-- *Postconditions*: The live settings instance is replaced (preserving the existing recent-repos
-  list in its order together with its `HasUserRepoOrder` marker, the collapsed-section names, and the group colors and
-  group order, since
+- *Returns*: `Task` — completes when the settings were saved and adopted; faults with `InvalidOperationException`
+  when they could not be saved.
+- *Preconditions*: `updated` is not null; a source location that embeds a credential is refused at once
+  (`InvalidOperationException` thrown before anything is saved).
+- *Algorithm*: the candidate is a snapshot of `updated` with the live repo list, `HasUserRepoOrder`, collapsed
+  sections, group colors and group order; it is written by a confirmed save of the settings writer
+  (`SaveConfirmedAsync`) on a worker thread, so the window does not wait for the settings file
+  (`AgentControl-MainWindowViewModel-ApplySettingsSaveInBackground`); `AdoptSettings` runs once it is on disk.
+- *Postconditions*: The live settings instance is replaced (preserving the live recent-repos list in its order together
+  with its `HasUserRepoOrder` marker, the collapsed-section names, and the group colors and group order as they are at
+  adoption - so a change made in the main window while the settings were saved is kept and written after them - since
   `SettingsWindowViewModel` never owns them - `AgentControl-MainWindowViewModel-OrderKeptOnApplySettings`,
-  `-GroupSettingsKeptOnApplySettings`) only after
-  the candidate has been
-  persisted successfully — if the write fails, the previous instance stays live, so a later save
-  (favorite, launch) can never persist a rejected candidate and the exception reaches the caller to
-  show; the shared
-  `PackageVersionCache` is invalidated for each package source that was edited or removed (the
-  sources before and after are compared by alias and by `PackageSourceDefinition.IsEquivalentTo`;
-  unchanged sources keep their cached results)
-  (`AgentControl-MainWindowViewModel-InvalidateChangedSources`). The save and the adoption happen before the method
-  returns; the cards are then refreshed in the background: the method cancels the upgrade check and the periodic round
-  that were running (they were started for the previous settings) and sets `PendingRefresh` to
-  `RefreshCardsAfterSettingsAsync`, which counts as a launch-style check while it runs (so no periodic round starts),
-  queues every card's cheap facts through the shared refresh queue at background priority, in display order (the
-  cards in `DisplayedRepoCards` first, then the collapsed and filtered-out ones), counted in the queue's progress wave
-  (`RepoCardViewModel.RefreshRepoStateAsync` with `reportsProgress`), so `GlobalProgress` shows "Refreshing
-  repositories {completed} of {total}..." (no Cancel; nothing for an empty list; see `OnRefreshQueueProgressChanged`),
-  rebuilds the list once and then awaits `BeginUpgradeRefresh` against the new sources
-  (`AgentControl-MainWindowViewModel-ApplySettingsInBackground`). A newer `ApplySettings` supersedes an older refresh
-  (`_settingsRefreshGeneration`): the older one neither rebuilds the list nor starts the upgrade check (the cards'
-  own generations already make the newest read win); `Dispose` cancels it. A present card
-  is additionally given a fresh Git status check (through the queue, after its cheap facts) when either it
-  reappeared (was missing, now present) during this refresh, so it is not left showing a "not yet
-  checked" state indefinitely, or `GitExecutablePath` itself changed, so a clean/dirty result
-  cached against the previously configured executable is not kept showing once a different
-  executable is in effect; a present card that was already checked and whose executable path
-  did not change only gets the cheap refresh, avoiding a `git status` call — which scans
-  the whole working tree — for every tracked repo on every settings save
-  (`AgentControl-MainWindowViewModel-ApplySettings`). Once the settings are saved, the saved
-  `Theme` is handed to the injected theme applier (`Action<ThemePreference>`, supplied by `App`), so the
-  choice takes effect without a restart (`AgentControl-MainWindowViewModel-ApplyTheme`); a refused save never reaches
-  this step (`AgentControl-MainWindowViewModel-RefusedThemeNotApplied`).
+  `-GroupSettingsKeptOnApplySettings`) only after the candidate has been persisted successfully — if the write fails,
+  the previous instance stays live, so a later save (favorite, launch) can never persist a rejected candidate and the
+  exception reaches the caller to show; the shared `PackageVersionCache` is invalidated for each package source that was
+  edited or removed (the sources before and after are compared by alias and by `PackageSourceDefinition.IsEquivalentTo`;
+  unchanged sources keep their cached results) (`AgentControl-MainWindowViewModel-InvalidateChangedSources`). The save
+  and the adoption happen before the returned task completes; the cards are then refreshed in the background: the
+  adoption cancels the upgrade check and the periodic round that were running (they were started for the previous
+  settings) and sets `PendingRefresh` to `RefreshCardsAfterSettingsAsync`, which counts as a launch-style check while it
+  runs (so no periodic round starts), queues every card's cheap facts through the shared refresh queue at background
+  priority, in display order (the cards in `DisplayedRepoCards` first, then the collapsed and filtered-out ones),
+  counted in the queue's progress wave (`RepoCardViewModel.RefreshRepoStateAsync` with `reportsProgress`), so
+  `GlobalProgress` shows "Refreshing repositories {completed} of {total}..." (no Cancel; nothing for an empty list; see
+  `OnRefreshQueueProgressChanged`), rebuilds the list once and then awaits `BeginUpgradeRefresh` against the new sources
+  (`AgentControl-MainWindowViewModel-ApplySettingsInBackground`). A newer `ApplySettingsAsync` supersedes an older
+  refresh (`_settingsRefreshGeneration`): the older one neither rebuilds the list nor starts the upgrade check (the
+  cards' own generations already make the newest read win); `Dispose` cancels it. A present card is additionally given a
+  fresh Git status check (through the queue, after its cheap facts) when either it reappeared (was missing, now present)
+  during this refresh, so it is not left showing a "not yet checked" state indefinitely, or `GitExecutablePath` itself
+  changed, so a clean/dirty result cached against the previously configured executable is not kept showing once a
+  different executable is in effect; a present card that was already checked and whose executable path did not change
+  only gets the cheap refresh, avoiding a `git status` call — which scans the whole working tree — for every tracked
+  repo on every settings save (`AgentControl-MainWindowViewModel-ApplySettings`). Once the settings are saved, the saved
+  `Theme` is handed to the injected theme applier (`Action<ThemePreference>`, supplied by `App`), so the choice takes
+  effect without a restart (`AgentControl-MainWindowViewModel-ApplyTheme`); a refused save never reaches this step
+  (`AgentControl-MainWindowViewModel-RefusedThemeNotApplied`).
 
 **OnRefreshQueueProgressChanged** (private): Shows the shared refresh queue's wave of counted reads in
 `GlobalProgress`: while it is active, one operation without a cancel action (begun on the first report) reporting
@@ -695,10 +727,10 @@ change the displayed set (add/remove, filter, favorite-toggle, grouping) runs th
 
 **ToggleGroupCollapsed** / **IsGroupCollapsed**: Collapse or expand a section by name (a group, or
 `Favorites` / `Ungrouped`; letter case ignored), add or remove the name in
-`AppSettings.CollapsedGroups` (through `CommitSettingsChange`; whether it is being collapsed or expanded is decided
-once, from the live state, before the call), and refresh the list. The collapsed names are written to the settings
+`AppSettings.CollapsedGroups` (through `CommitSettingsChange`, so applied at once and written in the background), and
+refresh the list. The collapsed names are written to the settings
 file, are read back when the view model is built (`AgentControl-MainWindowViewModel-GroupCollapseRemembered`) and are
-kept by `ApplySettings` (`-GroupCollapseKeptOnApplySettings`). The built-in names are reserved
+kept by `ApplySettingsAsync` (`-GroupCollapseKeptOnApplySettings`). The built-in names are reserved
 (`RepoGroupName`), so a group can never collide with them. Damaged group or collapsed values in the settings
 (a null list, blank, reserved or overlong names, names differing only in letter case) are read through
 `RepoGroupName` so that the list is still shown (`-DamagedGroupSettings`).
@@ -713,7 +745,7 @@ allowed (`-GroupRenameRules`).
 are forgotten
 (`-GroupRemove`, `-GroupSettingsFollowRenameAndRemove`). Both are applied through `CommitSettingsChange`, persist to
 the settings file only (never to a
-repository, `-GroupSettingsOnly`) and, once saved, refresh the cards' group properties (`FinishGroupEdit`, which calls
+repository, `-GroupSettingsOnly`) and then refresh the cards' group properties (`FinishGroupEdit`, which calls
 `RaiseGroupPropertiesChanged` on every card) and the list. A group whose last repo leaves it by any other path (a
 card moved out, a repo removed) forgets its color and position the same way, through the repair that
 `CommitSettingsChange` runs after every change. A header's
@@ -727,12 +759,12 @@ confirmation and calls these methods.
 - *Parameters*: `string groupName` (letter case ignored), `string? colorName` (a palette name, letter case ignored;
   `null` or blank for none).
 - *Returns*: `bool` — `true` when the group now has the requested color (also when it already had it, in which case
-  nothing is saved); `false`, changing nothing, for a color the palette does not know, a group that does not exist, a
-  built-in section's name, or a failed save (reported through `SettingsSaveFailed`).
+  nothing is saved); `false`, changing nothing, for a color the palette does not know, a group that does not exist or a
+  built-in section's name.
 - *Postconditions*: The color is stored in `AppSettings.GroupColors` under the group's canonical spelling (any entry of
-  the group in another letter case is removed) through `CommitSettingsChange`, so it is saved first and only then
-  applied; then `FinishGroupEdit` raises the cards' group properties (the tiles of the group's cards without a color of
-  their own follow) and recomputes the list (the header's accent follows). The color lives only in the per-user
+  the group in another letter case is removed) through `CommitSettingsChange`, so it is applied at once and written in
+  the background; then `FinishGroupEdit` raises the cards' group properties (the tiles of the group's cards without a
+  color of their own follow) and recomputes the list (the header's accent follows). The color lives only in the per-user
   settings file, never in a repository.
 
 **GetGroupMoveDisabledReason** / **CanMoveGroup**: Say whether a group can be moved a `RepoGroupMove` now, and if not
@@ -759,7 +791,7 @@ itself (`AgentControl-MainWindowViewModel-DropGroup`).
 - *Postconditions*: `CanDropGroup` is pure and refuses while the filter has text, a drop on the dragged group's own
   header, and a dragged or target group that is not a movable group (no section of its own, unknown, or a built-in
   section). `DropGroup` places the dragged group before or after the target group by `PlaceGroup`; a collapsed group
-  stays collapsed. It returns `false`, changing nothing, when refused or when the save failed.
+  stays collapsed. It returns `false`, changing nothing, when refused.
 
 **PlaceGroup** (private): Puts a group before or after another one and saves the order.
 
@@ -768,8 +800,7 @@ itself (`AgentControl-MainWindowViewModel-DropGroup`).
   stays complete) without the group, with the group inserted next to the anchor. When that equals the current order
   nothing is saved and `true` is returned. Otherwise the whole list is stored as `AppSettings.GroupOrder` through
   `CommitSettingsChange` - so groups that had no stored position keep the place they were shown at - and the list is
-  recomputed; a failed save is reported through `SettingsSaveFailed`, `false` is returned and nothing changed. The
-  saved order is what the next start reads (`-GroupOrderPersisted`).
+  recomputed; `true` is returned. The saved order is what the next start reads (`-GroupOrderPersisted`).
 
 **GetSectionOf** (internal, static): The section a card is listed in: **Favorites** for a favorite, otherwise its group,
 otherwise **Ungrouped** - the rule `DisplayedItems` builds its sections with. With no repo in a group the list has no
@@ -798,8 +829,7 @@ order.
   the previous one, the next one, the last one) and the card is placed before or after it by `PlaceCard` (below).
   Cards of other sections, which may be interleaved with the section's cards in the stored list, keep their relative
   order. When the move is not allowed, nothing changes and nothing is saved (`-MoveCard`).
-- *Returns*: `true` when the card moved; `false` when the move was refused or the order could not be saved - that
-  failure is reported through `SettingsSaveFailed` and nothing changed.
+- *Returns*: `true` when the card moved; `false` when the move was refused (nothing changed).
 
 **CanDrop**: Pure check of whether a dragged card may be dropped at a `RepoDropTarget`.
 
@@ -817,15 +847,14 @@ order.
 - *Postconditions*: When the card is not yet in the target section its section is changed first, through the paths
   the menu and the star use: dropping into **Favorites** sets `IsFavorite` (the card keeps its group); dropping into a
   **group** clears `IsFavorite` if set and calls `MoveToGroup(name)`; dropping into **Ungrouped** clears `IsFavorite`
-  if set and calls `MoveToGroup(null)`. If the card is then not in the requested section (a failed save, already
-  reported by the card through `SettingsSaveFailed`) nothing further is attempted and `false` is returned. Then
+  if set and calls `MoveToGroup(null)`. If the card is then not in the requested section (the card refused the change)
+  nothing further is attempted and `false` is returned. Then
   `PlaceCard` puts the card next to the anchor (before for the upper half of the row, after for the lower half) or,
   for a header drop (no anchor), at the **end of the section**. A **collapsed** target section stays collapsed - its
   header count shows the change; expanding it would silently change the collapsed state the user chose
   (`AgentControl-MainWindowViewModel-DropOnHeader`).
-- *Two saves*: a drop that changes the section saves twice - the section change, then the new position. If only the
-  second fails, the card is in its new section at its old relative position and the failure is reported through
-  `SettingsSaveFailed`; the result is `false`.
+- *Two changes*: a drop that changes the section makes two changes - the section, then the position. Both are applied
+  at once and scheduled; the settings writer folds them into one write, and a failure of that write is reported once.
 
 **PlaceCard** (private): Puts a card next to an anchor card, or at the end of its (current) section, in the stored
 order.
@@ -833,35 +862,34 @@ order.
 - *Postconditions*: The new order is decided once from the live state: `RepoCards` without the card, with the card
   inserted before/after the anchor or - with no anchor - after the last other member of its section (at the end of the
   list when it has none). When that equals the current order nothing is saved. Otherwise
-  `CommitSettingsChange` writes the order (`ApplyRepoOrder` reorders `AppSettings.RecentRepos` in place, by path
-  ignoring letter case, an unlisted entry keeping its relative place after the listed ones; it also sets
-  `HasUserRepoOrder`), and only after a successful save `RepoCards` is brought to the new order (`ObservableCollection`
-  `Move` operations, so the cards stay attached to the window) and `UpdateDisplayedRepoCards` runs. A failed save is
-  reported through `SettingsSaveFailed` (`ReportSaveFailure`), `false` is returned and nothing changed. A saved order
+  `CommitSettingsChange` applies and schedules the order (`ApplyRepoOrder` reorders `AppSettings.RecentRepos` in place,
+  by path ignoring letter case, an unlisted entry keeping its relative place after the listed ones; it also sets
+  `HasUserRepoOrder`), then `RepoCards` is brought to the new order (`ObservableCollection`
+  `Move` operations, so the cards stay attached to the window) and `UpdateDisplayedRepoCards` runs. A saved order
   is what the next start reads (`AgentControl-MainWindowViewModel-OrderPersisted`), and `RemoveRepo` leaves the rest
   of the order as it was.
 
 **AttachCardEvents** (private): Subscribes to each card's `FavoriteChanged` and `GroupChanged` events so the displayed
 list is refreshed. It deliberately does **not** subscribe to `LaunchRecorded` (the card still raises it): nothing
 displayed depends on a launch any more, so a launch cannot move a card - structurally, not just through the sort
-(`AgentControl-MainWindowViewModel-StableOrder`). The change itself was already saved by then: the card raises these
-events only after its `commitChange` callback (`CommitRepoChange`) reported success, so a failed save raises no event
-and refreshes nothing. A color change needs no re-ordering and so has no subscription here. A header's collapse toggle
-is run through `RunReportingSaveFailure` where the header is created.
+(`AgentControl-MainWindowViewModel-StableOrder`). The change itself was already applied (and scheduled to be written)
+by then: the card raises these events only after its `commitChange` callback (`CommitRepoChange`) accepted it. A color
+change needs no re-ordering and so has no subscription here. A header's collapse toggle calls `ToggleGroupCollapsed`
+where the header is created.
 
 #### Error Handling
 
 `AddRepo` throws `ArgumentException` for a null, empty, or whitespace `repoPath`.
-`RemoveRepo`/`ApplySettings` throw `ArgumentNullException` for a null argument, and `ApplySettings`
+`RemoveRepo`/`ApplySettingsAsync` throw `ArgumentNullException` for a null argument, and `ApplySettingsAsync`
 throws `InvalidOperationException` before adopting anything when a source location embeds a
-credential or when the settings file cannot be written, leaving the current settings in place. The
-operations `AddRepo`, `AddRepoToGroup`, `RemoveRepo`, `ToggleGroupCollapsed`, `RenameGroup` and `RemoveGroup`
-throw `InvalidOperationException` when the settings file cannot be written, having changed nothing (the window
-catches it and tells the user); a change that comes from a card or a header button is not thrown but reported through
-`SettingsSaveFailed` (the callback returns `false`, the card keeps its value); `MoveCard`, `DropCard`, `SetGroupColor`,
-`MoveGroup`, `DropGroup` and the order
-placement of `AddRepoToGroup` do not throw for a failed save either: they report it through `SettingsSaveFailed`,
-return `false` (or `MoveFailed`) and change nothing; `AddRepos` does not throw for a failed save either: nothing of
+credential (synchronously) or when the settings file cannot be written (through its task), leaving the current settings
+in place. The changes made in the window (`RemoveRepo`, `ToggleGroupCollapsed`, `RenameGroup`, `RemoveGroup`,
+`MoveCard`, `DropCard`, `SetGroupColor`, `MoveGroup`, `DropGroup` and the card's own changes) never fail for a save:
+they are applied at once, and a background write that fails is reported once per failure streak through
+`SettingsSaveFailed` while the change stays in effect. `AddRepo` and `AddRepoToGroup` (for a new repo) throw
+`InvalidOperationException` when the settings file cannot be written, having changed nothing; the move placement of
+`AddRepoToGroup` reports it through `SettingsSaveFailed` and returns `MoveFailed`; `AddRepos` does not throw for a
+failed save either: nothing of
 the batch changed, every folder that would have been added or moved gets the `SaveFailed` outcome with the redacted
 reason, and the window shows the reason in the summary of `DescribeAddOutcomes`; `EnqueueAddReposAsync` turns a failed
 save into the Retry/Discard question (`AddSaveFailed`) and, on Discard, into the same `SaveFailed` outcomes, and its
@@ -873,9 +901,8 @@ for a null list and `ArgumentException` for an invalid group name before adding 
 by returning `false`, as `SetGroupColor` does for an unknown group or color. A folder that is not a Git repository is
 an outcome (`NotAGitRepository`), not an error. Group names read from
 settings are repaired (`RepoGroupName.Sanitize`) on the fly, a null collapsed list reads as empty, so
-damaged values never throw. `SaveSettings`
-propagates `InvalidOperationException` from `SettingsStore.Save` if the settings file cannot
-be written; it writes the live settings as they are and is not used for the user's changes. A pin file that cannot be
+damaged values never throw. A failed background write never throws into the UI thread: the settings writer reports
+it through `WriteFailed`, and `Dispose` logs what it could not write at the close. A pin file that cannot be
 read while a folder is added is captured in its `RepoCheapFacts` (the card then shows the reason) and never prevents
 the add from succeeding. A background card refresh after a settings save that is canceled (the window closed) ends
 quietly.
@@ -896,17 +923,20 @@ quietly.
 - **CardColorPalette** (`LauncherUI` supporting type) — checks and spells a group color name in `SetGroupColor`.
 - **GitClient** (`GitIntegration` subsystem) — the static `IsRepositoryRoot`, which every add path uses to accept only
   the top folder of a Git repository (no git process is started).
-- **SecretRedactor** (`PackageCredentials` subsystem) — makes the reason of a failed save of an add safe to show.
+- **SecretRedactor** (`PackageCredentials` subsystem) — makes the reason of a failed save safe to show.
 - **RepoCardViewModel.ReadCheapFacts** (`LauncherUI`) — reads, on a worker thread of the refresh queue, the pin
   (`RepoConfig`'s `RepoPinStore`), branch and committed agent folders of a folder being added, before it has a card,
   through a `GitClient` (`GitIntegration`) with `_gitTimeouts`.
-- **SettingsStore** (`Settings` subsystem) — saves the candidate settings of every change and of `ApplySettings`
-  (`SaveSettings` persists the live `AppSettings` as they are);
+- **SettingsWriter** (`Settings` subsystem) — writes every settings save in the background: the snapshots scheduled
+  after the changes made in the window, the confirmed saves of an add and of `ApplySettingsAsync`, and the flush at the
+  close. **SettingsStore** (`Settings` subsystem) — the writer's default save delegate (`SettingsStore.Save` into the
+  configuration directory);
+  **AppLogging** (`Logging` subsystem) — logs the settings that could not be written at the close;
   **RepoGroupName** (`Settings` subsystem) — the group-name rules used for sorting, validation and
   repair; **AppSettings** (`Settings` subsystem data type) — `FindGroupColor` and `RepairGroupSettings` for the group
   colors and group order.
 - **PackageVersionCache** (`AgentPackageManagement` subsystem) — shared across all cards; invalidated per source by
-  `ApplySettings` when a package source was edited or removed, and entirely at the start of each periodic re-check
+  `ApplySettingsAsync` when a package source was edited or removed, and entirely at the start of each periodic re-check
   round.
 - **TimeProvider** (.NET) — the timer and the clock of the periodic re-check and of the cache's expiry.
 - **PackageCredentialContext** (`PackageCredentials` subsystem) — the session credentials and sign-in
@@ -922,7 +952,7 @@ quietly.
   add posted to the UI thread), binds the progress strip to `GlobalProgress`, answers `AddSaveFailed` with the
   Retry/Discard `ConfirmationWindow`, and calls `RemoveRepo`,
   `ToggleGroupCollapsed`, `RenameGroup` and
-  `RemoveGroup` (catching the `InvalidOperationException` of a failed save and showing a message), asks
+  `RemoveGroup` (a failed save is reported through `SettingsSaveFailed`, in a message box it does not wait for), asks
   `IsReorderEnabled`, `CanMoveCard`/`GetMoveDisabledReason`, `GetReorderDisabledReason`, `CanDrop` and `CanDropGroup`
   and calls
   `MoveCard`, `DropCard` and `DropGroup` for the

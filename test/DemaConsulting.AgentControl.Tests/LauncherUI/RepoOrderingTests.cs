@@ -65,7 +65,7 @@ public sealed class RepoOrderingTests : IDisposable
         Assert.Equal(["a", "b", "c"], fixture.Names());
         Assert.Equal(["a", "b", "c"], fixture.Displayed());
         Assert.Equal(["a", "b", "c"], fixture.StoredNames());
-        Assert.Equal(["a", "b", "c"], fixture.SavedNames());
+        Assert.Equal(["a", "b", "c"], await fixture.SavedNamesAsync());
     }
 
     /// <summary>
@@ -86,13 +86,13 @@ public sealed class RepoOrderingTests : IDisposable
             card.RefreshCheap();
         }
 
-        fixture.ViewModel.ApplySettings(new AppSettings { PackageSourcePath = fixture.CreateDirectory("source") });
+        await fixture.ViewModel.ApplySettingsAsync(new AppSettings { PackageSourcePath = fixture.CreateDirectory("source") });
         await fixture.ViewModel.BeginUpgradeRefresh();
 
         // Assert
         Assert.Equal(["a", "b", "c"], fixture.Names());
         Assert.Equal(["a", "b", "c"], fixture.Displayed());
-        Assert.Equal(["a", "b", "c"], fixture.SavedNames());
+        Assert.Equal(["a", "b", "c"], await fixture.SavedNamesAsync());
     }
 
     /// <summary>
@@ -100,7 +100,7 @@ public sealed class RepoOrderingTests : IDisposable
     ///     other repos of its tier in the flat list, and is saved there.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_AddRepo_NewRepoGoesToTheEndOfTheList()
+    public async Task MainWindowViewModel_AddRepo_NewRepoGoesToTheEndOfTheList()
     {
         // Arrange: two repos, the second a favorite
         var fixture = CreateFixture(Spec("a"), Spec("b", favorite: true));
@@ -111,7 +111,7 @@ public sealed class RepoOrderingTests : IDisposable
         // Assert: last in the list and in the file; in the flat list favorites stay first
         Assert.Equal(["a", "b", "c"], fixture.Names());
         Assert.Equal(["a", "b", "c"], fixture.StoredNames());
-        Assert.Equal(["a", "b", "c"], fixture.SavedNames());
+        Assert.Equal(["a", "b", "c"], await fixture.SavedNamesAsync());
         Assert.Equal(["b", "a", "c"], fixture.Displayed());
     }
 
@@ -137,7 +137,7 @@ public sealed class RepoOrderingTests : IDisposable
     ///     bottom of that group, wherever it was in the list.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_AddRepoToGroup_RepoAlreadyListed_MovesToTheBottomOfTheGroup()
+    public async Task MainWindowViewModel_AddRepoToGroup_RepoAlreadyListed_MovesToTheBottomOfTheGroup()
     {
         // Arrange: the ungrouped repo is listed between the two members of the group
         var fixture = CreateFixture(Spec("w1", "Work"), Spec("loose"), Spec("w2", "Work"));
@@ -148,7 +148,7 @@ public sealed class RepoOrderingTests : IDisposable
         // Assert: in the group, last, and the order is saved
         Assert.Equal(AddRepoResult.MovedExisting, result);
         Assert.Equal(["[Work 3]", "w1", "w2", "loose"], fixture.Describe());
-        Assert.Equal(["w1", "w2", "loose"], fixture.SavedNames());
+        Assert.Equal(["w1", "w2", "loose"], await fixture.SavedNamesAsync());
     }
 
     /// <summary>
@@ -189,7 +189,7 @@ public sealed class RepoOrderingTests : IDisposable
     ///     second time (and cannot change with later launches).
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_Constructor_SeededOrder_IsWrittenByTheNextSave()
+    public async Task MainWindowViewModel_Constructor_SeededOrder_IsWrittenByTheNextSave()
     {
         // Arrange: settings without a stored order, whose launch times put "b" first
         var now = DateTimeOffset.UtcNow;
@@ -209,6 +209,7 @@ public sealed class RepoOrderingTests : IDisposable
         Assert.True(viewModel.RepoCards.Single(card => card.RepoName == "a").SetCardColor("Teal"));
 
         // Assert: the file holds the seeded order and the marker
+        await viewModel.FlushSettingsAsync();
         var saved = SettingsStore.Load(configDirectory);
         Assert.True(saved.HasUserRepoOrder);
         Assert.Equal(["b", "a"], saved.RecentRepos.Select(repo => Path.GetFileName(repo.Path)));
@@ -268,7 +269,7 @@ public sealed class RepoOrderingTests : IDisposable
     [InlineData("Up", "c", "a,c,b,d")]
     [InlineData("Down", "b", "a,c,b,d")]
     [InlineData("Bottom", "b", "a,c,d,b")]
-    public void MainWindowViewModel_MoveCard_TopUpDownBottom_ReordersWithinTheSection(
+    public async Task MainWindowViewModel_MoveCard_TopUpDownBottom_ReordersWithinTheSection(
         string moveName, string repoName, string expected)
     {
         // Arrange
@@ -282,7 +283,7 @@ public sealed class RepoOrderingTests : IDisposable
         Assert.Equal(expected.Split(','), fixture.Names());
         Assert.Equal(expected.Split(','), fixture.Displayed());
         Assert.Equal(expected.Split(','), fixture.StoredNames());
-        Assert.Equal(expected.Split(','), fixture.SavedNames());
+        Assert.Equal(expected.Split(','), await fixture.SavedNamesAsync());
     }
 
     /// <summary>
@@ -357,11 +358,11 @@ public sealed class RepoOrderingTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that a move whose save fails changes nothing, tells the user once, and works once saving
-    ///     works again (the trial change and the real one agree).
+    ///     Test that a move whose background save fails is applied at once and kept, that the user is told
+    ///     once, and that the next change, once saving works again, writes it together with that change.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_MoveCard_SaveFails_ChangesNothingAndReports()
+    public async Task MainWindowViewModel_MoveCard_SaveFails_KeptReportedOnceAndSavedWithNextChange()
     {
         // Arrange
         var fixture = CreateFixture(Spec("a"), Spec("b"), Spec("c"));
@@ -369,21 +370,23 @@ public sealed class RepoOrderingTests : IDisposable
 
         // Act
         var moved = fixture.ViewModel.MoveCard(fixture.Card("c"), RepoMove.Top);
+        var written = await fixture.ViewModel.FlushSettingsAsync();
 
-        // Assert
-        Assert.False(moved);
-        Assert.Equal(["a", "b", "c"], fixture.Names());
-        Assert.Equal(["a", "b", "c"], fixture.Displayed());
-        Assert.Equal(["a", "b", "c"], fixture.StoredNames());
+        // Assert: applied at once, not written, reported once
+        Assert.True(moved);
+        Assert.False(written);
+        Assert.Equal(["c", "a", "b"], fixture.Names());
+        Assert.Equal(["c", "a", "b"], fixture.Displayed());
+        Assert.Equal(["c", "a", "b"], fixture.StoredNames());
         Assert.Single(fixture.Failures);
-        Assert.Contains("not applied", fixture.Failures[0], StringComparison.Ordinal);
+        Assert.Contains("could not be saved", fixture.Failures[0], StringComparison.Ordinal);
 
-        // Act: saving works again
+        // Act: saving works again, and the next change is made
         fixture.RestoreSaving();
-        Assert.True(fixture.ViewModel.MoveCard(fixture.Card("c"), RepoMove.Top));
+        Assert.True(fixture.ViewModel.MoveCard(fixture.Card("b"), RepoMove.Up));
 
-        // Assert
-        Assert.Equal(["c", "a", "b"], fixture.SavedNames());
+        // Assert: the file holds both moves, and the user was not told again
+        Assert.Equal(["c", "b", "a"], await fixture.SavedNamesAsync());
         Assert.Single(fixture.Failures);
     }
 
@@ -438,7 +441,7 @@ public sealed class RepoOrderingTests : IDisposable
     ///     saves the order.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_DropCard_BeforeAndAfterAnAnchor_ReordersWithinTheSection()
+    public async Task MainWindowViewModel_DropCard_BeforeAndAfterAnAnchor_ReordersWithinTheSection()
     {
         // Arrange
         var fixture = CreateFixture(Spec("a"), Spec("b"), Spec("c"), Spec("d"));
@@ -448,7 +451,7 @@ public sealed class RepoOrderingTests : IDisposable
 
         // Assert
         Assert.Equal(["b", "c", "a", "d"], fixture.Names());
-        Assert.Equal(["b", "c", "a", "d"], fixture.SavedNames());
+        Assert.Equal(["b", "c", "a", "d"], await fixture.SavedNamesAsync());
 
         // Act: "d" before "b"
         Assert.True(fixture.ViewModel.DropCard(fixture.Card("d"), fixture.Before("b")));
@@ -456,7 +459,7 @@ public sealed class RepoOrderingTests : IDisposable
         // Assert
         Assert.Equal(["d", "b", "c", "a"], fixture.Names());
         Assert.Equal(["d", "b", "c", "a"], fixture.Displayed());
-        Assert.Equal(["d", "b", "c", "a"], fixture.SavedNames());
+        Assert.Equal(["d", "b", "c", "a"], await fixture.SavedNamesAsync());
     }
 
     /// <summary>
@@ -529,7 +532,7 @@ public sealed class RepoOrderingTests : IDisposable
     ///     place, through the group change of the card, and saves both.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_DropCard_IntoAnotherGroup_SetsTheGroupAtTheDropPosition()
+    public async Task MainWindowViewModel_DropCard_IntoAnotherGroup_SetsTheGroupAtTheDropPosition()
     {
         // Arrange
         var fixture = CreateFixture(Spec("w1", "Work"), Spec("w2", "Work"), Spec("h1", "Home"), Spec("h2", "Home"));
@@ -540,6 +543,7 @@ public sealed class RepoOrderingTests : IDisposable
         // Assert
         Assert.Equal(["[Home 1]", "h1", "[Work 3]", "w1", "h2", "w2"], fixture.Describe());
         Assert.Equal("Work", fixture.Card("h2").GroupName);
+        await fixture.ViewModel.FlushSettingsAsync();
         var saved = SettingsStore.Load(fixture.ConfigDirectory).RecentRepos;
         Assert.Equal("Work", saved.Single(repo => Path.GetFileName(repo.Path) == "h2").GroupName);
         Assert.Equal(["w1", "h2", "w2"], saved.Where(repo => repo.GroupName == "Work").Select(repo => Path.GetFileName(repo.Path)));
@@ -549,7 +553,7 @@ public sealed class RepoOrderingTests : IDisposable
     ///     Test that dropping a grouped card among the ungrouped ones takes it out of its group.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_DropCard_IntoUngrouped_RemovesTheGroup()
+    public async Task MainWindowViewModel_DropCard_IntoUngrouped_RemovesTheGroup()
     {
         // Arrange
         var fixture = CreateFixture(Spec("w1", "Work"), Spec("w2", "Work"), Spec("u1"), Spec("u2"));
@@ -560,6 +564,7 @@ public sealed class RepoOrderingTests : IDisposable
         // Assert
         Assert.Equal(["[Work 1]", "w2", "[Ungrouped 3]", "u1", "w1", "u2"], fixture.Describe());
         Assert.Null(fixture.Card("w1").GroupName);
+        await fixture.ViewModel.FlushSettingsAsync();
         Assert.Null(SettingsStore.Load(fixture.ConfigDirectory).RecentRepos.Single(repo => repo.Path == fixture.Card("w1").RepoPath).GroupName);
     }
 
@@ -568,7 +573,7 @@ public sealed class RepoOrderingTests : IDisposable
     ///     the drop position.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_DropCard_IntoFavorites_MarksFavoriteAndKeepsTheGroup()
+    public async Task MainWindowViewModel_DropCard_IntoFavorites_MarksFavoriteAndKeepsTheGroup()
     {
         // Arrange
         var fixture = CreateFixture(Spec("f1", favorite: true), Spec("f2", favorite: true), Spec("w1", "Work"), Spec("w2", "Work"));
@@ -580,6 +585,7 @@ public sealed class RepoOrderingTests : IDisposable
         Assert.True(fixture.Card("w2").IsFavorite);
         Assert.Equal("Work", fixture.Card("w2").GroupName);
         Assert.Equal(["[Favorites 3]", "f1", "w2", "f2", "[Work 1]", "w1"], fixture.Describe());
+        await fixture.ViewModel.FlushSettingsAsync();
         Assert.True(SettingsStore.Load(fixture.ConfigDirectory).RecentRepos.Single(repo => repo.Path == fixture.Card("w2").RepoPath).IsFavorite);
     }
 
@@ -620,11 +626,11 @@ public sealed class RepoOrderingTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that when the section change cannot be saved nothing changes, the user is told once and
-    ///     the order is not attempted.
+    ///     Test that a drop into another section whose background save fails is applied at once - the
+    ///     section change and the place - and that the user is told once for both changes.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_DropCard_SectionChangeSaveFails_ChangesNothingAndReports()
+    public async Task MainWindowViewModel_DropCard_SaveFails_KeptAtTheDropPlaceAndReportedOnce()
     {
         // Arrange
         var fixture = CreateFixture(Spec("w1", "Work"), Spec("h1", "Home"), Spec("h2", "Home"));
@@ -632,11 +638,13 @@ public sealed class RepoOrderingTests : IDisposable
 
         // Act
         var dropped = fixture.ViewModel.DropCard(fixture.Card("h1"), fixture.Before("w1"));
+        var written = await fixture.ViewModel.FlushSettingsAsync();
 
-        // Assert
-        Assert.False(dropped);
-        Assert.Equal("Home", fixture.Card("h1").GroupName);
-        Assert.Equal(["w1", "h1", "h2"], fixture.Names());
+        // Assert: in the new section at the drop place, not written, reported once
+        Assert.True(dropped);
+        Assert.False(written);
+        Assert.Equal("Work", fixture.Card("h1").GroupName);
+        Assert.Equal(["h1", "w1", "h2"], fixture.Names());
         Assert.Single(fixture.Failures);
     }
 
@@ -644,7 +652,7 @@ public sealed class RepoOrderingTests : IDisposable
     ///     Test that dropping a card on a group's header puts it at the bottom of that group.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_DropCard_OnGroupHeader_GoesToTheBottomOfTheGroup()
+    public async Task MainWindowViewModel_DropCard_OnGroupHeader_GoesToTheBottomOfTheGroup()
     {
         // Arrange
         var fixture = CreateFixture(Spec("w1", "Work"), Spec("h1", "Home"), Spec("w2", "Work"), Spec("h2", "Home"));
@@ -654,7 +662,7 @@ public sealed class RepoOrderingTests : IDisposable
 
         // Assert
         Assert.Equal(["[Home 1]", "h2", "[Work 3]", "w1", "w2", "h1"], fixture.Describe());
-        Assert.Equal(["w1", "w2", "h1", "h2"], fixture.SavedNames());
+        Assert.Equal(["w1", "w2", "h1", "h2"], await fixture.SavedNamesAsync());
     }
 
     /// <summary>
@@ -662,7 +670,7 @@ public sealed class RepoOrderingTests : IDisposable
     ///     group collapsed and shows the new count.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_DropCard_OnCollapsedGroupHeader_KeepsItCollapsedAndUpdatesTheCount()
+    public async Task MainWindowViewModel_DropCard_OnCollapsedGroupHeader_KeepsItCollapsedAndUpdatesTheCount()
     {
         // Arrange: a collapsed Work group
         var fixture = CreateFixture(Spec("w1", "Work"), Spec("h1", "Home"), Spec("h2", "Home"));
@@ -680,6 +688,7 @@ public sealed class RepoOrderingTests : IDisposable
         Assert.Equal(2, header.Count);
         Assert.Equal("Work", fixture.Card("h1").GroupName);
         Assert.DoesNotContain(fixture.ViewModel.DisplayedRepoCards, card => card.RepoName == "h1");
+        await fixture.ViewModel.FlushSettingsAsync();
         Assert.Equal(["Work"], SettingsStore.Load(fixture.ConfigDirectory).CollapsedGroups);
     }
 
@@ -785,13 +794,14 @@ public sealed class RepoOrderingTests : IDisposable
     ///     settings shows the same order.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_MoveCard_OrderIsPersistedAndReloaded()
+    public async Task MainWindowViewModel_MoveCard_OrderIsPersistedAndReloaded()
     {
         // Arrange
         var fixture = CreateFixture(Spec("a"), Spec("b"), Spec("c"));
 
         // Act
         Assert.True(fixture.ViewModel.MoveCard(fixture.Card("c"), RepoMove.Top));
+        await fixture.ViewModel.FlushSettingsAsync();
         var reloaded = SettingsStore.Load(fixture.ConfigDirectory);
         var restarted = new MainWindowViewModel(reloaded, configDirectory: fixture.ConfigDirectory);
 
@@ -806,7 +816,7 @@ public sealed class RepoOrderingTests : IDisposable
     ///     user gave them, in the list and in the file.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_RemoveRepo_LeavesTheRestOfTheOrderAndPersistsIt()
+    public async Task MainWindowViewModel_RemoveRepo_LeavesTheRestOfTheOrderAndPersistsIt()
     {
         // Arrange: an order the user made
         var fixture = CreateFixture(Spec("a"), Spec("b"), Spec("c"));
@@ -818,7 +828,7 @@ public sealed class RepoOrderingTests : IDisposable
         // Assert
         Assert.Equal(["c", "b"], fixture.Names());
         Assert.Equal(["c", "b"], fixture.StoredNames());
-        Assert.Equal(["c", "b"], fixture.SavedNames());
+        Assert.Equal(["c", "b"], await fixture.SavedNamesAsync());
     }
 
     /// <summary>
@@ -826,23 +836,24 @@ public sealed class RepoOrderingTests : IDisposable
     ///     memory and in the file.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_ApplySettings_KeepsTheRepoOrder()
+    public async Task MainWindowViewModel_ApplySettings_KeepsTheRepoOrder()
     {
         // Arrange: a reordered list
         var fixture = CreateFixture(Spec("a"), Spec("b"), Spec("c"));
         Assert.True(fixture.ViewModel.MoveCard(fixture.Card("c"), RepoMove.Top));
 
         // Act: the Settings window hands over a fresh settings object without any order
-        fixture.ViewModel.ApplySettings(new AppSettings { ShellPreference = "pwsh" });
+        await fixture.ViewModel.ApplySettingsAsync(new AppSettings { ShellPreference = "pwsh" });
 
         // Assert
         Assert.True(fixture.ViewModel.Settings.HasUserRepoOrder);
         Assert.Equal(["c", "a", "b"], fixture.StoredNames());
         Assert.Equal(["c", "a", "b"], fixture.Names());
+        await fixture.ViewModel.FlushSettingsAsync();
         var reloaded = SettingsStore.Load(fixture.ConfigDirectory);
         Assert.True(reloaded.HasUserRepoOrder);
         Assert.Equal("pwsh", reloaded.ShellPreference);
-        Assert.Equal(["c", "a", "b"], fixture.SavedNames());
+        Assert.Equal(["c", "a", "b"], await fixture.SavedNamesAsync());
     }
 
     /// <summary>
@@ -880,7 +891,7 @@ public sealed class RepoOrderingTests : IDisposable
     ///     whole order of the groups as shown is stored and saved.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_MoveGroup_UpAndDown_SwapsWithNeighborAndStoresTheFullOrder()
+    public async Task MainWindowViewModel_MoveGroup_UpAndDown_SwapsWithNeighborAndStoresTheFullOrder()
     {
         // Arrange: three groups without a stored order (alphabetical)
         var fixture = CreateFixture(Spec("a", "Alpha"), Spec("b", "Beta"), Spec("g", "Gamma"), Spec("u"));
@@ -892,6 +903,7 @@ public sealed class RepoOrderingTests : IDisposable
         Assert.True(movedUp);
         Assert.Equal(["Alpha", "Gamma", "Beta"], GroupSections(fixture));
         Assert.Equal(["Alpha", "Gamma", "Beta"], fixture.ViewModel.Settings.GroupOrder);
+        await fixture.ViewModel.FlushSettingsAsync();
         Assert.Equal(["Alpha", "Gamma", "Beta"], SettingsStore.Load(fixture.ConfigDirectory).GroupOrder);
 
         // Act: letter case of the name does not matter
@@ -901,7 +913,7 @@ public sealed class RepoOrderingTests : IDisposable
         Assert.True(movedDown);
         Assert.Equal(["Gamma", "Alpha", "Beta"], GroupSections(fixture));
         Assert.Equal(["[Gamma 1]", "g", "[Alpha 1]", "a", "[Beta 1]", "b", "[Ungrouped 1]", "u"], fixture.Describe());
-        Assert.Equal(["a", "b", "g", "u"], fixture.SavedNames());
+        Assert.Equal(["a", "b", "g", "u"], await fixture.SavedNamesAsync());
         Assert.Empty(fixture.Failures);
     }
 
@@ -957,7 +969,7 @@ public sealed class RepoOrderingTests : IDisposable
     ///     there, that a collapsed group stays collapsed, and that the order is saved.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_DropGroup_BeforeOrAfterAnotherGroup_Reorders()
+    public async Task MainWindowViewModel_DropGroup_BeforeOrAfterAnotherGroup_Reorders()
     {
         // Arrange: Alpha is collapsed
         var fixture = CreateFixture(Spec("a", "Alpha"), Spec("b", "Beta"), Spec("g", "Gamma"));
@@ -977,6 +989,7 @@ public sealed class RepoOrderingTests : IDisposable
         // Assert
         Assert.True(beforeBeta);
         Assert.Equal(["Gamma", "Beta", "Alpha"], GroupSections(fixture));
+        await fixture.ViewModel.FlushSettingsAsync();
         Assert.Equal(["Gamma", "Beta", "Alpha"], SettingsStore.Load(fixture.ConfigDirectory).GroupOrder);
         Assert.True(fixture.ViewModel.IsGroupCollapsed("Alpha"));
     }
@@ -1015,7 +1028,7 @@ public sealed class RepoOrderingTests : IDisposable
     ///     the saved settings (the next start) shows the groups in the same order.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_MoveGroup_PersistsOrderForANewViewModel()
+    public async Task MainWindowViewModel_MoveGroup_PersistsOrderForANewViewModel()
     {
         // Arrange
         var fixture = CreateFixture(Spec("a", "Alpha"), Spec("b", "Beta"), Spec("g", "Gamma"));
@@ -1023,6 +1036,7 @@ public sealed class RepoOrderingTests : IDisposable
         Assert.True(fixture.ViewModel.MoveGroup("Gamma", RepoGroupMove.Up));
 
         // Act: start again from what was saved
+        await fixture.ViewModel.FlushSettingsAsync();
         var restarted = new MainWindowViewModel(SettingsStore.Load(fixture.ConfigDirectory), configDirectory: fixture.ConfigDirectory);
 
         // Assert
@@ -1032,10 +1046,11 @@ public sealed class RepoOrderingTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that moving a group whose save fails changes nothing and reports the failure.
+    ///     Test that moving a group whose background save fails is applied at once and kept, and that
+    ///     the failure is reported.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_MoveGroup_SaveFails_ChangesNothingAndReports()
+    public async Task MainWindowViewModel_MoveGroup_SaveFails_KeptAndReported()
     {
         // Arrange
         var fixture = CreateFixture(Spec("a", "Alpha"), Spec("b", "Beta"));
@@ -1043,11 +1058,13 @@ public sealed class RepoOrderingTests : IDisposable
 
         // Act
         var moved = fixture.ViewModel.MoveGroup("Beta", RepoGroupMove.Up);
+        var written = await fixture.ViewModel.FlushSettingsAsync();
 
         // Assert
-        Assert.False(moved);
-        Assert.Equal(["Alpha", "Beta"], GroupSections(fixture));
-        Assert.Empty(fixture.ViewModel.Settings.GroupOrder);
+        Assert.True(moved);
+        Assert.False(written);
+        Assert.Equal(["Beta", "Alpha"], GroupSections(fixture));
+        Assert.Equal(["Beta", "Alpha"], fixture.ViewModel.Settings.GroupOrder);
         Assert.Single(fixture.Failures);
     }
 
@@ -1268,9 +1285,15 @@ public sealed class RepoOrderingTests : IDisposable
         /// <summary>
         ///     Lists the repo names in the saved settings file, in order.
         /// </summary>
+        /// <remarks>
+        ///     Writes what is waiting to be written first, so the file holds every change made so far.
+        /// </remarks>
         /// <returns>The names.</returns>
-        public List<string> SavedNames() =>
-            [.. SettingsStore.Load(ConfigDirectory).RecentRepos.Select(repo => Path.GetFileName(repo.Path))];
+        public async Task<List<string>> SavedNamesAsync()
+        {
+            await ViewModel.FlushSettingsAsync();
+            return [.. SettingsStore.Load(ConfigDirectory).RecentRepos.Select(repo => Path.GetFileName(repo.Path))];
+        }
 
         /// <summary>
         ///     Lists the group of each card in the collection, in order (empty for none).

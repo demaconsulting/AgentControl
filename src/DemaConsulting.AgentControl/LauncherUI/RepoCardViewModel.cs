@@ -364,10 +364,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <param name="decodeImage">Decodes the repo's picture file for the avatar tile;
     ///     <see langword="null"/> uses <see cref="RepoImageLocator.Decode"/>. Supplied so tests can
     ///     count decodes or avoid needing a graphics platform.</param>
-    /// <param name="commitChange">Applies a change to this repo's settings entry and saves it,
-    ///     returning whether that succeeded (the owning <see cref="MainWindowViewModel"/> saves a
-    ///     candidate first and changes the live entry only then); <see langword="null"/> applies the
-    ///     change to the entry directly and saves nothing.</param>
+    /// <param name="commitChange">Applies a change to this repo's settings entry and has it saved,
+    ///     returning whether the change was accepted (the owning <see cref="MainWindowViewModel"/>
+    ///     applies it at once and saves it in the background, so it accepts every change; another
+    ///     owner may refuse one); <see langword="null"/> applies the change to the entry directly and
+    ///     saves nothing.</param>
     /// <param name="processStarter">Starts the agent-tool process; <see langword="null"/> uses the
     ///     real <see cref="AgentToolProcessStarter"/>. Supplied so tests can capture the launch
     ///     without starting a shell.</param>
@@ -493,11 +494,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     Gets or sets whether the user has pinned/favorited this repo.
     /// </summary>
     /// <remarks>
-    ///     Saved through the owning <see cref="MainWindowViewModel"/> (see the constructor's
-    ///     <c>commitChange</c>) <em>before</em> the shared <see cref="RecentRepo"/> is changed, and
-    ///     only then does the card raise <see cref="FavoriteChanged"/> so the owner can regroup
-    ///     <see cref="MainWindowViewModel.DisplayedRepoCards"/>. When the save fails the value is not
-    ///     changed (the owner tells the user) and the star is told to show the real state again.
+    ///     Changed through the owning <see cref="MainWindowViewModel"/> (see the constructor's
+    ///     <c>commitChange</c>), which applies it to the shared <see cref="RecentRepo"/> and saves it in
+    ///     the background; only once the owner accepted it does the card raise
+    ///     <see cref="FavoriteChanged"/> so the owner can regroup
+    ///     <see cref="MainWindowViewModel.DisplayedRepoCards"/>. When the owner refuses the change the
+    ///     value is not changed and the star is told to show the real state again.
     ///     This property is the <b>only</b> owner of the toggle state: the card's star is a
     ///     <c>ToggleButton</c> whose <c>IsChecked</c> binds here two-way, and it has no command.
     ///     An earlier design also bound a toggling command, so one click flipped the state twice
@@ -515,7 +517,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             if (!CommitChange(repo => repo.IsFavorite = value))
             {
-                // Not saved, so not changed: make the two-way bound star show the real state
+                // Refused, so not changed: make the two-way bound star show the real state
                 OnPropertyChanged();
                 return;
             }
@@ -527,13 +529,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Applies a change to this repo's settings entry through the owner (which saves it first),
-    ///     or directly when the card has no owner.
+    ///     Applies a change to this repo's settings entry through the owner (which has it saved), or
+    ///     directly when the card has no owner.
     /// </summary>
-    /// <param name="change">The change to the entry; it may run more than once (on a candidate copy,
-    ///     then on the live entry), so it must be a plain assignment of fixed values.</param>
-    /// <returns><see langword="true"/> when the change was applied; <see langword="false"/> when it
-    ///     could not be saved and so was not applied.</returns>
+    /// <param name="change">The change to the entry; it must be a plain assignment of fixed values,
+    ///     because an owner may run it on a copy of the entry as well.</param>
+    /// <returns><see langword="true"/> when the change was applied; <see langword="false"/> when the
+    ///     owner refused it and so it was not applied.</returns>
     private bool CommitChange(Action<RecentRepo> change)
     {
         if (_commitChange is null)
@@ -582,8 +584,8 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// <remarks>
     ///     A name that matches an existing group ignoring letter case joins that group under its own
     ///     spelling, so look-alike groups cannot arise. The choice is stored only in the per-user
-    ///     settings (on the shared <see cref="RecentRepo"/>), never in the repository, and is saved
-    ///     before it is applied (see <see cref="IsFavorite"/>). Raises
+    ///     settings (on the shared <see cref="RecentRepo"/>), never in the repository, and goes through
+    ///     the owner (see <see cref="IsFavorite"/>). Raises
     ///     <see cref="GroupChanged"/> when the group actually changed, so the owning
     ///     <see cref="MainWindowViewModel"/> rebuilds the list.
     /// </remarks>
@@ -591,7 +593,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     repo out of its group.</param>
     /// <returns><see langword="true"/> when the repo is now in the requested place (including when
     ///     it already was); <see langword="false"/> when <paramref name="groupName"/> is not a valid
-    ///     group name (too long, or a built-in section's name), or the choice could not be saved,
+    ///     group name (too long, or a built-in section's name), or the owner refused the change,
     ///     and nothing changed.</returns>
     public bool MoveToGroup(string? groupName)
     {
@@ -714,14 +716,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     /// <remarks>
     ///     Only the tile changes: the status accent bar keeps its fixed, meaningful colors. The choice
-    ///     is stored by name in the per-user settings only, saved before it is applied (see
+    ///     is stored by name in the per-user settings only, goes through the owner (see
     ///     <see cref="IsFavorite"/>), and raises <see cref="CardColorChanged"/> once applied.
     /// </remarks>
     /// <param name="colorName">A palette color's name (letter case ignored), or
     ///     <see langword="null"/> (or blank) for the automatic color.</param>
     /// <returns><see langword="true"/> when the card now has the requested color (including when it
     ///     already had); <see langword="false"/> when <paramref name="colorName"/> names no palette
-    ///     color or the choice could not be saved, and nothing changed.</returns>
+    ///     color or the owner refused the change, and nothing changed.</returns>
     public bool SetCardColor(string? colorName)
     {
         var requested = string.IsNullOrWhiteSpace(colorName) ? null : CardColorPalette.Find(colorName);
@@ -2037,13 +2039,13 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public event EventHandler<string>? ErrorOccurred;
 
     /// <summary>
-    ///     Raised after <see cref="IsFavorite"/> changed (and was saved), so the owning
+    ///     Raised after <see cref="IsFavorite"/> changed (accepted by the owner), so the owning
     ///     <see cref="MainWindowViewModel"/> can regroup <see cref="MainWindowViewModel.DisplayedRepoCards"/>.
     /// </summary>
     public event EventHandler? FavoriteChanged;
 
     /// <summary>
-    ///     Raised after <see cref="MoveToGroup"/> changed the repo's group (and it was saved), so the
+    ///     Raised after <see cref="MoveToGroup"/> changed the repo's group (accepted by the owner), so the
     ///     owning <see cref="MainWindowViewModel"/> can rebuild the sectioned list.
     /// </summary>
     public event EventHandler? GroupChanged;
@@ -2055,12 +2057,12 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public event EventHandler? NewGroupRequested;
 
     /// <summary>
-    ///     Raised after <see cref="SetCardColor"/> changed the tile color (and it was saved).
+    ///     Raised after <see cref="SetCardColor"/> changed the tile color (accepted by the owner).
     /// </summary>
     public event EventHandler? CardColorChanged;
 
     /// <summary>
-    ///     Raised after a launch was recorded (and saved). The owning
+    ///     Raised after a launch was recorded (accepted by the owner). The owning
     ///     <see cref="MainWindowViewModel"/> does not listen to it: a launch never moves a card,
     ///     because the list shows the user's own order.
     /// </summary>
@@ -2081,7 +2083,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     released.
     /// </summary>
     /// <remarks>
-    ///     Called by <see cref="MainWindowViewModel"/> once the removal was saved. Without it a card
+    ///     Called by <see cref="MainWindowViewModel"/> once the repo was removed. Without it a card
     ///     the user removed - kept alive by handlers the window attached, or by an operation that is
     ///     still running - could still raise <see cref="ErrorOccurred"/> or
     ///     <see cref="ReleaseNotesReady"/> for a repo that is no longer listed. A retired card is never
@@ -2952,11 +2954,11 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
     /// <summary>
     ///     Records that this repo was just successfully launched, stamping
-    ///     <see cref="LastLaunchedUtc"/> with the current UTC time (saved before it is applied, see
-    ///     <see cref="IsFavorite"/>) and raising <see cref="LaunchRecorded"/>. The stamp only
-    ///     records the launch; it does not move the card in the list.
-    ///     The launch itself has already happened; when the stamp cannot be saved it is simply not
-    ///     recorded (the owner tells the user).
+    ///     <see cref="LastLaunchedUtc"/> with the current UTC time (through the owner, which saves it in
+    ///     the background, see <see cref="IsFavorite"/>) and raising <see cref="LaunchRecorded"/>. The
+    ///     stamp only records the launch; it does not move the card in the list.
+    ///     The launch itself has already happened; when the owner refuses the stamp it is simply not
+    ///     recorded.
     /// </summary>
     private void RecordLaunched()
     {

@@ -747,44 +747,56 @@ sections:
       - id: AgentControl-LauncherUI-ChangeAppliedWhenSaved
         title: >-
           The LauncherUI subsystem shall apply a change the user makes to a repo or a section
-          (favorite, group, card color, launch time, collapse, rename or removal of a group, adding
-          or removing a repo) only once it has been saved to the user's settings.
+          (favorite, group, card color, launch time, collapse, rename, removal, color or order of a
+          group, the order of the repos, removing a repo) at once, without making the window wait for
+          the settings file, and save it to the user's settings in the background, keeping a change
+          made while an add or the Settings window's settings are saved, and writing what is not
+          written yet when the window closes; an add shall be applied only once it has been saved.
         justification: |
-          What the window shows must be what the settings hold, or the next start would show
-          something else than the user saw.
+          The settings file can be held by another process for up to a second; a window that waited
+          for it on every click would freeze. What the window shows must still reach the settings,
+          or the next start would show something else than the user saw.
         children:
           - AgentControl-MainWindowViewModel-ChangeAppliedWhenSaved
+          - AgentControl-MainWindowViewModel-AddKeepsOtherChanges
+          - AgentControl-MainWindowViewModel-SettingsFlushedOnClose
           - AgentControl-RepoCardViewModel-ChangeSavedBeforeApplied
         tests:
           - MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten
+          - MainWindowViewModel_Favorite_SaveHeld_AppliedAtOnceAndWrittenAfterFlush
           - RepoCardViewModel_Changes_GoThroughTheOwnerAndAreNotAppliedWhenItRefuses
 
       - id: AgentControl-LauncherUI-FailedSaveChangesNothing
         title: >-
-          The LauncherUI subsystem shall, when a change the user makes cannot be saved, leave the
-          repo cards, the displayed list and the settings file as they were, and never write that
-          change with a later, unrelated save.
+          The LauncherUI subsystem shall, when a change the user makes cannot be saved, keep the
+          change in effect - the repo cards, the displayed list and the settings in memory - while
+          the tool runs and save it with the next change or when the window closes, and shall apply
+          nothing of an add or of the Settings window's settings that cannot be saved.
         justification: |
-          A change that is shown but not saved is lost at the next start, and one that is written
-          later without the user asking surprises them.
+          A change the user saw take effect must not be undone because the file was busy; it is
+          written as soon as the file can be written again. An add and the Settings window's
+          values are applied only once saved, so their failure can be answered (Retry, or the
+          Settings window staying open) instead of leaving them half applied.
         children:
           - AgentControl-MainWindowViewModel-FailedSaveChangesNothing
-          - AgentControl-MainWindowViewModel-FailedSaveNotPersistedLater
           - AgentControl-MainWindowViewModel-SaveFailureRefusesOperation
         tests:
-          - MainWindow_SettingsCannotBeSaved_ShowsMessageAndKeepsStateAsItWas
-          - MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt
+          - MainWindow_SettingsCannotBeSaved_ChangeKeptAndMessageShownOnce
+          - MainWindowViewModel_FavoriteSaveFails_KeptReportedOnceAndSavedWithNextChange
 
       - id: AgentControl-LauncherUI-FailedSaveReported
         title: >-
-          The LauncherUI subsystem shall tell the user, in a message, when a change they made
-          cannot be saved.
+          The LauncherUI subsystem shall tell the user, in a message that does not hold up the
+          window, when changes they made cannot be saved, once per failure streak rather than for
+          every change, saying that the changes stay in effect.
         justification: |
-          A change that silently does nothing looks like a broken control.
+          A change the file silently does not get would be lost at the next start without the user
+          knowing; a message for every click while the disk stays unwritable would make the window
+          unusable.
         children:
           - AgentControl-MainWindowViewModel-SaveFailureReported
         tests:
-          - MainWindow_SettingsCannotBeSaved_ShowsMessageAndKeepsStateAsItWas
+          - MainWindow_SettingsCannotBeSaved_ChangeKeptAndMessageShownOnce
 
       - id: AgentControl-LauncherUI-RemovedRepoGoesQuiet
         title: >-
@@ -926,12 +938,12 @@ sections:
           The LauncherUI subsystem shall, when the repos of an add cannot be saved, ask the user -
           saying why in plain words - whether to try the save again (Retry) or to give up the add
           (Discard, also the answer to Escape and closing the question), add the repos when a retry
-          succeeds, and leave the list as it was saved, and say which folders were not added, after
-          Discard.
+          succeeds and ask again when it fails, and leave the list as it was before the add, and say
+          which folders were not added, after Discard.
         justification: |
           The settings file can be locked or on a full disk for a moment; the user should be able
-          to try again without picking the folders again, and giving up must never leave a list
-          that differs from what is saved.
+          to try again, as often as needed, without picking the folders again, and giving up must
+          never leave the add half applied.
         children:
           - AgentControl-MainWindowViewModel-AddReposSaveFailure
         tests:
@@ -940,15 +952,19 @@ sections:
 
       - id: AgentControl-LauncherUI-SettingsApplyResponsive
         title: >-
-          The LauncherUI subsystem shall refresh the repo cards after the settings were saved
-          without making the window wait for that refresh, showing it in the progress strip without
-          a Cancel button.
+          The LauncherUI subsystem shall save the Settings window's settings without making the
+          window wait for the settings file, the Save button being unavailable until the save has
+          ended, and refresh the repo cards after the settings were saved without making the window
+          wait for that refresh, showing it in the progress strip without a Cancel button.
         justification: |
-          Saving the settings refreshes every card (its pin, branch and committed agent folders);
-          with many repos that work must not freeze the window.
+          The settings file can be held by another process for up to a second, and saving the
+          settings refreshes every card (its pin, branch and committed agent folders); with many
+          repos that work must not freeze the window, and a second click must not save twice.
         children:
+          - AgentControl-MainWindowViewModel-ApplySettingsSaveInBackground
           - AgentControl-MainWindowViewModel-ApplySettingsInBackground
           - AgentControl-RepoCardViewModel-CheapRefreshInBackground
+          - AgentControl-SettingsWindowViewModel-Save
         tests:
           - MainWindow_SettingsApplied_RefreshesCardsInBackgroundShowingProgress
 

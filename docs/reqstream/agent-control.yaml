@@ -148,7 +148,8 @@ sections:
           refreshed after the settings are saved, showing the progress of that work under the app
           bar; it shall let the user cancel an add before anything is added, run an add requested
           meanwhile after the running one, and, when the added repos cannot be saved, let the user
-          retry the save or discard the add, which leaves the list as it was saved; it shall read
+          retry the save, as often as it fails, or discard the add, which leaves the list as it was
+          before the add; it shall save the settings without the window waiting for them; it shall read
           the repos a few at a time, and stop a git command that does not answer and say so on the
           repo's card; a card whose state is not read yet shall be shown as refreshing rather than
           with unknown facts, and an action or a Refresh on a card shall read the card's state ahead
@@ -201,16 +202,21 @@ sections:
         title: >-
           The tool shall keep the changes the user makes to the recent-repos list (favorite, group,
           group color, group order, card color, collapsed sections) in the user's settings, so they
-          are still there when the tool is started again, and shall never show a change that it
-          could not save.
+          are still there when the tool is started again; it shall apply such a change at once
+          without making the window wait for the settings to be saved, and, when a change cannot be
+          saved, tell the user once, keep the change while the tool runs and save it with the next
+          change or when the tool closes.
         tags: [system]
         justification: |
-          A choice that has to be repeated at every start is not a choice that was kept, and a
-          change that is shown but not saved would be lost without the user knowing.
+          A choice that has to be repeated at every start is not a choice that was kept. The
+          settings file can be held by another program for a moment, and a window that froze on
+          every click until it was free would be unusable; a change that could not be saved must
+          neither be lost silently nor be reported again on every click.
         children:
           - AgentControl-LauncherUI-ChangeAppliedWhenSaved
           - AgentControl-LauncherUI-FailedSaveChangesNothing
           - AgentControl-LauncherUI-FailedSaveReported
+          - AgentControl-Settings-BackgroundWriter
         tests:
           # End to end the keeping of a change is shown (the collapse, a group color, a card color
           # and the order of the groups also after a restart); a save that fails cannot be provoked

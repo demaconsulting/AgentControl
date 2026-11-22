@@ -71,6 +71,7 @@ input-files:
   - docs/design/agent-control/git-integration/git-remote-client.md
   - docs/design/agent-control/settings.md
   - docs/design/agent-control/settings/settings-store.md
+  - docs/design/agent-control/settings/settings-writer.md
   - docs/design/agent-control/settings/repo-group-name.md
   - docs/design/agent-control/logging.md
   - docs/design/agent-control/startup.md

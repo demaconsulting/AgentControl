@@ -66,7 +66,8 @@ belong to the Git repository source feature. `RepoGroupName` (in
 `RepoGroupHeaderViewModel`, `GroupNameViewModel` and `DialogBehavior` (in `LauncherUI`) belong to the repo-picture,
 repo-group and dialog features; `GlobalProgressViewModel` (in `LauncherUI`) backs the progress strip under the app bar
 that shows bulk work (adding repositories, refreshing the cards after Settings are saved); `RepoRefreshQueue` (in
-`LauncherUI`) is the one queue every lazy read of a repo's state goes through, two at a time;
+`LauncherUI`) is the one queue every lazy read of a repo's state goes through, two at a time; `SettingsWriter` (in
+`Settings`) writes the settings in the background, so the window never waits for the settings file;
 `BlockingCallGuard` (in `Utilities`) lets the tests refuse a git or disk call made on the UI thread; `PathEllipsisText`,
 `ColorPalettePanel` (the shared content of the card and group color pop-ups), `ThemePreferenceDisplayNameConverter`
 and `BackgroundWorkRunner` (the seam that runs file-system and git reads off the UI thread) are documented
@@ -111,9 +112,9 @@ Settings, Logging, Startup and Utilities](architecture.svg)
       (saved package-feed sign-ins) and hardened git against remote repositories (the Git package source)
     - **Settings/** - application-wide settings persistence (including the package sources and the user's repo
       groups, card colors, group colors, group order and theme; `SettingsStore`, which repairs unusable stored values on
-      load - an unknown card color reads as automatic, and unknown or stale group colors and positions are dropped) and
-      the `RepoGroupName` unit, the rules for the names of the
-      user's repo groups
+      load - an unknown card color reads as automatic, and unknown or stale group colors and positions are dropped),
+      the `SettingsWriter` unit, which writes the settings in the background, and the `RepoGroupName` unit, the rules
+      for the names of the user's repo groups
     - **Logging/** - diagnostic file logging setup
     - **Startup/** - startup-argument parsing
     - **Utilities/** - shared utilities subsystem (safe path combination, the test-enabled blocking-call guard)

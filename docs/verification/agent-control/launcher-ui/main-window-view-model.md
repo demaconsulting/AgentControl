@@ -12,17 +12,21 @@ background card refresh after a settings save are verified through the view mode
 timing: `backgroundWork` takes a `GatedBackgroundWorkRunner` (a test helper that counts every piece of work and holds it
 until the test releases it), so a test asserts what holds while the folders are still being checked - the add has
 returned to its caller, nothing is added, the global progress shows the count - and `saveSettings` takes a delegate that
-counts saves and can fail on demand, so "one save per batch", Cancel, Retry and Discard are deterministic. Tests that
-apply settings or add in the background await `PendingRefresh` or the add's task before asserting. Each test constructs
-a real `MainWindowViewModel` against a unique temporary configuration directory (via `SettingsStore`) and unique
-temporary repo directories, so tests are hermetic and can run in parallel with each other, subject to the `RealProcess`
-xUnit collection (which disables parallelization) since constructing a view model with recent repos starts background
-git reads through the shared refresh queue, which spawn real git subprocesses via `GitStub` or the system git
-executable. The temporary repo folders that tests add are made the top folder of a Git repository as far as the add is
-concerned by a `.git` folder whose `HEAD` names a branch (`ref: refs/heads/main`), so the real
-`GitClient.IsRepositoryRoot` accepts them and the branch is read without starting git; the tests of the Git check create
-folders without `.git`, with a `.git` file, and subfolders. No Avalonia `Window` is constructed; only the view-model
-class itself is under test.
+counts saves, can hold them at a gate and can fail on demand, so "one save per batch", Cancel, Retry, Discard and a
+change made while a save is held are deterministic. Every save runs through the view model's background settings writer
+on a worker thread, so a test that reads the settings file after a change first awaits `FlushSettingsAsync` (which
+writes what is waiting and completes when the writes have ended), and the persistence tests create their view model with
+no synchronization context current, so a failed background write is reported before that flush completes; two of them
+use a `FakeTimeProvider` so a change stays waiting until the test flushes. Tests that apply settings or add in the
+background await `PendingRefresh`, the apply's task or the add's task before asserting. Each test constructs a real
+`MainWindowViewModel` against a unique temporary configuration directory (via `SettingsStore`) and unique temporary repo
+directories, so tests are hermetic and can run in parallel with each other, subject to the `RealProcess` xUnit
+collection (which disables parallelization) since constructing a view model with recent repos starts background git
+reads through the shared refresh queue, which spawn real git subprocesses via `GitStub` or the system git executable.
+The temporary repo folders that tests add are made the top folder of a Git repository as far as the add is concerned by
+a `.git` folder whose `HEAD` names a branch (`ref: refs/heads/main`), so the real `GitClient.IsRepositoryRoot` accepts
+them and the branch is read without starting git; the tests of the Git check create folders without `.git`, with a
+`.git` file, and subfolders. No Avalonia `Window` is constructed; only the view-model class itself is under test.
 
 #### Test Environment
 
@@ -199,14 +203,26 @@ four checks were made in all and the cards are in request order
 **MainWindowViewModel_AddReposSaveFailure_RetryOrDiscard**: Tested by `MainWindowViewModelPersistenceTests.cs`. With
 saving failing, a background add of two folders asks once, with a message that says the settings could not be saved
 and gives the reason; after saving works again Retry adds both with one more save and clears the progress
-(`MainWindowViewModel_EnqueueAddRepos_SaveFailsThenRetry_AddsTheBatch`). Adding a listed repo and a new folder to a
+(`MainWindowViewModel_EnqueueAddRepos_SaveFailsThenRetry_AddsTheBatch`). When the save made on Retry fails again the
+question is asked again, and the next Retry that saves adds the folder once, with one successful save
+(`MainWindowViewModel_EnqueueAddRepos_RetryFailsAgain_AsksAgainUntilSaved`). Adding a listed repo and a new folder to a
 collapsed group and answering Discard reports both as not saved, and the listed repo keeps its group (none), the stored
 order is unchanged, the group stays collapsed, the cards, the displayed list and the settings file's content are
-exactly as before
-(`MainWindowViewModel_EnqueueAddRepos_SaveFailsThenDiscard_LeavesEverythingAsSavedIncludingMovedRepos`);
+exactly as before the add
+(`MainWindowViewModel_EnqueueAddRepos_SaveFailsThenDiscard_LeavesEverythingAsBeforeTheAddIncludingMovedRepos`);
 with no subscriber to the question the add is discarded and the folder reported as not saved with the reason
 (`MainWindowViewModel_EnqueueAddRepos_SaveFailsWithNoOneToAsk_Discards`). These cover
 `AgentControl-MainWindowViewModel-AddReposSaveFailure`.
+
+**MainWindowViewModel_AddKeepsOtherChanges_WrittenWithOrWithoutTheAdd**: Tested by
+`MainWindowViewModelPersistenceTests.cs`. With the add's save held at the gate, a favorite marked meanwhile is applied
+at once; once the gate opens the add is saved and then one more write holds both the new repo and the favorite (two
+saves in all, so no snapshot without the add was written after it)
+(`MainWindowViewModel_EnqueueAddRepos_ChangeWhileSaving_WrittenWithTheAdd`). On a clock that never fires by itself, a
+favorite marked before an add stays waiting; the add's save fails, a card color is chosen while the question is
+shown, and Discard is answered: the flush writes the favorite and the color, without the discarded add
+(`MainWindowViewModel_EnqueueAddRepos_SaveFailsThenDiscard_KeepsChangesMadeBeforeAndDuringTheAdd`). These cover
+`AgentControl-MainWindowViewModel-AddKeepsOtherChanges`.
 
 **MainWindowViewModel_AddReposSummary_NothingOneMessageOrOneSummary**: `DescribeAddOutcomes` returns nothing when every
 folder was added (`MainWindowViewModel_DescribeAddOutcomes_AllAdded_ReturnsNull`); for one folder it gives the
@@ -278,8 +294,9 @@ in its section and saves the order (`MainWindowViewModel_MoveCard_TopUpDownBotto
 that leads nowhere is refused without saving (`MainWindowViewModel_MoveCard_AtBoundary_IsRefusedAndChangesNothing`);
 when the cards of two sections alternate in the stored list a move changes only the moved card's place and leaves the
 other section's order alone (`MainWindowViewModel_MoveCard_SectionsInterleavedInTheList_KeepsOtherSectionsOrder`); and
-when the order cannot be saved nothing changes, the user is told once, and the same move works once saving works
-(`MainWindowViewModel_MoveCard_SaveFails_ChangesNothingAndReports`), covering
+when the order cannot be saved the move is kept (the cards, the list and the stored order), the user is told once, and
+the next move, once saving works, writes both
+(`MainWindowViewModel_MoveCard_SaveFails_KeptReportedOnceAndSavedWithNextChange`), covering
 `AgentControl-MainWindowViewModel-MoveCard`. `CanMoveCard` reports each of the four moves for the first, a middle and
 the last card (`MainWindowViewModel_CanMoveCard_FirstMiddleAndLast_ReportsEachItem`), and `GetMoveDisabledReason` names
 the reason - first, last, or the filter - and is `null` when the move is allowed
@@ -301,9 +318,9 @@ leaving Favorites, into a group or into Ungrouped, each at the drop position and
 `MainWindowViewModel_DropCard_IntoUngrouped_RemovesTheGroup`,
 `MainWindowViewModel_DropCard_IntoFavorites_MarksFavoriteAndKeepsTheGroup`,
 `MainWindowViewModel_DropCard_OutOfFavoritesIntoGroup_ClearsFavoriteAndSetsTheGroup` and
-`MainWindowViewModel_DropCard_OutOfFavoritesIntoUngrouped_ClearsFavoriteAndGroup`); when the section change cannot be
-saved nothing changes and the user is told once
-(`MainWindowViewModel_DropCard_SectionChangeSaveFails_ChangesNothingAndReports`), covering
+`MainWindowViewModel_DropCard_OutOfFavoritesIntoUngrouped_ClearsFavoriteAndGroup`); when the drop cannot be saved the
+card is kept in the new section at the drop place and the user is told once for both changes
+(`MainWindowViewModel_DropCard_SaveFails_KeptAtTheDropPlaceAndReportedOnce`), covering
 `AgentControl-MainWindowViewModel-DropChangesSection`. A drop on a group's header puts the card at the bottom of the
 group; on a collapsed group's header it does the same, leaves the group collapsed (the same header object, still
 collapsed) and updates its count; on the Favorites and Ungrouped headers it favorites, or un-favorites and takes the
@@ -339,7 +356,7 @@ first and Ungrouped last, and the stored order is repaired to the groups that ex
 **MainWindowViewModel_MoveGroup_SwapsWithItsNeighborAndExplainsWhatIsUnavailable**: Moving a group up or down swaps it
 with the group before or after it, and the whole order of the groups as shown is stored and saved
 (`MainWindowViewModel_MoveGroup_UpAndDown_SwapsWithNeighborAndStoresTheFullOrder`); when the order cannot be saved
-nothing changes and the failure is reported (`MainWindowViewModel_MoveGroup_SaveFails_ChangesNothingAndReports`).
+the move is kept and the failure is reported (`MainWindowViewModel_MoveGroup_SaveFails_KeptAndReported`).
 These cover `AgentControl-MainWindowViewModel-MoveGroup`. The first group cannot move up and the last cannot move
 down, *Favorites*, *Ungrouped*, unknown groups and groups without a section of their own never move, nothing moves
 while the filter has text, each with its reason, and the headers offer the moves accordingly
@@ -357,7 +374,7 @@ or *Ungrouped*, on a group that is not listed, or while the filter has text is r
 (the next start) shows the groups in the same order (`MainWindowViewModel_MoveGroup_PersistsOrderForANewViewModel`,
 covering `AgentControl-MainWindowViewModel-GroupOrderPersisted`).
 
-**MainWindowViewModel_ApplySettings_PreservesReposAndInvalidatesPackageCache**: `ApplySettings`
+**MainWindowViewModel_ApplySettings_PreservesReposAndInvalidatesPackageCache**: `ApplySettingsAsync`
 is called with an updated `AppSettings`; the existing recent-repos list survives, the new
 field values are adopted and persisted, and the shared `PackageVersionCache` is invalidated so
 a changed package-source path is reflected immediately rather than served from a stale cache.
@@ -377,28 +394,28 @@ tracked repo. These tests await `PendingRefresh` (the background refresh) before
 covering `AgentControl-MainWindowViewModel-ApplySettings`.
 
 **MainWindowViewModel_InvalidateChangedSources_OnlyEditedOrRemovedSourcesAreInvalidated**:
-`ApplySettings` replaces one package source's location; a card whose files that unchanged source supplies
+`ApplySettingsAsync` replaces one package source's location; a card whose files that unchanged source supplies
 keeps its cached upgrade answer even after that source's folder has disappeared (an invalidated
 cache would fail to read it and report no upgrade), while a changed source is observed afresh. This
 scenario is tested by `MainWindowViewModel_ApplySettings_OnlyEditedSourceIsInvalidated` and
 `MainWindowViewModel_ApplySettings_InvalidatesSharedPackageVersionCache`, covering
 `AgentControl-MainWindowViewModel-InvalidateChangedSources`.
 
-**MainWindowViewModel_ApplySettings_CredentialBearingSource_IsRefused**: `ApplySettings` with a
+**MainWindowViewModel_ApplySettings_CredentialBearingSource_IsRefused**: `ApplySettingsAsync` with a
 package source location that embeds a sentinel password throws `InvalidOperationException` whose
 message does not contain it, the live settings instance is unchanged, and no settings file is
 written. This scenario is tested by
 `MainWindowViewModel_ApplySettings_SourceLocationWithEmbeddedCredential_ThrowsAndKeepsCurrentSettings`,
 covering `AgentControl-MainWindowViewModel-ApplySettings`.
 
-**MainWindowViewModel_ApplySettings_SaveFails_KeepsPreviousSettingsLive**: `ApplySettings` against
+**MainWindowViewModel_ApplySettings_SaveFails_KeepsPreviousSettingsLive**: `ApplySettingsAsync` against
 a configuration location that cannot be written throws `InvalidOperationException`, and the live
 settings instance is still the previous one with its previous values and recent repos. This
 scenario is tested by `MainWindowViewModel_ApplySettings_SaveFails_KeepsPreviousSettingsLive`,
 covering `AgentControl-MainWindowViewModel-ApplySettings`.
 
 **MainWindowViewModel_ApplySettingsInBackground_ReturnsBeforeTheCardRefresh**: With one listed repo and the cards'
-background reads held at the gate, `ApplySettings` returns while `PendingRefresh` has not completed, and the global
+background reads held at the gate, `ApplySettingsAsync` returns while `PendingRefresh` has not completed, and the global
 progress shows "Refreshing repositories 0 of 1..." without Cancel; once released the refresh completes, the progress
 is cleared and the card reflects the refresh (present)
 (`MainWindowViewModel_ApplySettings_CardRefreshHeld_ReturnsAndShowsRefreshingProgress`). This covers
@@ -477,7 +494,7 @@ covering `AgentControl-MainWindowViewModel-GitConnectionTestProvider`, `-GitConn
 `-GitConnectionTestRefusesOldGit`.
 
 **MainWindowViewModel_ApplyTheme_SavedThemeIsHandedToTheApplierOnlyAfterTheSave**: With a recording theme
-applier, `ApplySettings` with the dark theme persists it and calls the applier once with it, covering
+applier, `ApplySettingsAsync` with the dark theme persists it and calls the applier once with it, covering
 `AgentControl-MainWindowViewModel-ApplyTheme`; when the write fails (the configuration "directory" is a file) the
 exception reaches the caller, the applier is not called and the live settings keep the system default, covering
 `AgentControl-MainWindowViewModel-RefusedThemeNotApplied`. This scenario is tested by
@@ -486,12 +503,12 @@ exception reaches the caller, the applier is not called and the live settings ke
 
 **MainWindowViewModel_ApplySettings_KeepShellOpenChanged_NextLaunchUsesIt**: Built with a recording process starter and
 a deterministic shell detector, the view model hands both to the cards it creates: a launch asks for PowerShell with
-`-NoExit`, and after `ApplySettings` with the keep-shell-open choice cleared the next launch of the same card asks for
-PowerShell without `-NoExit`, with no process started. This scenario is tested by
+`-NoExit`, and after `ApplySettingsAsync` with the keep-shell-open choice cleared the next launch of the same card asks
+for PowerShell without `-NoExit`, with no process started. This scenario is tested by
 `MainWindowViewModel_ApplySettings_KeepShellOpenChanged_NextLaunchUsesIt`, evidencing
 `AgentControl-LauncherUI-KeepShellOpenApplied` at the subsystem level (see the `LauncherUI` verification design). The
-persistence tests' launch case (`MainWindowViewModel_LaunchRecordSaveFails_StampNotRecordedAndReports`) uses the same
-fake starter.
+persistence tests' launch case (`MainWindowViewModel_LaunchRecordSaveFails_StampKeptAndReported`) uses the same fake
+starter.
 
 **MainWindowViewModel_GroupSections_FlatListWithoutGroupsSectionedListWithThem**: Tested by `RepoGroupingTests.cs` (same
 `RealProcess` collection and temporary-directory approach, with repos created under a unique parent so the card name is
@@ -569,8 +586,8 @@ the settings file only, and choosing no color clears it
 (`MainWindowViewModel_SetGroupColor_StoresColorAndNoneClears`); a color the palette does not know, a group that does
 not exist and the *Favorites* and *Ungrouped* sections are refused and nothing changes
 (`MainWindowViewModel_SetGroupColor_UnknownColorGroupOrBuiltInSection_ChangesNothing`); and when the color cannot be
-saved nothing changes - not the header, the tiles or the settings - and the failure is reported once
-(`MainWindowViewModel_SetGroupColor_SaveFails_ChangesNothingAndReports`, in `MainWindowViewModelPersistenceTests.cs`).
+saved the color is kept - on the header, the tiles and in the settings in memory - and the failure is reported once
+(`MainWindowViewModel_SetGroupColorSaveFails_KeptAndReported`, in `MainWindowViewModelPersistenceTests.cs`).
 These cover `AgentControl-MainWindowViewModel-GroupColor`. The color shows on the group's header (not on *Favorites* or
 *Ungrouped*) and on the tiles of the group's repos without a card color of their own, a favorite in the group
 included, while a card's own color wins and other repos keep their colors
@@ -588,55 +605,64 @@ window builds them keeps the group colors and the group order
 `AgentControl-MainWindowViewModel-GroupSettingsKeptOnApplySettings`).
 
 **MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten**: A favorite, a group and a card color chosen on a card
-are applied and read back from the settings file in the stored (canonical) spelling, and no failure is reported. This
-scenario is tested by `MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten`, covering
+are applied and, after a flush, read back from the settings file in the stored (canonical) spelling, and no failure is
+reported (`MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten`). With the writes held at the gate, a favorite is
+marked: the card, the settings and the list show it at once while nothing has been written yet and the flush is still
+pending; once the gate opens the flush completes and the file holds the favorite
+(`MainWindowViewModel_Favorite_SaveHeld_AppliedAtOnceAndWrittenAfterFlush`). These cover
 `AgentControl-MainWindowViewModel-ChangeAppliedWhenSaved`.
 
-**MainWindowViewModel_FailedSave_ChangesNothing**: Tested by `MainWindowViewModelPersistenceTests.cs` (the `RealProcess`
-collection, because every card's background repo-state read spawns git). A failing save is produced by making
-`settings.json` in the configuration folder a directory, which no write can replace; deleting that directory makes
-saving work again. With saving broken, each change is made and nothing is checked to have changed: a favorite (card,
-settings and displayed list as before), a move to a group, a card color, a recorded launch (the stamp stays unset and no
-launch is recorded), a collapse (through the API, and through the header's button), a group rename and a group removal
-(the group, its members and its collapsed state as before), adding a repo (nothing added to the cards, the displayed
-list or the settings) and removing a repo (still listed, the settings unchanged). This scenario is tested by
-`MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt`,
-`MainWindowViewModel_MoveToGroupSaveFails_ChangesNothingAndReports`,
-`MainWindowViewModel_CardColorSaveFails_ChangesNothingAndReports`,
-`MainWindowViewModel_LaunchRecordSaveFails_StampNotRecordedAndReports`,
-`MainWindowViewModel_CollapseSaveFails_SectionStaysExpanded`, `MainWindowViewModel_RenameGroupSaveFails_GroupUnchanged`,
-`MainWindowViewModel_RemoveGroupSaveFails_GroupUnchanged`, `MainWindowViewModel_AddRepoSaveFails_NothingAdded` and
-`MainWindowViewModel_RemoveRepoSaveFails_RepoStaysListedAndWorking`, covering
+**MainWindowViewModel_FailedSave_KeepsTheChange**: Tested by `MainWindowViewModelPersistenceTests.cs` (the `RealProcess`
+collection, because every card's background repo-state read spawns git). A failing write is produced by the save seam
+(it throws "The disk is full." without touching the file). With writing failing, each change is made and checked to be
+in effect after the flush: a favorite (the card, the settings and the list), a move to a group (the group's section
+appears), a card color, a recorded launch (the stamp is set and `LaunchRecorded` raised), a collapse (through the API
+and through the header's button, neither throwing), a group rename (the members and the collapsed state follow; the file
+still holds the old name) and a group removal, and removing a repo (removed from the list and the settings in memory
+while the file still lists it). The favorite test then makes a second change, which fails too, and, once writing works,
+a third: the file then holds all three. The removal test likewise writes the removal with the next change. This scenario
+is tested by `MainWindowViewModel_FavoriteSaveFails_KeptReportedOnceAndSavedWithNextChange`,
+`MainWindowViewModel_MoveToGroupSaveFails_KeptAndReported`, `MainWindowViewModel_CardColorSaveFails_KeptAndReported`,
+`MainWindowViewModel_LaunchRecordSaveFails_StampKeptAndReported`,
+`MainWindowViewModel_CollapseSaveFails_SectionCollapsedAndReported`,
+`MainWindowViewModel_RenameGroupSaveFails_RenamedAndReported`,
+`MainWindowViewModel_RemoveGroupSaveFails_RemovedAndReported` and
+`MainWindowViewModel_RemoveRepoSaveFails_RemovedReportedAndSavedWithNextChange`, covering
 `AgentControl-MainWindowViewModel-FailedSaveChangesNothing`.
 
-**MainWindowViewModel_FailedSave_IsNotPersistedLater**: After a failed favorite, saving is made to work and an
-unrelated change (a card color on another repo) is saved: the file holds the color but not the favorite, and the
-same favorite then succeeds. After a failed add the same repo can be added, and after a failed removal the card still
-works (a favorite can be set on it) and can then be removed. This scenario is tested by
-`MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt`,
-`MainWindowViewModel_AddRepoSaveFails_NothingAdded` and
-`MainWindowViewModel_RemoveRepoSaveFails_RepoStaysListedAndWorking`, covering
-`AgentControl-MainWindowViewModel-FailedSaveNotPersistedLater`.
-
-**MainWindowViewModel_FailedSave_IsReported**: A failed favorite, group move, card color, recorded launch and collapse
-from the header's button each raise the save-failed notice exactly once, with a message saying the change was not
-applied (the favorite test also checks that the two-way bound star is told to read its value again). This scenario is
-tested by `MainWindowViewModel_FavoriteSaveFails_ChangesNothingAndLaterSaveDoesNotPersistIt`,
-`MainWindowViewModel_MoveToGroupSaveFails_ChangesNothingAndReports`,
-`MainWindowViewModel_CardColorSaveFails_ChangesNothingAndReports`,
-`MainWindowViewModel_LaunchRecordSaveFails_StampNotRecordedAndReports` and
-`MainWindowViewModel_CollapseSaveFails_SectionStaysExpanded`, covering
+**MainWindowViewModel_FailedSave_IsReportedOncePerStreak**: A failed favorite, group move, card color, recorded launch
+and collapse each raise the save-failed notice exactly once; the favorite test checks that the message says the
+change could not be saved, gives the reason and says the change stays in effect, and that a second failing change
+raises no second notice, nor does the successful write after it. This scenario is tested by
+`MainWindowViewModel_FavoriteSaveFails_KeptReportedOnceAndSavedWithNextChange`,
+`MainWindowViewModel_MoveToGroupSaveFails_KeptAndReported`, `MainWindowViewModel_CardColorSaveFails_KeptAndReported`,
+`MainWindowViewModel_LaunchRecordSaveFails_StampKeptAndReported` and
+`MainWindowViewModel_CollapseSaveFails_SectionCollapsedAndReported`, covering
 `AgentControl-MainWindowViewModel-SaveFailureReported`.
 
-**MainWindowViewModel_FailedSave_RefusesTheOperation**: Collapsing through the API, renaming a group, removing a
-group, adding a repo and removing a repo with saving broken each throw to the caller. This scenario is tested by
-`MainWindowViewModel_CollapseSaveFails_SectionStaysExpanded`,
-`MainWindowViewModel_RenameGroupSaveFails_GroupUnchanged`, `MainWindowViewModel_RemoveGroupSaveFails_GroupUnchanged`,
-`MainWindowViewModel_AddRepoSaveFails_NothingAdded` and
-`MainWindowViewModel_RemoveRepoSaveFails_RepoStaysListedAndWorking`, covering
+**MainWindowViewModel_FailedSave_RefusesAddsAndSettings**: With writing failing, adding a repo throws to the caller and
+adds nothing, and the same repo can be added once writing works (`MainWindowViewModel_AddRepoSaveFails_NothingAdded`);
+a multi-folder add reports every folder as not saved and adds nothing
+(`MainWindowViewModel_AddRepos_SaveFails_NothingAddedAndEveryFolderReportedNotSaved`); and applying the Settings
+window's values throws through its task with the reason, adopts nothing (the same settings instance stays live, the
+theme is not applied) and raises no background notice
+(`MainWindowViewModel_ApplySettingsAsync_SaveFails_NothingAdoptedAndThrows`). These cover
 `AgentControl-MainWindowViewModel-SaveFailureRefusesOperation`. How the window shows that failure is verified at the
 `LauncherUI` subsystem level.
 
+**MainWindowViewModel_ApplySettingsAsync_SavesInTheBackground**: With the writes held at the gate, applying new
+settings returns a task that is still pending once the write has started, and nothing is adopted (the same settings
+instance is live); once the gate opens the task completes, the new value is adopted with the repo list kept, and the
+file holds it (`MainWindowViewModel_ApplySettingsAsync_SaveHeld_ReturnsPendingAndAdoptsOnceSaved`). A favorite marked
+while the write is held is applied at once, kept when the settings are adopted, and written together with them after a
+flush (`MainWindowViewModel_ApplySettingsAsync_ChangeDuringSave_KeptAndWrittenAfterFlush`). These cover
+`AgentControl-MainWindowViewModel-ApplySettingsSaveInBackground`.
+
+**MainWindowViewModel_Dispose_WritesWhatIsNotWrittenYet**: On a clock that never fires by itself, a favorite is marked
+and nothing has been written; the view model is disposed inside a `BlockingCallGuard` scope: no blocking call is
+recorded on the closing thread, and the settings file holds the favorite. This scenario is tested by
+`MainWindowViewModel_Dispose_OnGuardedThread_WritesPendingChangeWithoutBlockingCall`, covering
+`AgentControl-MainWindowViewModel-SettingsFlushedOnClose`.
 **MainWindowViewModel_RemoveRepo_RetiresTheCard**: A repo's card is asked to report an error (its select-package
 action with no package source configured) and does; the repo is removed and the same action is tried again: nothing is
 reported for the removed card. What a retired card does with work that is still running is verified by the
@@ -695,27 +721,26 @@ provider's token is cancelled and a late answer changes no card). This scenario 
 covering `AgentControl-MainWindowViewModel-PeriodicRecheckLifecycle`.
 
 **MainWindowViewModel_RecheckAfterSettingsClosed_ProblemCardsCheckedAgainWithoutPrompt**: In
-`MainWindowViewModelRecheckTests.cs`, over the counted in-memory source: a card whose launch check found that the
-source needs a sign-in, or could not reach it, is checked again when the view model is told that Settings closed
-without saving, and once the source answers it shows no problem and offers the upgrade; when no card shows a problem
-or a failed check, no source is read; after a save (`ApplySettings`, which checks every card) being told that Settings
-closed after saving reads the source no further time; with two cards whose check failed, the one busy refreshing
-itself is not checked while the other is (exactly one read); with five cards whose check failed (more than are checked
-at once), a card that waits for its turn in the re-check and that the user starts refreshing meanwhile is not checked
-when its turn comes, so it shows what the user's refresh read rather than the re-check's failure; and after the view
-model was disposed nothing is
-started. With a periodic round that recorded a server's sign-in failure for the first of two cards and is held at a
-second source, being told that Settings closed without saving (after the server started answering) makes the round
-read the server again for the second card rather than replay the recorded failure, so neither card is left showing
-"Sign-in needed" and both offer the upgrade. With a card that is up to date and a periodic round held while reading
-the source for it, being told that Settings closed without saving checks that card again, and when the round's old read
-then fails as needing a sign-in the card still shows the newer check's result (the upgrade) rather than "Sign-in
-needed". End to end against an in-process mock NuGet server that requires a sign-in (with a real `MainWindowViewModel`,
-its real providers and a `PackageCredentialContext` over a `SessionCredentialStore` and a scripted prompt): the launch
-check reports "Sign-in needed" without asking, a listing through `CreateConnectionTestProvider` - the Settings
-window's Test connection - asks once and signs in, and the re-check after Settings closed without saving then clears
-the problem and offers the upgrade without asking again. This scenario is tested by
-`MainWindowViewModel_RecheckAfterSettingsClosed_SourceNoLongerNeedsSignIn_ClearsTheProblem`,
+`MainWindowViewModelRecheckTests.cs`, over the counted in-memory source: a card whose launch check found that the source
+needs a sign-in, or could not reach it, is checked again when the view model is told that Settings closed without
+saving, and once the source answers it shows no problem and offers the upgrade; when no card shows a problem or a failed
+check, no source is read; after a save (`ApplySettingsAsync`, which checks every card) being told that Settings closed
+after saving reads the source no further time; with two cards whose check failed, the one busy refreshing itself is not
+checked while the other is (exactly one read); with five cards whose check failed (more than are checked at once), a
+card that waits for its turn in the re-check and that the user starts refreshing meanwhile is not checked when its turn
+comes, so it shows what the user's refresh read rather than the re-check's failure; and after the view model was
+disposed nothing is started. With a periodic round that recorded a server's sign-in failure for the first of two cards
+and is held at a second source, being told that Settings closed without saving (after the server started answering)
+makes the round read the server again for the second card rather than replay the recorded failure, so neither card is
+left showing "Sign-in needed" and both offer the upgrade. With a card that is up to date and a periodic round held while
+reading the source for it, being told that Settings closed without saving checks that card again, and when the round's
+old read then fails as needing a sign-in the card still shows the newer check's result (the upgrade) rather than
+"Sign-in needed". End to end against an in-process mock NuGet server that requires a sign-in (with a real
+`MainWindowViewModel`, its real providers and a `PackageCredentialContext` over a `SessionCredentialStore` and a
+scripted prompt): the launch check reports "Sign-in needed" without asking, a listing through
+`CreateConnectionTestProvider` - the Settings window's Test connection - asks once and signs in, and the re-check after
+Settings closed without saving then clears the problem and offers the upgrade without asking again. This scenario is
+tested by `MainWindowViewModel_RecheckAfterSettingsClosed_SourceNoLongerNeedsSignIn_ClearsTheProblem`,
 `MainWindowViewModel_RecheckAfterSettingsClosed_SourceUnreachableBefore_ChecksAgain`,
 `MainWindowViewModel_RecheckAfterSettingsClosed_NoCardHasAProblem_ReadsNoSource`,
 `MainWindowViewModel_RecheckAfterSettingsClosed_SettingsSaved_StartsNoSecondCheck`,

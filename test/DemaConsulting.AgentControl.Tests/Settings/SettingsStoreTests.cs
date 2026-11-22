@@ -21,6 +21,7 @@
 using System.Text.Json.Nodes;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.Settings;
+using DemaConsulting.AgentControl.Utilities;
 
 namespace DemaConsulting.AgentControl.Tests.Settings;
 
@@ -266,6 +267,35 @@ public class SettingsStoreTests
         // Act / Assert: the documented InvalidOperationException contract is honored instead of
         // the raw ArgumentException escaping uncaught
         Assert.Throws<InvalidOperationException>(() => SettingsStore.Save(new AppSettings(), invalidConfigDir));
+    }
+
+    /// <summary>
+    ///     Test that a save made on a thread that refuses blocking calls (as the window's UI thread does
+    ///     in the headless tests) is refused and recorded before anything is written, so a settings
+    ///     save that slips back onto the UI thread fails the tests.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Save_OnGuardedThread_IsRefusedAndWritesNothing()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            // Act: save on a guarded thread
+            using (BlockingCallGuard.GuardCurrentThread())
+            {
+                Assert.Throws<BlockingCallOnGuardedThreadException>(
+                    () => SettingsStore.Save(new AppSettings { GitExecutablePath = "refused" }, configDir));
+            }
+
+            // Assert: the refusal was recorded and nothing was written
+            Assert.Equal(["settings save"], BlockingCallGuard.TakeViolations());
+            Assert.False(File.Exists(Path.Combine(configDir, "settings.json")));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
     }
 
     /// <summary>

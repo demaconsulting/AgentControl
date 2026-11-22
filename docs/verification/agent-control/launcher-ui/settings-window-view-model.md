@@ -74,6 +74,12 @@ tested by
 `SettingsWindowViewModel_SaveCommand_OnSaveThrowsInvalidOperation_ShowsErrorAndDoesNotRaiseSaved`,
 covering `AgentControl-SettingsWindowViewModel-Save`.
 
+**SettingsWindowViewModel_Save_WhileSaving_SaveDisabledAndSavedRaisedAfter**: With an `onSave` callback whose task the
+test completes, Save is started and clicked a second time while the task runs: the callback was called once, Save is
+unavailable (`CanExecute` false) and `Saved` has not been raised; once the task completes, `Saved` is raised and Save is
+available again. This scenario is tested by `SettingsWindowViewModel_Save_WhileSaving_SaveDisabledAndSavedRaisedAfter`,
+covering `AgentControl-SettingsWindowViewModel-Save`.
+
 **SettingsWindowViewModel_ShellPreferencePresets_NonEmptyBlankFirstNoDuplicatesAndOsAppropriate**:
 `AvailableShellPreferences` is checked for being non-empty with a blank first entry, for having
 no duplicate entries, and for matching the expected preset names for the OS the test runs on

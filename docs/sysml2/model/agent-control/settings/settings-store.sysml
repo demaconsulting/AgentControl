@@ -12,4 +12,7 @@ package AgentControl {
             requirementFiles = ("docs/reqstream/agent-control/settings/settings-store.yaml");
         }
     }
+
+    // Asks the blocking-call guard before every save, so the tests catch a settings save made on the UI thread
+    dependency SettingsStore to BlockingCallGuard;
 }

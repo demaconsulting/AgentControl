@@ -143,9 +143,11 @@ selection.
 - *Type*: In-process .NET `ICommand`.
 - *Role*: Provider.
 - *Contract*: Invokes an `onSave` callback with the current property values, including the
-  edited list of package sources, and raises `Saved`, letting
-  `MainWindowViewModel.ApplySettings` persist the change and invalidate the cached package
-  data of every edited or removed source (`AgentControl-LauncherUI-Settings`). Whenever the Settings window
+  edited list of package sources, waits for its task without blocking the window (the command is unavailable until
+  then), and raises `Saved` once it completed, letting
+  `MainWindowViewModel.ApplySettingsAsync` persist the change in the background and invalidate the cached package
+  data of every edited or removed source (`AgentControl-LauncherUI-Settings`,
+  `AgentControl-LauncherUI-SettingsApplyResponsive`). Whenever the Settings window
   closes, saved or not, `MainWindow` calls `MainWindowViewModel.RecheckAfterSettingsClosed(settingsSaved)` with
   whether `Saved` was raised, which re-checks the cards that show a source problem or a failed upgrade check
   when nothing was saved and starts nothing after a save (`AgentControl-LauncherUI-SettingsClosedRechecksProblems`).
@@ -230,11 +232,11 @@ could not be saved at the end of a background add.
 `MainWindowViewModel` owns the `ObservableCollection<RepoCardViewModel>` backing the
 recent-repos list; on construction it creates one `RepoCardViewModel` per `RecentRepo` in the
 loaded `AppSettings`. It exposes `EnqueueAddReposAsync` (the background, queued add the window uses), `AddRepos` (the
-same add, synchronous, and the single-folder `AddRepo`/`AddRepoToGroup`) and `RemoveRepo` (each
-saved through `SettingsStore` before it takes effect, see
-*Transactional persistence* below), a `FilterText` property driving `DisplayedRepoCards`/`DisplayedItems`, and
-`ApplySettings`
-(invoked when `SettingsWindowViewModel` reports `Saved`), which persists the new settings
+same add, synchronous, and the single-folder `AddRepo`/`AddRepoToGroup`, each saved before it takes effect) and
+`RemoveRepo` (applied at once and saved in the background, see *Background persistence* below), a `FilterText`
+property driving `DisplayedRepoCards`/`DisplayedItems`, and
+`ApplySettingsAsync`
+(the Settings window's `onSave`), which persists the new settings in the background
 while preserving the existing recent-repos list (and its order), the collapsed sections and the group colors and order,
 and invalidates the shared
 `PackageVersionCache` for each package source that was edited or removed.
@@ -361,33 +363,32 @@ the events that need a dialog.
   `ThemePreferenceDisplayNameConverter` is used by the Settings window's theme picker to show a `ThemePreference`
   under a friendly name; the persisted value stays the enum member.
 
-**Transactional persistence.** Every change the user makes in the main window is saved before it takes effect, so
-memory, the list and the settings file never disagree. `MainWindowViewModel.CommitSettingsChange` tries the change on
-a candidate copy of the settings (`CreatePersistedCopy`, with the repos cloned by `RecentRepo.Clone` and the collapsed
-list, the group colors and the group order copied), saves the candidate with `SettingsStore.Save`, and only when that
-succeeded applies the same change to
-the live settings; then the list is refreshed (candidate copy, save, commit, refresh). After the change, on the
-candidate and on the live settings alike, `AppSettings.RepairGroupSettings` drops the color and position of a group
-that no repo is in any more (`AgentControl-LauncherUI-GroupSettingsKeptInStep`). A change made on a card -
-`IsFavorite`, `MoveToGroup`, `SetCardColor`, and the launch timestamp - reaches this through the card's
-`commitChange` callback (`MainWindowViewModel.CommitRepoChange`), which returns whether the change was saved: when it
-was not, the card property keeps its value (the two-way bound star is told to read it again),
-`MoveToGroup`/`SetCardColor` return `false`, and the main view-model raises `SettingsSaveFailed` with the message
-for the user, which `MainWindow` shows in a message box. A collapse toggle from a header is reported the same way, and
-so are `SetGroupColor`, `MoveGroup` and `DropGroup`, which return `false`.
-`RemoveRepo`, `ToggleGroupCollapsed`, `RenameGroup` and `RemoveGroup` instead throw
-`InvalidOperationException` when the save fails, having changed nothing, and the window's code-behind shows it in a
-message box; an add saves its whole batch once, and when that save fails nothing of the batch changed:
-`AddRepos` reports every folder that would have been added or moved as not saved, and the background add asks the
-user through `AddSaveFailed` whether to retry or discard (see *Background work and the global progress strip*). A
-failed save therefore leaves the live settings, the cards, the displayed list and the file as they
-were, and a later unrelated save can never write the failed change. `ApplySettings` follows the same rule for the
-Settings window's values: it saves them and adopts them only after that. When a repo is removed, `RemoveRepo` saves
-the removal and then calls `RepoCardViewModel.Retire`: the card cancels its running operation, ignores the results of
-upgrade checks and picture loads still in flight, clears all its events (so nothing it still does can show an error
-box, release notes or a prompt), and disposes its picture; `MainWindow` detaches its per-card handlers when a card
-leaves `RepoCards` and forgets its bookkeeping for it.
-
+**Background persistence.** Every change the user makes in the main window is applied at once and saved in the
+background, so the window never waits for the settings file, which another program (a virus scanner, an indexer, a
+sync client) can hold for up to a second (`AgentControl-LauncherUI-ChangeAppliedWhenSaved`).
+`MainWindowViewModel.CommitSettingsChange` applies the change to the live settings, runs
+`AppSettings.RepairGroupSettings` (which drops the color and position of a group that no repo is in any more,
+`AgentControl-LauncherUI-GroupSettingsKeptInStep`), and hands a snapshot of the live settings
+(`AppSettings.CreateSnapshot`) to the `Settings` subsystem's `SettingsWriter`, which writes the newest snapshot on a
+worker thread a moment after the last change, one write at a time; then the list is refreshed. A change made on a
+card - `IsFavorite`, `MoveToGroup`, `SetCardColor`, and the launch timestamp - reaches this through the card's
+`commitChange` callback (`MainWindowViewModel.CommitRepoChange`), which applies it and returns `true`. When a write
+fails, the change stays in effect - the settings in memory, the cards and the list - and is written with the next
+change or when the window closes (`AgentControl-LauncherUI-FailedSaveChangesNothing`); the writer reports the first
+failure of a streak, and the main view-model raises `SettingsSaveFailed` with a message saying why and that the
+changes stay in effect, which `MainWindow` shows in a message box it does not wait for - once per failure streak, not
+for every click (`AgentControl-LauncherUI-FailedSaveReported`). The changes that must be on disk before they are
+applied - an add, and the Settings window's values (`ApplySettingsAsync`) - are confirmed saves of the same writer,
+made on a worker thread: they are applied only once written, and a failure changes nothing and reaches their caller -
+`AddRepos` reports every folder that would have been added or moved as not saved, the background add asks the user
+through `AddSaveFailed` whether to retry or discard (see *Background work and the global progress strip*), and the
+Settings window stays open with the reason. A change made in the window while a confirmed save runs is applied at once
+and written after it, together with it, so the file never loses either. When the window closes,
+`MainWindowViewModel.Dispose` writes what is not written yet, on a worker thread, waiting at most five seconds. When a
+repo is removed, `RemoveRepo` applies and schedules the removal and then calls `RepoCardViewModel.Retire`: the card
+cancels its running operation, ignores the results of upgrade checks and picture loads still in flight, clears all its
+events (so nothing it still does can show an error box, release notes or a prompt), and disposes its picture;
+`MainWindow` detaches its per-card handlers when a card leaves `RepoCards` and forgets its bookkeeping for it.
 **Background work and the global progress strip.** Adding folders, refreshing the cards after a settings save and
 checking the working tree of the cards read the disk and run git for every repo; done on the UI thread for many repos
 they froze the window (`AgentControl-System-ResponsiveRepoListWork`). The rule is: blocking reads run off the UI
@@ -488,10 +489,13 @@ thread touches, the per-card `CommittedAgentFilesCache`, is lock-guarded
 - *A failed save* (`AgentControl-LauncherUI-AddSaveFailureChoice`): the commit raises `AddSaveFailed` with a
   `SettingsSaveRetryRequest` and waits for its answer; Retry prepares the commit again against the list as it is then
   and saves again; Discard (or no subscriber, a closed window, Escape) reports the folders that would have been added
-  or moved as not saved. Because the commit is candidate-first, nothing has to be undone: memory, the cards, the list
-  and the file still match, including the group, place and collapsed state of repos the add would have moved.
-- *Settings refresh* (`AgentControl-LauncherUI-SettingsApplyResponsive`): `ApplySettings` saves and adopts the new
-  settings synchronously, then cancels the upgrade check and periodic round that were running and starts
+  or moved as not saved; Retry saves again and asks again each time that save fails. Because the add is applied only
+  once saved, nothing has to be undone: memory, the cards and the list are as they were before the add, including the
+  group, place and collapsed state of repos the add would have moved.
+- *Settings refresh* (`AgentControl-LauncherUI-SettingsApplyResponsive`): `ApplySettingsAsync` saves the new settings
+  with a confirmed save of the settings writer on a worker thread (the Settings window's Save button is unavailable
+  meanwhile and the window stays usable) and adopts them once saved, then cancels the upgrade check and periodic round
+  that were running and starts
   `RefreshCardsAfterSettingsAsync` as `PendingRefresh`: each card's cheap facts through the shared queue at background
   priority, the cards shown first (`RefreshRepoStateAsync` with `reportsProgress`), and, for a card whose folder came
   back or every present card when the git executable changed, its working tree, with "Refreshing repositories
@@ -593,7 +597,7 @@ itself because every automatic check never prompts. Every other failure of that 
 check (`AgentControl-LauncherUI-SignInNotGivenKeepsChip`). A
 sign-in made with the Settings window's Test connection is kept in the session's credential store the cards share,
 so when the Settings window closes, `MainWindow` calls `MainWindowViewModel.RecheckAfterSettingsClosed`, passing
-whether `SettingsWindowViewModel.Saved` was raised: after a save it starts nothing (`ApplySettings` has already
+whether `SettingsWindowViewModel.Saved` was raised: after a save it starts nothing (`ApplySettingsAsync` has already
 started the check of every card), otherwise it re-checks in the background - the same never-prompting check,
 alongside any check that is running - only the cards that are not busy, not missing, pinned, and show a source
 problem or a failed upgrade check, so the sign-in (or a connection that came back) shows on them at once
@@ -748,7 +752,7 @@ dark) is a setting edited in the Settings window's Appearance picker (`ThemeComb
 `SettingsStore`. `App` maps it to an Avalonia theme variant (`ToThemeVariant`: `ThemeVariant.Default` for the
 system default, which makes Avalonia follow the operating system's light/dark setting live, otherwise
 `Light` or `Dark`) and applies it to the running application (`ApplyTheme`) before the main window is shown and
-again whenever `MainWindowViewModel.ApplySettings` has saved new settings (through an injected
+again whenever `MainWindowViewModel.ApplySettingsAsync` has saved new settings (through an injected
 `Action<ThemePreference>`, so the view model stays free of the UI framework), so every open window changes
 at once without a restart (`AgentControl-LauncherUI-Appearance`). Every color the application's own XAML uses
 lives in `AppStyles.axaml` as a resource in a `Light` and a `Dark` theme dictionary (surfaces, borders,

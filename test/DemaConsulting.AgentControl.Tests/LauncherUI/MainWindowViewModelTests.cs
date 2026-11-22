@@ -77,7 +77,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     ///     updated settings to disk.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_AddRepo_ValidNewPath_InsertsCardAndPersistsSettings()
+    public async Task MainWindowViewModel_AddRepo_ValidNewPath_InsertsCardAndPersistsSettings()
     {
         // Arrange: an empty recent-repos list and a config directory to persist to
         var configDir = CreateTempDirectory();
@@ -92,6 +92,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var card = Assert.Single(viewModel.RepoCards);
         Assert.Equal(newRepo, card.RepoPath);
 
+        await viewModel.FlushSettingsAsync();
         var reloaded = SettingsStore.Load(configDir);
         var recentRepo = Assert.Single(reloaded.RecentRepos);
         Assert.Equal(newRepo, recentRepo.Path);
@@ -229,7 +230,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     ///     longer) Git repositories: the check applies only to folders being added.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_Constructor_ListedFolderWithoutGit_IsKept()
+    public async Task MainWindowViewModel_Constructor_ListedFolderWithoutGit_IsKept()
     {
         // Arrange: a listed repo whose folder has no .git
         var plainFolder = CreateTempDirectory();
@@ -244,6 +245,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         // Assert: still listed (and saved with the next change), and reported as already listed
         Assert.Equal(plainFolder, viewModel.RepoCards[0].RepoPath);
         Assert.Equal(AddRepoResult.AlreadyListed, Assert.Single(again).Result);
+        await viewModel.FlushSettingsAsync();
         Assert.Contains(SettingsStore.Load(configDir).RecentRepos, repo => repo.Path == plainFolder);
     }
 
@@ -252,7 +254,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     ///     and skips the others, and handles a folder given twice once.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_AddRepos_MixedPaths_ReportsAnOutcomePerPath()
+    public async Task MainWindowViewModel_AddRepos_MixedPaths_ReportsAnOutcomePerPath()
     {
         // Arrange: a listed repo, two new repositories, a plain folder and a missing path
         var listed = CreateRepoDirectory();
@@ -276,6 +278,7 @@ public sealed class MainWindowViewModelTests : IDisposable
             ],
             outcomes.Select(outcome => outcome.Result));
         Assert.Equal([listed, first, second], viewModel.RepoCards.Select(card => card.RepoPath));
+        await viewModel.FlushSettingsAsync();
         Assert.Equal([listed, first, second], SettingsStore.Load(configDir).RecentRepos.Select(repo => repo.Path));
     }
 
@@ -284,7 +287,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     ///     multi-folder add is handled once and gives one card, stored without the separator.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_AddRepos_SameFolderWithAndWithoutTrailingSeparator_AddsOneCard()
+    public async Task MainWindowViewModel_AddRepos_SameFolderWithAndWithoutTrailingSeparator_AddsOneCard()
     {
         // Arrange: one repository, written both ways
         var repo = CreateRepoDirectory();
@@ -298,6 +301,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         // Assert: one outcome, one card and one saved entry, all for the folder without the separator
         Assert.Equal(AddRepoResult.Added, Assert.Single(outcomes).Result);
         Assert.Equal(repo, Assert.Single(viewModel.RepoCards).RepoPath);
+        await viewModel.FlushSettingsAsync();
         Assert.Equal(repo, Assert.Single(SettingsStore.Load(configDir).RecentRepos).Path);
     }
 
@@ -472,7 +476,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     ///     updated settings' other fields, and persists the result.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_ApplySettings_PreservesRecentReposAndPersistsUpdatedFields()
+    public async Task MainWindowViewModel_ApplySettings_PreservesRecentReposAndPersistsUpdatedFields()
     {
         // Arrange: a view model with one recent repo
         var configDir = CreateTempDirectory();
@@ -482,7 +486,7 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         // Act: apply an updated settings object with a new package source path
         var updated = new AppSettings { PackageSourcePath = @"\\share\packages" };
-        viewModel.ApplySettings(updated);
+        await viewModel.ApplySettingsAsync(updated);
 
         // Assert: the recent-repos list survived, the new field was adopted, and both were
         // persisted to disk
@@ -490,6 +494,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.Equal(repoPath, card.RepoPath);
         Assert.Equal(@"\\share\packages", Assert.Single(viewModel.Settings.GetEffectiveSources()).Location);
 
+        await viewModel.FlushSettingsAsync();
         var reloaded = SettingsStore.Load(configDir);
         Assert.Equal(@"\\share\packages", Assert.Single(reloaded.Sources).Location);
         Assert.Null(reloaded.PackageSourcePath);
@@ -523,7 +528,7 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         // Act: launch, apply settings that clear the choice (as the Settings window's Save does), launch again
         await card.LaunchCommand.ExecuteAsync();
-        viewModel.ApplySettings(new AppSettings
+        await viewModel.ApplySettingsAsync(new AppSettings
         {
             AgentTool = AgentToolKind.Custom,
             CustomAgentCommand = "my-agent",
@@ -663,7 +668,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     ///     persisted settings.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_RemoveRepo_RemovesFromCollectionsAndPersistsSettings()
+    public async Task MainWindowViewModel_RemoveRepo_RemovesFromCollectionsAndPersistsSettings()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -679,6 +684,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.Empty(viewModel.RepoCards);
         Assert.Empty(viewModel.DisplayedRepoCards);
 
+        await viewModel.FlushSettingsAsync();
         var reloaded = SettingsStore.Load(configDir);
         Assert.Empty(reloaded.RecentRepos);
     }
@@ -735,7 +741,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     ///     without leaking the secret, keeps the current settings, and writes nothing.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_ApplySettings_SourceLocationWithEmbeddedCredential_ThrowsAndKeepsCurrentSettings()
+    public async Task MainWindowViewModel_ApplySettings_SourceLocationWithEmbeddedCredential_ThrowsAndKeepsCurrentSettings()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -744,7 +750,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var updated = new AppSettings { PackageSourcePath = "https://user:SentinelSecretValue@feeds.example.com/nuget" };
 
         // Act
-        var ex = Assert.Throws<InvalidOperationException>(() => viewModel.ApplySettings(updated));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => viewModel.ApplySettingsAsync(updated));
 
         // Assert: refused, the live settings are unchanged, and nothing was written
         Assert.DoesNotContain("SentinelSecretValue", ex.Message, StringComparison.Ordinal);
@@ -757,7 +763,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     ///     away (so it takes effect without a restart), once per save.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_ApplySettings_ThemeChanged_PersistsAndAppliesTheme()
+    public async Task MainWindowViewModel_ApplySettings_ThemeChanged_PersistsAndAppliesTheme()
     {
         // Arrange: a view model with a recording theme applier
         var configDir = CreateTempDirectory();
@@ -766,11 +772,12 @@ public sealed class MainWindowViewModelTests : IDisposable
             new AppSettings(), configDirectory: configDir, applyTheme: applied.Add);
 
         // Act: save a settings object that chooses the dark theme
-        viewModel.ApplySettings(new AppSettings { Theme = ThemePreference.Dark });
+        await viewModel.ApplySettingsAsync(new AppSettings { Theme = ThemePreference.Dark });
 
         // Assert: the applier received the choice and it was persisted
         Assert.Equal([ThemePreference.Dark], applied);
         Assert.Equal(ThemePreference.Dark, viewModel.Settings.Theme);
+        await viewModel.FlushSettingsAsync();
         Assert.Equal(ThemePreference.Dark, SettingsStore.Load(configDir).Theme);
     }
 
@@ -778,18 +785,18 @@ public sealed class MainWindowViewModelTests : IDisposable
     ///     Test that a rejected save never applies the theme it carried.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_ApplySettings_SaveFails_DoesNotApplyTheme()
+    public async Task MainWindowViewModel_ApplySettings_SaveFails_DoesNotApplyTheme()
     {
         // Arrange: a configuration "directory" that is really a file, so every write fails
         var blockingFile = Path.Combine(CreateTempDirectory(), "not-a-directory");
-        File.WriteAllText(blockingFile, "blocker");
+        await File.WriteAllTextAsync(blockingFile, "blocker", TestContext.Current.CancellationToken);
         var applied = new List<ThemePreference>();
         var viewModel = new MainWindowViewModel(
             new AppSettings(), configDirectory: blockingFile, applyTheme: applied.Add);
 
         // Act / Assert
-        Assert.Throws<InvalidOperationException>(
-            () => viewModel.ApplySettings(new AppSettings { Theme = ThemePreference.Light }));
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => viewModel.ApplySettingsAsync(new AppSettings { Theme = ThemePreference.Light }));
         Assert.Empty(applied);
         Assert.Equal(ThemePreference.System, viewModel.Settings.Theme);
     }
@@ -799,13 +806,13 @@ public sealed class MainWindowViewModelTests : IDisposable
     ///     (for example when a repo is marked as a favorite) can never persist the rejected candidate.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_ApplySettings_SaveFails_KeepsPreviousSettingsLive()
+    public async Task MainWindowViewModel_ApplySettings_SaveFails_KeepsPreviousSettingsLive()
     {
         // Arrange: a configuration "directory" that is really a file, so every write fails; a later
         // save (such as toggling a favorite) would otherwise persist the rejected candidate
         var repoPath = CreateTempDirectory();
         var blockingFile = Path.Combine(CreateTempDirectory(), "not-a-directory");
-        File.WriteAllText(blockingFile, "blocker");
+        await File.WriteAllTextAsync(blockingFile, "blocker", TestContext.Current.CancellationToken);
         var settings = new AppSettings
         {
             GitExecutablePath = "previous-git",
@@ -815,7 +822,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var rejected = new AppSettings { GitExecutablePath = "rejected-git" };
 
         // Act
-        Assert.Throws<InvalidOperationException>(() => viewModel.ApplySettings(rejected));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => viewModel.ApplySettingsAsync(rejected));
 
         // Assert: the previous instance is still live and keeps its values
         Assert.Same(settings, viewModel.Settings);
@@ -847,7 +854,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var newSourceDir = CreateTempDirectory();
         CreatePackageZip(newSourceDir, "contoso-agents", "2.0.0");
         var updated = new AppSettings { PackageSourcePath = newSourceDir };
-        viewModel.ApplySettings(updated);
+        await viewModel.ApplySettingsAsync(updated);
         await viewModel.PendingRefresh;
 
         // Assert: the new source's package is observed immediately, not masked by a cache entry
@@ -893,7 +900,7 @@ public sealed class MainWindowViewModelTests : IDisposable
                 new PackageSourceDefinition { Alias = "Other", Type = PackageSourceType.Zip, Location = CreateTempDirectory() }
             ]
         };
-        viewModel.ApplySettings(updated);
+        await viewModel.ApplySettingsAsync(updated);
         await viewModel.PendingRefresh;
 
         // Assert: Default's cached answer survived (an invalidated cache would now fail to read
@@ -925,7 +932,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var stub = GitStub.Create(statusOutput: "", statusExitCode: 0);
         _tempPaths.Add(stub.Path);
         var updated = new AppSettings { GitExecutablePath = stub.Path };
-        viewModel.ApplySettings(updated);
+        await viewModel.ApplySettingsAsync(updated);
         await viewModel.PendingRefresh;
 
         // Assert: once the background refresh is done, the card reflects a fresh (clean) Git
@@ -964,7 +971,7 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         // Act: settings are reapplied without the repo ever having gone missing
         var updated = new AppSettings { GitExecutablePath = stub.Path };
-        viewModel.ApplySettings(updated);
+        await viewModel.ApplySettingsAsync(updated);
         await viewModel.PendingRefresh;
 
         // Assert: no additional "git status" invocation was made for the already-checked,
@@ -1000,7 +1007,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var dirtyStub = GitStub.Create(statusOutput: " M file.txt", statusExitCode: 0);
         _tempPaths.Add(dirtyStub.Path);
         var updated = new AppSettings { GitExecutablePath = dirtyStub.Path };
-        viewModel.ApplySettings(updated);
+        await viewModel.ApplySettingsAsync(updated);
         await viewModel.PendingRefresh;
 
         // Assert: the card reflects the new executable's status, not the stale
@@ -1317,6 +1324,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.Equal(4, viewModel.RepoCards.Count);
         Assert.Equal(1, saves);
         Assert.Equal(1, rebuilds);
+        await viewModel.FlushSettingsAsync();
         Assert.Equal(4, SettingsStore.Load(configDir).RecentRepos.Count);
     }
 
@@ -1415,6 +1423,9 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.DoesNotContain("Work", viewModel.GroupNames);
         Assert.DoesNotContain(viewModel.RepoCards, card => card.RepoPath == listed);
         Assert.False(add.IsCompleted);
+
+        // The removals are written in the background; written now, so the add's own save is counted alone
+        await viewModel.FlushSettingsAsync();
         var savesBefore = saves;
 
         // Act: let the checks run, then wait for the re-added card's background read
@@ -1435,6 +1446,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.False(viewModel.IsGroupCollapsed("Work"));
         Assert.Null(viewModel.RepoCards.Single(card => card.RepoPath == anchor).GroupName);
         Assert.Equal("1.0.0", reAdded.PinnedPackageVersion);
+        await viewModel.FlushSettingsAsync();
         var saved = SettingsStore.Load(configDir).RecentRepos;
         Assert.Equal("Work", saved.Single(repo => repo.Path == listed).GroupName);
         Assert.Equal("Work", saved.Single(repo => repo.Path == fresh).GroupName);
@@ -1473,6 +1485,9 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.True(viewModel.IsGroupCollapsed("Work"));
         Assert.DoesNotContain(viewModel.DisplayedRepoCards, card => card.RepoPath == anchor);
         Assert.False(add.IsCompleted);
+
+        // The collapse is written in the background; written now, so the add's own save is counted alone
+        await viewModel.FlushSettingsAsync();
         var savesBefore = saves;
 
         // Act: let the check run
@@ -1487,6 +1502,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var newCard = Assert.Single(viewModel.DisplayedRepoCards, card => card.RepoPath == fresh);
         Assert.Equal("Work", anchorCard.GroupName);
         Assert.Equal("Work", newCard.GroupName);
+        await viewModel.FlushSettingsAsync();
         Assert.DoesNotContain("Work", SettingsStore.Load(configDir).CollapsedGroups ?? [], StringComparer.OrdinalIgnoreCase);
     }
 
@@ -1645,7 +1661,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         gate.Close();
 
         // Act: apply settings; the card refresh is held
-        viewModel.ApplySettings(new AppSettings());
+        await viewModel.ApplySettingsAsync(new AppSettings());
         await gate.FirstCall;
 
         // Assert: returned with the refresh still running, shown in the strip with its count and
@@ -1717,7 +1733,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var callsBefore = gate.Calls;
 
         // Act: settings are saved (four card reads) and two folders are added (two folder checks)
-        viewModel.ApplySettings(new AppSettings());
+        await viewModel.ApplySettingsAsync(new AppSettings());
         var add = viewModel.EnqueueAddReposAsync([CreateRepoDirectory(), CreateRepoDirectory()], null);
         await gate.FirstCall;
         var handedOverWhileHeld = gate.Calls - callsBefore;

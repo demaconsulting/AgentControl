@@ -28,15 +28,15 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 /// <summary>
 ///     View model for the settings window: edits a working copy of <see cref="AppSettings"/>'s
 ///     user-configurable fields, including the list of package sources, and persists them on
-///     <see cref="Save"/>.
+///     <see cref="SaveCommand"/>.
 /// </summary>
 /// <remarks>
 ///     <para>
 ///     Edits a copy rather than the live <see cref="AppSettings"/> instance so that closing the
 ///     window without saving never partially mutates the caller's settings. The recent-repos list
 ///     is intentionally not exposed here - it is owned exclusively by
-///     <see cref="MainWindowViewModel"/> and is preserved by <see cref="MainWindowViewModel.ApplySettings"/>
-///     when the built <see cref="AppSettings"/> from <see cref="Save"/> is applied; it is only
+///     <see cref="MainWindowViewModel"/> and is preserved by <see cref="MainWindowViewModel.ApplySettingsAsync"/>
+///     when the built <see cref="AppSettings"/> from <see cref="SaveCommand"/> is applied; it is only
 ///     read, to tell the user how many repos are pinned to a source they are about to remove.
 ///     </para>
 ///     <para>
@@ -51,10 +51,11 @@ namespace DemaConsulting.AgentControl.LauncherUI;
 internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
 {
     /// <summary>
-    ///     Invoked by <see cref="Save"/> with the newly-built <see cref="AppSettings"/> to
-    ///     persist, typically <see cref="MainWindowViewModel.ApplySettings"/>.
+    ///     Invoked by <see cref="SaveAsync"/> with the newly-built <see cref="AppSettings"/> to
+    ///     persist, typically <see cref="MainWindowViewModel.ApplySettingsAsync"/>; its task completes
+    ///     when they were saved.
     /// </summary>
-    private readonly Action<AppSettings> _onSave;
+    private readonly Func<AppSettings, Task> _onSave;
 
     /// <summary>
     ///     Tells whether a folder exists; run on a worker thread for each source's status check.
@@ -135,7 +136,9 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     ///     configured source.
     /// </summary>
     /// <param name="initial">The current application settings to edit a copy of.</param>
-    /// <param name="onSave">Callback invoked by <see cref="Save"/> with the updated settings.</param>
+    /// <param name="onSave">Callback invoked by <see cref="SaveAsync"/> with the updated settings;
+    ///     the returned task completes when they were saved, or faults (normally with an
+    ///     <see cref="InvalidOperationException"/>) when they were not.</param>
     /// <param name="folderExists">Tells whether a folder exists, for the sources' status check;
     ///     <see langword="null"/> checks the real file system. Supplied so tests need no real
     ///     folders and the check can be made slow on purpose.</param>
@@ -148,7 +151,7 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     ///     <paramref name="onSave"/> is <see langword="null"/>.</exception>
     public SettingsWindowViewModel(
         AppSettings initial,
-        Action<AppSettings> onSave,
+        Func<AppSettings, Task> onSave,
         Func<string, CancellationToken, Task<bool>>? folderExists = null,
         Func<PackageSourceDefinition, IPackageSourceProvider>? providerFactory = null,
         PackageCredentialContext? credentials = null)
@@ -177,7 +180,8 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
             AddItem(source.Clone());
         }
 
-        SaveCommand = new RelayCommand(Save);
+        SaveCommand = new AsyncRelayCommand(
+            _ => SaveAsync(), ex => ErrorMessage = SecretRedactor.SafeMessage(ex));
         AddZipSourceCommand = new RelayCommand(() => RequestEditor(PackageSourceType.Zip, null));
         AddNuGetFolderSourceCommand = new RelayCommand(() => RequestEditor(PackageSourceType.NuGet, null));
         AddNuGetServerSourceCommand = new RelayCommand(() => RequestEditor(PackageSourceType.NuGet, null, server: true));
@@ -355,9 +359,10 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    ///     Gets the command bound to the window's "Save" button.
+    ///     Gets the command bound to the window's "Save" button; unavailable while a save runs, so a
+    ///     second click cannot save twice, while the window itself stays usable.
     /// </summary>
-    public RelayCommand SaveCommand { get; }
+    public AsyncRelayCommand SaveCommand { get; }
 
     /// <summary>
     ///     Gets the command bound to the "Add Zip-Package Folder" button.
@@ -391,8 +396,8 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     public RelayCommand RemoveSourceCommand { get; }
 
     /// <summary>
-    ///     Raised after <see cref="Save"/> has invoked the <c>onSave</c> callback, so
-    ///     <see cref="SettingsWindow"/>'s code-behind can close the window.
+    ///     Raised after <see cref="SaveAsync"/> has saved the settings through the <c>onSave</c>
+    ///     callback, so <see cref="SettingsWindow"/>'s code-behind can close the window.
     /// </summary>
     public event EventHandler? Saved;
 
@@ -478,7 +483,7 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    ///     Removes a source from the working list; nothing is persisted until <see cref="Save"/>.
+    ///     Removes a source from the working list; nothing is persisted until <see cref="SaveCommand"/>.
     /// </summary>
     /// <param name="source">The row to remove.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="source"/> is
@@ -517,14 +522,15 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     internal Task WaitForStatusChecksAsync() => Task.WhenAll(_statusChecks.ToArray());
 
     /// <summary>
-    ///     Builds an <see cref="AppSettings"/> from the current editable properties and invokes
-    ///     the <c>onSave</c> callback supplied at construction.
+    ///     Builds an <see cref="AppSettings"/> from the current editable properties and saves them
+    ///     through the <c>onSave</c> callback supplied at construction, waiting for it without blocking
+    ///     the window.
     /// </summary>
     /// <remarks>
     ///     The returned settings' <see cref="AppSettings.RecentRepos"/>,
     ///     <see cref="AppSettings.CollapsedGroups"/>, <see cref="AppSettings.GroupColors"/> and
     ///     <see cref="AppSettings.GroupOrder"/> are left as fresh empty collections; callers
-    ///     (specifically <see cref="MainWindowViewModel.ApplySettings"/>) are
+    ///     (specifically <see cref="MainWindowViewModel.ApplySettingsAsync"/>) are
     ///     responsible for preserving the authoritative repo list (and its order, including
     ///     <see cref="AppSettings.HasUserRepoOrder"/>), the collapsed-group state and the group colors
     ///     and order, since this view model never owns or edits them. The configured sources are written to
@@ -533,9 +539,12 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     ///     with the reason shown, rather than being allowed to reach the settings file. When the
     ///     callback rejects the settings (<see cref="InvalidOperationException"/>, for example a
     ///     settings file that cannot be written) the window stays open with the redacted reason and
-    ///     <see cref="Saved"/> is not raised.
+    ///     <see cref="Saved"/> is not raised. The save runs through <see cref="SaveCommand"/>, which is
+    ///     unavailable until it has ended.
     /// </remarks>
-    private void Save()
+    /// <returns>A task that completes when the settings were saved (and <see cref="Saved"/> raised) or
+    ///     the reason they were not is shown; never faults for a rejected save.</returns>
+    private async Task SaveAsync()
     {
         var sources = Sources.Select(item => item.Definition.Clone()).ToList();
         var updated = new AppSettings
@@ -560,7 +569,7 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
         ErrorMessage = null;
         try
         {
-            _onSave(updated);
+            await _onSave(updated);
         }
         catch (InvalidOperationException ex)
         {

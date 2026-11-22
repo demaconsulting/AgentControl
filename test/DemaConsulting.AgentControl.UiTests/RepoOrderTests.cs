@@ -117,7 +117,37 @@ public sealed class RepoOrderTests
             TimeSpan.FromSeconds(30),
             TimeSpan.FromMilliseconds(250)).Result);
         Assert.Equal(["repo", "second", "third"], RepoNames(mainWindow));
+
+        // The launch time is written in the background a moment after the launch: wait until the file holds it, so
+        // the stored order is checked after that write
+        Assert.True(Retry.WhileFalse(
+            () => LaunchStampStored(context, "third"),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
         Assert.Equal(["repo", "second", "third"], StoredOrder(context));
+    }
+
+    /// <summary>
+    ///     Tells whether the settings file holds a launch time for a repo.
+    /// </summary>
+    /// <param name="context">The running test context.</param>
+    /// <param name="repoFolderName">The repo's folder name.</param>
+    /// <returns><see langword="true"/> when the repo's entry has a <c>LastLaunchedUtc</c> value.</returns>
+    private static bool LaunchStampStored(AgentControlTestContext context, string repoFolderName)
+    {
+        var text = ReadSettings(context);
+        if (text.Length == 0)
+        {
+            return false;
+        }
+
+        using var document = JsonDocument.Parse(text);
+        return document.RootElement.TryGetProperty("RecentRepos", out var repos)
+               && repos.ValueKind == JsonValueKind.Array
+               && repos.EnumerateArray().Any(repo =>
+                   Path.GetFileName(repo.GetProperty("Path").GetString() ?? string.Empty) == repoFolderName
+                   && repo.TryGetProperty("LastLaunchedUtc", out var stamp)
+                   && stamp.ValueKind == JsonValueKind.String);
     }
 
     /// <summary>

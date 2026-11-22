@@ -197,7 +197,7 @@ public class PackageSourceStatusPresentationTests
                 }
             ]
         };
-        var viewModel = new SettingsWindowViewModel(settings, _ => { }, (_, _) => Task.FromResult(true));
+        var viewModel = new SettingsWindowViewModel(settings, _ => Task.CompletedTask, (_, _) => Task.FromResult(true));
         var window = new SettingsWindow(viewModel);
         window.Show();
         Dispatcher.UIThread.RunJobs();

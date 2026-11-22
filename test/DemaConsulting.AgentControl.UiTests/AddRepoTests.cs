@@ -393,6 +393,10 @@ public sealed class AddRepoTests
     /// </summary>
     /// <param name="context">The running test context.</param>
     /// <returns>The last path segment of each stored repo's <c>Path</c>.</returns>
+    /// <remarks>
+    ///     Read without polling: an add is applied (and its cards shown) only once its save was written, so the
+    ///     file holds it by the time the tests see the cards.
+    /// </remarks>
     private static List<string> StoredRepoNames(AgentControlTestContext context)
     {
         using var document = JsonDocument.Parse(ReadSettings(context));

@@ -58,14 +58,15 @@ package, and is where Select Package and Change package start. The card also kee
 **Changes go through the owner** (`AgentControl-RepoCardViewModel-ChangeSavedBeforeApplied`): the constructor takes
 an optional `commitChange` callback, `Func<RecentRepo, Action<RecentRepo>, bool>`. The card never assigns to its
 `RecentRepo` directly: the private `CommitChange` hands the owner the entry and the assignment to make, and the
-owner (`MainWindowViewModel.CommitRepoChange`) makes it on a candidate copy of the settings, saves the candidate,
-and only then applies it to the live entry, returning `true`; a failed save returns `false` after telling the user.
-The card then raises its change event and updates its derived properties only when the callback returned `true`. When it
-returned `false` nothing changed: `IsFavorite` keeps its value (and raises `PropertyChanged` for it so the two-way
-bound star shows the real state again), `MoveToGroup` and `SetCardColor` return `false`, and a launch is simply not
-stamped (`RecordLaunched` raises no `LaunchRecorded`). Without a callback (a card built outside the main window, as
-in tests) the change is applied to the entry directly. The assignments must be plain assignments of fixed values,
-because the owner runs them twice (candidate, then live entry).
+owner (`MainWindowViewModel.CommitRepoChange`) applies it to the live entry at once and has it saved in the background
+(see the `MainWindowViewModel` design, *Background saving*), returning `true`; a failed background write is reported by
+the owner and leaves the change in effect. The card then raises its change event and updates its derived properties
+only when the callback returned `true`. An owner may refuse a change (return `false`); nothing changed then:
+`IsFavorite` keeps its value (and raises `PropertyChanged` for it so the two-way bound star shows the real state
+again), `MoveToGroup` and `SetCardColor` return `false`, and a launch is simply not stamped (`RecordLaunched` raises
+no `LaunchRecorded`). Without a callback (a card built outside the main window, as in tests) the change is applied to
+the entry directly. The assignments must be plain assignments of fixed values, because an owner may run them on a copy
+of the entry as well.
 
 **Launch seam**: the constructor also takes two optional parameters, `processStarter`
 (`IAgentToolProcessStarter`) and `shellDetector` (`ShellDetector`), which default to the real
@@ -408,9 +409,9 @@ is not cacheable and is deferred/lazy per architecture.md's repo-fact caching st
 disappeared is no longer trustworthy once it reappears; this method itself never re-checks Git status on a
 missing-to-present transition (that would duplicate the check already performed by `RefreshCommand`/`Refresh`'s
 subsequent working-tree check), so a caller that refreshes an already-realized card's cheap facts alone (see
-`MainWindowViewModel.ApplySettings`) must request a working-tree check itself afterward (`RefreshRepoStateAsync` with
-`workingTree`) to get an immediate fresh check instead of leaving the card in a "not yet checked" state until its next
-manual refresh (`AgentControl-RepoCardViewModel-PullDisabledExplanation`). The missing-repo path also advances
+`MainWindowViewModel.ApplySettingsAsync`) must request a working-tree check itself afterward (`RefreshRepoStateAsync`
+with `workingTree`) to get an immediate fresh check instead of leaving the card in a "not yet checked" state until its
+next manual refresh (`AgentControl-RepoCardViewModel-PullDisabledExplanation`). The missing-repo path also advances
 `_gitStatusGeneration`, so a working-tree check still running is ignored.
 
 **ReadCheapFacts** (internal, static): Reads, on any thread, what a cheap refresh needs about a repo: whether the
@@ -599,9 +600,10 @@ becomes a source problem with the exception's secret-free message and no sign-in
 - *Parameters*: None (bound to `LaunchCommand`).
 - *Returns*: `void`.
 - *Postconditions*: On success, `StatusMessage` is set and the launch time is recorded through the owner
-  (`RecordLaunched`: the stamp is saved first, then `LastLaunchedUtc` is set and `LaunchRecorded` raised - the stamp
-  only records the launch, the main view-model does not listen and the card never moves; when the
-  save fails the stamp is not recorded and the process was launched all the same,
+  (`RecordLaunched`: the stamp goes through the owner, which applies it and saves it in the background, then
+  `LastLaunchedUtc` is set and `LaunchRecorded` raised - the stamp only records the launch, the main view-model
+  does not listen and the card never moves; when the owner refuses it the stamp is not recorded and the process was
+  launched all the same,
   `AgentControl-RepoCardViewModel-Launch`, `-ChangeSavedBeforeApplied`); on failure, `ErrorOccurred` is raised.
 
 Inside the card's cancelable busy operation ("Preparing agent files..."), first waits for the card's repo state that
@@ -1125,10 +1127,10 @@ background task, and a retired card raises nothing.
 #### Callers
 
 - **MainWindowViewModel** — constructs one `RepoCardViewModel` per `RecentRepo`, passing its `commitChange` callback
-  (which saves each of the card's changes before applying it), subscribes to
+  (which applies each of the card's changes at once and saves it in the background), subscribes to
   `FavoriteChanged`/`GroupChanged` to re-section the displayed list (it deliberately does not subscribe to
   `LaunchRecorded`: a launch never reorders the list; settings are already
-  saved by then; `CardColorChanged` needs no re-ordering), and retires a card when its repo is removed. It also
+  applied by then; `CardColorChanged` needs no re-ordering), and retires a card when its repo is removed. It also
   drives a drop in another section through `IsFavorite` and `MoveToGroup`, the same paths as the star and the menu,
   and calls `RaiseGroupPropertiesChanged` on the cards after a group is renamed, removed or given a color. It passes its
   shared refresh queue and its git time limits to every card, creates the card of a repo being added from the facts

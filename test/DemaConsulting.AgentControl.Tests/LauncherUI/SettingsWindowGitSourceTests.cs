@@ -45,7 +45,7 @@ public class SettingsWindowGitSourceTests
     public void SettingsWindowViewModel_AddGitSourceCommand_RequestsGitEditor()
     {
         // Arrange
-        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => { }, (_, _) => Task.FromResult(true));
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => Task.CompletedTask, (_, _) => Task.FromResult(true));
         SourceEditorViewModel? requested = null;
         viewModel.EditorRequested += (_, editor) => requested = editor;
 
@@ -68,7 +68,7 @@ public class SettingsWindowGitSourceTests
     public void SettingsWindow_AddGitSourceButton_IsInTheAddMenuAndOpensGitEditor() => HeadlessTestApp.Run(() =>
     {
         // Arrange
-        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => { }, (_, _) => Task.FromResult(true));
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => Task.CompletedTask, (_, _) => Task.FromResult(true));
         var settingsWindow = new SettingsWindow(viewModel);
         settingsWindow.Show();
         try
@@ -113,7 +113,7 @@ public class SettingsWindowGitSourceTests
         AppSettings? saved = null;
         var viewModel = new SettingsWindowViewModel(
             new AppSettings(),
-            settings => saved = settings,
+            settings => { saved = settings; return Task.CompletedTask; },
             (path, _) =>
             {
                 asked.Add(path);
@@ -168,7 +168,7 @@ public class SettingsWindowGitSourceTests
         var asked = new List<string>();
         var viewModel = new SettingsWindowViewModel(
             new AppSettings { Sources = [GitSource("Local", path)] },
-            _ => { },
+            _ => Task.CompletedTask,
             (folder, _) =>
             {
                 asked.Add(folder);
@@ -201,7 +201,7 @@ public class SettingsWindowGitSourceTests
                 Sources = [GitSource("Agents", RepositoryAddress)],
                 RecentRepos = [new RecentRepo { Path = Path.GetTempPath(), PinnedPackageName = "p", PinnedSource = "Agents" }]
             },
-            _ => { },
+            _ => Task.CompletedTask,
             (_, _) => Task.FromResult(true));
         var row = viewModel.Sources[0];
 
@@ -230,7 +230,7 @@ public class SettingsWindowGitSourceTests
         source.TagPattern = "release";
         var viewModel = new SettingsWindowViewModel(
             new AppSettings { Sources = [source] },
-            _ => saveCalled = true,
+            _ => { saveCalled = true; return Task.CompletedTask; },
             (_, _) => Task.FromResult(true));
         viewModel.Saved += (_, _) => savedRaised = true;
 
@@ -254,7 +254,7 @@ public class SettingsWindowGitSourceTests
         // Arrange
         AppSettings? saved = null;
         var viewModel = new SettingsWindowViewModel(
-            new AppSettings(), settings => saved = settings, (_, _) => Task.FromResult(true));
+            new AppSettings(), settings => { saved = settings; return Task.CompletedTask; }, (_, _) => Task.FromResult(true));
         var editor = viewModel.CreateEditor(PackageSourceType.Git, null);
         editor.Alias = "Agents";
         editor.Location = RepositoryAddress;
@@ -334,7 +334,7 @@ public class SettingsWindowGitSourceTests
         var savedRaised = false;
         var viewModel = new SettingsWindowViewModel(
             new AppSettings { Sources = [source] },
-            _ => saveCalled = true,
+            _ => { saveCalled = true; return Task.CompletedTask; },
             (_, _) => Task.FromResult(true));
         viewModel.Saved += (_, _) => savedRaised = true;
 

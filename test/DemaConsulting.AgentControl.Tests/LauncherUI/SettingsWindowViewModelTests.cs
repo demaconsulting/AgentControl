@@ -147,7 +147,7 @@ public class SettingsWindowViewModelTests
         // Arrange: a check that stays pending until released
         var gate = new TaskCompletionSource<bool>();
         var viewModel = new SettingsWindowViewModel(
-            new AppSettings { Sources = [ZipSource("Zips", @"C:\zips")] }, _ => { }, (_, _) => gate.Task);
+            new AppSettings { Sources = [ZipSource("Zips", @"C:\zips")] }, _ => Task.CompletedTask, (_, _) => gate.Task);
         var row = viewModel.Sources[0];
 
         // Assert: the constructor returned while the check is pending
@@ -175,7 +175,7 @@ public class SettingsWindowViewModelTests
         // Arrange: one folder that is absent and one whose check throws
         var viewModel = new SettingsWindowViewModel(
             new AppSettings { Sources = [ZipSource("Absent", @"C:\absent"), ZipSource("Broken", @"C:\broken")] },
-            _ => { },
+            _ => Task.CompletedTask,
             (path, _) => path.Contains("broken", StringComparison.Ordinal)
                 ? throw new IOException("share offline")
                 : Task.FromResult(false));
@@ -201,7 +201,7 @@ public class SettingsWindowViewModelTests
         // Arrange: a check that never finishes unless cancelled
         var viewModel = new SettingsWindowViewModel(
             new AppSettings { Sources = [ZipSource("Zips", @"C:\zips")] },
-            _ => { },
+            _ => Task.CompletedTask,
             async (_, token) =>
             {
                 await Task.Delay(Timeout.Infinite, token);
@@ -424,7 +424,7 @@ public class SettingsWindowViewModelTests
         AppSettings? savedSettings = null;
         var viewModel = new SettingsWindowViewModel(
             new AppSettings { Sources = [ZipSource("Zips", @"D:\packages")] },
-            settings => savedSettings = settings,
+            settings => { savedSettings = settings; return Task.CompletedTask; },
             (_, _) => Task.FromResult(true))
         {
             GitExecutablePath = "git",
@@ -452,6 +452,47 @@ public class SettingsWindowViewModelTests
     }
 
     /// <summary>
+    ///     Test that while the settings are being saved the Save command is unavailable (a second click
+    ///     cannot save twice) and the window is not told to close; once the save has completed, Saved is
+    ///     raised and Save is available again.
+    /// </summary>
+    [Fact]
+    public async Task SettingsWindowViewModel_Save_WhileSaving_SaveDisabledAndSavedRaisedAfter()
+    {
+        // Arrange: a save that waits for the test
+        var saving = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var saves = 0;
+        var viewModel = new SettingsWindowViewModel(
+            new AppSettings(),
+            _ =>
+            {
+                saves++;
+                return saving.Task;
+            },
+            (_, _) => Task.FromResult(true));
+        var savedRaised = false;
+        viewModel.Saved += (_, _) => savedRaised = true;
+
+        // Act: start the save, then click again while it runs
+        var save = viewModel.SaveCommand.ExecuteAsync();
+        viewModel.SaveCommand.Execute(null);
+
+        // Assert: one save is running, Save is unavailable and the window stays open
+        Assert.Equal(1, saves);
+        Assert.False(viewModel.SaveCommand.CanExecute(null));
+        Assert.False(savedRaised);
+
+        // Act: the save completes
+        saving.SetResult();
+        await save;
+
+        // Assert: the window is told to close, and Save is available again
+        Assert.True(savedRaised);
+        Assert.True(viewModel.SaveCommand.CanExecute(null));
+        Assert.Equal(1, saves);
+    }
+
+    /// <summary>
     ///     Test that the Appearance choice starts from the saved setting (the system default when
     ///     none was saved), offers system, light and dark in that order, and is saved with the
     ///     other settings.
@@ -461,7 +502,7 @@ public class SettingsWindowViewModelTests
     {
         // Arrange
         AppSettings? savedSettings = null;
-        var viewModel = new SettingsWindowViewModel(new AppSettings(), settings => savedSettings = settings);
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), settings => { savedSettings = settings; return Task.CompletedTask; });
         Assert.Equal(ThemePreference.System, viewModel.Theme);
         Assert.Equal(
             [ThemePreference.System, ThemePreference.Light, ThemePreference.Dark],
@@ -476,7 +517,7 @@ public class SettingsWindowViewModelTests
         Assert.Equal(ThemePreference.Dark, savedSettings.Theme);
         Assert.Equal(
             ThemePreference.Light,
-            new SettingsWindowViewModel(new AppSettings { Theme = ThemePreference.Light }, _ => { }).Theme);
+            new SettingsWindowViewModel(new AppSettings { Theme = ThemePreference.Light }, _ => Task.CompletedTask).Theme);
     }
 
     /// <summary>
@@ -488,7 +529,7 @@ public class SettingsWindowViewModelTests
     {
         // Arrange: no saved choice
         AppSettings? savedSettings = null;
-        var viewModel = new SettingsWindowViewModel(new AppSettings(), settings => savedSettings = settings);
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), settings => { savedSettings = settings; return Task.CompletedTask; });
         Assert.True(viewModel.KeepShellOpen);
 
         // Act: clear the choice and save
@@ -498,11 +539,11 @@ public class SettingsWindowViewModelTests
         // Assert: the saved settings carry it, and a window seeded with it starts the same way
         Assert.NotNull(savedSettings);
         Assert.False(savedSettings.KeepShellOpen);
-        Assert.False(new SettingsWindowViewModel(new AppSettings { KeepShellOpen = false }, _ => { }).KeepShellOpen);
+        Assert.False(new SettingsWindowViewModel(new AppSettings { KeepShellOpen = false }, _ => Task.CompletedTask).KeepShellOpen);
 
         // Act: saving without touching the choice keeps it on
         AppSettings? untouched = null;
-        new SettingsWindowViewModel(new AppSettings(), settings => untouched = settings).SaveCommand.Execute(null);
+        new SettingsWindowViewModel(new AppSettings(), settings => { untouched = settings; return Task.CompletedTask; }).SaveCommand.Execute(null);
 
         // Assert
         Assert.NotNull(untouched);
@@ -548,7 +589,7 @@ public class SettingsWindowViewModelTests
         AppSettings? savedSettings = null;
         var viewModel = new SettingsWindowViewModel(
             new AppSettings { Sources = [feed, ZipSource("Old", @"C:\old")] },
-            settings => savedSettings = settings,
+            settings => { savedSettings = settings; return Task.CompletedTask; },
             (_, _) => Task.FromResult(true));
         SourceEditorViewModel? editor = null;
         viewModel.EditorRequested += (_, requested) => editor = requested;
@@ -587,7 +628,7 @@ public class SettingsWindowViewModelTests
         var savedRaised = false;
         var viewModel = new SettingsWindowViewModel(
             new AppSettings { Sources = [NuGetSource("Feed", "https://user:SentinelSecretValue@feeds.example.com/index.json", "p")] },
-            _ => saveCalled = true,
+            _ => { saveCalled = true; return Task.CompletedTask; },
             (_, _) => Task.FromResult(true));
         viewModel.Saved += (_, _) => savedRaised = true;
 
@@ -609,7 +650,7 @@ public class SettingsWindowViewModelTests
     public void SettingsWindowViewModel_Constructor_NullInitial_ThrowsArgumentNullException()
     {
         // Act / Assert: a null initial settings object is rejected
-        Assert.Throws<ArgumentNullException>(() => new SettingsWindowViewModel(null!, _ => { }));
+        Assert.Throws<ArgumentNullException>(() => new SettingsWindowViewModel(null!, _ => Task.CompletedTask));
     }
 
     /// <summary>
@@ -662,7 +703,7 @@ public class SettingsWindowViewModelTests
     ///     Creates the view model under test with a folder check that finds every folder.
     /// </summary>
     private static SettingsWindowViewModel CreateViewModel(AppSettings initial) =>
-        new(initial, _ => { }, (_, _) => Task.FromResult(true));
+        new(initial, _ => Task.CompletedTask, (_, _) => Task.FromResult(true));
 
     /// <summary>
     ///     Builds a fully-qualified folder path valid on every platform the tests run on.

@@ -184,6 +184,7 @@ public sealed class RepoReorderWindowTests : IDisposable
             menu.Hide();
             Dispatcher.UIThread.RunJobs();
             Assert.Equal(["c", "a", "b"], RowNames(window));
+            HeadlessTestApp.RunJobsUntilSettingsWritten((MainWindowViewModel)window.DataContext!);
             Assert.Equal(
                 RowNames(window), SettingsStore.Load(configDirectory).RecentRepos.Select(repo => Path.GetFileName(repo.Path)));
         }
@@ -381,6 +382,7 @@ public sealed class RepoReorderWindowTests : IDisposable
                 Assert.Equal(plan.ExpectedGroup, card.GroupName);
                 Assert.Equal(plan.ExpectedFavorite, card.IsFavorite);
                 Assert.Equal(plan.ExpectedRows, RowNames(window));
+                HeadlessTestApp.RunJobsUntilSettingsWritten((MainWindowViewModel)window.DataContext!);
                 var saved = SettingsStore.Load(configDirectory).RecentRepos.Single(repo => Path.GetFileName(repo.Path) == plan.Dragged);
                 Assert.Equal(plan.ExpectedGroup, saved.GroupName);
                 Assert.Equal(plan.ExpectedFavorite, saved.IsFavorite);
@@ -601,6 +603,7 @@ public sealed class RepoReorderWindowTests : IDisposable
             Dispatcher.UIThread.RunJobs();
             var expected = RowNames(window);
 
+            HeadlessTestApp.RunJobsUntilSettingsWritten((MainWindowViewModel)window.DataContext!);
             var viewModel = new MainWindowViewModel(SettingsStore.Load(configDirectory), configDirectory: configDirectory);
             restarted = new MainWindow { DataContext = viewModel, Width = 900, Height = 1600 };
             restarted.Show();
@@ -843,6 +846,7 @@ public sealed class RepoReorderWindowTests : IDisposable
             Dispatcher.UIThread.RunJobs();
             var expected = HeaderNames(window);
 
+            HeadlessTestApp.RunJobsUntilSettingsWritten((MainWindowViewModel)window.DataContext!);
             var viewModel = new MainWindowViewModel(SettingsStore.Load(configDirectory), configDirectory: configDirectory);
             restarted = new MainWindow { DataContext = viewModel, Width = 900, Height = 1600 };
             restarted.Show();
@@ -888,6 +892,7 @@ public sealed class RepoReorderWindowTests : IDisposable
             // Assert: still first (alphabetically it would be between Alpha and Zed) and still teal
             Assert.Equal(["Office", "Alpha", "Zed"], HeaderNames(window));
             Assert.Equal("Group color: Teal", GroupAccentName(window, "Office"));
+            HeadlessTestApp.RunJobsUntilSettingsWritten((MainWindowViewModel)window.DataContext!);
             var saved = SettingsStore.Load(configDirectory);
             Assert.Equal(["Office"], saved.GroupColors.Keys);
             Assert.Equal("Teal", saved.GroupColors["Office"]);
@@ -926,6 +931,7 @@ public sealed class RepoReorderWindowTests : IDisposable
 
             // Assert: Work's color and place are gone
             Assert.Equal(["Home", "Alpha", "Ungrouped"], HeaderNames(window));
+            HeadlessTestApp.RunJobsUntilSettingsWritten((MainWindowViewModel)window.DataContext!);
             var saved = SettingsStore.Load(configDirectory);
             Assert.Equal(["Home"], saved.GroupColors.Keys);
             Assert.Equal(["Home"], saved.GroupOrder);
@@ -939,6 +945,7 @@ public sealed class RepoReorderWindowTests : IDisposable
 
             // Assert: Home's color and place are gone
             Assert.Equal(["Alpha", "Ungrouped"], HeaderNames(window));
+            HeadlessTestApp.RunJobsUntilSettingsWritten((MainWindowViewModel)window.DataContext!);
             saved = SettingsStore.Load(configDirectory);
             Assert.Empty(saved.GroupColors);
             Assert.Empty(saved.GroupOrder);
@@ -1058,6 +1065,7 @@ public sealed class RepoReorderWindowTests : IDisposable
             }
 
             // Assert: the settings file holds every choice
+            HeadlessTestApp.RunJobsUntilSettingsWritten((MainWindowViewModel)window.DataContext!);
             var saved = SettingsStore.Load(configDirectory);
             Assert.Equal("Beta", saved.RecentRepos.Single(repo => Path.GetFileName(repo.Path) == "u").GroupName);
             Assert.Equal("Teal", saved.RecentRepos.Single(repo => Path.GetFileName(repo.Path) == "a").CardColor);

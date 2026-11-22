@@ -263,6 +263,8 @@ internal sealed partial class MainWindow : Window
         }
 
         viewModel.RepoCards.CollectionChanged += OnRepoCardsChanged;
+        // A change that could not be saved in the background is told once per failure streak; the
+        // message box is not awaited, so the window keeps working behind it
         viewModel.SettingsSaveFailed += (_, message) => new MessageBoxWindow(message).ShowDialog(this);
         viewModel.GroupRenameRequested += async (_, name) => await ShowRenameGroupPrompt(viewModel, name);
         viewModel.GroupRemoveRequested += async (_, name) => await ConfirmAndRemoveGroup(viewModel, name);
@@ -533,15 +535,9 @@ internal sealed partial class MainWindow : Window
 
         if (confirmed)
         {
-            try
-            {
-                viewModel.RemoveRepo(card);
-            }
-            catch (InvalidOperationException ex)
-            {
-                // The removal was not saved, so the repo is still listed; say why
-                await new MessageBoxWindow($"The repo was not removed. {SecretRedactor.SafeMessage(ex)}").ShowDialog(this);
-            }
+            // Applied at once and saved in the background; a failed save is reported once through
+            // SettingsSaveFailed
+            viewModel.RemoveRepo(card);
         }
     }
 
@@ -873,7 +869,7 @@ internal sealed partial class MainWindow : Window
     {
         if (sender is MenuItem { DataContext: RepoCardViewModel card } && DataContext is MainWindowViewModel viewModel)
         {
-            // A failed save is reported to the user by the view model
+            // Applied at once and saved in the background; a failed save is reported by the view model
             viewModel.MoveCard(card, move);
         }
     }
@@ -2170,7 +2166,7 @@ internal sealed partial class MainWindow : Window
     /// <param name="e">The chosen color's name, or <see langword="null"/> for None.</param>
     private void GroupColorPalette_ColorChosen(object? sender, ColorChosenEventArgs e)
     {
-        // A failed save is reported to the user by the view model
+        // Applied at once and saved in the background; a failed save is reported by the view model
         if (_paletteHeader is { } header && DataContext is MainWindowViewModel viewModel)
         {
             viewModel.SetGroupColor(header.Name, e.ColorName);
@@ -2234,14 +2230,9 @@ internal sealed partial class MainWindow : Window
         var name = await new GroupNameWindow(prompt).ShowDialog<string?>(this);
         if (name is not null)
         {
-            try
-            {
-                viewModel.RenameGroup(groupName, name);
-            }
-            catch (InvalidOperationException ex)
-            {
-                await new MessageBoxWindow($"The group was not renamed. {SecretRedactor.SafeMessage(ex)}").ShowDialog(this);
-            }
+            // The prompt allows only a usable name; the rename is applied at once and saved in the
+            // background
+            viewModel.RenameGroup(groupName, name);
         }
     }
 
@@ -2262,14 +2253,8 @@ internal sealed partial class MainWindow : Window
 
         if (confirmed)
         {
-            try
-            {
-                viewModel.RemoveGroup(groupName);
-            }
-            catch (InvalidOperationException ex)
-            {
-                await new MessageBoxWindow($"The group was not removed. {SecretRedactor.SafeMessage(ex)}").ShowDialog(this);
-            }
+            // Applied at once and saved in the background
+            viewModel.RemoveGroup(groupName);
         }
     }
 
@@ -2416,7 +2401,7 @@ internal sealed partial class MainWindow : Window
 
         var settingsViewModel = new SettingsWindowViewModel(
             viewModel.Settings,
-            viewModel.ApplySettings,
+            viewModel.ApplySettingsAsync,
             providerFactory: viewModel.CreateConnectionTestProvider,
             credentials: viewModel.Credentials);
 

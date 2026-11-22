@@ -152,7 +152,7 @@ public sealed class RepoGroupingTests : IDisposable
     ///     shows the group collapsed.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_ToggleGroupCollapsed_HidesCardsAndPersists()
+    public async Task MainWindowViewModel_ToggleGroupCollapsed_HidesCardsAndPersists()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -164,6 +164,7 @@ public sealed class RepoGroupingTests : IDisposable
         // Assert: header stays, its cards are gone, and the choice reached the file
         Assert.Equal(["[Work 2 collapsed]", "[Ungrouped 1]", "c"], Describe(viewModel));
         Assert.Equal(["c"], viewModel.DisplayedRepoCards.Select(card => card.RepoName));
+        await viewModel.FlushSettingsAsync();
         Assert.Equal(["Work"], SettingsStore.Load(configDir).CollapsedGroups);
 
         // Act: a new session reads the remembered state
@@ -177,6 +178,7 @@ public sealed class RepoGroupingTests : IDisposable
 
         // Assert: letter case does not matter, and the state is forgotten
         Assert.Equal(["[Work 2]", "a", "b", "[Ungrouped 1]", "c"], Describe(viewModel));
+        await viewModel.FlushSettingsAsync();
         Assert.Empty(SettingsStore.Load(configDir).CollapsedGroups);
     }
 
@@ -184,7 +186,7 @@ public sealed class RepoGroupingTests : IDisposable
     ///     Test that the built-in Favorites and Ungrouped sections can be collapsed and remembered too.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_ToggleGroupCollapsed_BuiltInSections_CollapseAndPersist()
+    public async Task MainWindowViewModel_ToggleGroupCollapsed_BuiltInSections_CollapseAndPersist()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -197,6 +199,7 @@ public sealed class RepoGroupingTests : IDisposable
 
         // Assert
         Assert.Equal(["[Favorites 1 collapsed]", "[G 1]", "g", "[Ungrouped 1 collapsed]"], Describe(viewModel));
+        await viewModel.FlushSettingsAsync();
         Assert.Equal(
             ["Favorites", "Ungrouped"], SettingsStore.Load(configDir).CollapsedGroups.Order());
     }
@@ -207,7 +210,7 @@ public sealed class RepoGroupingTests : IDisposable
     ///     clearing the filter brings the collapsed state back.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_FilterText_ShowsMatchesInCollapsedGroupsAndHidesEmptyOnes()
+    public async Task MainWindowViewModel_FilterText_ShowsMatchesInCollapsedGroupsAndHidesEmptyOnes()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -227,6 +230,7 @@ public sealed class RepoGroupingTests : IDisposable
         // Assert: matches are expanded, counts are of the matches, empty sections are gone
         Assert.Equal(["[Home 1]", "alpha-home", "[Work 2]", "alpha-one", "alpha-two"], Describe(viewModel));
         Assert.All(viewModel.DisplayedItems.OfType<RepoGroupHeaderViewModel>(), header => Assert.False(header.IsToggleEnabled));
+        await viewModel.FlushSettingsAsync();
         Assert.Equal(["Work"], SettingsStore.Load(configDir).CollapsedGroups);
 
         // Act: clear the filter
@@ -279,7 +283,7 @@ public sealed class RepoGroupingTests : IDisposable
     ///     out of a group removes the header (and the headers altogether when no group is left).
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_MoveToGroup_NewExistingInvalidAndRemove()
+    public async Task RepoCardViewModel_MoveToGroup_NewExistingInvalidAndRemove()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -292,6 +296,7 @@ public sealed class RepoGroupingTests : IDisposable
 
         // Assert
         Assert.Equal(["[Client X 1]", "a", "[Ungrouped 1]", "b"], Describe(viewModel));
+        await viewModel.FlushSettingsAsync();
         Assert.Equal("Client X", SettingsStore.Load(configDir).RecentRepos.Single(r => r.Path == a.RepoPath).GroupName);
 
         // Act: the other repo joins the group using different letter case
@@ -316,6 +321,7 @@ public sealed class RepoGroupingTests : IDisposable
         Assert.False(viewModel.HasGroups);
         Assert.Empty(viewModel.DisplayedItems.OfType<RepoGroupHeaderViewModel>());
         Assert.Empty(viewModel.GroupNames);
+        await viewModel.FlushSettingsAsync();
         Assert.All(SettingsStore.Load(configDir).RecentRepos, repo => Assert.Null(repo.GroupName));
     }
 
@@ -324,7 +330,7 @@ public sealed class RepoGroupingTests : IDisposable
     ///     repo folder keeps exactly the entries it had and only the settings file changes.
     /// </summary>
     [Fact]
-    public void RepoCardViewModel_GroupAndColor_NeverWriteToTheRepository()
+    public async Task RepoCardViewModel_GroupAndColor_NeverWriteToTheRepository()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -338,10 +344,11 @@ public sealed class RepoGroupingTests : IDisposable
         viewModel.ToggleGroupCollapsed("Work");
         viewModel.RenameGroup("Work", "Office");
         viewModel.SetGroupColor("Office", "Lime");
+        await viewModel.FlushSettingsAsync();
 
         // Assert: the repository has no new file or folder, the settings do
         Assert.Equal(before, Directory.EnumerateFileSystemEntries(card.RepoPath, "*", SearchOption.AllDirectories).Order());
-        var json = File.ReadAllText(Path.Combine(configDir, "settings.json"));
+        var json = await File.ReadAllTextAsync(Path.Combine(configDir, "settings.json"), TestContext.Current.CancellationToken);
         Assert.Contains("Office", json, StringComparison.Ordinal);
         Assert.Contains("Teal", json, StringComparison.Ordinal);
     }
@@ -352,7 +359,7 @@ public sealed class RepoGroupingTests : IDisposable
     ///     another group.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_RenameGroup_MovesMembersAndRefusesBadNames()
+    public async Task MainWindowViewModel_RenameGroup_MovesMembersAndRefusesBadNames()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -373,6 +380,7 @@ public sealed class RepoGroupingTests : IDisposable
 
         // Assert: members, collapsed state and file all follow
         Assert.Equal(["[Home 1]", "c", "[Office 2 collapsed]"], Describe(viewModel));
+        await viewModel.FlushSettingsAsync();
         Assert.Equal(["Office"], SettingsStore.Load(configDir).CollapsedGroups);
         Assert.Equal(
             ["Office", "Office", "Home"],
@@ -391,7 +399,7 @@ public sealed class RepoGroupingTests : IDisposable
     ///     touch other groups; removing an unknown group does nothing.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_RemoveGroup_LeavesMembersUngrouped()
+    public async Task MainWindowViewModel_RemoveGroup_LeavesMembersUngrouped()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -406,6 +414,7 @@ public sealed class RepoGroupingTests : IDisposable
         // Assert
         Assert.Equal(["[Home 1]", "c", "[Ungrouped 2]", "a", "b"], Describe(viewModel));
         Assert.Equal(["Home"], viewModel.GroupNames);
+        await viewModel.FlushSettingsAsync();
         Assert.Empty(SettingsStore.Load(configDir).CollapsedGroups);
         Assert.All(viewModel.RepoCards.Where(card => card.RepoName != "c"), card => Assert.False(card.HasGroup));
     }
@@ -466,7 +475,7 @@ public sealed class RepoGroupingTests : IDisposable
     ///     sections.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_ApplySettings_KeepsCollapsedGroups()
+    public async Task MainWindowViewModel_ApplySettings_KeepsCollapsedGroups()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -474,10 +483,11 @@ public sealed class RepoGroupingTests : IDisposable
         viewModel.ToggleGroupCollapsed("Work");
 
         // Act
-        viewModel.ApplySettings(new AppSettings { Theme = ThemePreference.Dark });
+        await viewModel.ApplySettingsAsync(new AppSettings { Theme = ThemePreference.Dark });
 
         // Assert
         Assert.Equal(["[Work 1 collapsed]"], Describe(viewModel));
+        await viewModel.FlushSettingsAsync();
         Assert.Equal(["Work"], SettingsStore.Load(configDir).CollapsedGroups);
     }
 
@@ -538,7 +548,7 @@ public sealed class RepoGroupingTests : IDisposable
     ///     at the bottom of the group's section.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_AddRepoToGroup_NewRepo_AddsCardInTheGroupAndPersistsIt()
+    public async Task MainWindowViewModel_AddRepoToGroup_NewRepo_AddsCardInTheGroupAndPersistsIt()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -554,6 +564,7 @@ public sealed class RepoGroupingTests : IDisposable
         Assert.Equal("Work", card.GroupName);
         Assert.Equal(["Work"], viewModel.GroupNames);
         Assert.Equal(["[Work 2]", "w1", "fresh", "[Ungrouped 1]", "loose"], Describe(viewModel));
+        await viewModel.FlushSettingsAsync();
         var reloaded = SettingsStore.Load(configDir);
         Assert.Equal("Work", reloaded.RecentRepos.Single(repo => repo.Path == newRepo).GroupName);
     }
@@ -641,7 +652,7 @@ public sealed class RepoGroupingTests : IDisposable
     ///     color) and saved only in the settings, and that choosing no color clears it.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_SetGroupColor_StoresColorAndNoneClears()
+    public async Task MainWindowViewModel_SetGroupColor_StoresColorAndNoneClears()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -653,6 +664,7 @@ public sealed class RepoGroupingTests : IDisposable
         // Assert
         Assert.True(colored);
         Assert.Equal("Teal", viewModel.Settings.FindGroupColor("Work"));
+        await viewModel.FlushSettingsAsync();
         Assert.Equal("Teal", SettingsStore.Load(configDir).GroupColors["Work"]);
         Assert.True(viewModel.SetGroupColor("Work", "Teal"));
 
@@ -662,6 +674,7 @@ public sealed class RepoGroupingTests : IDisposable
         // Assert
         Assert.True(cleared);
         Assert.Null(viewModel.Settings.FindGroupColor("Work"));
+        await viewModel.FlushSettingsAsync();
         Assert.Empty(SettingsStore.Load(configDir).GroupColors);
     }
 
@@ -730,7 +743,7 @@ public sealed class RepoGroupingTests : IDisposable
     ///     the new name, in memory and in the saved settings.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_RenameGroup_KeepsColorAndPosition()
+    public async Task MainWindowViewModel_RenameGroup_KeepsColorAndPosition()
     {
         // Arrange: Work is colored and moved before Alpha
         var configDir = CreateTempDirectory();
@@ -746,6 +759,7 @@ public sealed class RepoGroupingTests : IDisposable
         Assert.Equal(["[Office 1]", "w", "[Alpha 1]", "a", "[Zed 1]", "z"], Describe(viewModel));
         Assert.Equal("Teal", viewModel.Settings.FindGroupColor("Office"));
         Assert.Equal("Teal", viewModel.DisplayedItems.OfType<RepoGroupHeaderViewModel>().First().ColorName);
+        await viewModel.FlushSettingsAsync();
         var saved = SettingsStore.Load(configDir);
         Assert.Equal(["Office"], saved.GroupColors.Keys);
         Assert.Equal(["Office", "Alpha", "Zed"], saved.GroupOrder);
@@ -756,7 +770,7 @@ public sealed class RepoGroupingTests : IDisposable
     ///     of the same name starts without them.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_RemoveGroup_ForgetsColorAndPosition()
+    public async Task MainWindowViewModel_RemoveGroup_ForgetsColorAndPosition()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -770,6 +784,7 @@ public sealed class RepoGroupingTests : IDisposable
         // Assert
         Assert.Empty(viewModel.Settings.GroupColors);
         Assert.Equal(["Alpha"], viewModel.Settings.GroupOrder);
+        await viewModel.FlushSettingsAsync();
         var saved = SettingsStore.Load(configDir);
         Assert.Empty(saved.GroupColors);
         Assert.Equal(["Alpha"], saved.GroupOrder);
@@ -787,7 +802,7 @@ public sealed class RepoGroupingTests : IDisposable
     ///     order, like a removed group.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_LastRepoLeavesGroup_ForgetsColorAndPosition()
+    public async Task MainWindowViewModel_LastRepoLeavesGroup_ForgetsColorAndPosition()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -802,6 +817,7 @@ public sealed class RepoGroupingTests : IDisposable
         // Assert
         Assert.Null(viewModel.Settings.FindGroupColor("Work"));
         Assert.Equal(["Alpha"], viewModel.Settings.GroupOrder);
+        await viewModel.FlushSettingsAsync();
         Assert.Empty(SettingsStore.Load(configDir).GroupColors);
 
         // Act: back into a group of that name
@@ -817,7 +833,7 @@ public sealed class RepoGroupingTests : IDisposable
     ///     group order.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_ApplySettings_KeepsGroupColorsAndOrder()
+    public async Task MainWindowViewModel_ApplySettings_KeepsGroupColorsAndOrder()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -826,11 +842,12 @@ public sealed class RepoGroupingTests : IDisposable
         Assert.True(viewModel.MoveGroup("Work", RepoGroupMove.Up));
 
         // Act
-        viewModel.ApplySettings(new AppSettings { Theme = ThemePreference.Dark });
+        await viewModel.ApplySettingsAsync(new AppSettings { Theme = ThemePreference.Dark });
 
         // Assert
         Assert.Equal(["[Work 1]", "w", "[Alpha 1]", "a"], Describe(viewModel));
         Assert.Equal("Teal", viewModel.Settings.FindGroupColor("Work"));
+        await viewModel.FlushSettingsAsync();
         var saved = SettingsStore.Load(configDir);
         Assert.Equal("Teal", saved.GroupColors["Work"]);
         Assert.Equal(["Work", "Alpha"], saved.GroupOrder);

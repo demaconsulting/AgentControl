@@ -539,7 +539,7 @@ public sealed class UsabilityWindowTests : IDisposable
     public void SettingsWindow_Layout_AppearanceIsItsOwnSectionBeforeTools() => HeadlessTestApp.Run(() =>
     {
         // Arrange
-        var window = new SettingsWindow(new SettingsWindowViewModel(new AppSettings(), _ => { }, (_, _) => Task.FromResult(true)));
+        var window = new SettingsWindow(new SettingsWindowViewModel(new AppSettings(), _ => Task.CompletedTask, (_, _) => Task.FromResult(true)));
         window.Show();
 
         try
@@ -577,7 +577,7 @@ public sealed class UsabilityWindowTests : IDisposable
     public void SettingsWindow_Layout_KeepShellOpenCheckBoxFollowsShellPreferenceWithTooltip() => HeadlessTestApp.Run(() =>
     {
         // Arrange
-        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => { }, (_, _) => Task.FromResult(true));
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => Task.CompletedTask, (_, _) => Task.FromResult(true));
         var window = new SettingsWindow(viewModel);
         window.Show();
         Dispatcher.UIThread.RunJobs();
@@ -622,7 +622,7 @@ public sealed class UsabilityWindowTests : IDisposable
         {
             Sources = [new PackageSourceDefinition { Alias = "Long", Type = PackageSourceType.Zip, Location = longLocation }]
         };
-        var window = new SettingsWindow(new SettingsWindowViewModel(settings, _ => { }, (_, _) => Task.FromResult(true)));
+        var window = new SettingsWindow(new SettingsWindowViewModel(settings, _ => Task.CompletedTask, (_, _) => Task.FromResult(true)));
         window.Show();
         Dispatcher.UIThread.RunJobs();
 
@@ -752,7 +752,7 @@ public sealed class UsabilityWindowTests : IDisposable
 
         // The user opened Settings from the keyboard (Enter on the Settings button), so the focus ring shows
         PressKey(owner, PhysicalKey.Enter);
-        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => { }, (_, _) => Task.FromResult(true));
+        var viewModel = new SettingsWindowViewModel(new AppSettings(), _ => Task.CompletedTask, (_, _) => Task.FromResult(true));
         var settings = new SettingsWindow(viewModel);
 
         try

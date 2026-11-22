@@ -47,6 +47,7 @@ N/A - standard test environment.
 - Loading with no settings file present returns default settings rather than throwing.
 - Saving creates the configuration directory when it does not yet exist.
 - A null settings value passed to save is rejected.
+- A save on a thread guarded against blocking calls is refused and recorded, and writes nothing.
 - The default configuration directory resolves under the user's application-data folder.
 
 #### Test Scenarios
@@ -250,3 +251,7 @@ changing its address to one with a user and password stops the next save with a 
 secret and leaves the saved file as it was. This scenario is tested by
 `SettingsStore_Save_GitSourceAddressWithCredential_IsRefusedWithoutChangingTheFile`, covering
 `AgentControl-SettingsStore-GitSourceRefusesCredential`.
+
+**SettingsStore_Save_OnGuardedThread_IsRefusedAndWritesNothing**: Inside a guard scope of `BlockingCallGuard` (as the
+headless UI thread is guarded), a save throws `BlockingCallOnGuardedThreadException`, the record of refused calls holds
+`settings save` once, and no settings file was written, covering `AgentControl-SettingsStore-RefusesGuardedThread`.

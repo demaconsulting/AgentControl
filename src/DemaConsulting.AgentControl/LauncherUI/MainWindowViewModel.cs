@@ -22,10 +22,12 @@ using System.Collections.ObjectModel;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.AgentToolLauncher;
 using DemaConsulting.AgentControl.GitIntegration;
+using DemaConsulting.AgentControl.Logging;
 using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.RepoConfig;
 using DemaConsulting.AgentControl.Settings;
 using DemaConsulting.AgentControl.Startup;
+using Microsoft.Extensions.Logging;
 
 namespace DemaConsulting.AgentControl.LauncherUI;
 
@@ -311,9 +313,42 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly SemaphoreSlim _upgradeCheckSlots = new(MaxConcurrentUpgradeChecks);
 
     /// <summary>
-    ///     Saves settings to disk; see the constructor.
+    ///     The longest the window's closing waits for the settings that are not written yet (see
+    ///     <see cref="Dispose"/>).
     /// </summary>
-    private readonly Action<AppSettings> _saveSettings;
+    /// <remarks>
+    ///     A write normally takes milliseconds; a file locked by another process is given up after
+    ///     about a second (see <see cref="SettingsStore.ReplaceMaxAttempts"/>). Five seconds covers a
+    ///     slow disk without keeping a closed window's process alive for long.
+    /// </remarks>
+    internal static readonly TimeSpan SettingsFlushTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    ///     Writes the settings in the background, one write at a time, the latest state winning; every
+    ///     settings save of the window goes through it, so none runs on the UI thread. See the
+    ///     constructor.
+    /// </summary>
+    private readonly SettingsWriter _settingsWriter;
+
+    /// <summary>
+    ///     How many confirmed saves (an add, the Settings window's Save) are running; while any is, a
+    ///     change made in the window is not handed to <see cref="_settingsWriter"/> but remembered in
+    ///     <see cref="_saveDeferred"/> (see <see cref="ScheduleSettingsSave"/>).
+    /// </summary>
+    private int _confirmedSavesRunning;
+
+    /// <summary>
+    ///     Whether the live settings hold something that has to be written once the confirmed saves
+    ///     that are running have ended: a change made while they ran, or a confirmed save that ended
+    ///     while another one still ran (see <see cref="SaveConfirmedAsync"/>).
+    /// </summary>
+    private bool _saveDeferred;
+
+    /// <summary>
+    ///     Logs what cannot be shown once the window has closed (settings that could not be written
+    ///     at the close).
+    /// </summary>
+    private static readonly ILogger Logger = AppLogging.Factory.CreateLogger<MainWindowViewModel>();
 
     /// <summary>
     ///     Runs the blocking reads of adds and refreshes off the UI thread; see the constructor.
@@ -352,7 +387,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private AddQueueSession? _addSession;
 
     /// <summary>
-    ///     Identifies the most recent card refresh started by <see cref="ApplySettings"/>, so an older
+    ///     Identifies the most recent card refresh started by <see cref="ApplySettingsAsync"/>, so an older
     ///     one that is still running does not update the list or start the upgrade check after it.
     /// </summary>
     private int _settingsRefreshGeneration;
@@ -455,7 +490,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly Action<ThemePreference>? _applyTheme;
     /// <summary>
     ///     The live application settings instance; mutated in place by
-    ///     <see cref="ApplySettings"/> and persisted by <see cref="SaveSettings"/>.
+    ///     <see cref="CommitSettingsChange"/>, replaced by <see cref="ApplySettingsAsync"/> and written
+    ///     in the background by <see cref="_settingsWriter"/>.
     /// </summary>
     private AppSettings _settings;
 
@@ -489,7 +525,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     NuGet server sources use, shared by every card and by the settings window's connection
     ///     test; <see langword="null"/> for none.</param>
     /// <param name="applyTheme">Applies the user's theme choice to the running application; called
-    ///     by <see cref="ApplySettings"/> after the settings were saved. <see langword="null"/>
+    ///     by <see cref="ApplySettingsAsync"/> after the settings were saved. <see langword="null"/>
     ///     applies nothing (the view model then has no dependency on the UI framework, so tests
     ///     can observe the call with a fake).</param>
     /// <param name="timeProvider">The clock behind the package-version cache's expiry and the
@@ -507,10 +543,11 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="shellDetector">Detects the shell for every card's launch;
     ///     <see langword="null"/> uses a real <see cref="ShellDetector"/>. Supplied so tests get a
     ///     deterministic shell.</param>
-    /// <param name="saveSettings">Writes settings to disk; <see langword="null"/> uses
+    /// <param name="saveSettings">Writes one settings snapshot to disk; <see langword="null"/> uses
     ///     <see cref="SettingsStore.Save"/> into <paramref name="configDirectory"/>. Supplied so tests
-    ///     can count saves and make them fail. It must throw <see cref="InvalidOperationException"/>
-    ///     when the settings could not be written.</param>
+    ///     can count saves, hold them and make them fail. It is called by the background settings
+    ///     writer on a thread-pool thread, one call at a time, and must throw
+    ///     <see cref="InvalidOperationException"/> when the settings could not be written.</param>
     /// <param name="backgroundWork">Runs the blocking reads of adds and card refreshes off the UI
     ///     thread, for this view model and every card; <see langword="null"/> uses the thread pool.
     ///     Supplied so tests can hold the reads at a gate.</param>
@@ -521,10 +558,15 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="gitTimeouts">The time limits of every git command the cards and adds run, or
     ///     <see langword="null"/> for <see cref="GitClientTimeouts.Default"/>. Supplied so tests can use a
     ///     short limit against a git that hangs.</param>
+    /// <param name="settingsWriteDelay">How long a change waits for the next one before the settings
+    ///     are written in the background, or <see langword="null"/> for
+    ///     <see cref="SettingsWriter.DefaultDelay"/>; measured on <paramref name="timeProvider"/>. Create
+    ///     the view model on the UI thread: a failed background write is reported there.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="settings"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when
-    ///     <paramref name="upgradeRecheckInterval"/> is zero or negative.</exception>
+    ///     <paramref name="upgradeRecheckInterval"/> is zero or negative, or
+    ///     <paramref name="settingsWriteDelay"/> is negative.</exception>
     public MainWindowViewModel(
         AppSettings settings,
         StartupOptions? startupOptions = null,
@@ -539,11 +581,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Action<AppSettings>? saveSettings = null,
         IBackgroundWorkRunner? backgroundWork = null,
         RepoRefreshQueue? refreshQueue = null,
-        GitClientTimeouts? gitTimeouts = null)
+        GitClientTimeouts? gitTimeouts = null,
+        TimeSpan? settingsWriteDelay = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(
             upgradeRecheckInterval ?? DefaultUpgradeRecheckInterval, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfLessThan(settingsWriteDelay ?? TimeSpan.Zero, TimeSpan.Zero);
 
         _settings = settings;
 
@@ -558,7 +602,6 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _processStarter = processStarter;
         _shellDetector = shellDetector;
         _startupOptions = startupOptions;
-        _saveSettings = saveSettings ?? (candidate => SettingsStore.Save(candidate, configDirectory));
         _backgroundWork = backgroundWork ?? ThreadPoolBackgroundWorkRunner.Instance;
         GlobalProgress = new GlobalProgressViewModel();
         _ownsRefreshQueue = refreshQueue is null;
@@ -567,6 +610,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _gitTimeouts = gitTimeouts;
         _applyTheme = applyTheme;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _settingsWriter = new SettingsWriter(
+            saveSettings ?? (snapshot => SettingsStore.Save(snapshot, configDirectory)), _timeProvider, settingsWriteDelay);
+        _settingsWriter.WriteFailed += OnSettingsWriteFailed;
         _upgradeRecheckInterval = upgradeRecheckInterval ?? DefaultUpgradeRecheckInterval;
         _packageVersionCache = new PackageVersionCache(_timeProvider);
         Credentials = credentials;
@@ -786,9 +832,11 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     the updated settings.
     /// </summary>
     /// <remarks>
-    ///     The synchronous single add, kept for callers that add one known folder; the window adds
-    ///     through <see cref="EnqueueAddReposAsync"/>, which reads the folder off the UI thread. Both
-    ///     use the same checks and the same all-or-nothing commit. Only the folder is checked here
+    ///     The synchronous single add, kept for callers that add one known folder (the tests; no window
+    ///     code calls it): it waits for the folder check and for the confirmed save, which the
+    ///     background settings writer makes on a worker thread. The window adds through
+    ///     <see cref="EnqueueAddReposAsync"/>, which waits for neither. Both use the same checks and
+    ///     the same all-or-nothing commit. Only the folder is checked here
     ///     (the file system, no git): the new card's repo state is read in the background through the
     ///     shared queue, as at startup, and its working-tree check runs when the card is first shown.
     /// </remarks>
@@ -843,9 +891,11 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     <see cref="AddRepoToGroup"/>) would, and reports what became of each.
     /// </summary>
     /// <remarks>
-    ///     The synchronous core of the add, kept for callers that add known folders; the window adds
-    ///     through <see cref="EnqueueAddReposAsync"/>, which reads the folders off the UI thread and
-    ///     shows progress. Both share the same checks and the same commit: one that is missing, not a
+    ///     The synchronous core of the add, kept for callers that add known folders (the tests; no
+    ///     window code calls it): it waits for the folder checks and for the confirmed save, which the
+    ///     background settings writer makes on a worker thread. The window adds through
+    ///     <see cref="EnqueueAddReposAsync"/>, which reads the folders off the UI thread, shows
+    ///     progress and waits for nothing. Both share the same checks and the same commit: one that is missing, not a
     ///     Git repository root or already listed does not stop the others; a folder that appears more
     ///     than once (see <see cref="IsSameRepoPath"/>) is handled once; blank entries are ignored. With
     ///     a group, a repo that is already listed is moved into it, and a collapsed group is opened
@@ -880,7 +930,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var commit = PrepareAddCommit(facts, target);
         try
         {
-            ApplyAddCommit(commit);
+            ApplyAddCommitNow(commit);
             return commit.Outcomes;
         }
         catch (InvalidOperationException ex)
@@ -921,10 +971,11 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     through <see cref="SettingsSaveRetryRequest.Respond"/>.
     /// </summary>
     /// <remarks>
-    ///     Nothing of the add has been applied when this is raised, so the list still shows what is
-    ///     on disk; Retry saves the add again (re-checked against the list as it is then), and Discard
-    ///     leaves everything as it is. Without a subscriber nobody can be asked, so the add is
-    ///     discarded and its folders are reported as not saved.
+    ///     Nothing of the add has been applied when this is raised, so the list still shows it as it was
+    ///     before the add; Retry saves the add again (re-checked against the list as it is then) and
+    ///     raises this again if that save fails too, and Discard leaves everything as it is. Without a
+    ///     subscriber nobody can be asked, so the add is discarded and its folders are reported as not
+    ///     saved.
     /// </remarks>
     public event EventHandler<SettingsSaveRetryRequest>? AddSaveFailed;
 
@@ -1148,12 +1199,14 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     /// <remarks>
     ///     Each attempt re-checks the folders against the list as it is at that moment and saves
-    ///     everything in one go (see <see cref="ApplyAddCommit"/>), so a failed save changed nothing.
-    ///     The user is then asked through <see cref="AddSaveFailed"/>: Retry tries again (the loop),
-    ///     Discard (or no one to ask, or a closed window) gives up and reports the folders that would
-    ///     have been added or moved as not saved, with the reason. Memory, cards, the displayed list
-    ///     and the file then still match, including the groups, order and collapsed state of repos the
-    ///     add would have moved.
+    ///     everything in one confirmed write (see <see cref="ApplyAddCommitAsync"/>), applying the add
+    ///     only once it is on disk, so a failed save changed nothing. The user is then asked through
+    ///     <see cref="AddSaveFailed"/>: Retry tries again and asks again each time that save fails (the
+    ///     loop), Discard (or no one to ask, or a closed window) gives up and reports the folders that
+    ///     would have been added or moved as not saved, with the reason. Memory, the cards and the
+    ///     displayed list are then as they were before the add, including the groups, order and
+    ///     collapsed state of repos the add would have moved; a change the user made meanwhile is kept
+    ///     and written in the background as usual.
     /// </remarks>
     /// <param name="facts">What was read about each folder, in request order.</param>
     /// <param name="groupName">The requested group, or <see langword="null"/>.</param>
@@ -1167,7 +1220,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             string problem;
             try
             {
-                ApplyAddCommit(commit);
+                await ApplyAddCommitAsync(commit);
                 return new AddReposBatchResult(commit.Outcomes, Canceled: false);
             }
             catch (InvalidOperationException ex)
@@ -1219,14 +1272,14 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (result != AddRepoResult.MovedExisting)
         {
             // A failed save of a new repo throws, as a single add always did
-            ApplyAddCommit(commit);
+            ApplyAddCommitNow(commit);
             return result;
         }
 
         // A repo that is already listed moved from a button the user pressed: a failed save is told
         try
         {
-            ApplyAddCommit(commit);
+            ApplyAddCommitNow(commit);
             return result;
         }
         catch (InvalidOperationException ex)
@@ -1392,29 +1445,82 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    ///     Carries out a prepared add: saves everything it changes in one go and, only once that
-    ///     succeeded, creates the new cards, puts the cards in the stored order, rebuilds the list once
-    ///     and starts the new repos' upgrade checks.
+    ///     Carries out a prepared add in the background: saves everything it changes in one confirmed
+    ///     write and, only once that succeeded, applies it (see <see cref="AdoptAddCommit"/>).
     /// </summary>
     /// <remarks>
-    ///     The settings change (see <see cref="ApplyAddSteps"/>) appends the new entries, moves the
-    ///     listed repos into the group at the bottom of their section, and opens the group when
-    ///     anything joined it; it is made all-or-nothing by <see cref="CommitSettingsChange"/>, so a
-    ///     failed save leaves memory, the cards, the displayed list and the file exactly as they were.
-    ///     A batch that changes nothing saves nothing.
+    ///     The candidate is a snapshot of the live settings with the add's change (see
+    ///     <see cref="ApplyAddSteps"/>) applied, written by the background settings writer (see
+    ///     <see cref="SaveConfirmedAsync"/>), so the window stays usable while it is written. A failed
+    ///     save leaves memory, the cards and the displayed list exactly as they were. A batch that
+    ///     changes nothing saves nothing.
+    /// </remarks>
+    /// <param name="commit">The prepared add.</param>
+    /// <returns>A task that completes when the add was saved and applied.</returns>
+    /// <exception cref="InvalidOperationException">Thrown (through the task) when the settings file
+    ///     cannot be written; nothing changed.</exception>
+    private Task ApplyAddCommitAsync(AddBatchCommit commit) =>
+        commit.Steps.Count == 0
+            ? Task.CompletedTask
+            : SaveConfirmedAsync(CreateAddCandidate(commit), () => AdoptAddCommit(commit));
+
+    /// <summary>
+    ///     Carries out a prepared add synchronously, for the synchronous adds (<see cref="AddRepos"/>,
+    ///     <see cref="AddRepo"/>, <see cref="AddRepoToGroup"/>): waits for the confirmed write, then
+    ///     applies it (see <see cref="AdoptAddCommit"/>).
+    /// </summary>
+    /// <remarks>
+    ///     The write still runs on a worker thread (the settings writer never needs the calling
+    ///     thread, so waiting for it cannot deadlock); only these synchronous adds, which no window code
+    ///     calls, wait for it. A failed save changed nothing.
     /// </remarks>
     /// <param name="commit">The prepared add.</param>
     /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
     ///     nothing changed.</exception>
-    private void ApplyAddCommit(AddBatchCommit commit)
+    private void ApplyAddCommitNow(AddBatchCommit commit)
     {
         if (commit.Steps.Count == 0)
         {
             return;
         }
 
-        // One save for the whole batch; a failure throws here, before anything changed
-        CommitSettingsChange(settings => ApplyAddSteps(settings, commit));
+        _settingsWriter.SaveNowAsync(CreateAddCandidate(commit)).GetAwaiter().GetResult();
+        AdoptAddCommit(commit);
+
+        // A confirmed save that is still running was built without this add: write the result after it
+        _saveDeferred |= _confirmedSavesRunning > 0;
+    }
+
+    /// <summary>
+    ///     Builds what an add saves: a snapshot of the live settings with the add's change applied and
+    ///     the group colors and order repaired, leaving the live settings untouched.
+    /// </summary>
+    /// <param name="commit">The prepared add.</param>
+    /// <returns>The candidate settings.</returns>
+    private AppSettings CreateAddCandidate(AddBatchCommit commit)
+    {
+        var candidate = _settings.CreateSnapshot();
+        ApplyAddSteps(candidate, commit);
+        candidate.RepairGroupSettings();
+        return candidate;
+    }
+
+    /// <summary>
+    ///     Applies an add that was saved: changes the live settings the same way, creates the new
+    ///     cards, puts the cards in the stored order, rebuilds the list once and starts the new repos'
+    ///     upgrade checks.
+    /// </summary>
+    /// <remarks>
+    ///     The settings change (see <see cref="ApplyAddSteps"/>) appends the new entries, moves the
+    ///     listed repos into the group at the bottom of their section, and opens the group when
+    ///     anything joined it. It runs against the live settings as they are now, so a change the user
+    ///     made while the add was saved (a repo removed, a group renamed) is kept.
+    /// </remarks>
+    /// <param name="commit">The prepared add.</param>
+    private void AdoptAddCommit(AddBatchCommit commit)
+    {
+        ApplyAddSteps(_settings, commit);
+        _settings.RepairGroupSettings();
 
         // Saved: create the new cards from what was read in the background (a folder read before it
         // was listed has facts; one whose facts are missing is refreshed in the background)
@@ -1834,15 +1940,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     view/view-model separation, <c>MainWindow</c>'s code-behind is responsible for showing
     ///     a confirmation dialog (via <c>ConfirmationWindow</c>) before calling this, in response
     ///     to <paramref name="card"/> raising <see cref="RepoCardViewModel.RemoveRequested"/>.
-    ///     The updated settings are saved before the card is removed, so a failed save leaves the
-    ///     list as it was; the removed card is then retired (see
+    ///     The removal is applied at once and saved in the background (see
+    ///     <see cref="CommitSettingsChange"/>); the removed card is retired (see
     ///     <see cref="RepoCardViewModel.Retire"/>) so nothing it still has running can report back.
     /// </remarks>
     /// <param name="card">The card to remove.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="card"/> is
     ///     <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
-    ///     nothing was removed.</exception>
     public void RemoveRepo(RepoCardViewModel card)
     {
         ArgumentNullException.ThrowIfNull(card);
@@ -1859,7 +1963,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     Replaces the current settings with <paramref name="updated"/> (preserving the
     ///     repo list and its order, the collapsed sections and the group colors and order, which are
     ///     only ever changed from the main window, e.g. via <see cref="AddRepo"/>/
-    ///     <see cref="RemoveRepo"/>/<see cref="MoveCard"/>/<see cref="DropCard"/>/<see cref="SetGroupColor"/>/<see cref="MoveGroup"/>), persists them (adopting them only if that succeeds), invalidates the shared
+    ///     <see cref="RemoveRepo"/>/<see cref="MoveCard"/>/<see cref="DropCard"/>/<see cref="SetGroupColor"/>/<see cref="MoveGroup"/>),
+    ///     persists them in the background (adopting them only once that succeeded), invalidates the shared
     ///     <see cref="PackageVersionCache"/> for each package source that was changed or removed
     ///     (cached results for an edited source would otherwise be silently reused; sources that
     ///     did not change keep theirs), and
@@ -1869,7 +1974,10 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     (<see cref="BeginUpgradeRefresh()"/>) against the new sources.
     /// </summary>
     /// <remarks>
-    ///     The save and the adoption happen before this returns; the card refresh runs in the
+    ///     The save is a confirmed write made by the background settings writer on a worker thread (see
+    ///     <see cref="SaveConfirmedAsync"/>), so the window is not frozen while the file is written; the
+    ///     returned task completes once it was saved and adopted. A change made in the main window
+    ///     meanwhile is kept and written after it. The card refresh runs in the
     ///     background through the shared refresh queue (see <see cref="RefreshCardsAfterSettingsAsync"/>),
     ///     reading git off the UI thread and showing "Refreshing repositories {n} of {total}..." in
     ///     <see cref="GlobalProgress"/>, so the
@@ -1891,25 +1999,20 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     subsequent Pull operations use the newly configured one.
     /// </remarks>
     /// <param name="updated">The updated settings, typically built by
-    ///     <see cref="SettingsWindowViewModel.Save"/>.</param>
+    ///     <see cref="SettingsWindowViewModel.SaveCommand"/>.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="updated"/> is
     ///     <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when a source location embeds a
-    ///     credential or the settings file cannot be written; the current settings are left
-    ///     unchanged (the candidate is adopted only after it has been persisted).</exception>
-    public void ApplySettings(AppSettings updated)
+    /// <returns>A task that completes when the settings were saved and adopted.</returns>
+    /// <exception cref="InvalidOperationException">Thrown, before anything is saved, when a source
+    ///     location embeds a credential; thrown through the task when the settings file cannot be
+    ///     written. Either way the current settings are left unchanged (the candidate is adopted only
+    ///     after it has been persisted).</exception>
+    public Task ApplySettingsAsync(AppSettings updated)
     {
         ArgumentNullException.ThrowIfNull(updated);
 
-        var gitExecutablePathChanged = !string.Equals(
-            _settings.GitExecutablePath, updated.GitExecutablePath, StringComparison.Ordinal);
-
-        // Note which sources were configured before the swap so cached results for any that were
-        // edited or removed can be dropped afterwards
-        var previousSources = _settings.GetEffectiveSources().ToList();
-
-        // Refuse a credential-bearing source before adopting the settings, so the rejected values
-        // never become the live in-memory settings either
+        // Refuse a credential-bearing source before anything is saved or adopted, so the rejected
+        // values never reach the file or the live in-memory settings
         foreach (var source in updated.GetEffectiveSources())
         {
             var problem = source.GetCredentialProblem();
@@ -1919,15 +2022,44 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
         }
 
-        // Persist the candidate first and adopt it only once that succeeds: if the write fails,
-        // the exception propagates to the caller (which shows it) while the live settings stay as
-        // they were, so a later save (favorite, launch, ...) can never write the rejected values
+        // The candidate: the new settings with the user's repos and organizing choices as they are
+        // now, as a snapshot the writer can write while the window keeps running
+        var candidate = updated.CreateSnapshot();
+        var organizing = _settings.CreateSnapshot();
+        candidate.RecentRepos = organizing.RecentRepos;
+        candidate.HasUserRepoOrder = organizing.HasUserRepoOrder;
+        candidate.CollapsedGroups = organizing.CollapsedGroups;
+        candidate.GroupColors = organizing.GroupColors;
+        candidate.GroupOrder = organizing.GroupOrder;
+
+        // Written in the background; adopted only once it is on disk, so a failed write (thrown
+        // through the task) leaves the live settings as they were and a later save can never write
+        // the rejected values
+        return SaveConfirmedAsync(candidate, () => AdoptSettings(updated));
+    }
+
+    /// <summary>
+    ///     Adopts settings from the Settings window once they were saved: keeps the live repo list and
+    ///     organizing choices, applies the theme, drops the cached results of changed sources and
+    ///     starts the cards' refresh and the upgrade check (see <see cref="ApplySettingsAsync"/>).
+    /// </summary>
+    /// <param name="updated">The settings that were saved.</param>
+    private void AdoptSettings(AppSettings updated)
+    {
+        var gitExecutablePathChanged = !string.Equals(
+            _settings.GitExecutablePath, updated.GitExecutablePath, StringComparison.Ordinal);
+
+        // Note which sources were configured before the swap so cached results for any that were
+        // edited or removed can be dropped afterwards
+        var previousSources = _settings.GetEffectiveSources().ToList();
+
+        // The live repo list and organizing choices are kept, including a change made while the
+        // settings were saved (it is written by the save scheduled after this, see SaveConfirmedAsync)
         updated.RecentRepos = _settings.RecentRepos;
         updated.HasUserRepoOrder = _settings.HasUserRepoOrder;
         updated.CollapsedGroups = _settings.CollapsedGroups;
         updated.GroupColors = _settings.GroupColors;
         updated.GroupOrder = _settings.GroupOrder;
-        _saveSettings(updated);
         _settings = updated;
         OnPropertyChanged(nameof(Settings));
 
@@ -1955,7 +2087,6 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var generation = ++_settingsRefreshGeneration;
         PendingRefresh = RefreshCardsAfterSettingsAsync(generation, gitExecutablePathChanged, cancellation.Token);
     }
-
     /// <summary>
     ///     Refreshes every card after the settings were saved - its cheap checks and, where needed, its
     ///     working-tree check - through the shared refresh queue, then rebuilds the list once and starts
@@ -1968,8 +2099,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     reads) and the window stays usable however many repos are listed; the queue runs only a
     ///     couple of reads at a time across everything that reads repos. A card whose folder came back,
     ///     or every present card when the git executable changed, also gets a fresh working-tree check
-    ///     (see <see cref="ApplySettings"/>). Counted as a launch-style check while it runs, so the
-    ///     periodic round does not start meanwhile. A newer <see cref="ApplySettings"/> supersedes it:
+    ///     (see <see cref="ApplySettingsAsync"/>). Counted as a launch-style check while it runs, so the
+    ///     periodic round does not start meanwhile. A newer <see cref="ApplySettingsAsync"/> supersedes it:
     ///     the superseded one neither rebuilds the list nor starts the upgrade check (the card-level
     ///     generations already make the newest read win). <see cref="Dispose"/> cancels it.
     /// </remarks>
@@ -2100,7 +2231,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     While the Settings window is open the user may sign in to a source with
     ///     <b>Test connection</b>, or the network may have come back; without this the cards would
     ///     keep showing "Sign-in needed" (or a failed check) until the next periodic round. When the
-    ///     settings were saved, <see cref="ApplySettings"/> has already started the check of every
+    ///     settings were saved, <see cref="ApplySettingsAsync"/> has already started the check of every
     ///     card, so nothing more is started and the pending check is returned - the cards are never
     ///     checked twice for one Settings session.
     ///     </para>
@@ -2392,9 +2523,16 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     Stops the periodic upgrade re-check (see <see cref="StartPeriodicUpgradeRecheck"/>) and
     ///     cancels the round that is running, the background upgrade check (launch, settings
     ///     change, added repo) and card refresh that are running, the adds that have not saved
-    ///     yet, and every repo read of the shared refresh queue (a running git is stopped); called
-    ///     when the main window closes.
+    ///     yet, and every repo read of the shared refresh queue (a running git is stopped), then
+    ///     writes the settings that are not written yet; called when the main window closes.
     /// </summary>
+    /// <remarks>
+    ///     The settings are written by the background writer on a worker thread; the calling thread
+    ///     waits for it at most <see cref="SettingsFlushTimeout"/>. That is the one wait for the disk
+    ///     left on the UI thread, and it comes after the window has closed, so no interaction is held
+    ///     up; the write never needs the UI thread, so the wait cannot deadlock. Settings that could
+    ///     not be written in time are logged, because nobody can be told any more.
+    /// </remarks>
     public void Dispose()
     {
         if (_disposed)
@@ -2430,6 +2568,21 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _refreshProgress?.Dispose();
         _refreshProgress = null;
+
+        // The settings changes made while a confirmed save still runs are written now (the add that
+        // was saving at the close is left to that save), then everything waiting is written
+        if (_saveDeferred)
+        {
+            _saveDeferred = false;
+            _settingsWriter.Schedule(_settings.CreateSnapshot());
+        }
+
+        if (!_settingsWriter.Flush(SettingsFlushTimeout))
+        {
+            Logger.LogWarning("The latest settings changes could not be written when the window closed");
+        }
+
+        _settingsWriter.Dispose();
     }
 
     /// <summary>
@@ -2572,81 +2725,126 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    ///     Persists the current settings to the configured directory.
+    ///     Raised when the user's latest changes in the main window (marking a favorite, choosing a
+    ///     group or a card color, coloring, renaming, removing or moving a group, collapsing a section,
+    ///     moving or removing a repo, a launch being recorded) could not be written to the settings
+    ///     file in the background; the argument is the message for the user and the window shows it.
     /// </summary>
     /// <remarks>
-    ///     Writes the live settings as they are. The changes the user makes in the main window do
-    ///     not use this: they go through <see cref="CommitSettingsChange"/>, which saves a candidate
-    ///     first and changes the live settings only when that succeeded.
+    ///     The changes stay applied: they are in effect while the application runs and are written
+    ///     again with the next change and when the window closes. Raised on the UI thread, once per
+    ///     failure streak (the first failure after a write that succeeded), so a disk that keeps
+    ///     failing does not interrupt every click; not raised after the window closed. Also raised,
+    ///     with its own message, when a synchronous <see cref="AddRepoToGroup"/> could not save the
+    ///     move of a listed repo.
     /// </remarks>
-    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be
-    ///     written.</exception>
-    public void SaveSettings() => _saveSettings(_settings);
-
-    /// <summary>
-    ///     Raised when a change the user made in the main window (marking a favorite, choosing a group
-    ///     or a card color, coloring or moving a group, collapsing a section, a launch being recorded)
-    ///     could not be saved. The
-    ///     change was not applied, so the list still shows what is on disk; the argument is the
-    ///     message for the user and the window shows it.
-    /// </summary>
     public event EventHandler<string>? SettingsSaveFailed;
 
     /// <summary>
-    ///     Makes a change to the settings all-or-nothing: the change is tried on a candidate copy,
-    ///     the candidate is saved, and only when that succeeded is the same change applied to the
-    ///     live settings.
+    ///     Writes the settings that are waiting to be written now and waits for it; a test seam for
+    ///     code that reads the settings file right after a change.
+    /// </summary>
+    /// <returns>A task that completes, never faulting, when every write accepted so far has ended:
+    ///     <see langword="true"/> when what was waiting was written.</returns>
+    internal Task<bool> FlushSettingsAsync() => _settingsWriter.FlushAsync();
+
+    /// <summary>
+    ///     Applies a change to the live settings at once and schedules them to be written in the
+    ///     background.
     /// </summary>
     /// <remarks>
-    ///     This is what keeps memory, the displayed list and the settings file in step. A failed save
-    ///     leaves the live settings untouched, so a later, unrelated save can never write the change
-    ///     that failed. The candidate copies the repos (so the change never reaches the live
-    ///     entries), the collapsed list, the group colors and the group order; everything else is
-    ///     shared and must not be changed by <paramref name="change"/>. The change runs twice (on the
-    ///     candidate, then on the live settings), so it must give the same result both times and must
-    ///     not depend on state that the first run changed. After each run the group colors and order
-    ///     are repaired (see <see cref="AppSettings.RepairGroupSettings"/>), so a group that lost its
-    ///     last repo forgets its color and position in the file and in memory alike.
+    ///     The change takes effect immediately, so the window never waits for the settings file; the
+    ///     group colors and order are repaired afterwards (see
+    ///     <see cref="AppSettings.RepairGroupSettings"/>), so a group that lost its last repo forgets
+    ///     its color and position. The background writer (see <see cref="ScheduleSettingsSave"/>)
+    ///     writes the newest state shortly after the last change. When a write fails the user is told
+    ///     once (see <see cref="SettingsSaveFailed"/>) and the change stays in effect; it is written with
+    ///     the next change or when the window closes.
     /// </remarks>
     /// <param name="change">The change, expressed on the settings it is given.</param>
-    /// <exception cref="InvalidOperationException">Thrown when the candidate cannot be saved (the
-    ///     file cannot be written, or a source embeds a credential); the live settings are unchanged.</exception>
     private void CommitSettingsChange(Action<AppSettings> change)
     {
-        // Candidate copy: the user's repos, collapsed sections, group colors and group order are
-        // copied, so the trial change cannot reach the live objects
-        var candidate = _settings.CreatePersistedCopy();
-        candidate.RecentRepos = [.. _settings.RecentRepos.Select(repo => repo.Clone())];
-        candidate.CollapsedGroups = [.. _settings.CollapsedGroups ?? []];
-        candidate.GroupColors = new Dictionary<string, string>(RepoGroupName.Comparer);
-        foreach (var (group, color) in _settings.GroupColors ?? new Dictionary<string, string>())
-        {
-            candidate.GroupColors.TryAdd(group, color);
-        }
-
-        candidate.GroupOrder = [.. _settings.GroupOrder ?? []];
-        change(candidate);
-        candidate.RepairGroupSettings();
-
-        // Save the candidate; an exception here leaves the live settings as they were
-        _saveSettings(candidate);
-
-        // Saved: adopt the change
         change(_settings);
         _settings.RepairGroupSettings();
+        ScheduleSettingsSave();
     }
 
     /// <summary>
-    ///     Applies a change to one repo's entry all-or-nothing, on behalf of its card (see
-    ///     <see cref="CommitSettingsChange"/>); a failed save is reported to the user instead of
-    ///     thrown, because the change comes from a button the user pressed.
+    ///     Hands a snapshot of the live settings to the background writer, or, while a confirmed save
+    ///     runs (an add, the Settings window's Save), remembers that one is due once it has ended.
+    /// </summary>
+    /// <remarks>
+    ///     A confirmed save was built from the settings as they were when it started, without the
+    ///     change it has not adopted yet. A snapshot written while it runs would therefore not hold that
+    ///     change and, written after it, would take it out of the file again until the next write. So
+    ///     the snapshot is taken only after every confirmed save has ended and adopted its change (see
+    ///     <see cref="SaveConfirmedAsync"/>).
+    /// </remarks>
+    private void ScheduleSettingsSave()
+    {
+        if (_confirmedSavesRunning > 0)
+        {
+            _saveDeferred = true;
+            return;
+        }
+
+        _settingsWriter.Schedule(_settings.CreateSnapshot());
+    }
+
+    /// <summary>
+    ///     Saves a candidate with a confirmed write of the background settings writer and, once it is on
+    ///     disk, adopts it; for the changes that must not be applied unless they were saved (an add,
+    ///     the Settings window's Save).
+    /// </summary>
+    /// <remarks>
+    ///     The write runs on a worker thread, so the window stays usable; the adoption runs on the
+    ///     caller's thread (the UI thread) when the write has succeeded. A change made in the window
+    ///     while the write ran is applied at once but written only afterwards (see
+    ///     <see cref="ScheduleSettingsSave"/>): when the last confirmed save has ended, the live
+    ///     settings - holding both - are scheduled to be written. A confirmed save that ends while
+    ///     another one still runs schedules that write too, because the other one's candidate does not
+    ///     hold it.
+    /// </remarks>
+    /// <param name="candidate">The settings to write: a snapshot nobody changes any more.</param>
+    /// <param name="adopt">Applies the saved change to the live settings, the cards and the list.</param>
+    /// <returns>A task that completes when the candidate was written and adopted.</returns>
+    /// <exception cref="InvalidOperationException">Thrown (through the task) when the settings file
+    ///     cannot be written; nothing was adopted.</exception>
+    private async Task SaveConfirmedAsync(AppSettings candidate, Action adopt)
+    {
+        _confirmedSavesRunning++;
+        var adopted = false;
+        try
+        {
+            await _settingsWriter.SaveNowAsync(candidate);
+            adopt();
+            adopted = true;
+        }
+        finally
+        {
+            _confirmedSavesRunning--;
+            if (_confirmedSavesRunning > 0)
+            {
+                // Another confirmed save is still running, built without this one's change
+                _saveDeferred |= adopted;
+            }
+            else if (_saveDeferred)
+            {
+                _saveDeferred = false;
+                ScheduleSettingsSave();
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Applies a change to one repo's entry on behalf of its card and saves it in the background
+    ///     (see <see cref="CommitSettingsChange"/>).
     /// </summary>
     /// <param name="repo">The repo's entry; a repo that is no longer in the list (a card that was
     ///     removed) is changed without saving anything.</param>
     /// <param name="change">The change to the repo's entry.</param>
-    /// <returns><see langword="true"/> when the change was saved and applied (or needed no saving);
-    ///     <see langword="false"/> when the save failed, in which case nothing changed and
-    ///     <see cref="SettingsSaveFailed"/> was raised.</returns>
+    /// <returns><see langword="true"/>: the change is applied at once (a failed background write is
+    ///     reported through <see cref="SettingsSaveFailed"/> and leaves it applied).</returns>
     private bool CommitRepoChange(RecentRepo repo, Action<RecentRepo> change)
     {
         if (!_settings.RecentRepos.Contains(repo))
@@ -2655,29 +2853,39 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return true;
         }
 
-        try
-        {
-            CommitSettingsChange(settings =>
-                change(settings.RecentRepos.First(
-                    entry => string.Equals(entry.Path, repo.Path, StringComparison.OrdinalIgnoreCase))));
-            return true;
-        }
-        catch (InvalidOperationException ex)
-        {
-            ReportSaveFailure(ex);
-            return false;
-        }
+        CommitSettingsChange(_ => change(repo));
+        return true;
     }
 
     /// <summary>
-    ///     Tells the user (through <see cref="SettingsSaveFailed"/>) that a change was not saved and
-    ///     so not applied.
+    ///     Tells the user (through <see cref="SettingsSaveFailed"/>) that the background writer could
+    ///     not write the latest changes; they stay in effect.
+    /// </summary>
+    /// <param name="sender">The settings writer.</param>
+    /// <param name="failure">Why the write failed.</param>
+    private void OnSettingsWriteFailed(object? sender, Exception failure)
+    {
+        // A closed window has nobody to tell; the close logged what it could not write
+        if (_disposed)
+        {
+            return;
+        }
+
+        SettingsSaveFailed?.Invoke(
+            this,
+            $"Your latest changes could not be saved to the settings file. {SecretRedactor.SafeMessage(failure)}\n\n" +
+            "They stay in effect while AgentControl runs, and are saved again with your next change and when " +
+            "AgentControl closes.");
+    }
+
+    /// <summary>
+    ///     Tells the user (through <see cref="SettingsSaveFailed"/>) that the move of a listed repo by a
+    ///     synchronous <see cref="AddRepoToGroup"/> was not saved and so not applied.
     /// </summary>
     /// <param name="exception">The failure.</param>
     private void ReportSaveFailure(InvalidOperationException exception) =>
         SettingsSaveFailed?.Invoke(
             this, $"The change was not applied because it could not be saved. {SecretRedactor.SafeMessage(exception)}");
-
     /// <summary>
     ///     Drops the shared cache's entries for every source that existed before a settings change
     ///     and is now removed or different, so a stale result is never reused for an edited source
@@ -2862,7 +3070,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var header = new RepoGroupHeaderViewModel(kind, name);
-        header.ToggleRequested += (_, _) => RunReportingSaveFailure(() => ToggleGroupCollapsed(header.Name));
+        header.ToggleRequested += (_, _) => ToggleGroupCollapsed(header.Name);
         header.RenameRequested += (_, _) => GroupRenameRequested?.Invoke(this, header.Name);
         header.RemoveGroupRequested += (_, _) => GroupRemoveRequested?.Invoke(this, header.Name);
         header.AddRepoRequested += (_, _) => GroupAddRepoRequested?.Invoke(this, header.Name);
@@ -2890,13 +3098,10 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </remarks>
     /// <param name="name">The section's name (a group name, or <c>Favorites</c> or
     ///     <c>Ungrouped</c>); letter case is ignored.</param>
-    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
-    ///     the section keeps its state.</exception>
     public void ToggleGroupCollapsed(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        // Decided once, from the live state, so the trial change and the real one agree
         var collapse = !IsGroupCollapsed(name);
         CommitSettingsChange(settings =>
         {
@@ -2922,8 +3127,6 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <returns><see langword="true"/> when the group was renamed (or the name was already so);
     ///     <see langword="false"/> when the group does not exist or the new name cannot be used, in
     ///     which case nothing changed.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
-    ///     the group is unchanged.</exception>
     public bool RenameGroup(string oldName, string newName)
     {
         var target = RepoGroupName.Normalize(newName);
@@ -2937,8 +3140,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         // Every member takes the new spelling; the collapsed state, the color and the place in the
-        // user's group order follow the name. Decided once, from the live state, so the trial change
-        // and the real one agree.
+        // user's group order follow the name
         var wasCollapsed = IsGroupCollapsed(oldName);
         var color = _settings.FindGroupColor(oldName);
         var order = (_settings.GroupOrder ?? [])
@@ -2990,8 +3192,6 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     /// <param name="name">The group's name; letter case is ignored.</param>
     /// <returns><see langword="true"/> when the group existed and was removed.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when the settings file cannot be written;
-    ///     the group is unchanged.</exception>
     public bool RemoveGroup(string name)
     {
         if (!GroupNames.Contains(name, RepoGroupName.Comparer))
@@ -3016,7 +3216,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    ///     Brings the cards and the list up to date after a group rename or removal that was saved.
+    ///     Brings the cards and the list up to date after a group rename, removal or color change.
     /// </summary>
     private void FinishGroupEdit()
     {
@@ -3035,9 +3235,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <remarks>
     ///     The color shows as an accent on the group's header and is the tile color of the group's
     ///     repos that have no card color of their own (a card's own color wins). It is stored only in
-    ///     the per-user settings (<see cref="AppSettings.GroupColors"/>), never in a repository, and is
-    ///     saved before it is applied, so a failed save changes nothing; the failure is reported
-    ///     through <see cref="SettingsSaveFailed"/> because the change comes from a menu the user used.
+    ///     the per-user settings (<see cref="AppSettings.GroupColors"/>), never in a repository; it is
+    ///     applied at once and saved in the background (see <see cref="CommitSettingsChange"/>).
     ///     Favorites and Ungrouped are not groups of the user's own and cannot be colored.
     /// </remarks>
     /// <param name="groupName">The group's name; letter case is ignored.</param>
@@ -3045,8 +3244,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     <see langword="null"/> (or blank) for no color.</param>
     /// <returns><see langword="true"/> when the group now has the requested color (including when it
     ///     already had); <see langword="false"/> when the group does not exist (or is a built-in
-    ///     section), the color is not in the palette, or the choice could not be saved - nothing
-    ///     changed then.</returns>
+    ///     section) or the color is not in the palette - nothing changed then.</returns>
     public bool SetGroupColor(string groupName, string? colorName)
     {
         var name = RepoGroupName.Sanitize(groupName);
@@ -3066,22 +3264,14 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return true;
         }
 
-        try
+        CommitSettingsChange(settings =>
         {
-            CommitSettingsChange(settings =>
+            RemoveGroupColor(settings, group);
+            if (color is not null)
             {
-                RemoveGroupColor(settings, group);
-                if (color is not null)
-                {
-                    settings.GroupColors[group] = color;
-                }
-            });
-        }
-        catch (InvalidOperationException ex)
-        {
-            ReportSaveFailure(ex);
-            return false;
-        }
+                settings.GroupColors[group] = color;
+            }
+        });
 
         FinishGroupEdit();
         return true;
@@ -3192,8 +3382,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="groupName">The group's name; letter case is ignored.</param>
     /// <param name="move">The move.</param>
     /// <returns><see langword="true"/> when the group was moved; <see langword="false"/> when the move
-    ///     is not allowed (see <see cref="GetGroupMoveDisabledReason"/>) or the order could not be
-    ///     saved (reported through <see cref="SettingsSaveFailed"/>); nothing changed then.</returns>
+    ///     is not allowed (see <see cref="GetGroupMoveDisabledReason"/>); nothing changed then.</returns>
     public bool MoveGroup(string groupName, RepoGroupMove move)
     {
         if (!CanMoveGroup(groupName, move))
@@ -3243,8 +3432,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="groupName">The dragged group's name; letter case is ignored.</param>
     /// <param name="target">The place; see <see cref="CanDropGroup"/> for what is refused.</param>
     /// <returns><see langword="true"/> when the group is now at the place; <see langword="false"/> when
-    ///     the drop was refused or the order could not be saved (reported through
-    ///     <see cref="SettingsSaveFailed"/>).</returns>
+    ///     the drop was refused.</returns>
     public bool DropGroup(string groupName, GroupDropTarget target)
     {
         if (!CanDropGroup(groupName, target))
@@ -3266,13 +3454,12 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="anchor">The group to place it next to, as spelled.</param>
     /// <param name="insertBefore"><see langword="true"/> to place it before <paramref name="anchor"/>,
     ///     <see langword="false"/> after it.</param>
-    /// <returns><see langword="true"/> when the group is at the place (including when it already was,
-    ///     in which case nothing is saved); <see langword="false"/> when the order could not be saved
-    ///     (reported through <see cref="SettingsSaveFailed"/>), in which case nothing changed.</returns>
+    /// <returns><see langword="true"/>: the group is at the place (including when it already was, in
+    ///     which case nothing is saved).</returns>
     private bool PlaceGroup(string groupName, string anchor, bool insertBefore)
     {
         // Every group (also those whose repos are all favorites) keeps a place, so the order stays
-        // complete; decided once, from the live state, so the trial change and the real one agree
+        // complete
         var current = ArrangeGroups(GroupNames, _settings.GroupOrder);
         var order = current.Where(group => !RepoGroupName.Comparer.Equals(group, groupName)).ToList();
         var index = order.FindIndex(group => RepoGroupName.Comparer.Equals(group, anchor));
@@ -3282,16 +3469,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return true;
         }
 
-        try
-        {
-            CommitSettingsChange(settings => settings.GroupOrder = [.. order]);
-        }
-        catch (InvalidOperationException ex)
-        {
-            ReportSaveFailure(ex);
-            return false;
-        }
-
+        CommitSettingsChange(settings => settings.GroupOrder = [.. order]);
         UpdateDisplayedRepoCards();
         return true;
     }
@@ -3449,8 +3627,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="card">The card to move.</param>
     /// <param name="move">The move.</param>
     /// <returns><see langword="true"/> when the card was moved; <see langword="false"/> when the move
-    ///     is not allowed (see <see cref="GetMoveDisabledReason"/>) or the order could not be saved
-    ///     (reported through <see cref="SettingsSaveFailed"/>); nothing changed then.</returns>
+    ///     is not allowed (see <see cref="GetMoveDisabledReason"/>); nothing changed then.</returns>
     public bool MoveCard(RepoCardViewModel card, RepoMove move)
     {
         if (!CanMoveCard(card, move))
@@ -3518,16 +3695,15 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     <see cref="RepoCardViewModel.MoveToGroup"/> for a group (or none, for Ungrouped) and
     ///     <see cref="RepoCardViewModel.IsFavorite"/> for Favorites; dropping into Favorites marks the
     ///     repo as a favorite and keeps its group, and leaving Favorites un-favorites it (and sets the
-    ///     group the target section implies). The position is then committed as a second save: when
-    ///     only that fails the repo is in its new section at its old relative place, and the failure is
-    ///     reported through <see cref="SettingsSaveFailed"/>; when the section change fails nothing
-    ///     else is attempted. A collapsed target section stays collapsed (its header count shows the
-    ///     change). A drop on a header (no anchor) puts the card at the end of that section.
+    ///     group the target section implies). The position is then set as a second change; both are
+    ///     applied at once and saved in the background (the writer folds them into one write). A
+    ///     collapsed target section stays collapsed (its header count shows the change). A drop on a
+    ///     header (no anchor) puts the card at the end of that section.
     /// </remarks>
     /// <param name="card">The dragged card.</param>
     /// <param name="target">The place; see <see cref="CanDrop"/> for what is refused.</param>
     /// <returns><see langword="true"/> when the card is now at the place; <see langword="false"/> when
-    ///     the drop was refused or a save failed.</returns>
+    ///     the drop was refused.</returns>
     public bool DropCard(RepoCardViewModel card, RepoDropTarget target)
     {
         if (!CanDrop(card, target))
@@ -3554,7 +3730,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     break;
             }
 
-            // A refused (failed) save leaves the card where it was: stop, it was already reported
+            // A change the card refused leaves it where it was: stop
             if (!IsInSection(card, target.Kind, target.Name))
             {
                 return false;
@@ -3585,9 +3761,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     it has none).</param>
     /// <param name="insertBefore"><see langword="true"/> to place it before <paramref name="anchor"/>,
     ///     <see langword="false"/> after it.</param>
-    /// <returns><see langword="true"/> when the card is at the place (including when it already was, in
-    ///     which case nothing is saved); <see langword="false"/> when the order could not be saved
-    ///     (reported through <see cref="SettingsSaveFailed"/>), in which case nothing changed.</returns>
+    /// <returns><see langword="true"/>: the card is at the place (including when it already was, in
+    ///     which case nothing is saved).</returns>
     private bool PlaceCard(RepoCardViewModel card, RepoCardViewModel? anchor, bool insertBefore)
     {
         // Placing a card next to itself is the identity
@@ -3618,22 +3793,12 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return true;
         }
 
-        // The new order of the paths is decided once, from the live state, so the trial change and
-        // the real one agree
         var paths = ordered.Select(other => other.RepoPath).ToList();
-        try
+        CommitSettingsChange(settings =>
         {
-            CommitSettingsChange(settings =>
-            {
-                ApplyRepoOrder(settings.RecentRepos, paths);
-                settings.HasUserRepoOrder = true;
-            });
-        }
-        catch (InvalidOperationException ex)
-        {
-            ReportSaveFailure(ex);
-            return false;
-        }
+            ApplyRepoOrder(settings.RecentRepos, paths);
+            settings.HasUserRepoOrder = true;
+        });
 
         SyncCollection(RepoCards, ordered);
         UpdateDisplayedRepoCards();
@@ -3646,8 +3811,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <remarks>
     ///     Paths are compared ignoring letter case. An entry whose path is not listed keeps its current
     ///     relative order after the listed ones (so nothing is ever dropped). The same list instance is
-    ///     kept, because the settings share it by reference. Deterministic, as
-    ///     <see cref="CommitSettingsChange"/> requires.
+    ///     kept, because the settings share it by reference.
     /// </remarks>
     /// <param name="repos">The list to reorder.</param>
     /// <param name="orderedPaths">The wanted order of the repo paths.</param>
@@ -3670,9 +3834,10 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <summary>
     ///     Subscribes to a card's <see cref="RepoCardViewModel.FavoriteChanged"/> and
     ///     <see cref="RepoCardViewModel.GroupChanged"/> events so
-    ///     <see cref="DisplayedRepoCards"/> is kept current. The change itself has already been saved
-    ///     by then: the card applies it through <see cref="CommitRepoChange"/> and raises its event
-    ///     only when that succeeded. Deliberately does <em>not</em> subscribe to
+    ///     <see cref="DisplayedRepoCards"/> is kept current. The change itself has already been applied
+    ///     by then (and scheduled to be saved): the card applies it through
+    ///     <see cref="CommitRepoChange"/> and raises its event only when that accepted it. Deliberately
+    ///     does <em>not</em> subscribe to
     ///     <c>LaunchRecorded</c>: nothing displayed depends on a launch, so a launch can never move
     ///     a card. Also deliberately does <em>not</em>
     ///     subscribe to <see cref="RepoCardViewModel.RemoveRequested"/> here - that event is a
@@ -3687,28 +3852,12 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         card.GroupChanged += (_, _) => UpdateDisplayedRepoCards();
     }
 
-    /// <summary>
-    ///     Runs a change that saves settings from an event handler and, when the save fails, tells
-    ///     the user instead of letting the exception escape into the UI framework.
-    /// </summary>
-    /// <param name="change">The change; it saves before applying, so a failure changed nothing.</param>
-    private void RunReportingSaveFailure(Action change)
-    {
-        try
-        {
-            change();
-        }
-        catch (InvalidOperationException ex)
-        {
-            ReportSaveFailure(ex);
-        }
-    }
 
     /// <summary>
     ///     Creates a <see cref="RepoCardViewModel"/> for a recent-repos entry, wired to always
     ///     read the live <see cref="_settings"/>/<see cref="_startupOptions"/> fields, share
-    ///     this view model's <see cref="PackageVersionCache"/> and save the card's own changes
-    ///     all-or-nothing (see <see cref="CommitRepoChange"/>).
+    ///     this view model's <see cref="PackageVersionCache"/> and save the card's own changes in the
+    ///     background (see <see cref="CommitRepoChange"/>).
     /// </summary>
     /// <param name="recentRepo">The recent-repos entry to create a card for.</param>
     /// <returns>The created card, not yet refreshed.</returns>
