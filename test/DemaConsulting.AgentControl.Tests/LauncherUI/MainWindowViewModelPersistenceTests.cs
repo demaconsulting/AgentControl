@@ -702,6 +702,57 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that two confirmed saves that overlap at the close - an add, and the Settings window's
+    ///     settings saved while the add's write is held - leave the file with the change of each one
+    ///     whose write succeeded and without the change of each one whose write failed, with no other
+    ///     change made. The Settings window's candidate was built without the add (not adopted yet), so
+    ///     when both succeed only the close's own write puts both on disk. Each write is held at its own
+    ///     <see cref="TaskCompletionSource{TResult}"/> and the close waits for nothing, so no timing is
+    ///     involved.
+    /// </summary>
+    /// <param name="addSucceeds">Whether the add's write succeeds.</param>
+    /// <param name="settingsSucceed">Whether the Settings window's write succeeds.</param>
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void MainWindowViewModel_Dispose_OverlappingAddAndSettingsSaves_FileHoldsEachChangeThatSucceeded(
+        bool addSucceeds, bool settingsSucceed) => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: both writes held, and a close that does not wait
+        var fixture = CreateFixture(new AppSettings(), [("alpha", null)], settingsFlushTimeout: TimeSpan.Zero);
+        var alpha = fixture.Card("alpha");
+        var gamma = CreateDirectory("gamma");
+        var addWrite = fixture.Saving.HoldNextWrite();
+        var settingsWrite = fixture.Saving.HoldNextWrite();
+
+        // Act: start the add and wait until its write is held, save the Settings window's settings
+        // (their write waits behind the add's), close, then release both writes and wait for the close's
+        var add = fixture.ViewModel.EnqueueAddReposAsync([gamma], null);
+        await fixture.Saving.WaitForStartAsync();
+        var apply = fixture.ViewModel.ApplySettingsAsync(new AppSettings { GitExecutablePath = "new-git" });
+        fixture.ViewModel.Dispose();
+        addWrite.SetResult(addSucceeds);
+        settingsWrite.SetResult(settingsSucceed);
+        var written = await fixture.ViewModel.CloseSettingsWrite!;
+        await add;
+        if (settingsSucceed)
+        {
+            await apply;
+        }
+        else
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => apply);
+        }
+
+        // Assert: the close's write succeeded, and the file holds exactly the changes that succeeded
+        Assert.True(written);
+        string[] expectedRepos = addSucceeds ? [alpha.RepoPath, gamma] : [alpha.RepoPath];
+        var saved = SettingsStore.Load(fixture.ConfigDirectory);
+        Assert.Equal(expectedRepos, saved.RecentRepos.Select(repo => repo.Path));
+        Assert.Equal(settingsSucceed ? "new-git" : null, saved.GitExecutablePath);
+    });
+    /// <summary>
     ///     Test that an add whose save is still running when the window closes is decided once, by the
     ///     close: the close writes it with the change made meanwhile, and when the add's own completion
     ///     runs afterwards it adopts nothing - no card is built, the live settings and the displayed
@@ -760,6 +811,7 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
         fixture.ViewModel.Dispose();
         fixture.Saving.Gate.Set();
         await apply;
+        await fixture.ViewModel.CloseSettingsWrite!;
 
         // Assert: nothing adopted into the closed view model, and the write put the settings on disk
         Assert.Same(fixture.Settings, fixture.ViewModel.Settings);

@@ -252,6 +252,13 @@ what NuGet itself supplies.
 
 #### Key Methods
 
+**Settings persistence model**: `_settingsWriter` is the only thing that writes the settings file while the window is
+open and at its close. Its writes are one at a time, in the order asked, and every write is a full snapshot of the
+intended state when it is queued: the confirmed state, the confirmed changes adopted so far and every ordinary change
+made in the window (a confirmed save's candidate adds its own change). A confirmed save (an add, the Settings
+window's Save) is a writer request whose task completes with success or failure; the caller then adopts or rolls back
+exactly once, on the UI thread. The close always queues the full intended state as the final write (see *Close*).
+
 **Background saving (apply at once, write in the background)**: every change the user makes in the main window goes
 through the private `CommitSettingsChange(change)`:
 
@@ -289,6 +296,8 @@ take the add out of the file again. So `ScheduleSettingsSave` only records such 
 settings - holding both - are scheduled. A confirmed save that ends while another one still runs sets `_saveDeferred`
 too, because the other one's candidate was built without it. The writer itself keeps a snapshot scheduled before a
 confirmed save when that save fails, so a change made before a discarded add is still written (`-AddKeepsOtherChanges`).
+`_saveDeferred` only serves the open window (it keeps a confirmed save with no other change at one write); the close
+never reads it, because it always writes the intended state last.
 
 *Close*: `Dispose` writes every change made in the window, after any write still running, with one bounded wait
 (`SettingsFlushTimeout`). It first takes the decision of every confirmed save still running (`TryDecide`): what becomes
@@ -304,12 +313,15 @@ that was not adopted - and starts its own write on a worker thread (`WriteSettin
   its change applied to the snapshot (`ApplyTo`); each one whose write failed is left out - nobody is left to offer
   Retry, so it is discarded, as Discard would, while everything else is kept - and a warning names it
   (`Description`) with the reason.
-- When a change was deferred, the snapshot is then written with a confirmed save of the writer
-  (`SaveNowAsync`), asked for only now that the confirmed writes it waited for have ended; the writer makes one write
-  at a time in the order asked, so the snapshot is written after them (and after a scheduled write that was waiting for
-  its turn), and drops an older waiting snapshot once written. Otherwise the live settings were handed to the writer
-  already and what is waiting is flushed. The close's write is therefore never written before an older confirmed
-  write, and that older write can never follow it and take the changes made meanwhile out of the file again.
+- The composed snapshot - the full intended state - is then always written, once, as the last write: with a
+  confirmed save of the writer (`SaveNowAsync`), asked for only now that the confirmed writes it waited for have
+  ended. The writer makes one write at a time in the order asked, so the snapshot is written after them (and after a
+  scheduled write that was waiting for its turn), and drops an older waiting snapshot once written. Nothing decides
+  whether the close needs to write: overlapping confirmed saves (an add and the Settings window's Save that run
+  together each wrote a candidate built without the other's change, so the later write took the earlier change out of
+  the file), a change held back while a confirmed save ran and a change still waiting for the debounce are all set
+  right by the one write of the intended state. The close's write is therefore never written before an older
+  confirmed write, and that older write can never follow it and take a change out of the file again.
 - What could not be written is logged as the difference between `_lastWrittenSettings` and what should be on disk
   (repos added and removed, the changed fields of each repo, the repo order, the collapsed sections, the group colors
   and order, the Settings window's values). The writer is disposed when the close's write has ended.

@@ -99,6 +99,8 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 - No change made in the window before it closes is lost to a confirmed write still running at the close, even when
   that write outlasts the close's wait: the close's write follows that write, never precedes it, and holds the change
   made meanwhile together with the confirmed change when its write succeeded, or without it when its write failed.
+- Overlapping confirmed saves at the close (an add and the Settings window's settings) leave the file with the change
+  of each one whose write succeeded and without the change of each one whose write failed.
 
 #### Test Scenarios
 
@@ -713,6 +715,18 @@ add write never follows the close's snapshot. This scenario is tested by
 
 Each of these three tests fails against the earlier close, which left the change made meanwhile out when the add's
 write was still running after the wait.
+
+**MainWindowViewModel_Dispose_OverlappingConfirmedSaves_FileHoldsEachSucceededChange**: On the headless UI thread, with
+a close that does not wait and each write held at a `TaskCompletionSource` of its own, an add is started and its write
+held, the Settings window's settings (a Git executable) are saved behind it with no other change made, and the view
+model is disposed; both writes are then released and the close's write is awaited. When both succeed, the settings
+file holds the added repo and the Git executable (the Settings window's candidate was built without the add, so only
+the close's write holds both); when only the add succeeds it holds the repo and no Git executable; when only the
+Settings window's write succeeds it holds the Git executable and not the repo. This scenario is tested by
+`MainWindowViewModel_Dispose_OverlappingAddAndSettingsSaves_FileHoldsEachChangeThatSucceeded` (one case per outcome),
+covering `AgentControl-MainWindowViewModel-SettingsFlushedOnClose`; its both-succeed case fails against the close of
+1b7b30f, which wrote its composed snapshot only when a change was deferred. Together with the tests above it shows
+the close always writes the full intended state, once, as the last write.
 
 **MainWindowViewModel_Dispose_ConfirmedSaveEndsAfterTheClose_ChangesNothing**: On the headless UI thread, writes are
 held at a gate. An add is started and its save is held; a favorite is marked meanwhile; the gate is opened and the view

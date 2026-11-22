@@ -9,7 +9,7 @@ full disk, so every test controls exactly when each write happens and none depen
 apart by its git executable path. Every writer is created with no synchronization context current, so a failure is
 reported on the writing thread before the write's turn ends and a flush that follows has seen it. One test writes
 through the real `SettingsStore.Save` into a temporary directory, on a thread that refuses blocking calls
-(`BlockingCallGuard`), to show that neither scheduling nor the bounded flush makes a blocking call on the caller's
+(`BlockingCallGuard`), to show that neither scheduling nor starting a flush makes a blocking call on the caller's
 thread.
 
 The window's close relies on two of these guarantees - a confirmed save asked for after the writes it waits for have
@@ -36,9 +36,8 @@ removes it.
 - Background writes that fail in a row are reported once, with the reason; a write that succeeds ends the streak, and
   the next failure is reported again; the failed snapshot is kept until a write succeeds and is written by the next
   flush.
-- A flush writes the waiting snapshot at once and it is not written again later; the bounded flush returns false while
-  a write is held and the next flush true once it can complete.
-- Scheduling and the bounded flush on a guarded thread record no blocking call, and the real settings file is written.
+- A flush writes the waiting snapshot at once and it is not written again later.
+- Scheduling and starting a flush on a guarded thread record no blocking call, and the real settings file is written.
 - A missing save delegate and a negative delay are refused.
 
 #### Test Scenarios
@@ -81,13 +80,9 @@ writing works again the next flush returns true and writes the kept snapshot, co
 **SettingsWriter_FlushAsync_WritesWaitingSnapshotNow**: A flush writes a waiting snapshot before its delay, and the
 delay passing afterwards writes nothing more, covering `AgentControl-SettingsWriter-Flush`.
 
-**SettingsWriter_Flush_Timeout_ReturnsFalseWhenWriteHeld**: A bounded flush that does not wait returns false while the
-write is held; once the gate opens the next flush returns true and the snapshot was written once, covering
-`AgentControl-SettingsWriter-Flush`.
-
 **SettingsWriter_ScheduleAndFlushOnGuardedThread_WritesWithoutBlockingCall**: On a thread guarded against blocking
-calls, a snapshot is scheduled and flushed with a bounded wait over the real `SettingsStore.Save`: no blocking call is
-recorded, the flush returns true and the settings file holds the snapshot, covering
+calls, a snapshot is scheduled and a flush started over the real `SettingsStore.Save`: no blocking call is recorded on
+that thread, the flush returns true and the settings file holds the snapshot, covering
 `AgentControl-SettingsWriter-Serialize` and `AgentControl-SettingsWriter-Flush`.
 
 **SettingsWriter_Constructor_InvalidArguments_Throw**: A null save delegate and a negative delay are refused (a

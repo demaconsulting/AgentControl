@@ -60,7 +60,7 @@ in the application.
 
 **SettingsWriter**: Writes settings snapshots in the background.
 
-- *Type*: In-process .NET class (`Schedule`, `SaveNowAsync`, `FlushAsync`, `Flush(TimeSpan)`, `HasUnsavedChanges`,
+- *Type*: In-process .NET class (`Schedule`, `SaveNowAsync`, `FlushAsync`, `HasUnsavedChanges`,
   the `WriteFailed` event).
 - *Role*: Provider.
 - *Contract*: `Schedule` accepts a snapshot at once and writes the newest one once no newer one came for the debounce
@@ -68,8 +68,8 @@ in the application.
   (`AgentControl-SettingsWriter-Serialize`); `SaveNowAsync` is a confirmed write that tells its caller whether it
   reached the disk, dropping an older waiting snapshot only when it did (`AgentControl-SettingsWriter-ConfirmedSave`); a
   background write that fails is reported once per failure streak and its snapshot is kept for the next write
-  (`AgentControl-SettingsWriter-FailureReportedOnce`); `FlushAsync` writes what is waiting at once and `Flush` does so
-  with a bounded wait (`AgentControl-SettingsWriter-Flush`).
+  (`AgentControl-SettingsWriter-FailureReportedOnce`); `FlushAsync` writes what is waiting at once and tells whether it
+  was written (`AgentControl-SettingsWriter-Flush`).
 - *Constraints*: The snapshots must be copies nobody changes any more (`AppSettings.CreateSnapshot`). `WriteFailed` is
   posted to the synchronization context current when the writer was created.
 

@@ -361,7 +361,10 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <summary>
     ///     Whether the live settings hold something that has to be written once the confirmed saves
     ///     that are running have ended: a change made while they ran, or a confirmed save that ended
-    ///     while another one still ran (see <see cref="SaveConfirmedAsync"/>).
+    ///     while another one still ran (see <see cref="SaveConfirmedAsync"/>). Used only while the
+    ///     window is open, so that a confirmed save with no other change costs one write; the close
+    ///     never reads it, because it always writes the intended state last (see
+    ///     <see cref="Dispose"/>).
     /// </summary>
     private bool _saveDeferred;
 
@@ -2622,9 +2625,12 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     settings - holding every change made in the window, those made while a confirmed save ran
     ///     included - with the change of each confirmed save whose write succeeded; one whose write
     ///     failed is left out (there is nobody left to offer Retry, so it is discarded, as Discard
-    ///     would) and logged. Writes stay one at a time and in order, so the close's snapshot is
-    ///     never written before a confirmed write it waits for, and that older write can never
-    ///     follow it and take the changes made meanwhile out of the file again.
+    ///     would) and logged. That snapshot - the full intended state - is always written, once, as
+    ///     the last write, so two overlapping confirmed saves (an add and the Settings window's Save)
+    ///     both end up on disk although each one's candidate lacked the other's change, and a change
+    ///     held back or still waiting is never left behind. Writes stay one at a time and in order,
+    ///     so the close's snapshot is never written before a confirmed write it waits for, and that
+    ///     older write can never follow it and take a change out of the file again.
     ///     </para>
     ///     <para>
     ///     The calling thread waits for that write at most <see cref="SettingsFlushTimeout"/> in all
@@ -2686,12 +2692,11 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _refreshProgress = null;
 
         // The live settings hold every change made in the window and no change of a confirmed save that
-        // was not adopted; taken here, on the UI thread, and written by the worker after the confirmed
-        // writes still running have ended
+        // was not adopted; taken here, on the UI thread, and always written by the worker as the last
+        // write, after the confirmed writes still running have ended, with the change of each one that
+        // succeeded
         var atClose = _settings.CreateSnapshot();
-        var writeAtClose = _saveDeferred;
-        _saveDeferred = false;
-        var closeWrite = Task.Run(() => WriteSettingsAtCloseAsync(pending, atClose, writeAtClose), CancellationToken.None);
+        var closeWrite = Task.Run(() => WriteSettingsAtCloseAsync(pending, atClose), CancellationToken.None);
         CloseSettingsWrite = closeWrite;
         if (WaitQuietly(closeWrite, _settingsFlushTimeout))
         {
@@ -2726,23 +2731,24 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     ///     The close's write of the settings, on a worker thread: waits for the confirmed writes still
-    ///     running, then writes the settings with the change of each one that succeeded (see
+    ///     running, then always writes the settings with the change of each one that succeeded (see
     ///     <see cref="Dispose"/>), and finally disposes the settings writer.
     /// </summary>
     /// <remarks>
-    ///     The snapshot is written with a confirmed save of the writer, asked for only once every
-    ///     confirmed write it waits for has ended, so it is written after them (and after a scheduled
-    ///     write that was waiting for its turn), and a waiting snapshot older than it is dropped. With
-    ///     no change made while a confirmed save ran, the live settings were handed to the writer
-    ///     already, and what is waiting is flushed instead. What could not be written is logged.
+    ///     The composed snapshot is the full intended state: every change made in the window (those
+    ///     held back while a confirmed save ran included) and every confirmed change that reached the
+    ///     disk. It is written with a confirmed save of the writer, asked for only once every confirmed
+    ///     write it waits for has ended, so it is always the last write: after them (and after a
+    ///     scheduled write that was waiting for its turn), with an older waiting snapshot dropped.
+    ///     Nothing decides whether it is needed: overlapping confirmed saves each wrote a candidate
+    ///     without the other's change, and a change may be waiting or held back, so writing the
+    ///     intended state once, last, is what leaves the file right in every case. What could not be
+    ///     written is logged.
     /// </remarks>
     /// <param name="pending">The confirmed saves the close decided, oldest first.</param>
     /// <param name="atClose">A snapshot of the live settings at the close; changed here.</param>
-    /// <param name="writeAtClose">Whether <paramref name="atClose"/> holds changes that were not
-    ///     handed to the writer because a confirmed save was running.</param>
     /// <returns><see langword="true"/> when everything was written. Never faults.</returns>
-    private async Task<bool> WriteSettingsAtCloseAsync(
-        RunningConfirmedSave[] pending, AppSettings atClose, bool writeAtClose)
+    private async Task<bool> WriteSettingsAtCloseAsync(RunningConfirmedSave[] pending, AppSettings atClose)
     {
         try
         {
@@ -2765,23 +2771,17 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 }
             }
 
+            // The intended state, always, as the last write
             var written = true;
-            if (writeAtClose)
+            try
             {
-                try
-                {
-                    await _settingsWriter.SaveNowAsync(intended).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    // Whatever the save threw, the snapshot is not on disk
-                    Logger.LogWarning(ex, "The settings could not be written when the window closed");
-                    written = false;
-                }
+                await _settingsWriter.SaveNowAsync(intended).ConfigureAwait(false);
             }
-            else
+            catch (Exception ex)
             {
-                written = await _settingsWriter.FlushAsync().ConfigureAwait(false);
+                // Whatever the save threw, the snapshot is not on disk
+                Logger.LogWarning(ex, "The settings could not be written when the window closed");
+                written = false;
             }
 
             if (!written)

@@ -913,8 +913,10 @@ sections:
           in the window that is not written yet, the write running off the closing thread with a
           bounded wait; when a confirmed save (an add, the Settings window's settings) is still running
           at the close, it shall write those changes after that save's write has ended - together with
-          that save's change when its write succeeded and without it when its write failed - even when
-          that write ends after the wait, and shall never write them before that write. A confirmed save
+          the change of every such save whose write succeeded, overlapping saves included, and without
+          the change of each one whose write failed - even when that write ends after the wait, and
+          shall never write them before that write; its own write of the intended state shall always be
+          the last write. A confirmed save
           that ends after the close shall change nothing of the closed view model.
         justification: |
           Changes made before closing must be kept, and the close must neither hang on a busy file nor
@@ -931,6 +933,7 @@ sections:
           - MainWindowViewModel_Dispose_AddWriteRunningPastTheWait_ChangeWrittenAfterTheAdd
           - MainWindowViewModel_Dispose_AddWriteFailsDuringTheClose_ChangeWrittenWithoutTheAdd
           - MainWindowViewModel_Dispose_AddWriteHeld_CloseWriteIsTheLastWrite
+          - MainWindowViewModel_Dispose_OverlappingAddAndSettingsSaves_FileHoldsEachChangeThatSucceeded
           - MainWindowViewModel_Dispose_WhileAddSaving_AddCompletionChangesNothingAfterTheClose
           - MainWindowViewModel_Dispose_WhileSettingsSaving_SettingsCompletionAdoptsNothingAfterTheClose
 
