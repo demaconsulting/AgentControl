@@ -320,19 +320,21 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
     [Fact]
     public async Task MainWindowViewModel_SetGroupColorSaveFails_KeptAndReported()
     {
-        // Arrange
+        // Arrange: a group color that differs from the tile's automatic (path-hashed) color, so the
+        // change is visible whatever the temporary path hashes to
         var fixture = CreateFixture(("alpha", "Work"), ("beta", null));
         var alpha = fixture.Card("alpha");
         var tileBefore = alpha.AvatarStyleClass;
+        var groupColor = CardColorPalette.All.First(color => color.Index != alpha.AvatarColorIndex).Name;
         fixture.Saving.Fail = true;
 
         // Act
-        var colored = fixture.ViewModel.SetGroupColor("Work", "Teal");
+        var colored = fixture.ViewModel.SetGroupColor("Work", groupColor);
         await fixture.ViewModel.FlushSettingsAsync();
 
         // Assert
         Assert.True(colored);
-        Assert.Equal("Teal", fixture.ViewModel.Settings.FindGroupColor("Work"));
+        Assert.Equal(groupColor, fixture.ViewModel.Settings.FindGroupColor("Work"));
         Assert.NotEqual(tileBefore, alpha.AvatarStyleClass);
         Assert.True(fixture.ViewModel.DisplayedItems.OfType<RepoGroupHeaderViewModel>().Single(header => header.Name == "Work").HasColor);
         Assert.Single(fixture.Failures);
