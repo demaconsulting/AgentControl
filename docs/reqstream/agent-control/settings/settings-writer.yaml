@@ -66,13 +66,11 @@ sections:
       - id: AgentControl-SettingsWriter-Flush
         title: >-
           The SettingsWriter class shall write the snapshot that is waiting at once when asked,
-          without waiting for its delay, and shall offer a flush with a bounded wait that tells
-          whether everything was written in time.
+          without waiting for its delay, and shall tell whether it was written.
         justification: |
-          When the window closes, a change made a moment before must still reach the file, and the
-          close must not hang on a file that stays locked.
+          When the window closes, a change made a moment before must still reach the file without
+          waiting for the delay, and what could not be written must be known so it can be logged.
         tests:
           - SettingsWriter_FlushAsync_WritesWaitingSnapshotNow
-          - SettingsWriter_Flush_Timeout_ReturnsFalseWhenWriteHeld
           - SettingsWriter_FailedWrite_KeptAndWrittenByNextFlush
           - SettingsWriter_ScheduleAndFlushOnGuardedThread_WritesWithoutBlockingCall

@@ -71,7 +71,7 @@ internal sealed class SettingsWriter : IDisposable
     /// <remarks>
     ///     Long enough to fold a burst of clicks or a drag (several changes in quick succession) into
     ///     one write, short enough that a change is on disk well before the user could close the
-    ///     window and expect it kept; the close flushes anyway.
+    ///     window and expect it kept; the close writes what is left anyway.
     /// </remarks>
     internal static readonly TimeSpan DefaultDelay = TimeSpan.FromMilliseconds(300);
 
@@ -320,26 +320,10 @@ internal sealed class SettingsWriter : IDisposable
         return await WriteWaitingAsync().ConfigureAwait(false);
     }
 
-    /// <summary>
-    ///     Flushes (see <see cref="FlushAsync"/>) and waits for it at most <paramref name="timeout"/>;
-    ///     for the window closing, when nothing is left to come back to.
-    /// </summary>
-    /// <remarks>
-    ///     The calling thread only waits: the write runs on a thread-pool thread and never needs the
-    ///     calling thread, so waiting on the UI thread cannot deadlock.
-    /// </remarks>
-    /// <param name="timeout">The longest wait; <see cref="TimeSpan.Zero"/> does not wait.</param>
-    /// <returns><see langword="true"/> when everything was written in time; <see langword="false"/>
-    ///     when the time ran out or the write failed.</returns>
-    public bool Flush(TimeSpan timeout)
-    {
-        var flush = Task.Run(FlushAsync);
-        return flush.Wait(timeout) && flush.Result;
-    }
 
     /// <summary>
     ///     Stops the debounce timer and ignores later <see cref="Schedule"/> calls; a write in
-    ///     progress completes. Flush first to write what is waiting.
+    ///     progress completes. Write what is waiting first (a flush or a confirmed save).
     /// </summary>
     public void Dispose()
     {

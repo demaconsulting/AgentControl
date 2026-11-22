@@ -12,10 +12,13 @@ background card refresh after a settings save are verified through the view mode
 timing: `backgroundWork` takes a `GatedBackgroundWorkRunner` (a test helper that counts every piece of work and holds it
 until the test releases it), so a test asserts what holds while the folders are still being checked - the add has
 returned to its caller, nothing is added, the global progress shows the count - and `saveSettings` takes a delegate that
-counts saves, can hold them at a gate and can fail on demand, so "one save per batch", Cancel, Retry, Discard and a
-change made while a save is held are deterministic. Every save runs through the view model's background settings writer
+counts saves, can hold them at a gate (or one write at a `TaskCompletionSource` of its own, released to succeed or to
+fail), records every write's start and end in order, and can fail on demand, so "one save per batch", Cancel, Retry,
+Discard, a change made while a save is held and the order of the close's write are deterministic. Every save runs
+through the view model's background settings writer
 on a worker thread, so a test that reads the settings file after a change first awaits `FlushSettingsAsync` (which
-writes what is waiting and completes when the writes have ended), and the persistence tests create their view model with
+writes what is waiting and completes when the writes have ended), or, after a close that did not wait,
+`CloseSettingsWrite`, and the persistence tests create their view model with
 no synchronization context current, so a failed background write is reported before that flush completes; two of them
 use a `FakeTimeProvider` so a change stays waiting until the test flushes. Tests that apply settings or add in the
 background await `PendingRefresh`, the apply's task or the add's task before asserting. Each test constructs a real
@@ -93,6 +96,11 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
   decided once, by the close, and changes nothing of the closed view model when it ends afterwards: no card is built,
   the live settings are not replaced and the theme is not applied; the file holds its change exactly when its write
   succeeded.
+- No change made in the window before it closes is lost to a confirmed write still running at the close, even when
+  that write outlasts the close's wait: the close's write follows that write, never precedes it, and holds the change
+  made meanwhile together with the confirmed change when its write succeeded, or without it when its write failed.
+- Overlapping confirmed saves at the close (an add and the Settings window's settings) leave the file with the change
+  of each one whose write succeeded and without the change of each one whose write failed.
 
 #### Test Scenarios
 
@@ -680,13 +688,45 @@ and the favorite. This scenario is tested by
 `MainWindowViewModel_Dispose_WhileAddSavingAfterAnotherChange_WritesAddAndChange`, covering
 `AgentControl-MainWindowViewModel-SettingsFlushedOnClose`.
 
-**MainWindowViewModel_Dispose_AddWriteStillRunning_AddNotOverwritten**: On the headless UI thread, with a close that
-does not wait and writes held at a gate, an add is started and its save is held; a favorite is marked meanwhile
-(deferred while the add saves); a flush is asked for (it waits for its turn behind the held write); the view model is
-disposed while the write is still held, and only then is the gate opened. Once the flush has ended, exactly one write
-(the add's) has run and the settings file holds both repos, the added one included: the close wrote nothing over the
-add. This scenario is tested by `MainWindowViewModel_Dispose_AddWriteStillRunningAfterTheWait_AddNotOverwritten`,
-covering `AgentControl-MainWindowViewModel-SettingsFlushedOnClose`.
+**MainWindowViewModel_Dispose_AddWriteRunningPastTheWait_ChangeWrittenAfterTheAdd**: On the headless UI thread, with
+a close that does not wait and the add's write held at a `TaskCompletionSource` of its own, an add is started and its
+write is held; a favorite is marked meanwhile (deferred while the add saves); the view model is disposed while the
+write is still held (the close returns at once), then the write is let through and the close's write
+(`CloseSettingsWrite`) is awaited: it reports everything written, exactly two writes ran (the add's and the close's)
+and the settings file holds both repos, the added one included, and the favorite. This scenario is tested by
+`MainWindowViewModel_Dispose_AddWriteRunningPastTheWait_ChangeWrittenAfterTheAdd`, covering
+`AgentControl-MainWindowViewModel-SettingsFlushedOnClose`.
+
+**MainWindowViewModel_Dispose_AddWriteFailsDuringTheClose_ChangeWrittenWithoutTheAdd**: As above, but the held add
+write is made to fail after the view model was disposed, while the close's write waits for it: the close's write
+reports everything written, it is the only write that succeeded, the settings file holds the one repo with the
+favorite and not the added repo, and the closed view model shows no card for it - the add was discarded, the change
+made meanwhile kept. This scenario is tested by
+`MainWindowViewModel_Dispose_AddWriteFailsDuringTheClose_ChangeWrittenWithoutTheAdd`, covering
+`AgentControl-MainWindowViewModel-SettingsFlushedOnClose`.
+
+**MainWindowViewModel_Dispose_AddWriteHeld_CloseWriteIsTheLastWrite**: As above, with every write's start and end
+recorded in order: while the add's write is held after the close, it is the only write that started; once it is let
+through and the close's write has ended, the record is the add's write starting and ending, then the close's write
+starting and ending - the add's write holds the added repo without the favorite, the close's holds both - so the older
+add write never follows the close's snapshot. This scenario is tested by
+`MainWindowViewModel_Dispose_AddWriteHeld_CloseWriteIsTheLastWrite`, covering
+`AgentControl-MainWindowViewModel-SettingsFlushedOnClose`.
+
+Each of these three tests fails against the earlier close, which left the change made meanwhile out when the add's
+write was still running after the wait.
+
+**MainWindowViewModel_Dispose_OverlappingConfirmedSaves_FileHoldsEachSucceededChange**: On the headless UI thread, with
+a close that does not wait and each write held at a `TaskCompletionSource` of its own, an add is started and its write
+held, the Settings window's settings (a Git executable) are saved behind it with no other change made, and the view
+model is disposed; both writes are then released and the close's write is awaited. When both succeed, the settings
+file holds the added repo and the Git executable (the Settings window's candidate was built without the add, so only
+the close's write holds both); when only the add succeeds it holds the repo and no Git executable; when only the
+Settings window's write succeeds it holds the Git executable and not the repo. This scenario is tested by
+`MainWindowViewModel_Dispose_OverlappingAddAndSettingsSaves_FileHoldsEachChangeThatSucceeded` (one case per outcome),
+covering `AgentControl-MainWindowViewModel-SettingsFlushedOnClose`; its both-succeed case fails against the close of
+1b7b30f, which wrote its composed snapshot only when a change was deferred. Together with the tests above it shows
+the close always writes the full intended state, once, as the last write.
 
 **MainWindowViewModel_Dispose_ConfirmedSaveEndsAfterTheClose_ChangesNothing**: On the headless UI thread, writes are
 held at a gate. An add is started and its save is held; a favorite is marked meanwhile; the gate is opened and the view

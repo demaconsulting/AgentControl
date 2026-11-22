@@ -19,7 +19,7 @@
 // SOFTWARE.
 
 using System.Collections.ObjectModel;
-using System.Diagnostics;
+using System.Text.Json;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.AgentToolLauncher;
 using DemaConsulting.AgentControl.GitIntegration;
@@ -320,7 +320,10 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <remarks>
     ///     A write normally takes milliseconds; a file locked by another process is given up after
     ///     about a second (see <see cref="SettingsStore.ReplaceMaxAttempts"/>). Five seconds covers a
-    ///     slow disk without keeping a closed window's process alive for long.
+    ///     confirmed write that is still running at the close and the close's own write after it, each
+    ///     on a held file, without keeping a closed window's process alive for long. A write still
+    ///     running after it means the disk itself is not answering, which waiting longer does not
+    ///     cure.
     /// </remarks>
     internal static readonly TimeSpan SettingsFlushTimeout = TimeSpan.FromSeconds(5);
 
@@ -339,26 +342,38 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly SettingsWriter _settingsWriter;
 
     /// <summary>
+    ///     The last settings snapshot <see cref="_settingsWriter"/> wrote, or the settings as they were
+    ///     when the view model was created while nothing was written yet: what the settings file is
+    ///     known to hold, against which the close logs what it could not write (see
+    ///     <see cref="Dispose"/>). Set on the writing thread, read with <see cref="Volatile"/>.
+    /// </summary>
+    private AppSettings _lastWrittenSettings;
+
+    /// <summary>
     ///     The confirmed saves (an add, the Settings window's Save) that are running, oldest first; while
     ///     any is, a change made in the window is not handed to <see cref="_settingsWriter"/> but
     ///     remembered in <see cref="_saveDeferred"/> (see <see cref="ScheduleSettingsSave"/>). The close
-    ///     (see <see cref="Dispose"/>) waits for their writes and writes their changes together with the
-    ///     changes made meanwhile.
+    ///     (see <see cref="Dispose"/>) writes the changes made meanwhile after their writes have ended,
+    ///     together with the change of each one whose write succeeded.
     /// </summary>
     private readonly List<RunningConfirmedSave> _runningConfirmedSaves = [];
 
     /// <summary>
     ///     Whether the live settings hold something that has to be written once the confirmed saves
     ///     that are running have ended: a change made while they ran, or a confirmed save that ended
-    ///     while another one still ran (see <see cref="SaveConfirmedAsync"/>).
+    ///     while another one still ran (see <see cref="SaveConfirmedAsync"/>). Used only while the
+    ///     window is open, so that a confirmed save with no other change costs one write; the close
+    ///     never reads it, because it always writes the intended state last (see
+    ///     <see cref="Dispose"/>).
     /// </summary>
     private bool _saveDeferred;
 
     /// <summary>
     ///     Logs what cannot be shown once the window has closed (settings that could not be written
-    ///     at the close).
+    ///     at the close), through a <see cref="SecretRedactingLogger"/>, so a failure logged with its
+    ///     exception carries no secret.
     /// </summary>
-    private static readonly ILogger Logger = AppLogging.Factory.CreateLogger<MainWindowViewModel>();
+    private static readonly ILogger Logger = new SecretRedactingLogger(AppLogging.Factory.CreateLogger<MainWindowViewModel>());
 
     /// <summary>
     ///     Runs the blocking reads of adds and refreshes off the UI thread; see the constructor.
@@ -628,8 +643,17 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _gitTimeouts = gitTimeouts;
         _applyTheme = applyTheme;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        var save = saveSettings ?? (snapshot => SettingsStore.Save(snapshot, configDirectory));
+        _lastWrittenSettings = settings.CreateSnapshot();
         _settingsWriter = new SettingsWriter(
-            saveSettings ?? (snapshot => SettingsStore.Save(snapshot, configDirectory)), _timeProvider, settingsWriteDelay);
+            snapshot =>
+            {
+                // The writer makes one write at a time, so the last one that succeeded is the file
+                save(snapshot);
+                Volatile.Write(ref _lastWrittenSettings, snapshot);
+            },
+            _timeProvider,
+            settingsWriteDelay);
         _settingsWriter.WriteFailed += OnSettingsWriteFailed;
         _upgradeRecheckInterval = upgradeRecheckInterval ?? DefaultUpgradeRecheckInterval;
         _packageVersionCache = new PackageVersionCache(_timeProvider);
@@ -1480,7 +1504,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private Task ApplyAddCommitAsync(AddBatchCommit commit) =>
         commit.Steps.Count == 0
             ? Task.CompletedTask
-            : SaveConfirmedAsync(settings => ApplyAddChange(settings, commit), () => AdoptAddCommit(commit));
+            : SaveConfirmedAsync(
+                settings => ApplyAddChange(settings, commit), () => AdoptAddCommit(commit), commit.Describe());
 
     /// <summary>
     ///     Carries out a prepared add synchronously, for the synchronous adds (<see cref="AddRepos"/>,
@@ -1502,6 +1527,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        // A closed window saves nothing more: a write now could follow the close's own write
+        ObjectDisposedException.ThrowIf(_disposed, this);
         _settingsWriter.SaveNowAsync(CreateAddCandidate(commit)).GetAwaiter().GetResult();
         AdoptAddCommit(commit);
 
@@ -1735,6 +1762,32 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ? new AddRepoOutcome(outcome.Path, AddRepoResult.SaveFailed, problem)
                 : outcome)
         ];
+
+        /// <summary>
+        ///     Describes what the add changes, for the log of a close that could not save it.
+        /// </summary>
+        /// <remarks>
+        ///     Reads the moved cards' paths, so it is called on the UI thread.
+        /// </remarks>
+        /// <returns>The repos it adds and moves, and the group it puts them in.</returns>
+        public string Describe()
+        {
+            var added = Steps.Where(step => step.NewRepo is not null).Select(step => step.NewRepo!.Path).ToList();
+            var moved = Steps.Where(step => step.MovedCard is not null).Select(step => step.MovedCard!.RepoPath).ToList();
+            var parts = new List<string>();
+            if (added.Count > 0)
+            {
+                parts.Add("adding " + string.Join(", ", added));
+            }
+
+            if (moved.Count > 0)
+            {
+                parts.Add("moving " + string.Join(", ", moved));
+            }
+
+            var group = Target is null ? string.Empty : $" into group '{Target}'";
+            return $"the add ({string.Join(" and ", parts)}){group}";
+        }
     }
 
     /// <summary>
@@ -2053,7 +2106,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // now, as a snapshot the writer can write while the window keeps running. Written in the
         // background; adopted only once it is on disk, so a failed write (thrown through the task)
         // leaves the live settings as they were and a later save can never write the rejected values
-        return SaveConfirmedAsync(settings => WithOrganizingFrom(updated, settings), () => AdoptSettings(updated));
+        return SaveConfirmedAsync(
+            settings => WithOrganizingFrom(updated, settings), () => AdoptSettings(updated), "the Settings window's settings");
     }
 
     /// <summary>
@@ -2564,21 +2618,35 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     writes the settings that are not written yet; called when the main window closes.
     /// </summary>
     /// <remarks>
-    ///     The settings are written by the background writer on a worker thread; the calling thread
-    ///     waits for it at most <see cref="SettingsFlushTimeout"/> in all. When a confirmed save (an
-    ///     add, the Settings window's Save) is still running and changes were made meanwhile, that wait
-    ///     first covers the confirmed write: the changes made meanwhile are then written together with
-    ///     the confirmed save's change once it was written (a confirmed save that failed is left out,
-    ///     so nothing that was not saved is written). When a confirmed write is still running after
-    ///     the whole wait, the changes made meanwhile are not written at all (and that is logged): a
-    ///     snapshot written after that write would not hold its change and would take it out of the
-    ///     file again. That is the one wait for the disk left on the UI thread, and it comes after the
-    ///     window has closed, so no interaction is held up; the writes never need the UI thread, so the
-    ///     wait cannot deadlock. Settings that could not be written in time are logged, because nobody
-    ///     can be told any more. Every confirmed save still running at the close is decided by the
-    ///     close, once (see <see cref="SaveConfirmedAsync"/>): when it ends afterwards it adopts
-    ///     nothing, so the closed view model's settings, cards and list are not changed and no refresh
-    ///     is started; its change is on disk exactly when its write succeeded.
+    ///     <para>
+    ///     The settings are written on a worker thread, after every write that is still running, by
+    ///     the close's own write (see <see cref="WriteSettingsAtCloseAsync"/>): it first waits for the
+    ///     confirmed saves (an add, the Settings window's Save) still running, then writes the live
+    ///     settings - holding every change made in the window, those made while a confirmed save ran
+    ///     included - with the change of each confirmed save whose write succeeded; one whose write
+    ///     failed is left out (there is nobody left to offer Retry, so it is discarded, as Discard
+    ///     would) and logged. That snapshot - the full intended state - is always written, once, as
+    ///     the last write, so two overlapping confirmed saves (an add and the Settings window's Save)
+    ///     both end up on disk although each one's candidate lacked the other's change, and a change
+    ///     held back or still waiting is never left behind. Writes stay one at a time and in order,
+    ///     so the close's snapshot is never written before a confirmed write it waits for, and that
+    ///     older write can never follow it and take a change out of the file again.
+    ///     </para>
+    ///     <para>
+    ///     The calling thread waits for that write at most <see cref="SettingsFlushTimeout"/> in all
+    ///     (the one wait for the disk left on the UI thread; it comes after the window has closed, and
+    ///     the writes never need the UI thread, so it cannot deadlock). When the time runs out the
+    ///     close returns anyway, so the process can exit: the close's write stays queued behind the
+    ///     write that is still running and still happens if the process lives that long, and what is
+    ///     not on disk yet - and is lost if the process ends first - is logged, because nobody can be
+    ///     told any more; so is a close's write that failed.
+    ///     </para>
+    ///     <para>
+    ///     Every confirmed save still running at the close is decided by the close, once (see
+    ///     <see cref="SaveConfirmedAsync"/>): when it ends afterwards it adopts nothing, so the closed
+    ///     view model's settings, cards and list are not changed and no refresh is started; its
+    ///     change is on disk exactly when its write succeeded.
+    ///     </para>
     /// </remarks>
     public void Dispose()
     {
@@ -2590,9 +2658,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _disposed = true;
 
         // Every confirmed save still running is decided by the close, here and once: its own completion
-        // then adopts nothing into the closed view model (see SaveConfirmedAsync). Those whose write has
-        // succeeded by the time the close writes are written with its snapshot below; the others are
-        // left to their own write.
+        // then adopts nothing into the closed view model (see SaveConfirmedAsync). The close's write
+        // adds the change of those whose write succeeds and leaves out those whose write fails.
         var pending = _runningConfirmedSaves.Where(save => save.TryDecide()).ToArray();
         _runningConfirmedSaves.Clear();
 
@@ -2624,51 +2691,259 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _refreshProgress?.Dispose();
         _refreshProgress = null;
 
-        // The settings changes made while a confirmed save still runs are written now, together with
-        // the change of every confirmed save whose write succeeded meanwhile (the close decided those
-        // saves above, so their own completion adopts nothing), then everything waiting is written -
-        // all within one bounded wait
-        var started = Stopwatch.GetTimestamp();
-        if (_saveDeferred)
+        // The live settings hold every change made in the window and no change of a confirmed save that
+        // was not adopted; taken here, on the UI thread, and always written by the worker as the last
+        // write, after the confirmed writes still running have ended, with the change of each one that
+        // succeeded
+        var atClose = _settings.CreateSnapshot();
+        var closeWrite = Task.Run(() => WriteSettingsAtCloseAsync(pending, atClose), CancellationToken.None);
+        CloseSettingsWrite = closeWrite;
+        if (WaitQuietly(closeWrite, _settingsFlushTimeout))
         {
-            _saveDeferred = false;
-            if (pending.Length > 0)
-            {
-                WaitQuietly(Task.WhenAll(pending.Select(save => save.Write)), _settingsFlushTimeout);
-            }
+            return;
+        }
 
-            if (pending.Any(save => !save.Write.IsCompleted))
+        // Out of time: the process may end before the close's write, which still waits behind a write
+        // that is running, so say what is not on disk yet; and say so again if it is written after all
+        LogSettingsNotWrittenInTime(pending);
+        _ = closeWrite.ContinueWith(
+            write =>
             {
-                // A confirmed write is still running: a snapshot written after it would not hold its
-                // change and would take it out of the file again, so the changes made meanwhile are
-                // left out instead
-                Logger.LogWarning(
-                    "The settings changes made while a save was running were not written when the window closed, because that save had not ended");
-            }
-            else
-            {
-                var snapshot = _settings.CreateSnapshot();
-                foreach (var save in pending.Where(save => save.Write.IsCompletedSuccessfully))
+                if (write.Result)
                 {
-                    snapshot = save.ApplyTo(snapshot);
+                    Logger.LogInformation("The settings were written after the window closed, after all");
                 }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnRanToCompletion,
+            TaskScheduler.Default);
+    }
 
-                _settingsWriter.Schedule(snapshot);
+    /// <summary>
+    ///     Gets the close's write of the settings (see <see cref="Dispose"/>), or
+    ///     <see langword="null"/> before the close; a test seam for a close that did not wait for it.
+    /// </summary>
+    /// <remarks>
+    ///     Completes, never faulting, when the write has ended: <see langword="true"/> when everything
+    ///     was written.
+    /// </remarks>
+    internal Task<bool>? CloseSettingsWrite { get; private set; }
+
+    /// <summary>
+    ///     The close's write of the settings, on a worker thread: waits for the confirmed writes still
+    ///     running, then always writes the settings with the change of each one that succeeded (see
+    ///     <see cref="Dispose"/>), and finally disposes the settings writer.
+    /// </summary>
+    /// <remarks>
+    ///     The composed snapshot is the full intended state: every change made in the window (those
+    ///     held back while a confirmed save ran included) and every confirmed change that reached the
+    ///     disk. It is written with a confirmed save of the writer, asked for only once every confirmed
+    ///     write it waits for has ended, so it is always the last write: after them (and after a
+    ///     scheduled write that was waiting for its turn), with an older waiting snapshot dropped.
+    ///     Nothing decides whether it is needed: overlapping confirmed saves each wrote a candidate
+    ///     without the other's change, and a change may be waiting or held back, so writing the
+    ///     intended state once, last, is what leaves the file right in every case. What could not be
+    ///     written is logged.
+    /// </remarks>
+    /// <param name="pending">The confirmed saves the close decided, oldest first.</param>
+    /// <param name="atClose">A snapshot of the live settings at the close; changed here.</param>
+    /// <returns><see langword="true"/> when everything was written. Never faults.</returns>
+    private async Task<bool> WriteSettingsAtCloseAsync(RunningConfirmedSave[] pending, AppSettings atClose)
+    {
+        try
+        {
+            // The confirmed writes end first: the settings are written after them, never before
+            var intended = atClose;
+            foreach (var save in pending)
+            {
+                try
+                {
+                    await save.Write.ConfigureAwait(false);
+                    intended = save.ApplyTo(intended);
+                }
+                catch (Exception ex)
+                {
+                    // Whatever the write threw, the change is not on disk; nobody can be asked any more
+                    Logger.LogWarning(
+                        ex,
+                        "The settings could not be saved for {Change}, which is discarded because the window closed",
+                        save.Description);
+                }
+            }
+
+            // The intended state, always, as the last write
+            var written = true;
+            try
+            {
+                await _settingsWriter.SaveNowAsync(intended).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Whatever the save threw, the snapshot is not on disk
+                Logger.LogWarning(ex, "The settings could not be written when the window closed");
+                written = false;
+            }
+
+            if (!written)
+            {
+                Logger.LogWarning(
+                    "Settings changes lost when the window closed: {Lost}",
+                    DescribeSettingsDifference(Volatile.Read(ref _lastWrittenSettings), intended));
+            }
+
+            return written;
+        }
+        finally
+        {
+            _settingsWriter.Dispose();
+        }
+    }
+
+    /// <summary>
+    ///     Logs, when the close's wait ran out, what is not on disk yet: the confirmed saves whose
+    ///     write is still running and every change the file does not hold yet.
+    /// </summary>
+    /// <remarks>
+    ///     Runs on the UI thread, which owns the live settings; the close's write works on its own
+    ///     snapshot. The settings described assume the running confirmed writes succeed, as the
+    ///     close's write would.
+    /// </remarks>
+    /// <param name="pending">The confirmed saves the close decided.</param>
+    private void LogSettingsNotWrittenInTime(RunningConfirmedSave[] pending)
+    {
+        var intended = _settings.CreateSnapshot();
+        var running = new List<string>();
+        foreach (var save in pending.Where(save => !save.Write.IsFaulted && !save.Write.IsCanceled))
+        {
+            intended = save.ApplyTo(intended);
+            if (!save.Write.IsCompleted)
+            {
+                running.Add(save.Description);
             }
         }
 
-        var remaining = _settingsFlushTimeout - Stopwatch.GetElapsedTime(started);
-        if (remaining < TimeSpan.Zero)
+        Logger.LogWarning(
+            "The settings were not written within {Timeout} when the window closed; the close's write waits for " +
+            "the save still running ({Running}) and is lost if the application exits first. Not on disk yet: {Lost}",
+            _settingsFlushTimeout,
+            running.Count == 0 ? "none" : string.Join("; ", running),
+            DescribeSettingsDifference(Volatile.Read(ref _lastWrittenSettings), intended));
+    }
+
+    /// <summary>
+    ///     Describes how one settings state differs from another, for the log of settings that could
+    ///     not be written.
+    /// </summary>
+    /// <param name="onDisk">What the settings file holds.</param>
+    /// <param name="intended">What it should hold.</param>
+    /// <returns>Every difference - repos added and removed, the changed fields of each repo, the repo
+    ///     order, the collapsed sections, the group colors and order, and the Settings window's
+    ///     values - or "nothing".</returns>
+    private static string DescribeSettingsDifference(AppSettings onDisk, AppSettings intended)
+    {
+        var changes = new List<string>();
+        var before = new Dictionary<string, RecentRepo>(StringComparer.OrdinalIgnoreCase);
+        foreach (var repo in onDisk.RecentRepos)
         {
-            remaining = TimeSpan.Zero;
+            before.TryAdd(repo.Path, repo);
         }
 
-        if (!_settingsWriter.Flush(remaining))
+        var after = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var repo in intended.RecentRepos)
         {
-            Logger.LogWarning("The latest settings changes could not be written when the window closed");
+            after.Add(repo.Path);
+            if (!before.TryGetValue(repo.Path, out var old))
+            {
+                changes.Add($"repo {repo.Path} added");
+                continue;
+            }
+
+            var fields = new List<string>();
+            AddIfChanged(fields, "favorite", old.IsFavorite, repo.IsFavorite);
+            AddIfChanged(fields, "group", old.GroupName, repo.GroupName);
+            AddIfChanged(fields, "card color", old.CardColor, repo.CardColor);
+            AddIfChanged(fields, "last launch", old.LastLaunchedUtc, repo.LastLaunchedUtc);
+            AddIfChanged(fields, "pinned package", old.PinnedPackageName, repo.PinnedPackageName);
+            AddIfChanged(fields, "pinned version", old.PinnedPackageVersion, repo.PinnedPackageVersion);
+            AddIfChanged(fields, "package source", old.PinnedSource, repo.PinnedSource);
+            if (fields.Count > 0)
+            {
+                changes.Add($"repo {repo.Path}: {string.Join(", ", fields)}");
+            }
         }
 
-        _settingsWriter.Dispose();
+        changes.AddRange(onDisk.RecentRepos.Where(repo => !after.Contains(repo.Path)).Select(repo => $"repo {repo.Path} removed"));
+
+        // The order of the repos both hold
+        var orderBefore = onDisk.RecentRepos.Select(repo => repo.Path).Where(after.Contains);
+        var orderAfter = intended.RecentRepos.Select(repo => repo.Path).Where(before.ContainsKey);
+        if (!orderBefore.SequenceEqual(orderAfter, StringComparer.OrdinalIgnoreCase))
+        {
+            changes.Add("repo order: " + string.Join(", ", orderAfter));
+        }
+
+        if (!onDisk.CollapsedGroups.Order(StringComparer.Ordinal).SequenceEqual(intended.CollapsedGroups.Order(StringComparer.Ordinal)))
+        {
+            changes.Add($"collapsed sections: [{string.Join(", ", intended.CollapsedGroups)}]");
+        }
+
+        if (!DescribeGroupColors(onDisk).SequenceEqual(DescribeGroupColors(intended)))
+        {
+            changes.Add($"group colors: [{string.Join(", ", DescribeGroupColors(intended))}]");
+        }
+
+        if (!onDisk.GroupOrder.SequenceEqual(intended.GroupOrder))
+        {
+            changes.Add($"group order: [{string.Join(", ", intended.GroupOrder)}]");
+        }
+
+        if (!string.Equals(DescribeOtherSettings(onDisk), DescribeOtherSettings(intended), StringComparison.Ordinal))
+        {
+            changes.Add("the Settings window's settings");
+        }
+
+        return changes.Count == 0 ? "nothing" : string.Join("; ", changes);
+    }
+
+    /// <summary>
+    ///     Adds a field's change to a description when its value changed.
+    /// </summary>
+    /// <typeparam name="T">The field's type.</typeparam>
+    /// <param name="fields">The description of the changed fields.</param>
+    /// <param name="name">The field's name.</param>
+    /// <param name="before">The value on disk.</param>
+    /// <param name="after">The value that should be on disk.</param>
+    private static void AddIfChanged<T>(List<string> fields, string name, T before, T after)
+    {
+        if (!EqualityComparer<T>.Default.Equals(before, after))
+        {
+            fields.Add($"{name} {before?.ToString() ?? "none"} -> {after?.ToString() ?? "none"}");
+        }
+    }
+
+    /// <summary>
+    ///     Lists the group colors of settings in a stable order, for comparing and logging them.
+    /// </summary>
+    /// <param name="settings">The settings.</param>
+    /// <returns>One "group=color" entry per group, ordered by group.</returns>
+    private static List<string> DescribeGroupColors(AppSettings settings) =>
+        [.. settings.GroupColors.OrderBy(entry => entry.Key, StringComparer.Ordinal).Select(entry => $"{entry.Key}={entry.Value}")];
+
+    /// <summary>
+    ///     Serializes the settings the Settings window edits (everything but the repos and how they
+    ///     are organized), for telling whether they differ.
+    /// </summary>
+    /// <param name="settings">The settings.</param>
+    /// <returns>The JSON of those settings.</returns>
+    private static string DescribeOtherSettings(AppSettings settings)
+    {
+        var others = settings.CreateSnapshot();
+        others.RecentRepos = [];
+        others.HasUserRepoOrder = false;
+        others.CollapsedGroups = [];
+        others.GroupColors = new Dictionary<string, string>();
+        others.GroupOrder = [];
+        return JsonSerializer.Serialize(others);
     }
 
     /// <summary>
@@ -2864,10 +3139,17 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     change it has not adopted yet. A snapshot written while it runs would therefore not hold that
     ///     change and, written after it, would take it out of the file again until the next write. So
     ///     the snapshot is taken only after every confirmed save has ended and adopted its change (see
-    ///     <see cref="SaveConfirmedAsync"/>).
+    ///     <see cref="SaveConfirmedAsync"/>). Nothing is handed to the writer after the close: the
+    ///     close's own write (see <see cref="Dispose"/>) is the last one, and a later snapshot would
+    ///     not hold a confirmed save the close decided.
     /// </remarks>
     private void ScheduleSettingsSave()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         if (_runningConfirmedSaves.Count > 0)
         {
             _saveDeferred = true;
@@ -2890,24 +3172,31 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     settings - holding both - are scheduled to be written. A confirmed save that ends while
     ///     another one still runs schedules that write too, because the other one's candidate does not
     ///     hold it. The save is tracked in <see cref="_runningConfirmedSaves"/> until it has ended, so
-    ///     the close can write its change with the changes made meanwhile (see <see cref="Dispose"/>).
+    ///     the close can write its change with the changes made meanwhile once its write succeeded, or
+    ///     leave it out once it failed (see <see cref="Dispose"/>).
     ///     Whether the change is adopted is decided once (<see cref="RunningConfirmedSave.TryDecide"/>):
     ///     by this method when the write ends while the window is open, otherwise by the close, after
     ///     which this method adopts nothing and changes nothing of the closed view model.
     /// </remarks>
     /// <param name="applyTo">Applies the change to settings that are not the live ones and returns
     ///     the result: applied to a snapshot of the live settings it builds the candidate to write, and
-    ///     at the close it is applied to the snapshot written then.</param>
+    ///     at the close it is applied, on a worker thread, to the snapshot written then.</param>
     /// <param name="adopt">Applies the saved change to the live settings, the cards and the list.</param>
+    /// <param name="description">What the change is, for the log of a close that could not save
+    ///     it.</param>
     /// <returns>A task that completes when the candidate was written and adopted (or, when the window
     ///     closed while it was written, when it was written).</returns>
     /// <exception cref="InvalidOperationException">Thrown (through the task) when the settings file
     ///     cannot be written; nothing was adopted.</exception>
-    private async Task SaveConfirmedAsync(Func<AppSettings, AppSettings> applyTo, Action adopt)
+    /// <exception cref="ObjectDisposedException">Thrown (through the task) when the window has
+    ///     closed; nothing was written.</exception>
+    private async Task SaveConfirmedAsync(Func<AppSettings, AppSettings> applyTo, Action adopt, string description)
     {
+        // A closed window saves nothing more: a write now could follow the close's own write
+        ObjectDisposedException.ThrowIf(_disposed, this);
         var candidate = applyTo(_settings.CreateSnapshot());
         var write = _settingsWriter.SaveNowAsync(candidate);
-        var running = new RunningConfirmedSave(write, applyTo);
+        var running = new RunningConfirmedSave(write, applyTo, description);
         _runningConfirmedSaves.Add(running);
         try
         {
@@ -2970,15 +3259,17 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     /// <param name="task">The task.</param>
     /// <param name="timeout">How long to wait at most.</param>
-    private static void WaitQuietly(Task task, TimeSpan timeout)
+    /// <returns><see langword="true"/> when the task ended in time.</returns>
+    private static bool WaitQuietly(Task task, TimeSpan timeout)
     {
         try
         {
-            task.Wait(timeout);
+            return task.Wait(timeout);
         }
         catch (AggregateException)
         {
-            // A failed write is left out by the caller; nothing to report here
+            // Ended, by failing: the task logged what it could not do
+            return true;
         }
     }
 
@@ -2993,7 +3284,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </remarks>
     /// <param name="write">The confirmed write of the background settings writer.</param>
     /// <param name="applyTo">Applies the save's change to settings that are not the live ones.</param>
-    private sealed class RunningConfirmedSave(Task write, Func<AppSettings, AppSettings> applyTo)
+    /// <param name="description">What the change is, for the log.</param>
+    private sealed class RunningConfirmedSave(Task write, Func<AppSettings, AppSettings> applyTo, string description)
     {
         /// <summary>
         ///     One once the decision was taken.
@@ -3009,6 +3301,12 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ///     Gets the function that applies the save's change to settings that are not the live ones.
         /// </summary>
         public Func<AppSettings, AppSettings> ApplyTo { get; } = applyTo;
+
+        /// <summary>
+        ///     Gets what the change is (the repos an add adds and moves, or the Settings window's
+        ///     settings), for the log of a close that could not save it.
+        /// </summary>
+        public string Description { get; } = description;
 
         /// <summary>
         ///     Takes the decision about the save's change, unless it was taken already.

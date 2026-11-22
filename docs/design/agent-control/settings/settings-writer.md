@@ -20,7 +20,7 @@ every favorite, color, group, order, collapse, removal and launch, and froze for
 
 **DefaultDelay** (`static readonly TimeSpan`, 300 ms): the debounce delay used when the caller gives none. Long enough
 to fold a burst of clicks or a drag (several changes in quick succession) into one write, short enough that a change is
-on disk well before a user could close the window and expect it kept; the close flushes anyway.
+on disk well before a user could close the window and expect it kept; the close writes the intended state last anyway.
 
 Read-only state set by the constructor:
 
@@ -76,13 +76,10 @@ thread, and completes when the snapshot is written or faults with the exception 
 **FlushAsync()** (`Task<bool>`): stops the timer and writes the waiting snapshot in its turn, so it completes, never
 faulting, once every write accepted before the call has ended. It returns `true` when the waiting snapshot (if any) was
 written and `false` when its write failed. A snapshot kept after a failed write is written by it as well
-(`AgentControl-SettingsWriter-Flush`).
-
-**Flush(TimeSpan timeout)** (`bool`): the bounded flush for the window's close: it starts `FlushAsync` on a worker
-thread (`Task.Run`) and waits for it at most `timeout`. It returns `true` only when everything was written in time.
-The calling thread only waits; the save never runs on it and never needs it (every `await` in the writer uses
-`ConfigureAwait(false)`), so waiting on the UI thread cannot deadlock and the blocking-call guard of `SettingsStore` is
-never tripped by it.
+(`AgentControl-SettingsWriter-Flush`). The save never runs on the calling thread and never needs it (every `await` in
+the writer uses `ConfigureAwait(false)`), so an owner may wait for the returned task on the UI thread without a
+deadlock, and the blocking-call guard of `SettingsStore` is never tripped by it. A bounded wait is the owner's (the
+window's close waits for its own write, see `MainWindowViewModel`).
 
 **HasUnsavedChanges** (`bool`): whether a snapshot is waiting (scheduled, or kept after a failed write) or a write is
 running.
@@ -92,8 +89,8 @@ before it succeeded - once per failure streak, not per failed write - with the f
 redacts it for the user). Posted to the captured context, or raised on the writing thread when there was none
 (`AgentControl-SettingsWriter-FailureReportedOnce`).
 
-**Dispose()**: stops the timer and ignores later `Schedule` calls; a write in progress completes. The owner flushes
-first.
+**Dispose()**: stops the timer and ignores later `Schedule` calls; a write in progress completes. The owner writes
+what is left first (the window's close disposes the writer when its own write has ended).
 
 *WriteWaitingAsync* (private, the body of every scheduled and flushed write): waits for the turn; takes the waiting
 snapshot (if none, it returns `true`); runs the save on a worker thread (`Task.Run`); on failure puts the snapshot back
@@ -126,5 +123,9 @@ The save delegate is injected; the writer has no dependency on `SettingsStore` i
 - **MainWindowViewModel** (`LauncherUI` subsystem) — owns one writer over `SettingsStore.Save` into the configuration
   directory (or the test seam `saveSettings`), on its `TimeProvider`: it schedules a snapshot of the live settings after
   every change made in the window, makes the confirmed saves of an add and of the Settings window's values, shows
-  `WriteFailed` to the user through its `SettingsSaveFailed` event, offers `FlushAsync` to the tests
-  (`FlushSettingsAsync`) and flushes with a bounded wait when the window closes.
+  `WriteFailed` to the user through its `SettingsSaveFailed` event, and offers `FlushAsync` to the tests
+  (`FlushSettingsAsync`). When the window closes it relies on the turn's order: on a worker thread it first awaits the
+  confirmed writes still running, and only then always makes its own write - a confirmed save of the full intended
+  state it composed - so that write queues behind every write accepted before it (a scheduled write waiting for its
+  turn included), drops an older waiting snapshot and is the last one; the owner waits for it with a bounded wait of
+  its own and then disposes the writer. The writer is the only thing that writes the settings file.

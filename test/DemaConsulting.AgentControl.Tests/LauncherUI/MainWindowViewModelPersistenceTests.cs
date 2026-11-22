@@ -588,42 +588,170 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
     });
 
     /// <summary>
-    ///     Test that closing the window while an add's write is still running after the whole close
-    ///     wait, after another change was made, writes nothing over the add: the change made meanwhile is
-    ///     left out rather than written after the add's write without the add. The add's write is held
-    ///     at a gate that opens only after the close returned, and the close waits for nothing, so no
-    ///     timing is involved.
+    ///     Test that a change made while an add's write is held, followed by a close whose wait runs out
+    ///     before that write ends, is still written: the close returns at once, and its write follows the
+    ///     add's once that succeeded, so the file holds both the add and the change. The add's write is
+    ///     held at its own <see cref="TaskCompletionSource{TResult}"/> and the close waits for nothing, so
+    ///     no timing is involved.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_Dispose_AddWriteStillRunningAfterTheWait_AddNotOverwritten() => HeadlessTestApp.RunAsync(async () =>
+    public void MainWindowViewModel_Dispose_AddWriteRunningPastTheWait_ChangeWrittenAfterTheAdd() => HeadlessTestApp.RunAsync(async () =>
     {
-        // Arrange: writes held at a gate, and a close that does not wait
+        // Arrange: the add's write held, and a close that does not wait
         var fixture = CreateFixture(new AppSettings(), [("alpha", null)], settingsFlushTimeout: TimeSpan.Zero);
         var alpha = fixture.Card("alpha");
         var gamma = CreateDirectory("gamma");
-        fixture.Saving.Gate.Reset();
+        var addWrite = fixture.Saving.HoldNextWrite();
 
         // Act: start the add and wait until its write is held, make a change (deferred while the add
-        // saves), ask for a flush (it waits for its turn behind the held write, so it writes whatever
-        // the close hands the writer), close while the write is still held, then let it go
+        // saves), close while the write is still held, then let the write succeed and wait for the
+        // close's write
         var add = fixture.ViewModel.EnqueueAddReposAsync([gamma], null);
         await fixture.Saving.WaitForStartAsync();
         alpha.IsFavorite = true;
-        var flushed = fixture.ViewModel.FlushSettingsAsync();
         fixture.ViewModel.Dispose();
-        fixture.Saving.Gate.Set();
-        await flushed;
+        addWrite.SetResult(true);
+        var written = await fixture.ViewModel.CloseSettingsWrite!;
 
-        // Assert: only the add's write ran, and the file holds the add
-        Assert.Equal(1, fixture.Saving.Saves);
+        // Assert: the add's write, then the close's, and the file holds the add and the change
+        Assert.True(written);
+        Assert.Equal(2, fixture.Saving.Saves);
         var saved = SettingsStore.Load(fixture.ConfigDirectory).RecentRepos;
-        Assert.Equal(2, saved.Count);
-        Assert.Contains(saved, repo => repo.Path == gamma);
+        Assert.Equal([alpha.RepoPath, gamma], saved.Select(repo => repo.Path));
+        Assert.True(saved.Single(repo => repo.Path == alpha.RepoPath).IsFavorite);
 
         // The add's completion was queued on the UI thread and is dropped with the test's application
         _ = add;
     });
 
+    /// <summary>
+    ///     Test that when an add's write fails after the window closed, while the close's write waits for
+    ///     it, the change made meanwhile is still written and the add is not: with nobody left to offer
+    ///     Retry, the add is discarded and everything else is kept.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_Dispose_AddWriteFailsDuringTheClose_ChangeWrittenWithoutTheAdd() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: the add's write held, and a close that does not wait
+        var fixture = CreateFixture(new AppSettings(), [("alpha", null)], settingsFlushTimeout: TimeSpan.Zero);
+        var alpha = fixture.Card("alpha");
+        var gamma = CreateDirectory("gamma");
+        var addWrite = fixture.Saving.HoldNextWrite();
+
+        // Act: start the add and wait until its write is held, make a change, close, then make the
+        // held write fail and wait for the close's write and the add
+        var add = fixture.ViewModel.EnqueueAddReposAsync([gamma], null);
+        await fixture.Saving.WaitForStartAsync();
+        alpha.IsFavorite = true;
+        fixture.ViewModel.Dispose();
+        addWrite.SetResult(false);
+        var written = await fixture.ViewModel.CloseSettingsWrite!;
+        await add;
+
+        // Assert: only the close's write succeeded; the file holds the change and not the add
+        Assert.True(written);
+        Assert.Equal(1, fixture.Saving.Saves);
+        var saved = Assert.Single(SettingsStore.Load(fixture.ConfigDirectory).RecentRepos);
+        Assert.Equal(alpha.RepoPath, saved.Path);
+        Assert.True(saved.IsFavorite);
+
+        // Assert: the closed view model adopted nothing
+        Assert.Equal(["alpha"], fixture.ViewModel.RepoCards.Select(card => card.RepoName));
+    });
+
+    /// <summary>
+    ///     Test the order of the writes when the window closes while an add's write is held: the close's
+    ///     write does not start while the add's runs, it starts only after the add's write has ended, and
+    ///     nothing is written after it, so the older add write can never follow the close's snapshot.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_Dispose_AddWriteHeld_CloseWriteIsTheLastWrite() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: the add's write held, and a close that does not wait
+        var fixture = CreateFixture(new AppSettings(), [("alpha", null)], settingsFlushTimeout: TimeSpan.Zero);
+        var alpha = fixture.Card("alpha");
+        var gamma = CreateDirectory("gamma");
+        var addWrite = fixture.Saving.HoldNextWrite();
+
+        // Act: start the add and wait until its write is held, make a change and close
+        var add = fixture.ViewModel.EnqueueAddReposAsync([gamma], null);
+        await fixture.Saving.WaitForStartAsync();
+        alpha.IsFavorite = true;
+        fixture.ViewModel.Dispose();
+
+        // Assert: while the add's write is held, it is the only write that started
+        Assert.Equal([WriteStage.Started], fixture.Saving.Log.Select(entry => entry.Stage));
+
+        // Act: let the add's write end and wait for the close's write
+        addWrite.SetResult(true);
+        await fixture.ViewModel.CloseSettingsWrite!;
+
+        // Assert: the add's write ended before the close's started, and the close's write - holding the
+        // add and the change - is the last one
+        var log = fixture.Saving.Log;
+        Assert.Equal(
+            [WriteStage.Started, WriteStage.Written, WriteStage.Started, WriteStage.Written],
+            log.Select(entry => entry.Stage));
+        Assert.Contains(log[1].Settings.RecentRepos, repo => repo.Path == gamma);
+        Assert.False(log[1].Settings.RecentRepos.Single(repo => repo.Path == alpha.RepoPath).IsFavorite);
+        Assert.Contains(log[3].Settings.RecentRepos, repo => repo.Path == gamma);
+        Assert.True(log[3].Settings.RecentRepos.Single(repo => repo.Path == alpha.RepoPath).IsFavorite);
+
+        // The add's completion was queued on the UI thread and is dropped with the test's application
+        _ = add;
+    });
+
+    /// <summary>
+    ///     Test that two confirmed saves that overlap at the close - an add, and the Settings window's
+    ///     settings saved while the add's write is held - leave the file with the change of each one
+    ///     whose write succeeded and without the change of each one whose write failed, with no other
+    ///     change made. The Settings window's candidate was built without the add (not adopted yet), so
+    ///     when both succeed only the close's own write puts both on disk. Each write is held at its own
+    ///     <see cref="TaskCompletionSource{TResult}"/> and the close waits for nothing, so no timing is
+    ///     involved.
+    /// </summary>
+    /// <param name="addSucceeds">Whether the add's write succeeds.</param>
+    /// <param name="settingsSucceed">Whether the Settings window's write succeeds.</param>
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void MainWindowViewModel_Dispose_OverlappingAddAndSettingsSaves_FileHoldsEachChangeThatSucceeded(
+        bool addSucceeds, bool settingsSucceed) => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: both writes held, and a close that does not wait
+        var fixture = CreateFixture(new AppSettings(), [("alpha", null)], settingsFlushTimeout: TimeSpan.Zero);
+        var alpha = fixture.Card("alpha");
+        var gamma = CreateDirectory("gamma");
+        var addWrite = fixture.Saving.HoldNextWrite();
+        var settingsWrite = fixture.Saving.HoldNextWrite();
+
+        // Act: start the add and wait until its write is held, save the Settings window's settings
+        // (their write waits behind the add's), close, then release both writes and wait for the close's
+        var add = fixture.ViewModel.EnqueueAddReposAsync([gamma], null);
+        await fixture.Saving.WaitForStartAsync();
+        var apply = fixture.ViewModel.ApplySettingsAsync(new AppSettings { GitExecutablePath = "new-git" });
+        fixture.ViewModel.Dispose();
+        addWrite.SetResult(addSucceeds);
+        settingsWrite.SetResult(settingsSucceed);
+        var written = await fixture.ViewModel.CloseSettingsWrite!;
+        await add;
+        if (settingsSucceed)
+        {
+            await apply;
+        }
+        else
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => apply);
+        }
+
+        // Assert: the close's write succeeded, and the file holds exactly the changes that succeeded
+        Assert.True(written);
+        string[] expectedRepos = addSucceeds ? [alpha.RepoPath, gamma] : [alpha.RepoPath];
+        var saved = SettingsStore.Load(fixture.ConfigDirectory);
+        Assert.Equal(expectedRepos, saved.RecentRepos.Select(repo => repo.Path));
+        Assert.Equal(settingsSucceed ? "new-git" : null, saved.GitExecutablePath);
+    });
     /// <summary>
     ///     Test that an add whose save is still running when the window closes is decided once, by the
     ///     close: the close writes it with the change made meanwhile, and when the add's own completion
@@ -683,6 +811,7 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
         fixture.ViewModel.Dispose();
         fixture.Saving.Gate.Set();
         await apply;
+        await fixture.ViewModel.CloseSettingsWrite!;
 
         // Assert: nothing adopted into the closed view model, and the write put the settings on disk
         Assert.Same(fixture.Settings, fixture.ViewModel.Settings);
@@ -1074,8 +1203,9 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
 
     /// <summary>
     ///     The save seam of a fixture's view model: writes the settings file like the application does,
-    ///     counts the writes that succeeded, can hold every write at a gate, and can be made to fail
-    ///     (leaving the file as it is). Called by the settings writer on a worker thread.
+    ///     counts the writes that succeeded, records every write in order, can hold every write at a
+    ///     gate or one write at a <see cref="TaskCompletionSource{TResult}"/> of its own, and can be made
+    ///     to fail (leaving the file as it is). Called by the settings writer on a worker thread.
     /// </summary>
     /// <param name="cancellationToken">Ends a held write when the test is canceled, so a broken test
     ///     cannot hang the run.</param>
@@ -1085,6 +1215,16 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
         ///     Released once at the start of every write.
         /// </summary>
         private readonly SemaphoreSlim _started = new(0);
+
+        /// <summary>
+        ///     The holds of the next writes, in order (see <see cref="HoldNextWrite"/>).
+        /// </summary>
+        private readonly Queue<TaskCompletionSource<bool>> _holds = new();
+
+        /// <summary>
+        ///     Every write's start and end, in order (see <see cref="Log"/>).
+        /// </summary>
+        private readonly List<WriteEvent> _log = [];
 
         /// <summary>
         ///     Backing field for <see cref="Fail"/>.
@@ -1116,28 +1256,111 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
         public int Saves => Volatile.Read(ref _saves);
 
         /// <summary>
+        ///     Gets every write's start and end so far, in the order they happened.
+        /// </summary>
+        public IReadOnlyList<WriteEvent> Log
+        {
+            get
+            {
+                lock (_log)
+                {
+                    return [.. _log];
+                }
+            }
+        }
+
+        /// <summary>
         ///     Waits until one more write has started (counting from the previous wait).
         /// </summary>
         /// <returns>A task that completes when a write started.</returns>
         public Task WaitForStartAsync() => _started.WaitAsync(cancellationToken);
 
         /// <summary>
+        ///     Holds the next write that starts (after those already held) until the test completes the
+        ///     returned source: with <see langword="true"/> the write goes ahead, with
+        ///     <see langword="false"/> it fails like a full disk would.
+        /// </summary>
+        /// <returns>The source that releases the write.</returns>
+        public TaskCompletionSource<bool> HoldNextWrite()
+        {
+            var hold = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_holds)
+            {
+                _holds.Enqueue(hold);
+            }
+
+            return hold;
+        }
+
+        /// <summary>
         ///     Writes the settings, or fails like a full disk would.
         /// </summary>
         /// <param name="settings">The settings to write.</param>
         /// <param name="configDirectory">The directory to write them to.</param>
-        /// <exception cref="InvalidOperationException">Thrown when <see cref="Fail"/> is set.</exception>
+        /// <exception cref="InvalidOperationException">Thrown when <see cref="Fail"/> is set, or when the
+        ///     write's hold was released with <see langword="false"/>.</exception>
         public void Save(AppSettings settings, string configDirectory)
         {
+            TaskCompletionSource<bool>? hold;
+            lock (_holds)
+            {
+                _holds.TryDequeue(out hold);
+            }
+
+            Record(WriteStage.Started, settings);
             _started.Release();
             Gate.Wait(cancellationToken);
-            if (Fail)
+            var proceed = hold is null || hold.Task.WaitAsync(cancellationToken).GetAwaiter().GetResult();
+            if (Fail || !proceed)
             {
+                Record(WriteStage.Failed, settings);
                 throw new InvalidOperationException("The disk is full.");
             }
 
             SettingsStore.Save(settings, configDirectory);
             Interlocked.Increment(ref _saves);
+            Record(WriteStage.Written, settings);
+        }
+
+        /// <summary>
+        ///     Records a write's start or end.
+        /// </summary>
+        /// <param name="stage">What happened.</param>
+        /// <param name="settings">The settings of the write.</param>
+        private void Record(WriteStage stage, AppSettings settings)
+        {
+            lock (_log)
+            {
+                _log.Add(new WriteEvent(stage, settings));
+            }
         }
     }
+
+    /// <summary>
+    ///     What happened to a write of the save seam.
+    /// </summary>
+    private enum WriteStage
+    {
+        /// <summary>
+        ///     The write started.
+        /// </summary>
+        Started,
+
+        /// <summary>
+        ///     The write ended with the settings on disk.
+        /// </summary>
+        Written,
+
+        /// <summary>
+        ///     The write ended without writing anything.
+        /// </summary>
+        Failed
+    }
+
+    /// <summary>
+    ///     A write's start or end, as the save seam recorded it.
+    /// </summary>
+    /// <param name="Stage">What happened.</param>
+    /// <param name="Settings">The settings of the write.</param>
+    private sealed record WriteEvent(WriteStage Stage, AppSettings Settings);
 }

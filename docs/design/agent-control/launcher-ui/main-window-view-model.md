@@ -119,12 +119,24 @@ file cannot be written; tests count, hold and fail writes) on `_timeProvider`, w
 
 **_runningConfirmedSaves**, **_saveDeferred**: `List<RunningConfirmedSave>` and `bool` — the confirmed saves (an add,
 the Settings window's Save) that are running, oldest first, each with its write (`Task`), a function that applies
-its change to settings that are not the live ones (`ApplyTo`) and a once-only decision (`TryDecide`, see *Close*), and
-whether the live settings hold something to write once they have ended (see *Background saving*). The list's count
-replaces a separate counter, so there is one source of truth.
+its change to settings that are not the live ones (`ApplyTo`), a description of the change for the log
+(`Description`: the repos an add adds and moves and its group, or the Settings window's settings) and a once-only
+decision (`TryDecide`, see *Close*), and whether the live settings hold something to write once they have ended (see
+*Background saving*). The list's count replaces a separate counter, so there is one source of truth.
 
-**SettingsFlushTimeout**: `TimeSpan` (internal, five seconds) — the longest `Dispose` waits in all, for a running
-confirmed write and the writes that are not done yet together.
+**_lastWrittenSettings**: `AppSettings` — the last snapshot the writer wrote (set by the save delegate the constructor
+wraps around `saveSettings`, on the writing thread; read with `Volatile`), or the settings as they were when the view
+model was created while nothing was written yet: what the settings file is known to hold, against which the close logs
+what it could not write.
+
+**SettingsFlushTimeout**: `TimeSpan` (internal, five seconds) — the longest `Dispose` waits in all, for the confirmed
+writes still running and the close's own write after them. A write normally takes milliseconds and `SettingsStore.Save`
+gives a held file up after about a second, so the budget covers a running confirmed write and the close's write, each
+on a held file; a write still running after it means the disk itself is not answering, which a longer wait would not
+cure.
+
+**CloseSettingsWrite**: `Task<bool>?` (internal) — the close's write of the settings (see *Close*), `null` before the
+close; completes, never faulting, with whether everything was written. A test seam for a close that did not wait for it.
 
 **_backgroundWork**: `IBackgroundWorkRunner` — constructor seam for how blocking reads run off the UI thread
 (`ThreadPoolBackgroundWorkRunner.Instance` by default, the runner of the refresh queue; tests hold the reads at a
@@ -240,6 +252,13 @@ what NuGet itself supplies.
 
 #### Key Methods
 
+**Settings persistence model**: `_settingsWriter` is the only thing that writes the settings file while the window is
+open and at its close. Its writes are one at a time, in the order asked, and every write is a full snapshot of the
+intended state when it is queued: the confirmed state, the confirmed changes adopted so far and every ordinary change
+made in the window (a confirmed save's candidate adds its own change). A confirmed save (an add, the Settings
+window's Save) is a writer request whose task completes with success or failure; the caller then adopts or rolls back
+exactly once, on the UI thread. The close always queues the full intended state as the final write (see *Close*).
+
 **Background saving (apply at once, write in the background)**: every change the user makes in the main window goes
 through the private `CommitSettingsChange(change)`:
 
@@ -263,39 +282,60 @@ builds it: it applies the change to the repo's live entry through `CommitSetting
 when the repo is no longer in the list) and returns `true`; the card applies its own property and raises its change
 event (see the `RepoCardViewModel` design).
 
-*Confirmed saves*: an add and the Settings window's values must be on disk before they are applied, so their failure
-can be answered (Retry/Discard, or the Settings window staying open) and Discard has nothing to undo. They go through
-the private `SaveConfirmedAsync(applyTo, adopt)`: the candidate is `applyTo` applied to a snapshot of the live settings
-(for an add `ApplyAddChange`, for the Settings window `WithOrganizingFrom`, which takes the new settings with the repos
-and organizing choices of the snapshot), written by `_settingsWriter.SaveNowAsync` on a worker thread, and the save is
-tracked in `_runningConfirmedSaves` until it has ended; `adopt` applies the change to the live settings,
-the cards and the list on the UI thread once the write succeeded; a failure leaves everything as it was and reaches
-the caller (`-SaveFailureRefusesOperation`). While a confirmed save runs, the candidate it writes does not hold a
-change made meanwhile in the window, and a snapshot taken then would not hold the confirmed change: written after it,
-it would take the add out of the file again. So `ScheduleSettingsSave` only records such a change
-(`_saveDeferred`) while `_runningConfirmedSaves` is not empty, and when the last confirmed save has ended (and
-adopted its change) the live settings - holding both - are scheduled. A confirmed save that ends while another one
-still runs sets `_saveDeferred` too, because the other one's candidate was built without it. The writer itself keeps
-a snapshot scheduled before a confirmed save when that save fails, so a change made before a discarded add is still
-written (`-AddKeepsOtherChanges`).
+*Confirmed saves*: an add and the Settings window's values must be on disk before they are applied, so their failure can
+be answered (Retry/Discard, or the Settings window staying open) and Discard has nothing to undo. They go through the
+private `SaveConfirmedAsync(applyTo, adopt, description)`: the candidate is `applyTo` applied to a snapshot of the live
+settings (for an add `ApplyAddChange`, for the Settings window `WithOrganizingFrom`, which takes the new settings with
+the repos and organizing choices of the snapshot), written by `_settingsWriter.SaveNowAsync` on a worker thread, and the
+save is tracked in `_runningConfirmedSaves` until it has ended; `adopt` applies the change to the live settings, the
+cards and the list on the UI thread once the write succeeded; a failure leaves everything as it was and reaches the
+caller (`-SaveFailureRefusesOperation`). While a confirmed save runs, the candidate it writes does not hold a change
+made meanwhile in the window, and a snapshot taken then would not hold the confirmed change: written after it, it would
+take the add out of the file again. So `ScheduleSettingsSave` only records such a change (`_saveDeferred`) while
+`_runningConfirmedSaves` is not empty, and when the last confirmed save has ended (and adopted its change) the live
+settings - holding both - are scheduled. A confirmed save that ends while another one still runs sets `_saveDeferred`
+too, because the other one's candidate was built without it. The writer itself keeps a snapshot scheduled before a
+confirmed save when that save fails, so a change made before a discarded add is still written (`-AddKeepsOtherChanges`).
+`_saveDeferred` only serves the open window (it keeps a confirmed save with no other change at one write); the close
+never reads it, because it always writes the intended state last.
 
-*Close*: `Dispose` writes a deferred change and flushes the writer, all within one bounded wait
+*Close*: `Dispose` writes every change made in the window, after any write still running, with one bounded wait
 (`SettingsFlushTimeout`). It first takes the decision of every confirmed save still running (`TryDecide`): what becomes
 of a confirmed save's change is decided exactly once, by the save's own completion when its write ends while the
 window is open, otherwise by the close. A save the close decided adopts nothing when its write ends afterwards: the
 closed view model's settings, cards and list are not changed and no refresh or upgrade check is started; its change
-is on disk exactly when its write succeeded. When a change was deferred because a confirmed save (an add) was still
-running, the close then waits for the running confirmed writes, takes a snapshot of the live settings and applies to it
-the change of every confirmed save whose write succeeded (`ApplyTo`), and schedules that snapshot, so the close never
-writes the changes made meanwhile over the add without it. A confirmed save that failed is left out, so nothing that
-was not saved is written, and one whose adoption already ran has left the list, so nothing is applied twice. When a
-confirmed write is still running after the whole wait, no snapshot is scheduled at all and a warning is logged: the
-writer would write it after that write, without its change, and take the add out of the file again, so the changes
-made meanwhile are the lesser loss. The writes run on a worker thread and the closing UI thread only waits, which is
-the one wait for the disk left on the UI thread and comes after the window has closed; the remaining flush wait is what
-is left of the budget, and settings that could not be written in time are logged (`-SettingsFlushedOnClose`). The
-constructor's `settingsFlushTimeout` lets a test shorten the budget, so the case of a write still running after it is
-tested without waiting.
+is on disk exactly when its write succeeded. The close then takes a snapshot of the live settings on the UI thread -
+every change made in the window, those deferred while a confirmed save ran included, and no change of a confirmed save
+that was not adopted - and starts its own write on a worker thread (`WriteSettingsAtCloseAsync`, exposed as
+`CloseSettingsWrite`):
+
+- It first awaits the write of every confirmed save the close decided, oldest first. Each one whose write succeeded has
+  its change applied to the snapshot (`ApplyTo`); each one whose write failed is left out - nobody is left to offer
+  Retry, so it is discarded, as Discard would, while everything else is kept - and a warning names it
+  (`Description`) with the reason.
+- The composed snapshot - the full intended state - is then always written, once, as the last write: with a
+  confirmed save of the writer (`SaveNowAsync`), asked for only now that the confirmed writes it waited for have
+  ended. The writer makes one write at a time in the order asked, so the snapshot is written after them (and after a
+  scheduled write that was waiting for its turn), and drops an older waiting snapshot once written. Nothing decides
+  whether the close needs to write: overlapping confirmed saves (an add and the Settings window's Save that run
+  together each wrote a candidate built without the other's change, so the later write took the earlier change out of
+  the file), a change held back while a confirmed save ran and a change still waiting for the debounce are all set
+  right by the one write of the intended state. The close's write is therefore never written before an older
+  confirmed write, and that older write can never follow it and take a change out of the file again.
+- What could not be written is logged as the difference between `_lastWrittenSettings` and what should be on disk
+  (repos added and removed, the changed fields of each repo, the repo order, the collapsed sections, the group colors
+  and order, the Settings window's values). The writer is disposed when the close's write has ended.
+
+The closing UI thread only waits for that write, at most `SettingsFlushTimeout`: the one wait for the disk left on the
+UI thread, after the window has closed; the writes never need the UI thread, so it cannot deadlock. When the time runs
+out the close returns anyway, so the process can exit (the write runs on a thread-pool thread, which does not keep the
+process alive). The close's write stays queued behind the write that is still running and still happens if the process
+lives long enough (an information entry then says so), so nothing is written out of order; the close logs at once the
+confirmed saves still running and everything not on disk yet - which is lost if the process ends first - because
+nobody can be told any more (`-SettingsFlushedOnClose`). Nothing is handed to the writer after the close
+(`ScheduleSettingsSave` ignores a change, and a confirmed save or a synchronous add throws `ObjectDisposedException`),
+so the close's write is the last one. The constructor's `settingsFlushTimeout` lets a test shorten the budget, so a
+write still running after it is tested without waiting.
 
 *Test seam*: `FlushSettingsAsync()` (internal) flushes the writer and completes when the writes accepted so far have
 ended, so a test reads the settings file only once it holds every change.
@@ -946,10 +986,12 @@ quietly.
   (`RepoConfig`'s `RepoPinStore`), branch and committed agent folders of a folder being added, before it has a card,
   through a `GitClient` (`GitIntegration`) with `_gitTimeouts`.
 - **SettingsWriter** (`Settings` subsystem) — writes every settings save in the background: the snapshots scheduled
-  after the changes made in the window, the confirmed saves of an add and of `ApplySettingsAsync`, and the flush at the
-  close. **SettingsStore** (`Settings` subsystem) — the writer's default save delegate (`SettingsStore.Save` into the
+  after the changes made in the window, the confirmed saves of an add and of `ApplySettingsAsync`, and the close's write
+  (a confirmed save, or a flush, after the confirmed writes still running). **SettingsStore** (`Settings` subsystem) —
+  the writer's default save delegate (`SettingsStore.Save` into the
   configuration directory);
-  **AppLogging** (`Logging` subsystem) — logs the settings that could not be written at the close;
+  **AppLogging** (`Logging` subsystem) — logs, through a `SecretRedactingLogger` (`PackageCredentials`), the settings
+  that could not be written at the close;
   **RepoGroupName** (`Settings` subsystem) — the group-name rules used for sorting, validation and
   repair; **AppSettings** (`Settings` subsystem data type) — `FindGroupColor` and `RepairGroupSettings` for the group
   colors and group order.

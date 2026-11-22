@@ -310,54 +310,31 @@ public class SettingsWriterTests
     }
 
     /// <summary>
-    ///     Test that the bounded flush of the window's close returns false when a write cannot complete
-    ///     in time, and true once it can.
+    ///     Test that scheduling and flushing make no blocking call on a thread that refuses them (as the
+    ///     UI thread does in the headless tests): the real settings store writes on a worker thread, and
+    ///     the file is written.
     /// </summary>
     [Fact]
-    public async Task SettingsWriter_Flush_Timeout_ReturnsFalseWhenWriteHeld()
-    {
-        // Arrange: the write is held at the gate
-        var probe = new SaveProbe();
-        using var writer = CreateWriter(probe, out _);
-        probe.Gate.Reset();
-        writer.Schedule(Snapshot("held"));
-
-        // Act: a flush that does not wait
-        var flushedWhileHeld = writer.Flush(TimeSpan.Zero);
-        await probe.WaitForStartAsync();
-        probe.Gate.Set();
-        var flushedAfterwards = await writer.FlushAsync();
-
-        // Assert
-        Assert.False(flushedWhileHeld);
-        Assert.True(flushedAfterwards);
-        Assert.Equal(["held"], probe.Written);
-    }
-
-    /// <summary>
-    ///     Test that scheduling and the bounded flush of the window's close make no blocking call on a
-    ///     thread that refuses them (as the UI thread does in the headless tests): the real settings
-    ///     store writes on a worker thread, and the file is written.
-    /// </summary>
-    [Fact]
-    public void SettingsWriter_ScheduleAndFlushOnGuardedThread_WritesWithoutBlockingCall()
+    public async Task SettingsWriter_ScheduleAndFlushOnGuardedThread_WritesWithoutBlockingCall()
     {
         // Arrange: a writer over the real settings store
         var configDir = Path.Combine(Path.GetTempPath(), "agentcontrol_writer_" + Guid.NewGuid().ToString("N"));
         try
         {
             using var writer = CreateWriter(snapshot => SettingsStore.Save(snapshot, configDir), out _);
-            bool flushed;
+            Task<bool> flush;
 
-            // Act: schedule and flush on a guarded thread
+            // Act: schedule and start the flush on a guarded thread
             using (BlockingCallGuard.GuardCurrentThread())
             {
                 writer.Schedule(Snapshot("guarded"));
-                flushed = writer.Flush(TimeSpan.FromMinutes(1));
+                flush = writer.FlushAsync();
             }
 
-            // Assert: no blocking call here, and the file holds the snapshot
+            // Assert: no blocking call was made here (checked before awaiting, on the guarded thread),
+            // and once the flush has ended the file holds the snapshot
             Assert.Empty(BlockingCallGuard.TakeViolations());
+            var flushed = await flush;
             Assert.True(flushed);
             Assert.Equal("guarded", SettingsStore.Load(configDir).GitExecutablePath);
         }
