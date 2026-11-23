@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_PackageZipExtractor {
     private import SoftwareItemMetadata::*;
 
     part def PackageZipExtractor {

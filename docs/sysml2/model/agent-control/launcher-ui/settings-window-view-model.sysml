@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_SettingsWindowViewModel {
     private import SoftwareItemMetadata::*;
 
     part def SettingsWindowViewModel {

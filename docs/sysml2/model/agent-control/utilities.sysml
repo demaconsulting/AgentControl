@@ -1,4 +1,6 @@
-package AgentControl {
+package AgentControl_UtilitiesSubsystem {
+    public import AgentControl_PathHelpers::*;
+    public import AgentControl_BlockingCallGuard::*;
     private import SoftwareItemMetadata::*;
 
     part def UtilitiesSubsystem {

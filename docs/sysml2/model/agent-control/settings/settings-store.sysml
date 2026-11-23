@@ -1,4 +1,5 @@
-package AgentControl {
+package AgentControl_SettingsStore {
+    private import AgentControl_BlockingCallGuard::*;
     private import SoftwareItemMetadata::*;
 
     part def SettingsStore {

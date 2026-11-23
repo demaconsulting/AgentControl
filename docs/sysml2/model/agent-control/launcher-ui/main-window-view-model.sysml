@@ -1,4 +1,8 @@
-package AgentControl {
+package AgentControl_MainWindowViewModel {
+    private import AgentControl_GitClient::*;
+    private import AgentControl_GlobalProgressViewModel::*;
+    private import AgentControl_SettingsWriter::*;
+    private import AgentControl_RepoRefreshQueue::*;
     private import SoftwareItemMetadata::*;
 
     part def MainWindowViewModel {

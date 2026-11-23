@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_SecretRedactingLogger {
     private import SoftwareItemMetadata::*;
 
     part def SecretRedactingLogger {

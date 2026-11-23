@@ -1,4 +1,8 @@
-package AgentControl {
+package AgentControl_GitIntegrationSubsystem {
+    public import AgentControl_GitClient::*;
+    public import AgentControl_GitCredentialClient::*;
+    public import AgentControl_GitRemoteClient::*;
+    public import AgentControl_CommittedAgentFilesCache::*;
     private import SoftwareItemMetadata::*;
 
     part def GitIntegrationSubsystem {

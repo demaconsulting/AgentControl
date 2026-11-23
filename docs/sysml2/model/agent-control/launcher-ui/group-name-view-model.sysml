@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_GroupNameViewModel {
     private import SoftwareItemMetadata::*;
 
     part def GroupNameViewModel {

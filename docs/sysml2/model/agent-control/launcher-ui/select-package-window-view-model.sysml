@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_SelectPackageWindowViewModel {
     private import SoftwareItemMetadata::*;
 
     part def SelectPackageWindowViewModel {

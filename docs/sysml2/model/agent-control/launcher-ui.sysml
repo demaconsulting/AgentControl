@@ -1,4 +1,17 @@
-package AgentControl {
+package AgentControl_LauncherUISubsystem {
+    public import AgentControl_MainWindowViewModel::*;
+    public import AgentControl_RepoCardViewModel::*;
+    public import AgentControl_SelectPackageWindowViewModel::*;
+    public import AgentControl_SettingsWindowViewModel::*;
+    public import AgentControl_SourceEditorViewModel::*;
+    public import AgentControl_CredentialPromptViewModel::*;
+    public import AgentControl_RepoImageLocator::*;
+    public import AgentControl_RepoGroupHeaderViewModel::*;
+    public import AgentControl_GroupNameViewModel::*;
+    public import AgentControl_DialogBehavior::*;
+    public import AgentControl_GlobalProgressViewModel::*;
+    public import AgentControl_RepoRefreshQueue::*;
+    private import OtsDependencies::*;
     private import SoftwareItemMetadata::*;
 
     part def LauncherUISubsystem {

@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_SignatureVerificationSupport {
     private import SoftwareItemMetadata::*;
 
     part def SignatureVerificationSupport {

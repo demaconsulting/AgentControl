@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_FeedOrigin {
     private import SoftwareItemMetadata::*;
 
     part def FeedOrigin {

@@ -1,4 +1,9 @@
-package AgentControl {
+package AgentControl_PackageCredentialsSubsystem {
+    public import AgentControl_FeedOrigin::*;
+    public import AgentControl_SessionCredentialStore::*;
+    public import AgentControl_PackageCredentialCallback::*;
+    public import AgentControl_SecretRedactingLogger::*;
+    private import OtsDependencies::*;
     private import SoftwareItemMetadata::*;
 
     part def PackageCredentialsSubsystem {

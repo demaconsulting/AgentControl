@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_SettingsWriter {
     private import SoftwareItemMetadata::*;
 
     part def SettingsWriter {

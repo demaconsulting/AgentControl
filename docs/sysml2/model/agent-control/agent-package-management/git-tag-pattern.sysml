@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_GitTagPattern {
     private import SoftwareItemMetadata::*;
 
     part def GitTagPattern {

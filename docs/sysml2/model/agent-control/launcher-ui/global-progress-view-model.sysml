@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_GlobalProgressViewModel {
     private import SoftwareItemMetadata::*;
 
     part def GlobalProgressViewModel {

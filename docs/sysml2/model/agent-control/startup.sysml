@@ -1,4 +1,5 @@
-package AgentControl {
+package AgentControl_StartupSubsystem {
+    public import AgentControl_StartupOptions::*;
     private import SoftwareItemMetadata::*;
 
     part def StartupSubsystem {

@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_RepoGroupName {
     private import SoftwareItemMetadata::*;
 
     part def RepoGroupName {

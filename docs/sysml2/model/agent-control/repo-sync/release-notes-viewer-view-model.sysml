@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_ReleaseNotesViewerViewModel {
     private import SoftwareItemMetadata::*;
 
     part def ReleaseNotesViewerViewModel {

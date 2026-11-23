@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_CommittedAgentFilesCache {
     private import SoftwareItemMetadata::*;
 
     part def CommittedAgentFilesCache {

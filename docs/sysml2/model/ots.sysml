@@ -1,4 +1,4 @@
-package AgentControl {
+package OtsDependencies {
     private import SoftwareItemMetadata::*;
 
     doc

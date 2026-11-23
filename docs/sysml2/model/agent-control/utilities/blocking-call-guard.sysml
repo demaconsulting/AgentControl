@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_BlockingCallGuard {
     private import SoftwareItemMetadata::*;
 
     part def BlockingCallGuard {

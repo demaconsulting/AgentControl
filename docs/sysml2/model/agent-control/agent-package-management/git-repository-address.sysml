@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_GitRepositoryAddress {
     private import SoftwareItemMetadata::*;
 
     part def GitRepositoryAddress {
