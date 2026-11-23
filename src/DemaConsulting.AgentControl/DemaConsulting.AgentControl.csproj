@@ -126,7 +126,7 @@
        intentionally omitted here rather than pinned to an incompatible 11.x version. -->
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.2.0" />
-    <PackageReference Include="Avalonia.Desktop" Version="12.1.6" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.2.0" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.2.0" />
     <PackageReference Include="Material.Icons.Avalonia" Version="3.0.2" />
   </ItemGroup>
