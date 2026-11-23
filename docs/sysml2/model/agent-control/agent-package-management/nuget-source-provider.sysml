@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_NuGetSourceProvider {
     private import SoftwareItemMetadata::*;
 
     part def NuGetSourceProvider {

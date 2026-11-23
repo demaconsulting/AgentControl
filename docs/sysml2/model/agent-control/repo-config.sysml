@@ -1,4 +1,5 @@
-package AgentControl {
+package AgentControl_RepoConfigSubsystem {
+    public import AgentControl_RepoPinStore::*;
     private import SoftwareItemMetadata::*;
 
     part def RepoConfigSubsystem {

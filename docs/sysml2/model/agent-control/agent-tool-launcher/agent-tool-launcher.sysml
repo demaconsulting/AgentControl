@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_AgentToolLauncher {
     private import SoftwareItemMetadata::*;
 
     part def AgentToolLauncher {

@@ -1,4 +1,7 @@
-package AgentControl {
+package AgentControl_SettingsSubsystem {
+    public import AgentControl_SettingsStore::*;
+    public import AgentControl_SettingsWriter::*;
+    public import AgentControl_RepoGroupName::*;
     private import SoftwareItemMetadata::*;
 
     part def SettingsSubsystem {

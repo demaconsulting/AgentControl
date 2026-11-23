@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_SourceEditorViewModel {
     private import SoftwareItemMetadata::*;
 
     part def SourceEditorViewModel {

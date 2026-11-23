@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_PackageSourceRegistry {
     private import SoftwareItemMetadata::*;
 
     part def PackageSourceRegistry {

@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_PathHelpers {
     private import SoftwareItemMetadata::*;
 
     part def PathHelpers {

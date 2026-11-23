@@ -1,4 +1,5 @@
-package AgentControl {
+package AgentControl_LoggingSubsystem {
+    private import OtsDependencies::*;
     private import SoftwareItemMetadata::*;
 
     part def LoggingSubsystem {

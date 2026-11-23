@@ -262,7 +262,7 @@ if (-not ($run.ReqStream -or $run.VersionMark -or $run.ReviewMark -or $run.SysML
     }
 
     if ($run.SysML -and (Test-Path docs/sysml2)) {
-        dotnet sysml2tools lint 'docs/sysml2/**/*.sysml'
+        dotnet sysml2tools lint --strict-unresolved 'docs/sysml2/**/*.sysml'
         if ($LASTEXITCODE -ne 0) { $lintError = $true }
     } elseif (-not $run.SysML) {
         Write-Host "  sysml2tools skipped (no SysML2 model files changed)"

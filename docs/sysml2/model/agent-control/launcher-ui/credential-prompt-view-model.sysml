@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_CredentialPromptViewModel {
     private import SoftwareItemMetadata::*;
 
     part def CredentialPromptViewModel {

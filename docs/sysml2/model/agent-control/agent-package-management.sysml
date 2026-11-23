@@ -1,4 +1,16 @@
-package AgentControl {
+package AgentControl_AgentPackageManagementSubsystem {
+    public import AgentControl_PackageSource::*;
+    public import AgentControl_PackageVersion::*;
+    public import AgentControl_PackageVersionCache::*;
+    public import AgentControl_PackageSourceRegistry::*;
+    public import AgentControl_ZipFolderSourceProvider::*;
+    public import AgentControl_NuGetSourceProvider::*;
+    public import AgentControl_SignatureVerificationSupport::*;
+    public import AgentControl_PackageContentIdentity::*;
+    public import AgentControl_GitSourceProvider::*;
+    public import AgentControl_GitRepositoryAddress::*;
+    public import AgentControl_GitTagPattern::*;
+    private import OtsDependencies::*;
     private import SoftwareItemMetadata::*;
 
     part def AgentPackageManagementSubsystem {

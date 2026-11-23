@@ -1,4 +1,17 @@
 package AgentControl {
+    public import AgentControl_Program::*;
+    public import AgentControl_LauncherUISubsystem::*;
+    public import AgentControl_AgentPackageManagementSubsystem::*;
+    public import AgentControl_PackageCredentialsSubsystem::*;
+    public import AgentControl_RepoSyncSubsystem::*;
+    public import AgentControl_RepoConfigSubsystem::*;
+    public import AgentControl_AgentToolLauncherSubsystem::*;
+    public import AgentControl_GitIntegrationSubsystem::*;
+    public import AgentControl_SettingsSubsystem::*;
+    public import AgentControl_LoggingSubsystem::*;
+    public import AgentControl_StartupSubsystem::*;
+    public import AgentControl_UtilitiesSubsystem::*;
+    private import OtsDependencies::*;
     private import SoftwareItemMetadata::*;
 
     doc

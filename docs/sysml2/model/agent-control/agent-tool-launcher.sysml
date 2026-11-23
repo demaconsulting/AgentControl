@@ -1,4 +1,7 @@
-package AgentControl {
+package AgentControl_AgentToolLauncherSubsystem {
+    public import AgentControl_ShellDetector::*;
+    public import AgentControl_AgentToolLauncher::*;
+    public import AgentControl_AgentToolProcessStarter::*;
     private import SoftwareItemMetadata::*;
 
     part def AgentToolLauncherSubsystem {

@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_DialogBehavior {
     private import SoftwareItemMetadata::*;
 
     part def DialogBehavior {

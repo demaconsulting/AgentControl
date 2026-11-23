@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_RepoGroupHeaderViewModel {
     private import SoftwareItemMetadata::*;
 
     part def RepoGroupHeaderViewModel {

@@ -1,4 +1,5 @@
-package AgentControl {
+package AgentControl_RepoCardViewModel {
+    private import AgentControl_RepoRefreshQueue::*;
     private import SoftwareItemMetadata::*;
 
     part def RepoCardViewModel {

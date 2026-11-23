@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_SessionCredentialStore {
     private import SoftwareItemMetadata::*;
 
     part def SessionCredentialStore {

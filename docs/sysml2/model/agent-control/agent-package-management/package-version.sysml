@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_PackageVersion {
     private import SoftwareItemMetadata::*;
 
     part def PackageVersion {

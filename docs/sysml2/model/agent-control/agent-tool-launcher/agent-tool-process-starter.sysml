@@ -1,4 +1,5 @@
-package AgentControl {
+package AgentControl_AgentToolProcessStarter {
+    private import AgentControl_AgentToolLauncher::*;
     private import SoftwareItemMetadata::*;
 
     part def AgentToolProcessStarter {

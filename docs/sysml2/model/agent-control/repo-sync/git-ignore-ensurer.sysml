@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_GitIgnoreEnsurer {
     private import SoftwareItemMetadata::*;
 
     part def GitIgnoreEnsurer {

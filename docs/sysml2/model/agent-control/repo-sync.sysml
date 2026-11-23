@@ -1,4 +1,8 @@
-package AgentControl {
+package AgentControl_RepoSyncSubsystem {
+    public import AgentControl_PackageZipExtractor::*;
+    public import AgentControl_PackageContentExtractor::*;
+    public import AgentControl_ReleaseNotesViewerViewModel::*;
+    public import AgentControl_GitIgnoreEnsurer::*;
     private import SoftwareItemMetadata::*;
 
     part def RepoSyncSubsystem {

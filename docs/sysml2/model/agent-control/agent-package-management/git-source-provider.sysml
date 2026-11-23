@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_GitSourceProvider {
     private import SoftwareItemMetadata::*;
 
     part def GitSourceProvider {

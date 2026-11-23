@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_ZipFolderSourceProvider {
     private import SoftwareItemMetadata::*;
 
     part def ZipFolderSourceProvider {

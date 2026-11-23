@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_RepoRefreshQueue {
     private import SoftwareItemMetadata::*;
 
     part def RepoRefreshQueue {

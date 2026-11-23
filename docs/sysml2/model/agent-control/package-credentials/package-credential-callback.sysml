@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_PackageCredentialCallback {
     private import SoftwareItemMetadata::*;
 
     part def PackageCredentialCallback {

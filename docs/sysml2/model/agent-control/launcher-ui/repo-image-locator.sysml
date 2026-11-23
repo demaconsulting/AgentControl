@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_RepoImageLocator {
     private import SoftwareItemMetadata::*;
 
     part def RepoImageLocator {

@@ -1,4 +1,4 @@
-package AgentControl {
+package AgentControl_ShellDetector {
     private import SoftwareItemMetadata::*;
 
     part def ShellDetector {
