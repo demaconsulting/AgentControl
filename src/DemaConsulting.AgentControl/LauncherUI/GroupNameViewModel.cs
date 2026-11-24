@@ -46,6 +46,12 @@ internal sealed class GroupNameViewModel : ViewModelBase
     /// </summary>
     private readonly string? _renaming;
 
+    /// <summary>
+    ///     Whether the name must be new: an existing group's name is refused, as in a rename, instead of
+    ///     joining that group.
+    /// </summary>
+    private readonly bool _requireNewName;
+
     /// <summary>Backing field for <see cref="Text"/>.</summary>
     private string _text;
 
@@ -64,11 +70,19 @@ internal sealed class GroupNameViewModel : ViewModelBase
     /// <param name="renaming">The group being renamed (its name is the initial text), or
     ///     <see langword="null"/> to create a group, in which case an existing group's name is
     ///     allowed (the repo simply joins it) while in a rename it is refused.</param>
+    /// <param name="requireNewName"><see langword="true"/> to refuse the name of any existing group
+    ///     when creating a group (a group created inside another one is a group of its own: group names
+    ///     are unique across the whole tree, so it cannot join an existing group).</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="title"/>,
     ///     <paramref name="prompt"/>, <paramref name="acceptText"/> or
     ///     <paramref name="existingGroups"/> is <see langword="null"/>.</exception>
     public GroupNameViewModel(
-        string title, string prompt, string acceptText, IEnumerable<string?> existingGroups, string? renaming = null)
+        string title,
+        string prompt,
+        string acceptText,
+        IEnumerable<string?> existingGroups,
+        string? renaming = null,
+        bool requireNewName = false)
     {
         ArgumentNullException.ThrowIfNull(title);
         ArgumentNullException.ThrowIfNull(prompt);
@@ -80,6 +94,7 @@ internal sealed class GroupNameViewModel : ViewModelBase
         AcceptText = acceptText;
         _existingGroups = RepoGroupName.DistinctNames(existingGroups);
         _renaming = renaming;
+        _requireNewName = requireNewName;
         _text = renaming ?? string.Empty;
 
         AcceptCommand = new RelayCommand(Accept, () => CanAccept);
@@ -142,7 +157,7 @@ internal sealed class GroupNameViewModel : ViewModelBase
                     $"Use at most {RepoGroupName.MaxLength} characters (this name has {RepoGroupName.Normalize(_text)!.Length}).",
                 RepoGroupNameProblem.Reserved =>
                     $"\"{RepoGroupName.FavoritesName}\" and \"{RepoGroupName.UngroupedName}\" are built-in sections. Choose another name.",
-                _ => FindClashingGroup() is { } clash && _renaming is not null
+                _ => FindClashingGroup() is { } clash && (_renaming is not null || _requireNewName)
                     ? $"A group named \"{clash}\" already exists."
                     : null
             };
@@ -160,7 +175,7 @@ internal sealed class GroupNameViewModel : ViewModelBase
     ///     <see langword="null"/>.
     /// </summary>
     public string? HintText =>
-        _renaming is null && HasUsableName && FindClashingGroup() is { } existing
+        _renaming is null && !_requireNewName && HasUsableName && FindClashingGroup() is { } existing
             ? $"A group named \"{existing}\" already exists. The repo will be added to it."
             : null;
 
@@ -226,10 +241,10 @@ internal sealed class GroupNameViewModel : ViewModelBase
             return;
         }
 
-        // A rename keeps exactly what was typed (so changing only the letter case works); a new
-        // group adopts the spelling of an existing group the name matches
+        // A rename and a new subgroup keep exactly what was typed (so changing only the letter case
+        // works); a new group adopts the spelling of an existing group the name matches
         var typed = RepoGroupName.Normalize(_text)!;
-        Complete(_renaming is null ? RepoGroupName.Canonicalize(typed, _existingGroups) : typed);
+        Complete(_renaming is null && !_requireNewName ? RepoGroupName.Canonicalize(typed, _existingGroups) : typed);
     }
 
     /// <summary>

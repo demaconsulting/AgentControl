@@ -128,6 +128,34 @@ public class GroupNameViewModelTests
     }
 
     /// <summary>
+    ///     Test that a prompt that requires a new name (a group created inside another group) refuses the
+    ///     name of every existing group, in any letter case, with no hint of joining it, and accepts a
+    ///     fresh name exactly as typed.
+    /// </summary>
+    [Fact]
+    public void GroupNameViewModel_NewSubgroup_RefusesExistingNamesAcceptsFreshName()
+    {
+        // Arrange
+        var viewModel = new GroupNameViewModel(
+            "New subgroup", "Name of the new group:", "Create", ["Home", "Work"], requireNewName: true);
+        string? result = null;
+        viewModel.Completed += (_, name) => result = name;
+
+        // Act / Assert: an existing group's name, in another letter case
+        viewModel.Text = "HOME";
+        Assert.Contains("already exists", viewModel.ErrorText, StringComparison.Ordinal);
+        Assert.False(viewModel.HasHint);
+        Assert.False(viewModel.CanAccept);
+
+        // Act / Assert: a fresh name is accepted as typed (cleaned up)
+        viewModel.Text = "  new   Name ";
+        Assert.False(viewModel.HasError);
+        Assert.True(viewModel.CanAccept);
+        viewModel.AcceptCommand.Execute(null);
+        Assert.Equal("new Name", result);
+    }
+
+    /// <summary>
     ///     Test that renaming starts with the group's own name, refuses another existing group's name,
     ///     accepts a change of letter case only (keeping what was typed) and a fresh name.
     /// </summary>

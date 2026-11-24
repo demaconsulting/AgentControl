@@ -40,7 +40,9 @@ no logic of its own, and the tests replace it with `GatedBackgroundWorkRunner` (
 of work at a gate until released) to prove the callers stay free while the work runs;
 `AsyncRelayCommand` and `ThirdPartyDependencies` have dedicated test files
 (`AsyncRelayCommandTests.cs`, `ThirdPartyDependenciesTests.cs`) because each is independent of any Avalonia control;
-and the pure display helpers - the value converters `FavoriteIconConverter`, `AgentToolKindDisplayNameConverter` and
+and the pure display helpers - the value converters `FavoriteIconConverter`, `GroupIndentConverter` (the indent of a
+row of the tree as the margin that draws it, exercised through the window's indentation test),
+`AgentToolKindDisplayNameConverter` and
 `ThemePreferenceDisplayNameConverter` (each maps one value to its display text or glyph; the last two have their own
 test files) and the `PathEllipsisText` control (a presentational control that only shortens text to the width it is
 given, with its own `PathEllipsisTextTests.cs`) - are exercised through the subsystem requirements that name their
@@ -826,12 +828,24 @@ repository or its `.agentcontrol.json` (`AgentControl-System-RepoGroups`, `Agent
 repo card, and a section header - a fixed 8-pixel slot for the group's color accent, one flat button (chevron, icon,
 name, count chip) that collapses or expands the
 section, plus, for the user's own groups, a "..." menu (`GroupHeaderMenuButton`, tooltip "Add a repository to this
-group, or move, color, rename or remove the group") with **Add repository...** (`GroupAddRepoMenuItem`), a separator,
+group, or move, color, rename or remove the group") with **Add repository...** (`GroupAddRepoMenuItem`), **New
+subgroup...** (`GroupNewSubgroupMenuItem`), a separator,
 **Move up** (`MoveGroupUpMenuItem`), **Move down** (`MoveGroupDownMenuItem`), **Group color...**
 (`GroupColorMenuItem`), a separator, **Rename group...** and **Remove group**. The header
-button's accessible name says the section, its count and its state (`Work, 2 repos, collapsed`); the group's color does
+button's accessible name says the section, its count and its state (`Work, 2 repos, collapsed`, with `, inside Client`
+for a nested group); the group's color does
 not change it. The header template is wrapped in a `Panel` with two drop indicator borders
-(`GroupDropIndicatorAbove`, `GroupDropIndicatorBelow`) for dragging groups. A decision
+(`GroupDropIndicatorAbove`, `GroupDropIndicatorBelow`) for dragging groups. *Nested groups.* Groups are listed as a
+tree (see the `MainWindowViewModel` design): the header's `Grid` and a card's outer `Border` take their left margin
+from the row's `IndentWidth` (`RepoGroupHeaderViewModel.IndentWidth`, `RepoCardViewModel.IndentWidth`: 20
+device-independent pixels per level, capped at eight levels) through `GroupIndentConverter`, a stateless
+`IValueConverter` that turns the number into a `Thickness` (the converter parameter is the header's unchanged top
+margin of 8), so a group's repos line up with its header and no UI type enters the view models
+(`AgentControl-LauncherUI-NestedGroupTree`). **New subgroup...** raises the header's `NewSubgroupRequested`, which the
+window answers with `ShowNewSubgroupPrompt`: the same `GroupNameWindow`, titled *New subgroup*, over a
+`GroupNameViewModel` that must be given a new name (it refuses the name of any group of the whole tree), and
+`MainWindowViewModel.CreateSubgroup` creates the group inside the header's group
+(`AgentControl-LauncherUI-NestedGroupCreate`). A decision
 made here: a favorite repo is listed **only** under *Favorites* (not a second time under its group), so every
 repo appears once and the counts add up; its card shows its group as a chip so the user can still see where it
 belongs, and it returns to its group when it stops being a favorite. When no repo is in a group the list has no
@@ -841,12 +855,15 @@ headers' toggles are disabled then, with a tooltip that says why.
 *Move to group.* The submenu depends on the groups that exist when the menu opens, which a XAML template cannot
 express as one list mixing groups and commands, so `MainWindow`'s code-behind fills it in the flyout's `Opening`
 event (a check mark on the repo's own group, a separator, **New group...**, and **Remove from group** for a
-grouped repo); the choices run `RepoCardViewModel.MoveToGroup` and its commands. Group names are shown in
+grouped repo); the groups offered are all that exist, groups with no repo and nested groups included, a nested
+group's tooltip giving its path (`Client > Project`, `MainWindowViewModel.GetGroupPath`); the choices run
+`RepoCardViewModel.MoveToGroup` and its commands. Group names are shown in
 text blocks, so an underscore is not taken as an access key. **New group...** and **Rename group...** show the
 small `GroupNameWindow`, whose `GroupNameViewModel` validates while the user types (blank, longer than 40
 characters, and the built-in names *Favorites* and *Ungrouped* are refused; a duplicate is refused when renaming and
 joins the existing group, with a note, when creating); **Remove group** asks for a confirmation that says
-nothing on disk or in any repository changes.
+nothing on disk or in any repository changes and where the group's repos and subgroups go (the group it is inside, or
+ungrouped at the top level).
 *Card color.* **Card color...** opens a small palette pop-up (an attached `Flyout` on the "..." button, whose content is
 a `ColorPalettePanel` with AutomationId `CardColorPalette`) with one
 round swatch per `CardColorPalette` entry - the same ten theme-aware avatar colors the automatic color is drawn
@@ -994,10 +1011,16 @@ live in `MainWindowViewModel` and the window only translates input and shows fee
   the release at the end of the drag does not collapse or expand the section, puts the `dragging` class on the header
   row and starts the drag (`DragStarter`, else `DragDrop.DoDragDropAsync`, effect `Move`) with one item of the
   application data format `DemaConsulting.AgentControl.RepoGroup` (`RepoGroupDataFormat`) carrying the group's name.
-  **Group drop target**: only the header of another user group accepts it, the upper half meaning before that group
-  and the lower half after it (a `GroupDropTarget`), shown with the same `dropAbove` / `dropBelow` line through the
-  header's own indicators; `MainWindowViewModel.CanDropGroup` decides and `DropGroup` does it. Over the *Favorites* or
-  *Ungrouped* header, a card or empty space the effect is `None` and no line shows. A collapsed group stays collapsed.
+  **Group drop target**: only the header of another user group accepts it. The header's row is split in thirds
+  (`GetGroupDropZone`): the upper third means before that group (shown with the `dropAbove` line), the lower third
+  after it (the `dropBelow` line) and the middle third **inside** it as its last subgroup (the header tinted with the
+  `dropHeader` class, as for a card dropped on a header) - a `GroupDropTarget` - and a group dropped before or after a
+  nested group becomes that group's sibling, leaving the group it was in
+  (`AgentControl-LauncherUI-NestedGroupDrag`); the thirds keep "upper" and "lower" meaning what the halves did.
+  `MainWindowViewModel.CanDropGroup` decides, refusing a drop next to or inside the dragged group's own subgroups, and
+  `DropGroup` does it. Over the *Favorites* or
+  *Ungrouped* header, a card, a refused place or empty space the effect is `None` and no line or tint shows. A collapsed
+  group stays collapsed.
   No group drag starts while the filter has text, and the Move items are then disabled with
   `GroupReorderDisabledWhileFilteringMessage`. The whole order of the groups as shown is stored on every change, so the
   next start shows the same order (`AgentControl-LauncherUI-GroupOrderRemembered`).

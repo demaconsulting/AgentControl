@@ -269,6 +269,7 @@ internal sealed partial class MainWindow : Window
         viewModel.GroupRenameRequested += async (_, name) => await ShowRenameGroupPrompt(viewModel, name);
         viewModel.GroupRemoveRequested += async (_, name) => await ConfirmAndRemoveGroup(viewModel, name);
         viewModel.GroupAddRepoRequested += async (_, name) => await ShowNoticeAsync(await AddRepoAsync(viewModel, name));
+        viewModel.GroupNewSubgroupRequested += async (_, name) => await ShowNewSubgroupPrompt(viewModel, name);
         viewModel.AddSaveFailed += async (_, request) => await AskAddSaveRetryAsync(request);
 
         // The upgrade check reads package sources, which may be slow or unreachable, so it starts
@@ -764,10 +765,13 @@ internal sealed partial class MainWindow : Window
 
         var entries = new List<object>();
         var groups = card.GetExistingGroupNames();
+        var viewModel = TopLevel.GetTopLevel(flyout.Target)?.DataContext as MainWindowViewModel;
         foreach (var group in groups)
         {
-            // The header is a TextBlock so an underscore in a group name is not taken as an access key
+            // The header is a TextBlock so an underscore in a group name is not taken as an access key;
+            // a nested group's tooltip gives its path so groups inside different groups are told apart
             var isCurrent = RepoGroupName.Comparer.Equals(group, card.GroupName ?? string.Empty);
+            var path = viewModel?.GetGroupPath(group) ?? group;
             var entry = new MenuItem
             {
                 Header = new TextBlock { Text = group },
@@ -777,7 +781,7 @@ internal sealed partial class MainWindow : Window
             AutomationProperties.SetName(entry, group);
             ToolTip.SetTip(
                 entry,
-                isCurrent ? $"{card.RepoName} is in the group {group}." : $"Move {card.RepoName} to the group {group}.");
+                isCurrent ? $"{card.RepoName} is in the group {path}." : $"Move {card.RepoName} to the group {path}.");
             entry.Click += (_, _) => card.MoveToGroup(group);
             entries.Add(entry);
         }
@@ -1313,8 +1317,9 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Works out where a drop at the pointer's position would put a dragged group: before or after
-    ///     the user's group whose header the pointer is over.
+    ///     Works out where a drop at the pointer's position would put a dragged group: next to the user's
+    ///     group whose header the pointer is over (before it over the upper third, after it over the
+    ///     lower third) or inside it (over the middle third).
     /// </summary>
     /// <param name="pointInWindow">The pointer's position, relative to this window.</param>
     /// <returns>The place and the header's row, or <see langword="null"/> when the pointer is not over
@@ -1328,7 +1333,31 @@ internal sealed partial class MainWindow : Window
         }
 
         var y = GetYWithin(pointInWindow, container);
-        return (new GroupDropTarget(header.Name, IsUpperHalf(y, container.Bounds.Height)), container);
+        var (insertBefore, inside) = GetGroupDropZone(y, container.Bounds.Height);
+        return (new GroupDropTarget(header.Name, insertBefore, inside), container);
+    }
+
+    /// <summary>
+    ///     Decides whether a group header is dropped before, after or inside the group header it is
+    ///     over, from the pointer's height within that header's row.
+    /// </summary>
+    /// <remarks>
+    ///     The row is split in thirds: the upper third is "before" and the lower third "after" (the two
+    ///     places the halves were before groups nested, so "upper" and "lower" keep their meaning), and
+    ///     the middle third puts the dragged group inside the header's group.
+    /// </remarks>
+    /// <param name="y">The pointer's vertical position within the row.</param>
+    /// <param name="height">The row's height.</param>
+    /// <returns><c>InsertBefore</c> for the upper third and <c>Inside</c> for the middle third; both
+    ///     <see langword="false"/> for the lower third (insert after).</returns>
+    internal static (bool InsertBefore, bool Inside) GetGroupDropZone(double y, double height)
+    {
+        if (y < height / 3)
+        {
+            return (true, false);
+        }
+
+        return y < height * 2 / 3 ? (false, true) : (false, false);
     }
 
     /// <summary>
@@ -1418,7 +1447,8 @@ internal sealed partial class MainWindow : Window
 
     /// <summary>
     ///     Shows where a dragged group header would land at a point (the line above or below another
-    ///     group's header), or hides the feedback when it cannot be dropped there.
+    ///     group's header, or the tint of the header it would go inside), or hides the feedback when it
+    ///     cannot be dropped there.
     /// </summary>
     /// <param name="viewModel">The window's view model.</param>
     /// <param name="groupName">The dragged group's name.</param>
@@ -1430,7 +1460,8 @@ internal sealed partial class MainWindow : Window
         var allowed = found is { } target && viewModel.CanDropGroup(groupName, target.Target);
         if (allowed && found is { } shown)
         {
-            ShowDropFeedback(shown.Container, shown.Target.InsertBefore ? "dropAbove" : "dropBelow");
+            var feedbackClass = shown.Target.InsertBefore ? "dropAbove" : "dropBelow";
+            ShowDropFeedback(shown.Container, shown.Target.Inside ? "dropHeader" : feedbackClass);
         }
         else
         {
@@ -2217,6 +2248,33 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
+    ///     Shows the name prompt for a group created inside another group and, when a name is chosen,
+    ///     creates it.
+    /// </summary>
+    /// <remarks>
+    ///     Group names are unique across the whole tree, so the prompt refuses the name of every existing
+    ///     group (an empty or nested one included) instead of letting the new group join it.
+    /// </remarks>
+    /// <param name="viewModel">The main view model that owns the groups.</param>
+    /// <param name="parentName">The group the new group is created inside.</param>
+    private async Task ShowNewSubgroupPrompt(MainWindowViewModel viewModel, string parentName)
+    {
+        var prompt = new GroupNameViewModel(
+            "New subgroup",
+            $"Name of the new group inside \"{parentName}\":",
+            "Create",
+            viewModel.GroupNames,
+            requireNewName: true);
+        var name = await new GroupNameWindow(prompt).ShowDialog<string?>(this);
+        if (name is not null)
+        {
+            // The prompt allows only a usable, unused name; the group is created at once and saved in
+            // the background
+            viewModel.CreateSubgroup(parentName, name);
+        }
+    }
+
+    /// <summary>
     ///     Shows the name prompt for renaming a group and, when a new name is chosen, renames it.
     /// </summary>
     /// <param name="viewModel">The main view model that owns the groups.</param>
@@ -2239,18 +2297,28 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Asks the user to confirm removing a group and, if confirmed, removes it (its repos become
-    ///     ungrouped). Nothing on disk or in any repository changes, which the message says.
+    ///     Asks the user to confirm removing a group and, if confirmed, removes it (its repos and
+    ///     subgroups go to the group it was inside, or become ungrouped at the top level). Nothing on disk
+    ///     or in any repository changes, which the message says.
     /// </summary>
     /// <param name="viewModel">The main view model that owns the groups.</param>
     /// <param name="groupName">The group to remove.</param>
     private async Task ConfirmAndRemoveGroup(MainWindowViewModel viewModel, string groupName)
     {
         var members = viewModel.RepoCards.Count(card => RepoGroupName.Comparer.Equals(card.GroupName ?? string.Empty, groupName));
+        var parent = viewModel.GetGroupParent(groupName);
+        var where = parent is null ? "ungrouped" : $"in the group \"{parent}\"";
+        var subgroups = viewModel.GetSubgroupCount(groupName);
+        var subgroupText = string.Empty;
+        if (subgroups > 0)
+        {
+            var target = parent is null ? "to the top level" : $"into \"{parent}\"";
+            subgroupText = $" Its {subgroups} subgroup(s) move {target} too.";
+        }
         var confirmed = await new ConfirmationWindow(
                 $"Remove the group \"{groupName}\"?\n\n" +
-                $"Its {members} repo(s) stay in AgentControl's list, ungrouped. This only changes how AgentControl " +
-                "lists them - nothing on disk or in any repository is changed.")
+                $"Its {members} repo(s) stay in AgentControl's list, {where}.{subgroupText} This only changes how " +
+                "AgentControl lists them - nothing on disk or in any repository is changed.")
             .ShowDialog<bool>(this);
 
         if (confirmed)

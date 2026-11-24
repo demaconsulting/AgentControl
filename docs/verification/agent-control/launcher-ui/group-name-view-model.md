@@ -81,6 +81,12 @@ has no error and no note and completes with `work`. This scenario is tested by
 `GroupNameViewModel_Rename_RefusesOtherGroupsAcceptsCaseChange`, covering
 `AgentControl-GroupNameViewModel-RenameAcceptsCaseChange`.
 
+**GroupNameViewModel_NewSubgroup**: A prompt that requires a new name, with the groups *Home* and *Work* existing,
+refuses `HOME` with the "already exists" message and no hint of joining it, and cannot accept it; `  new   Name ` is
+accepted and completes with `new Name`. This scenario is tested by
+`GroupNameViewModel_NewSubgroup_RefusesExistingNamesAcceptsFreshName`, covering
+`AgentControl-GroupNameViewModel-NewSubgroup`.
+
 **GroupNameViewModel_CompletesOnce**: A name is typed and the prompt is accepted, accepted again, canceled twice and
 the text changed and accepted once more; the single completion carried the first accepted name. This scenario is
 tested by `GroupNameViewModel_Accept_CompletesOnceWithTheName`, covering

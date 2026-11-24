@@ -1206,12 +1206,31 @@ name. The requirements are split by behavior; each is covered by the tests that 
   `MainWindow_NestedGroups_ListSubgroupsBeforeOwnReposAndCollapseHidesSubtree` (`RepoGroupTreeWindowTests.cs`): a group
   with two subgroups and a repo of its own is listed with the subgroups first, in order, and its own repo after them,
   each header's accessible name saying which group it is inside and counting its whole subtree, and collapsing the top
-  group hides its subgroups and their repos, the header saying it is collapsed. The behaviors of the tree that are
+  group hides its subgroups and their repos, the header saying it is collapsed; and
+  `MainWindow_NestedGroups_RowsAreIndentedByDepth`: a group three levels deep has headers indented by one level more
+  each time (with the unchanged top margin) and a repo is as far in as its group's header. The behaviors of the tree
+  that are
   observable only in the view-model layer (the same list without a hierarchy, a group created empty, creating, moving,
   dropping, renaming and removing a group) are covered by the view-model tests of the units that realize them, cited at
   this level as the subsystem's convention: `RepoGroupTreeTests.cs` for `MainWindowViewModel`
   (`AgentControl-MainWindowViewModel-NestedGroupTree` through `-NestedGroupRemoveKeepsContents`),
   `RepoGroupHeaderViewModelTests.cs` and `RepoCardColorTests.cs`.
+- `AgentControl-LauncherUI-NestedGroupCreate` (a group created inside another from its header's menu):
+  `MainWindow_HeaderMenu_NewSubgroup_PromptsAndCreatesGroupInside`: "New subgroup..." opens the prompt titled *New
+  subgroup*; canceled, nothing changes; the name of another group in another letter case is refused (an error, no
+  note that the group would be joined, accept unavailable); a new name creates the group, whose header appears with
+  no repos and the words `inside Project`. `MainWindow_CardMenu_MoveToGroup_ListsEmptyAndNestedGroupsWithPath`: the
+  submenu lists a group with no repo and a nested group, the nested group's tooltip giving its path, and choosing the
+  empty group moves the repo into it.
+- `AgentControl-LauncherUI-NestedGroupDrag` (dragging a group header into, out of and among groups):
+  `MainWindow_DragGroupHeader_ThreeZones_NestBeforeAndAfter`: a top-level group is dragged over the middle of another
+  group's header (the header is tinted, no line) and dropped inside it, over the upper third of a nested group's header
+  (the line above it) and dropped before it, and over the lower third of the parent's own header (the line below) and
+  dropped after it, leaving the parent; and `MainWindow_DragGroupHeader_OntoOwnDescendant_IsRefused`: a group dragged
+  over each third of a group inside it shows nothing and the drop changes nothing.
+- `AgentControl-LauncherUI-NestedGroupRemembered`: `MainWindow_NestedGroups_TreeSurvivesAWindowRestart`: a group
+  created inside another and a group dropped into it are written; a new window over the saved settings lists the same
+  tree.
 - `AgentControl-LauncherUI-RepoGroupCollapse` (collapse and expand from the header):
   `MainWindow_HeaderToggle_CollapsesAndExpandsSection`.
 

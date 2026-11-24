@@ -314,9 +314,10 @@ sections:
         title: >-
           The LauncherUI subsystem shall let a group contain other groups, listing them as a tree - each
           group's header followed by its subgroups and then by its own repos, every header saying which
-          group it is inside and counting the repos of its whole subtree - with a collapsed group hiding
-          its whole subtree, a group that was created inside another listed even when no repo is in it,
-          and a list without any nested group looking exactly as it did.
+          group it is inside and counting the repos of its whole subtree, and every header and repo drawn
+          as far in as the groups it is inside - with a collapsed group hiding its whole subtree, a group
+          that was created inside another listed even when no repo is in it, and a list without any
+          nested group looking exactly as it did.
         justification: |
           A flat list of groups cannot express customer and then project; a tree scales to a large
           collection of repos and matches how developers organize their work.
@@ -328,6 +329,51 @@ sections:
           - AgentControl-RepoCardViewModel-GroupDepthIndent
         tests:
           - MainWindow_NestedGroups_ListSubgroupsBeforeOwnReposAndCollapseHidesSubtree
+          - MainWindow_NestedGroups_RowsAreIndentedByDepth
+
+      - id: AgentControl-LauncherUI-NestedGroupCreate
+        title: >-
+          The LauncherUI subsystem shall offer "New subgroup..." in the menu of each of the user's group
+          headers, which asks for the new group's name in a prompt that refuses the name of any existing
+          group and can be canceled without changing anything, and which creates the group inside the
+          header's group, listed with no repos; the card menu's "Move to group" shall offer the groups
+          that have no repo and the nested ones too, a nested group's path in its tooltip.
+        justification: |
+          A group is created inside another where the user already sees it; names are unique across the
+          whole tree, so the prompt cannot let the new group join an existing one, and a repo can only
+          be moved into a group that is offered.
+        children:
+          - AgentControl-MainWindowViewModel-NestedGroupCreate
+          - AgentControl-RepoGroupHeaderViewModel-NewSubgroupRequest
+          - AgentControl-GroupNameViewModel-NewSubgroup
+        tests:
+          - MainWindow_HeaderMenu_NewSubgroup_PromptsAndCreatesGroupInside
+          - MainWindow_CardMenu_MoveToGroup_ListsEmptyAndNestedGroupsWithPath
+
+      - id: AgentControl-LauncherUI-NestedGroupDrag
+        title: >-
+          The LauncherUI subsystem shall let the user drag a group's header onto another of the user's
+          group headers and drop it before that group (upper third), inside it as its last subgroup
+          (middle third, the header tinted) or after it (lower third, a line shown), a group dropped next
+          to a nested group leaving the group it was in, and shall refuse a drop onto a group inside the
+          dragged group, showing nothing there.
+        justification: |
+          Dragging is the direct way to nest a group and to take it out again; a group inside itself
+          would be a loop, so no place inside the dragged group may look like a target.
+        children:
+          - AgentControl-MainWindowViewModel-NestedGroupDrop
+        tests:
+          - MainWindow_DragGroupHeader_ThreeZones_NestBeforeAndAfter
+          - MainWindow_DragGroupHeader_OntoOwnDescendant_IsRefused
+
+      - id: AgentControl-LauncherUI-NestedGroupRemembered
+        title: >-
+          The LauncherUI subsystem shall save the tree of the user's groups in the settings when it
+          changes and show the saved tree when the window is created again.
+        justification: |
+          A tree that is lost at the next start is not the user's tree.
+        tests:
+          - MainWindow_NestedGroups_TreeSurvivesAWindowRestart
 
       - id: AgentControl-LauncherUI-GroupAddRepository
         title: >-
@@ -404,7 +450,7 @@ sections:
         title: >-
           The LauncherUI subsystem shall offer, in a group's header, renaming and removing the
           group, the repos of a removed group going to the group it was inside or, at the top level,
-          becoming ungrouped, and creating a new group inside the group.
+          becoming ungrouped.
         justification: |
           Groups change over time; the header is where the user sees the group, so it is where the
           group is managed.
@@ -413,12 +459,10 @@ sections:
           - AgentControl-MainWindowViewModel-GroupRenameRules
           - AgentControl-MainWindowViewModel-GroupRemove
           - AgentControl-MainWindowViewModel-GroupHeaderRequests
-          - AgentControl-MainWindowViewModel-NestedGroupCreate
           - AgentControl-MainWindowViewModel-NestedGroupRename
           - AgentControl-MainWindowViewModel-NestedGroupRemoveKeepsContents
           - AgentControl-RepoGroupHeaderViewModel-GroupActions
           - AgentControl-RepoGroupHeaderViewModel-RemoveGroupRequest
-          - AgentControl-RepoGroupHeaderViewModel-NewSubgroupRequest
           - AgentControl-GroupNameViewModel-Rename
           - AgentControl-GroupNameViewModel-RenameStartsWithCurrentName
           - AgentControl-GroupNameViewModel-RenameAcceptsCaseChange
@@ -1260,7 +1304,6 @@ sections:
           group drag must not change how cards are dragged or toggle the section it was grabbed by.
         children:
           - AgentControl-MainWindowViewModel-DropGroup
-          - AgentControl-MainWindowViewModel-NestedGroupDrop
         tests:
           - MainWindow_DragGroupHeader_BelowAnotherGroup_ReordersGroupsWithLineFeedback
           - MainWindow_DragGroupHeader_OntoBuiltInSectionOrCard_IsRefused

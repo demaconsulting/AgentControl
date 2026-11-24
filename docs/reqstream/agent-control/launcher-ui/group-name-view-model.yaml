@@ -124,6 +124,17 @@ sections:
         tests:
           - GroupNameViewModel_Rename_RefusesOtherGroupsAcceptsCaseChange
 
+      - id: AgentControl-GroupNameViewModel-NewSubgroup
+        title: >-
+          The GroupNameViewModel class shall, when asking for the name of a group created inside
+          another group, refuse the name of every existing group, in any letter case, saying that
+          it already exists and not offering to join it, and shall complete with the name as typed.
+        justification: |
+          Group names are unique across the whole tree, so a group created inside another cannot
+          join an existing group the way a repo moved into a new group can.
+        tests:
+          - GroupNameViewModel_NewSubgroup_RefusesExistingNamesAcceptsFreshName
+
       - id: AgentControl-GroupNameViewModel-CompletesOnce
         title: >-
           The GroupNameViewModel class shall, once accepted, complete exactly once with the

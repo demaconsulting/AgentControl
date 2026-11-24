@@ -398,11 +398,27 @@ sections:
           - AgentControl-LauncherUI-RepoGroupsFlatList
           - AgentControl-LauncherUI-RepoGroupCollapse
           - AgentControl-LauncherUI-GroupAddRepository
-          - AgentControl-LauncherUI-NestedGroupTree
         tests:
           - windows@RepoList_FavoritesAndGroups_SectionsAreFavoritesThenGroupsAlphabeticallyThenUngrouped
           - windows@CardMenu_RemoveFromGroup_ReturnsRepoToUngroupedAndRemovesTheHeader
           - windows@GroupHeaderMenu_MoveDown_ReordersGroupsAndKeepsOrderAfterRestart
+
+      - id: AgentControl-System-NestedGroups
+        title: >-
+          The tool shall let the user nest groups - create a group inside another group from its
+          header's menu and drag a group's header into, out of and among other groups - listing the
+          nested groups as a collapsible tree, and shall remember the tree.
+        tags: [system]
+        justification: |
+          Developers who work for several customers, each with several projects, need groups inside
+          groups to keep a large collection of repos organized.
+        children:
+          - AgentControl-LauncherUI-NestedGroupTree
+          - AgentControl-LauncherUI-NestedGroupCreate
+          - AgentControl-LauncherUI-NestedGroupDrag
+          - AgentControl-LauncherUI-NestedGroupRemembered
+        tests:
+          - windows@GroupHeaderMenu_NewSubgroup_ListsGroupInsideParentStoresHierarchyInSettingsOnlyAndKeepsItAfterRestart
 
       - id: AgentControl-System-RepoGroupCollapseRemembered
         title: >-

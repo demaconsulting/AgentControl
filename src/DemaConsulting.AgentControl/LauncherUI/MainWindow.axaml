@@ -196,7 +196,8 @@
                          group header can be dragged above or below another group's header; the two
                          lines show where it would land. -->
                     <Panel>
-                        <Grid Name="GroupHeader" ColumnDefinitions="Auto,*,Auto" Margin="0,8,0,0">
+                        <Grid Name="GroupHeader" ColumnDefinitions="Auto,*,Auto"
+                               Margin="{Binding IndentWidth, Converter={x:Static vm:GroupIndentConverter.Instance}, ConverterParameter=8}">
                             <!-- Group color accent: a fixed-width slot, so headers stay aligned whether or
                                  not the group has a color. Named in words by its tooltip and accessible
                                  name (never color alone). -->
@@ -275,6 +276,15 @@
                                                 <materialIcons:MaterialIcon Kind="FolderPlus" />
                                             </MenuItem.Icon>
                                         </MenuItem>
+                                        <MenuItem Name="GroupNewSubgroupMenuItem"
+                                                   AutomationProperties.AutomationId="GroupNewSubgroupMenuItem"
+                                                   Header="New subgroup..."
+                                                   ToolTip.Tip="Create a new group inside this group"
+                                                   Command="{Binding NewSubgroupCommand}">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="FolderPlusOutline" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
                                         <Separator />
                                         <!-- Move up / Move down: disabled (with the reason as the tooltip) at
                                              the ends of the groups and while the filter has text -->
@@ -320,7 +330,7 @@
                                         <MenuItem Name="RemoveGroupMenuItem"
                                                    AutomationProperties.AutomationId="RemoveGroupMenuItem"
                                                    Header="Remove group"
-                                                   ToolTip.Tip="Remove this group; its repos stay in the list, ungrouped"
+                                                   ToolTip.Tip="Remove this group; its repos and subgroups stay in the list, in the group this one is inside (or ungrouped)"
                                                    Command="{Binding RemoveGroupCommand}">
                                             <MenuItem.Icon>
                                                 <materialIcons:MaterialIcon Kind="FolderRemove" />
@@ -355,6 +365,7 @@
                 </DataTemplate>
                 <DataTemplate DataType="vm:RepoCardViewModel" x:DataType="vm:RepoCardViewModel">
                     <Border Classes="RepoCard"
+                             Margin="{Binding IndentWidth, Converter={x:Static vm:GroupIndentConverter.Instance}}"
                              AttachedToVisualTree="RepoCard_AttachedToVisualTree">
                         <Panel>
                         <!-- Accent bar (overall status) | card body -->

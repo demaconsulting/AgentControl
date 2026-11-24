@@ -11,9 +11,9 @@ logic. The rules for what a name may be live in `RepoGroupName` (`Settings` subs
 messages, the "does it clash with another group" check that needs the existing groups, and completion. Its behavior is
 specified by the unit requirements `AgentControl-GroupNameViewModel-ValidatesAsTyped`, `-NeutralUntilTyped`,
 `-RefusesBlankName`, `-RefusesTooLongName`, `-RefusesBuiltInNames`, `-AcceptsUsableName`, `-NewGroup`, `-NewGroupHint`,
-`-NewGroupAdoptsSpelling`, `-Rename`, `-RenameStartsWithCurrentName`, `-RenameAcceptsCaseChange`, `-CompletesOnce`,
-`-CancelCompletesOnce` and `-RequiresArguments` (each prefixed `AgentControl-GroupNameViewModel`), and together with
-`MainWindowViewModel` and `RepoCardViewModel` it provides `AgentControl-LauncherUI-RepoGroups`.
+`-NewGroupAdoptsSpelling`, `-NewSubgroup`, `-Rename`, `-RenameStartsWithCurrentName`, `-RenameAcceptsCaseChange`,
+`-CompletesOnce`, `-CancelCompletesOnce` and `-RequiresArguments` (each prefixed `AgentControl-GroupNameViewModel`), and
+together with `MainWindowViewModel` and `RepoCardViewModel` it provides `AgentControl-LauncherUI-RepoGroups`.
 
 #### Data Model
 
@@ -22,7 +22,8 @@ text (for example `Create` or `Rename`), given at construction.
 
 **Existing groups** (private): the distinct names of the groups that exist now (`RepoGroupName.DistinctNames`), for the
 clash check and for adopting an existing group's spelling. **Renaming** (private): the group being renamed, or `null`
-when a group is being created.
+when a group is being created. **Require new name** (private): `true` for a group created inside another group, which
+cannot join an existing group because group names are unique across the whole tree.
 
 **Text**: the name as typed; its initial value is the group's current name when renaming and empty when creating.
 Changing it re-validates and raises change notifications for the messages and for `CanAccept`, so the message and
@@ -32,12 +33,12 @@ whether the name can be accepted always follow the current text (`AgentControl-G
 typed, so the prompt does not open already scolding (`AgentControl-GroupNameViewModel-NeutralUntilTyped`). A blank
 name (`-RefusesBlankName`), a name longer than `RepoGroupName.MaxLength` (40 characters, with the length of the
 cleaned-up name in the message; exactly 40 is fine) (`-RefusesTooLongName`) and the built-in names *Favorites* and
-*Ungrouped* in any letter case (`-RefusesBuiltInNames`) are refused; when renaming, the name of another existing group
-is refused as well (`-Rename`).
+*Ungrouped* in any letter case (`-RefusesBuiltInNames`) are refused; when renaming, or when a new name is required (a
+group created inside another group), the name of another existing group is refused as well (`-Rename`, `-NewSubgroup`).
 
-**HintText** / **HasHint**: a friendly note that is not an error: when creating a group, that the name matches an
-existing group ignoring letter case and the repo will be added to it (`AgentControl-GroupNameViewModel-NewGroup`,
-`-NewGroupHint`).
+**HintText** / **HasHint**: a friendly note that is not an error: when creating a group that may join an existing one,
+that the name matches an existing group ignoring letter case and the repo will be added to it
+(`AgentControl-GroupNameViewModel-NewGroup`, `-NewGroupHint`); never when a new name is required.
 
 **CanAccept**: a name has been typed, it is valid by the shared rules and there is no error.
 **AcceptCommand** (available while `CanAccept`) and **CancelCommand**; the **Completed** event
@@ -45,15 +46,16 @@ existing group ignoring letter case and the repo will be added to it (`AgentCont
 
 #### Key Methods
 
-**Constructor(title, prompt, acceptText, existingGroups, renaming = null)**: Stores the texts, cleans the list of
-existing groups and sets the initial text. Throws `ArgumentNullException` for a null title, prompt, accept text or
-list of groups (`AgentControl-GroupNameViewModel-RequiresArguments`).
+**Constructor(title, prompt, acceptText, existingGroups, renaming = null, requireNewName = false)**: Stores the texts,
+cleans the list of existing groups and sets the initial text. Throws `ArgumentNullException` for a null title, prompt,
+accept text or list of groups (`AgentControl-GroupNameViewModel-RequiresArguments`).
 
 **Accept** (via `AcceptCommand`): Does nothing unless `CanAccept`. A usable name completes with the name cleaned of
 surrounding and repeated white space (`AgentControl-GroupNameViewModel-AcceptsUsableName`). A *rename* completes with
 exactly what was typed (cleaned of surrounding white space), so changing only the letter case works
 (`-RenameAcceptsCaseChange`); when renaming, the prompt starts with the group's current name
-(`-RenameStartsWithCurrentName`). Creating a group completes with the
+(`-RenameStartsWithCurrentName`); a group created inside another group (a new name is required) also completes with the
+typed name (`-NewSubgroup`). Creating a group that may join an existing one completes with the
 spelling of an existing group the name matches ignoring letter case (`RepoGroupName.Canonicalize`), otherwise with the
 typed name (`-NewGroupAdoptsSpelling`).
 

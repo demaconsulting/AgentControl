@@ -768,6 +768,16 @@ collapsed. This scenario is tested by
 `windows@RepoList_DragGroupHeaderHeldStillAtBottomEdge_ScrollsAndDropsBeyondTheFirstView`, covering
 `AgentControl-System-GroupReorder`.
 
+**AgentControl_NestedGroups_NewSubgroupListsGroupInsideParentAndKeepsTreeAfterRestart**: With the test repo in the
+group Work and a second repo in no group, choosing "New subgroup..." in the Work header's menu opens the name prompt;
+typing `Phase 1` and confirming lists a group `Phase 1` with no repos inside Work (its header says
+`Phase 1, 0 repos, expanded, inside Work`), the hierarchy is found in the settings file and nothing is written into the
+repository. After the application is closed and started again the same tree is listed. This scenario is tested by
+`windows@GroupHeaderMenu_NewSubgroup_ListsGroupInsideParentStoresHierarchyInSettingsOnlyAndKeepsItAfterRestart`,
+covering `AgentControl-System-NestedGroups`. That the headers are indented by depth, that a header dropped in the three
+zones of another group's header nests, reorders and un-nests, and that a drop onto a group inside the dragged group is
+refused are verified in the headless window tests of the `LauncherUI` subsystem.
+
 **AgentControl_ListChangesKept_FavoriteCollapseColorsAndGroupOrderAreKept**: The favorite star, a section's
 collapse, a card color, a group color and the order of the groups are each changed in the real application and found
 in the settings file. The collapse, the card color, the group color and the group order are also still there after a

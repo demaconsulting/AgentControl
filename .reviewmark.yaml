@@ -141,6 +141,7 @@ reviews:
       - "src/**/LauncherUI/PackageSourceItemViewModel.cs"
       - "src/**/LauncherUI/SelectPackageSourceViewModel.cs"
       - "src/**/LauncherUI/FavoriteIconConverter.cs"
+      - "src/**/LauncherUI/GroupIndentConverter.cs"
       - "src/**/LauncherUI/AgentToolKindDisplayNameConverter.cs"
       - "src/**/LauncherUI/FavoriteColorConverter.cs"  # deleted: keeps the removal of the file reviewable
       - "src/**/LauncherUI/ThemePreferenceDisplayNameConverter.cs"

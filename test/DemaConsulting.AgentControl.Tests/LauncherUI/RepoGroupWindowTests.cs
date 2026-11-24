@@ -340,9 +340,10 @@ public sealed class RepoGroupWindowTests : IDisposable
     });
 
     /// <summary>
-    ///     Test that the header's "..." menu starts with "Add repository..." (with an AutomationId and
-    ///     a tooltip), followed by a separator, the Move up, Move down and Group color items, another
-    ///     separator and then the rename and remove items - each item identified and explained.
+    ///     Test that the header's "..." menu starts with "Add repository..." and "New subgroup..." (each with
+    ///     an AutomationId and a tooltip), followed by a separator, the Move up, Move down and Group color
+    ///     items, another separator and then the rename and remove items - each item identified and
+    ///     explained.
     /// </summary>
     [Fact]
     public void MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator() => HeadlessTestApp.Run(() =>
@@ -358,18 +359,21 @@ public sealed class RepoGroupWindowTests : IDisposable
             var menu = OpenMenu(menuButton);
             var items = menu.Items.OfType<Control>().ToList();
 
-            // Assert: Add repository..., separator, Move up, Move down, Group color..., separator,
-            // Rename group..., Remove group
-            Assert.Equal(8, items.Count);
+            // Assert: Add repository..., New subgroup..., separator, Move up, Move down, Group color...,
+            // separator, Rename group..., Remove group
+            Assert.Equal(9, items.Count);
             var add = Assert.IsType<MenuItem>(items[0]);
             Assert.Equal("GroupAddRepoMenuItem", AutomationProperties.GetAutomationId(add));
             Assert.Equal("Add repository...", add.Header);
-            Assert.IsType<Separator>(items[1]);
-            Assert.IsType<Separator>(items[5]);
+            var subgroup = Assert.IsType<MenuItem>(items[1]);
+            Assert.Equal("GroupNewSubgroupMenuItem", AutomationProperties.GetAutomationId(subgroup));
+            Assert.Equal("New subgroup...", subgroup.Header);
+            Assert.IsType<Separator>(items[2]);
+            Assert.IsType<Separator>(items[6]);
             Assert.Equal(
                 [
-                    "GroupAddRepoMenuItem", "MoveGroupUpMenuItem", "MoveGroupDownMenuItem", "GroupColorMenuItem",
-                    "RenameGroupMenuItem", "RemoveGroupMenuItem"
+                    "GroupAddRepoMenuItem", "GroupNewSubgroupMenuItem", "MoveGroupUpMenuItem", "MoveGroupDownMenuItem",
+                    "GroupColorMenuItem", "RenameGroupMenuItem", "RemoveGroupMenuItem"
                 ],
                 items.OfType<MenuItem>().Select(AutomationProperties.GetAutomationId));
             Assert.All(items.OfType<MenuItem>(), item => Assert.False(string.IsNullOrEmpty(ToolTip.GetTip(item)?.ToString())));
