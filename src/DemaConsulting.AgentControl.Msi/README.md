@@ -8,7 +8,7 @@ WiX Toolset v5 packaging project that produces the Windows installer for
 The build produces exactly one output file:
 
 ```text
-src/DemaConsulting.AgentControl.Msi/bin/x64/Release/AgentControl-{version}.msi
+src/DemaConsulting.AgentControl.Msi/bin/x64/Release/AgentControl-{version}-win-x64.msi
 ```
 
 `Package.wxs` sets `<MediaTemplate EmbedCab="yes" CompressionLevel="high" />`,
