@@ -1,147 +1,131 @@
 # lint.ps1
 #
 # PURPOSE:
-#   Runs all lint checks and reports failures. Exits 1 on error.
-#   Used by CI/CD as the merge gate and by the lint-fix agent
-#   during pre-PR cleanup.
+#   Runs the lint checks and reports failures. Exits 1 on error.
+#   Used by CI/CD as the merge gate (-All) and by the lint-fix agent during pre-PR cleanup.
 #
 #   To auto-fix formatting issues, run fix.ps1 instead.
 #
-# PARAMETERS:
-#   -Changed      Runs only the checks whose inputs changed since -Base plus uncommitted and
-#                 untracked files: yamllint for YAML, TextLint for the spell-checked file types,
-#                 LintMark for Markdown, and each compliance tool only when its inputs changed
-#                 (a tool manifest change runs them all). dotnet format is limited to the changed
-#                 .cs files (at most 200), or covers the whole solution when a project or build
-#                 configuration file changed. Each skipped check is printed. When the changed
-#                 files cannot be determined, every check runs.
-#   -Base <ref>   Git reference -Changed compares against (default origin/main, else main).
-#   -DryRun       Prints which checks would run and exits without running them.
-#
 # USAGE:
-#   pwsh ./lint.ps1                          All checks (CI merge gate)
-#   pwsh ./lint.ps1 -Changed [-Base <ref>]   Only the checks whose inputs changed
-#   Add -DryRun to print which checks would run without running them.
+#   pwsh ./lint.ps1 -Help                     Print the usage text and exit 0
+#   pwsh ./lint.ps1 -All                      All checks (CI merge gate)
+#   pwsh ./lint.ps1 -Changed [-Base <ref>]    Only the checks whose inputs changed since <ref>
+#                                             (default origin/main, else main) plus uncommitted changes;
+#                                             a selected check runs over the whole repository (read-only),
+#                                             except dotnet format, which is limited to the changed .cs files
+#                                             unless project or build configuration files changed
+#   pwsh ./lint.ps1 -Check lintmark,textlint  Only the named checks, in full; with -Changed, only the named
+#                                             checks whose inputs changed
+#   Add -DryRun to any scope to print which checks would run without running them.
+#   With no arguments the usage text is printed and the script exits 1 (a scope must be chosen).
+#
+# EXTENSION POINTS:
+#   Search for "[PROJECT-SPECIFIC]" comments to find the designated locations
+#   for adding project-specific lint checks.
 #
 # CUSTOMIZATION:
 #   This script belongs to the project: extend it as the project grows. Add steps at the
-#   [PROJECT-SPECIFIC] points, update tool versions, and add optional parameters that focus
-#   a run (here the scoped -Changed/-DryRun modes).
-#   Run with no arguments it must still run every check (CI relies on that), and never
-#   remove or weaken a check to make it pass.
+#   [PROJECT-SPECIFIC] points, update tool versions, and add optional parameters that focus a run.
+#   To add a check, add it to the $checks table (its name becomes a valid -Check value and
+#   appears in the usage text), then add its input filter and its run step at the
+#   [PROJECT-SPECIFIC] points. The reusable scoping logic lives in scripts/ProjectScripts.psm1,
+#   which is delivered by the Agents release zip, is shared across repositories, and must never
+#   be edited here.
+#   With no arguments the script prints the usage text and exits 1; -All must still run every
+#   check (CI relies on that), and never remove or weaken a check to make it pass.
 
 param(
+    # Run every check (what CI runs).
+    [switch]$All,
+
     # Run only the checks whose inputs changed.
     [switch]$Changed,
 
     # Git reference to compare against for -Changed (default: origin/main, else main).
     [string]$Base,
 
+    # Run only the named checks (see the usage text for the valid names).
+    [string[]]$Check,
+
     # Print which checks would run and exit without running them.
-    [switch]$DryRun
+    [switch]$DryRun,
+
+    # Print the usage text and exit 0.
+    [switch]$Help
 )
 
-function Get-VenvActivateScript {
-    if (Test-Path ".venv/Scripts/Activate.ps1") { return ".venv/Scripts/Activate.ps1" }
-    if (Test-Path ".venv/bin/Activate.ps1") { return ".venv/bin/Activate.ps1" }
-    return $null
+Import-Module (Join-Path $PSScriptRoot 'scripts/ProjectScripts.psm1') -Force
+
+# ==============================================================================
+# CHECK TABLE
+# Every check in run order: its -Check name, the title shown in progress output, and the
+# reason shown when -Changed skips it. [PROJECT-SPECIFIC] Add repository-specific checks here.
+# ==============================================================================
+
+$checks = [ordered]@{
+    yamllint    = @{ Title = 'YAML';             Skip = 'no YAML files changed' }
+    textlint    = @{ Title = 'spelling';         Skip = 'no spell-checked files changed' }
+    lintmark    = @{ Title = 'markdown';         Skip = 'no Markdown files changed' }
+    reqstream   = @{ Title = 'reqstream';        Skip = 'no requirements files changed' }
+    versionmark = @{ Title = 'versionmark';      Skip = '.versionmark.yaml not changed' }
+    reviewmark  = @{ Title = 'reviewmark';       Skip = 'no reviewed files changed' }
+    sysml2tools = @{ Title = 'sysml2tools';      Skip = 'no SysML2 model files changed' }
+    format      = @{ Title = 'dotnet format';    Skip = 'no C# or project files changed' }
 }
 
-function Initialize-PythonVenv {
-    if (-not (Test-Path ".venv")) {
-        python -m venv .venv
-        if ($LASTEXITCODE -ne 0) { return $false }
-    }
+# ==============================================================================
+# USAGE AND SCOPE VALIDATION
+# ==============================================================================
 
-    $activateScript = Get-VenvActivateScript
-    if (-not $activateScript) { return $false }
-    & $activateScript
-    if (-not (Get-Command deactivate -ErrorAction SilentlyContinue)) { return $false }
-
-    $installSucceeded = $false
-    try {
-        pip install -r pip-requirements.txt --quiet --disable-pip-version-check
-        $installSucceeded = $LASTEXITCODE -eq 0
-        return $installSucceeded
-    }
-    finally {
-        if (-not $installSucceeded -and (Get-Command deactivate -ErrorAction SilentlyContinue)) {
-            deactivate 2>$null
-        }
-    }
+function Show-Usage {
+    Write-ScriptUsage -Script 'lint.ps1' -IterateWith '-Changed (or -Check)' `
+        -Purpose 'run the lint checks (the CI merge gate); exits 1 if any check fails.' `
+        -Options ([ordered]@{
+            '-All'           = 'Every check (what CI runs); cannot be combined with another scope.'
+            '-Changed'       = 'Only the checks whose inputs changed (since the base, plus uncommitted); they run repository-wide.'
+            '-Base <ref>'    = 'Base reference for -Changed (default origin/main, else main).'
+            '-Check <names>' = 'Only the named checks, in full; with -Changed, only the named checks whose inputs changed.'
+            '-DryRun'        = 'Print which checks would run or be skipped, then exit 0 without running anything.'
+            '-Help'          = 'Print this text and exit 0.'
+        }) `
+        -ChecksLabel 'Checks' -Checks @($checks.Keys) `
+        -Examples @('-Changed', '-Check lintmark,textlint', '-Check format -Changed -DryRun', '-All')
 }
 
-function Get-ChangedFiles {
-    param([string]$Base)
+if ($Help) { Show-Usage; exit 0 }
 
-    # Default to origin/main, falling back to the local main branch
-    if (-not $Base) {
-        $Base = 'origin/main'
-        git rev-parse --verify --quiet "$Base^{commit}" > $null 2>&1
-        if ($LASTEXITCODE -ne 0) { $Base = 'main' }
-    }
-    git rev-parse --verify --quiet "$Base^{commit}" > $null 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Cannot resolve base reference '$Base'."
-        return $null
-    }
-    Write-Host "Changes since: $Base (plus uncommitted and untracked files)"
-
-    # Committed changes since the merge-base, then staged, unstaged, and untracked files
-    $committed = @(git -c core.quotePath=false diff --name-only --no-renames "$Base...HEAD")
-    if ($LASTEXITCODE -ne 0) { return $null }
-    $working = @(git -c core.quotePath=false status --porcelain --untracked-files=all --no-renames)
-    if ($LASTEXITCODE -ne 0) { return $null }
-
-    $files = $committed + @($working | ForEach-Object { $_.Substring(3).Trim('"') })
-    return , @($files | Where-Object { $_ } | ForEach-Object { $_ -replace '\\', '/' } | Sort-Object -Unique)
+$scopeProblems = Test-ScopeArguments -Base $Base -Scopes ([ordered]@{
+        All     = $All.IsPresent
+        Changed = $Changed.IsPresent
+        Check   = [bool]$Check
+    })
+if ($scopeProblems.Count -gt 0) {
+    $scopeProblems | ForEach-Object { Write-Host "Error: $_" }
+    Write-Host ""
+    Show-Usage
+    exit 1
 }
 
-function Test-AnyMatch {
-    param([string[]]$Files, [string]$Pattern)
-    return @($Files | Where-Object { $_ -match $Pattern }).Count -gt 0
+$wanted = @($checks.Keys)
+if ($Check) {
+    $wanted = Resolve-NameList -Names $Check -Valid @($checks.Keys) -Label 'check'
+    if ($null -eq $wanted) { exit 1 }
 }
 
-function Get-ReviewMarkPattern {
-    # Builds one regex from the 'needs-review' globs in .reviewmark.yaml ('!' excludes are ignored,
-    # which can only run the check more often); returns a match-all pattern if none are found
-    $globs = @()
-    $inList = $false
-    foreach ($line in Get-Content .reviewmark.yaml -ErrorAction SilentlyContinue) {
-        if ($line -match '^needs-review:') { $inList = $true; continue }
-        if ($inList -and $line -match '^\s+-\s+["'']?([^"''#\s]+)') {
-            if (-not $Matches[1].StartsWith('!')) { $globs += $Matches[1] }
-        } elseif ($inList -and $line -match '^\S') { break }
-    }
-    if ($globs.Count -eq 0) { return '.' }
+# ==============================================================================
+# CHECK SELECTION
+# A check runs when it is wanted (-All, or named by -Check) and, with -Changed, when a file
+# it reads changed. When the changed files cannot be determined, every wanted check runs.
+# ==============================================================================
 
-    $regexes = foreach ($glob in $globs) {
-        $regex = [regex]::Escape($glob)
-        $regex = $regex -replace '\\\*\\\*/', '(.*/)?' -replace '\\\*\\\*', '.*' -replace '\\\*', '[^/]*' -replace '\\\?', '[^/]'
-        "^$regex$"
-    }
-    return ($regexes -join '|')
-}
-
-# --- Check Selection ---
-# Without -Changed every check runs. With -Changed a check runs only when a file it reads
-# changed; when the changed files cannot be determined, every check runs.
-$run = @{
-    Yaml        = $true
-    Spelling    = $true
-    Markdown    = $true
-    ReqStream   = $true
-    VersionMark = $true
-    ReviewMark  = $true
-    SysML       = $true
-    Format      = $true
-}
+$inputsChanged = @{}
+foreach ($name in $checks.Keys) { $inputsChanged[$name] = $true }
 $formatInclude = @()
 
 if ($Changed) {
     $files = Get-ChangedFiles -Base $Base
     if ($null -eq $files) {
-        Write-Host "Running all checks: the changed files could not be determined."
+        Write-Host "Running all selected checks: the changed files could not be determined."
     } else {
         Write-Host "Changed files: $($files.Count)"
 
@@ -149,47 +133,77 @@ if ($Changed) {
         $toolManifest = Test-AnyMatch $files '^\.config/dotnet-tools\.json$'
 
         # yamllint: YAML files (including .yamllint.yaml) and its Python requirements
-        $run.Yaml = Test-AnyMatch $files '\.ya?ml$|^pip-requirements\.txt$'
+        $inputsChanged.yamllint = Test-AnyMatch $files '\.ya?ml$|^pip-requirements\.txt$'
 
         # TextLint: the file types in the 'files' setting of .textlint.yaml (and that YAML file itself)
-        $run.Spelling = $toolManifest -or (Test-AnyMatch $files '\.(md|yaml|yml|json|cs|cpp|hpp|h|txt)$')
+        $inputsChanged.textlint = $toolManifest -or (Test-AnyMatch $files '\.(md|yaml|yml|json|cs|cpp|hpp|h|txt)$')
 
         # LintMark: Markdown files, .lintmark.yaml, and .editorconfig (LintMark reads both)
-        $run.Markdown = $toolManifest -or (Test-AnyMatch $files '\.md$|(^|/)\.lintmark\.yaml$|(^|/)\.editorconfig$')
+        $inputsChanged.lintmark = $toolManifest -or (Test-AnyMatch $files '\.md$|(^|/)\.lintmark\.yaml$|(^|/)\.editorconfig$')
 
         # ReqStream: the requirements tree
-        $run.ReqStream = $toolManifest -or (Test-AnyMatch $files '^requirements\.yaml$|^docs/reqstream/')
+        $inputsChanged.reqstream = $toolManifest -or (Test-AnyMatch $files '^requirements\.yaml$|^docs/reqstream/')
 
         # VersionMark: its definition file
-        $run.VersionMark = $toolManifest -or (Test-AnyMatch $files '^\.versionmark\.yaml$')
+        $inputsChanged.versionmark = $toolManifest -or (Test-AnyMatch $files '^\.versionmark\.yaml$')
 
         # ReviewMark: its definition and the files its 'needs-review' patterns track
-        $run.ReviewMark = $toolManifest -or (Test-AnyMatch $files "^\.reviewmark\.yaml$|$(Get-ReviewMarkPattern)")
+        $inputsChanged.reviewmark = $toolManifest -or (Test-AnyMatch $files "^\.reviewmark\.yaml$|$(Get-ReviewMarkPattern)")
 
         # SysML2Tools: the architecture model
-        $run.SysML = $toolManifest -or (Test-AnyMatch $files '^docs/sysml2/')
+        $inputsChanged.sysml2tools = $toolManifest -or (Test-AnyMatch $files '^docs/sysml2/')
 
         # dotnet format: the changed .cs files only, or everything when project or build configuration changed
-        $projectChanged = Test-AnyMatch $files `
-            '\.(csproj|props|targets|sln|slnx)$|(^|/)(\.editorconfig|\.globalconfig|global\.json|nuget\.config)$'
-        $csFiles = @($files | Where-Object { $_ -match '\.cs$' -and (Test-Path -LiteralPath $_) })
-        $run.Format = $projectChanged -or $csFiles.Count -gt 0
-        if (-not $projectChanged -and $csFiles.Count -gt 0 -and $csFiles.Count -le 200) { $formatInclude = $csFiles }
+        $formatScope = Get-DotnetFormatScope $files
+        $inputsChanged.format = $formatScope.Run
+        $formatInclude = $formatScope.Include
+
+        # [PROJECT-SPECIFIC] Add input filters for repository-specific checks here.
+
+        # A change to this script or the shared module changes the selection logic itself, so every selected
+        # check runs over the whole repository (no input filter could say what it affects)
+        if (Test-AnyMatch $files '^(lint\.ps1|scripts/ProjectScripts\.psm1)$') {
+            Write-Host "Running all selected checks over the whole repository: lint.ps1 or scripts/ProjectScripts.psm1 changed."
+            foreach ($name in $checks.Keys) { $inputsChanged[$name] = $true }
+            $formatInclude = @()
+        }
     }
+}
+
+$run = @{}
+$skipReason = @{}
+foreach ($name in $checks.Keys) {
+    $run[$name] = ($name -in $wanted) -and $inputsChanged[$name]
+    if ($name -notin $wanted) { $skipReason[$name] = 'not selected by -Check' }
+    else { $skipReason[$name] = $checks[$name].Skip }
+}
+if (-not $run.format) { $formatInclude = @() }
+
+function Write-Skipped {
+    param([string]$Name)
+    Write-Host "Linting: $($checks[$Name].Title)... skipped ($($skipReason[$Name]))"
 }
 
 if ($DryRun) {
-    foreach ($check in 'Yaml', 'Spelling', 'Markdown', 'ReqStream', 'VersionMark', 'ReviewMark', 'SysML', 'Format') {
-        Write-Host ("  {0,-12} {1}" -f $check, ($run[$check] ? 'run' : 'skip'))
+    foreach ($name in $checks.Keys) {
+        Write-Host ("  {0,-12} {1}" -f $name, ($run[$name] ? 'run' : "skip ($($skipReason[$name]))"))
     }
     if ($formatInclude.Count -gt 0) { Write-Host "  dotnet format limited to: $($formatInclude -join ' ')" }
+    Write-Host "Dry run: no check was run."
     exit 0
 }
 
+# ==============================================================================
+# LINT CHECKS
+# Runs the selected lint checks. Exits 1 if any check fails.
+# ==============================================================================
+
 $lintError = $false
 
-# --- YAML ---
-if ($run.Yaml) {
+# --- PYTHON SECTION ---
+# Sets up a virtual environment and runs yamllint.
+$skipPython = $true
+if ($run.yamllint) {
     Write-Host "Linting: YAML..."
     $skipPython = -not (Initialize-PythonVenv)
     if ($skipPython) { $lintError = $true }
@@ -200,79 +214,103 @@ if ($run.Yaml) {
         deactivate
     }
 } else {
-    Write-Host "Linting: YAML... skipped (no YAML files changed)"
+    Write-Skipped 'yamllint'
 }
 
-# --- dotnet Tools ---
+# [PROJECT-SPECIFIC] Add additional Python-based lint checks here.
+# Example:
+#   if (-not $skipPython) {
+#       flake8 src/
+#       if ($LASTEXITCODE -ne 0) { $lintError = $true }
+#   }
+
+# --- DOTNET TOOLS RESTORE ---
+# Restores the local dotnet tools; required by TextLint, LintMark, and the compliance tools.
 $skipDotnetTools = $true
-if ($run.Spelling -or $run.Markdown -or $run.ReqStream -or $run.VersionMark -or $run.ReviewMark -or $run.SysML) {
+if ($run.textlint -or $run.lintmark -or $run.reqstream -or $run.versionmark -or $run.reviewmark -or $run.sysml2tools) {
     $skipDotnetTools = $false
     dotnet tool restore > $null
     if ($LASTEXITCODE -ne 0) { $lintError = $true; $skipDotnetTools = $true }
 }
 
-# --- Spelling ---
-if ($run.Spelling) {
+# --- SPELLING SECTION ---
+# Runs TextLint using the files configured in .textlint.yaml.
+if ($run.textlint) {
     Write-Host "Linting: spelling..."
     if (-not $skipDotnetTools) {
         dotnet textlint
         if ($LASTEXITCODE -ne 0) { $lintError = $true }
     }
 } else {
-    Write-Host "Linting: spelling... skipped (no spell-checked files changed)"
+    Write-Skipped 'textlint'
 }
 
-# --- Markdown ---
-if ($run.Markdown) {
+# --- MARKDOWN SECTION ---
+# Runs LintMark using the settings in .lintmark.yaml.
+if ($run.lintmark) {
     Write-Host "Linting: markdown..."
     if (-not $skipDotnetTools) {
         dotnet lintmark
         if ($LASTEXITCODE -ne 0) { $lintError = $true }
     }
 } else {
-    Write-Host "Linting: markdown... skipped (no Markdown files changed)"
+    Write-Skipped 'lintmark'
 }
 
 # [PROJECT-SPECIFIC] Add additional lint checks here.
 
-# --- Compliance Tools ---
-Write-Host "Linting: compliance tools..."
-if (-not ($run.ReqStream -or $run.VersionMark -or $run.ReviewMark -or $run.SysML)) {
-    Write-Host "  skipped (no compliance tool inputs changed)"
-} elseif (-not $skipDotnetTools) {
-    if ($run.ReqStream) {
+# --- DOTNET LINTING SECTION ---
+# Runs compliance tools: reqstream, versionmark, reviewmark, sysml2tools.
+if ($run.reqstream) {
+    Write-Host "Linting: reqstream..."
+    if (-not $skipDotnetTools) {
         dotnet reqstream --lint --enforce --requirements requirements.yaml
         if ($LASTEXITCODE -ne 0) { $lintError = $true }
-    } else {
-        Write-Host "  reqstream skipped (no requirements files changed)"
     }
-
-    if ($run.VersionMark) {
-        dotnet versionmark --lint
-        if ($LASTEXITCODE -ne 0) { $lintError = $true }
-    } else {
-        Write-Host "  versionmark skipped (.versionmark.yaml not changed)"
-    }
-
-    if ($run.ReviewMark) {
-        dotnet reviewmark --lint
-        if ($LASTEXITCODE -ne 0) { $lintError = $true }
-    } else {
-        Write-Host "  reviewmark skipped (no reviewed files changed)"
-    }
-
-    if ($run.SysML -and (Test-Path docs/sysml2)) {
-        dotnet sysml2tools lint --strict-unresolved 'docs/sysml2/**/*.sysml'
-        if ($LASTEXITCODE -ne 0) { $lintError = $true }
-    } elseif (-not $run.SysML) {
-        Write-Host "  sysml2tools skipped (no SysML2 model files changed)"
-    }
+} else {
+    Write-Skipped 'reqstream'
 }
 
-# [PROJECT-SPECIFIC] Add additional dotnet tool checks here.
+if ($run.versionmark) {
+    Write-Host "Linting: versionmark..."
+    if (-not $skipDotnetTools) {
+        dotnet versionmark --lint
+        if ($LASTEXITCODE -ne 0) { $lintError = $true }
+    }
+} else {
+    Write-Skipped 'versionmark'
+}
 
-# --- dotnet Format ---
-if ($run.Format) {
+if ($run.reviewmark) {
+    Write-Host "Linting: reviewmark..."
+    if (-not $skipDotnetTools) {
+        dotnet reviewmark --lint
+        if ($LASTEXITCODE -ne 0) { $lintError = $true }
+    }
+} else {
+    Write-Skipped 'reviewmark'
+}
+
+if ($run.sysml2tools) {
+    Write-Host "Linting: sysml2tools..."
+    if (-not $skipDotnetTools -and (Test-Path docs/sysml2)) {
+        dotnet sysml2tools lint --strict-unresolved 'docs/sysml2/**/*.sysml'
+        if ($LASTEXITCODE -ne 0) { $lintError = $true }
+    }
+} else {
+    Write-Skipped 'sysml2tools'
+}
+
+# [PROJECT-SPECIFIC] Add additional dotnet tool lint checks here.
+# Example:
+#   if (-not $skipDotnetTools) {
+#       dotnet custom-tool --lint
+#       if ($LASTEXITCODE -ne 0) { $lintError = $true }
+#   }
+
+# --- DOTNET FORMATTING SECTION ---
+# Verifies C# code formatting matches .editorconfig rules.
+if ($run.format) {
     if ($formatInclude.Count -gt 0) {
         Write-Host "Linting: dotnet format ($($formatInclude.Count) changed C# files)..."
     } else {
@@ -289,15 +327,14 @@ if ($run.Format) {
         if ($LASTEXITCODE -ne 0) { $lintError = $true }
     }
 } else {
-    Write-Host "Linting: dotnet format... skipped (no C# or project files changed)"
+    Write-Skipped 'format'
 }
 
-# [PROJECT-SPECIFIC] C/C++ clang-format check example:
-#   Get-ChildItem -Recurse -Include "*.cpp","*.hpp","*.h","*.c" |
-#       Where-Object { $_.FullName -notmatch '[/\\](thirdparty|third-party|3rd-party|generated)[/\\]' } |
-#       ForEach-Object {
-#           $result = clang-format --dry-run --Werror $_.FullName 2>&1
-#           if ($LASTEXITCODE -ne 0) { Write-Output $result; $lintError = $true }
-#       }
+# [PROJECT-SPECIFIC] Add additional format verification checks here.
+# Example (clang-format check for C/C++):
+#   Get-ChildItem -Recurse -Include "*.cpp","*.hpp","*.h" | ForEach-Object {
+#       $result = clang-format --dry-run --Werror $_.FullName 2>&1
+#       if ($LASTEXITCODE -ne 0) { Write-Output $result; $lintError = $true }
+#   }
 
 exit ($lintError ? 1 : 0)
