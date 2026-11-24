@@ -380,6 +380,25 @@ while the filter has text, each with its reason, and the headers offer the moves
 (`MainWindowViewModel_GetGroupMoveDisabledReason_EndsBuiltInSectionsAndFilter`, covering
 `AgentControl-MainWindowViewModel-MoveGroupAvailability`).
 
+**MainWindowViewModel_SortGroupByName_SortsDirectReposOfOneGroupByName**: Tested by `RepoGroupSortTests.cs`. Sorting a
+group puts its direct repos in name order ignoring letter case, in the places its repos had in the stored list, so repos
+of other groups and ungrouped repos between them do not move, and the new order is the user's own
+(`MainWindowViewModel_SortGroupByName_SortsDirectReposIntoTheirOwnSlots`); the repos of a subgroup and the group's
+favorites keep their places and repos with the same name keep their order
+(`MainWindowViewModel_SortGroupByName_LeavesSubgroupsFavoritesAndEqualNamesAlone`); a name that starts with an A with an
+umlaut sorts between `alpha` and `Zeta` for the culture `en-US` and after `Zeta` for `sv-SE`
+(`MainWindowViewModel_SortGroupByName_FollowsTheCurrentCulture`, run for both); and a view model started from the saved
+settings has the sorted order (`MainWindowViewModel_SortGroupByName_SavesTheNewOrder`). These cover
+`AgentControl-MainWindowViewModel-GroupSortByName`. A group with fewer than two repos of its own (a favorite and a
+subgroup's repos do not count), a group in order already, *Favorites*, *Ungrouped* and an unknown group are refused,
+each with its reason, and change nothing
+(`MainWindowViewModel_SortGroupByName_NothingToSort_ExplainsAndChangesNothing`); while the filter has text sorting is
+refused with the filter explanation and is available again after it is cleared
+(`MainWindowViewModel_SortGroupByName_WhileFiltering_IsRefusedUntilFilterCleared`); and the group header's command
+follows that availability, sorts the group when executed and then is unavailable
+(`MainWindowViewModel_GroupHeaderSortCommand_FollowsAvailabilityAndSorts`). These cover
+`AgentControl-MainWindowViewModel-GroupSortAvailability`.
+
 **MainWindowViewModel_DropGroup_BeforeOrAfterAnotherGroup**: Dropping a group header before or after another group's
 header puts the group there, a collapsed group stays collapsed and the order is saved
 (`MainWindowViewModel_DropGroup_BeforeOrAfterAnotherGroup_Reorders`); a drop on the group's own header, on *Favorites*

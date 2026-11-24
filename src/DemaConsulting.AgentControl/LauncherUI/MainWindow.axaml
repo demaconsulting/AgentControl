@@ -308,6 +308,16 @@
                                                 <materialIcons:MaterialIcon Kind="ArrowDown" />
                                             </MenuItem.Icon>
                                         </MenuItem>
+                                        <MenuItem Name="GroupSortByNameMenuItem"
+                                                   AutomationProperties.AutomationId="GroupSortByNameMenuItem"
+                                                   Header="Sort by name"
+                                                   ToolTip.Tip="{Binding SortByNameTooltip}"
+                                                   ToolTip.ShowOnDisabled="True"
+                                                   Command="{Binding SortByNameCommand}">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="SortAlphabeticalAscending" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
                                         <MenuItem Name="GroupColorMenuItem"
                                                    AutomationProperties.AutomationId="GroupColorMenuItem"
                                                    Header="Group color..."

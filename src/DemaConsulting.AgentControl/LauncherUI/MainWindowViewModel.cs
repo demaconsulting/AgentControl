@@ -3529,6 +3529,17 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             var pending = new Stack<GroupWork>();
+            var stored = new Dictionary<string, List<RepoCardViewModel>>(RepoGroupName.Comparer);
+            foreach (var card in RepoCards.Where(card => !card.IsFavorite && card.HasGroup))
+            {
+                if (!stored.TryGetValue(card.GroupName!, out var storedMembers))
+                {
+                    stored[card.GroupName!] = storedMembers = [];
+                }
+
+                storedMembers.Add(card);
+            }
+
             PushGroups(pending, plan.Tree, parent: null, depth: 0);
             while (pending.Count > 0)
             {
@@ -3563,6 +3574,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 header.UpdateOrder(
                     GetGroupMoveReason(plan, name, RepoGroupMove.Up),
                     GetGroupMoveReason(plan, name, RepoGroupMove.Down));
+                header.UpdateSort(GetGroupSortReason(stored.TryGetValue(name, out var storedOwn) ? storedOwn : []));
                 usedHeaders.Add(header);
                 items.Add(header);
                 if (collapsed)
@@ -3673,6 +3685,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         header.AddRepoRequested += (_, _) => GroupAddRepoRequested?.Invoke(this, header.Name);
         header.NewSubgroupRequested += (_, _) => GroupNewSubgroupRequested?.Invoke(this, header.Name);
         header.MoveRequested += (_, move) => MoveGroup(header.Name, move);
+        header.SortByNameRequested += (_, _) => SortGroupByName(header.Name);
         _headers[key] = header;
         return header;
     }
@@ -4132,6 +4145,135 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var index = siblings.FindIndex(group => RepoGroupName.Comparer.Equals(group, groupName));
         var neighbor = siblings[move == RepoGroupMove.Up ? index - 1 : index + 1];
         return PlaceGroup(plan, siblings[index], parent, neighbor, insertBefore: move == RepoGroupMove.Up);
+    }
+
+    /// <summary>
+    ///     The explanation shown (as the tooltip of the disabled "Sort by name" item of a group header's
+    ///     menu) while the filter has text and so only some of the repos of a group are shown.
+    /// </summary>
+    public const string GroupSortDisabledWhileFilteringMessage =
+        "Clear the filter to sort a group: while the filter has text only some of its repos are shown, so " +
+        "their order cannot be changed.";
+
+    /// <summary>
+    ///     Gets the repos listed directly under a group - those whose group it is that are not
+    ///     favorites (a favorite is listed under Favorites) - in the stored order. The repos of its
+    ///     subgroups are not included.
+    /// </summary>
+    /// <param name="groupName">The group's name; letter case is ignored.</param>
+    /// <returns>The repos' cards, in the order they are stored in.</returns>
+    private List<RepoCardViewModel> GetDirectCards(string groupName) =>
+        [.. RepoCards.Where(card => !card.IsFavorite && RepoGroupName.Comparer.Equals(card.GroupName ?? string.Empty, groupName))];
+
+    /// <summary>
+    ///     Gets why a group's repos cannot be sorted by name now, for the repos listed directly under it.
+    /// </summary>
+    /// <param name="directCards">The group's own listed repos, in the stored order (see
+    ///     <see cref="GetDirectCards"/>).</param>
+    /// <returns>The reason, or <see langword="null"/> when sorting would change the order.</returns>
+    private string? GetGroupSortReason(IReadOnlyList<RepoCardViewModel> directCards)
+    {
+        if (!IsReorderEnabled)
+        {
+            return GroupSortDisabledWhileFilteringMessage;
+        }
+
+        if (directCards.Count < 2)
+        {
+            return "This group has fewer than two repos of its own, so there is nothing to sort.";
+        }
+
+        return SortByName(directCards).SequenceEqual(directCards, ReferenceEqualityComparer.Instance)
+            ? "This group's repos are already sorted by name."
+            : null;
+    }
+
+    /// <summary>
+    ///     Sorts cards by repo name, ignoring letter case and following the rules of the current
+    ///     culture; cards with the same name keep their order.
+    /// </summary>
+    /// <param name="cards">The cards.</param>
+    /// <returns>The cards, sorted.</returns>
+    private static List<RepoCardViewModel> SortByName(IEnumerable<RepoCardViewModel> cards) =>
+        [.. cards.OrderBy(card => card.RepoName, StringComparer.CurrentCultureIgnoreCase)];
+
+    /// <summary>
+    ///     Gets why a group's repos cannot be sorted by name now.
+    /// </summary>
+    /// <remarks>
+    ///     The wording is what the header's menu shows as the tooltip of the disabled "Sort by name"
+    ///     item. Only the repos listed directly under the group count (not those of its subgroups, and not
+    ///     favorites, which are listed under Favorites).
+    /// </remarks>
+    /// <param name="groupName">The group's name; letter case is ignored.</param>
+    /// <returns>The reason, or <see langword="null"/> when sorting is allowed: the filter has no text, the
+    ///     group has at least two repos of its own and they are not in name order already.</returns>
+    public string? GetGroupSortDisabledReason(string groupName)
+    {
+        ArgumentNullException.ThrowIfNull(groupName);
+
+        if (RepoGroupName.IsReserved(groupName))
+        {
+            return "Favorites and Ungrouped cannot be sorted.";
+        }
+
+        return GetGroupSortReason(GetDirectCards(groupName));
+    }
+
+    /// <summary>
+    ///     Gets whether a group's repos can be sorted by name now.
+    /// </summary>
+    /// <param name="groupName">The group's name; letter case is ignored.</param>
+    /// <returns><see langword="true"/> when <see cref="GetGroupSortDisabledReason"/> has no reason.</returns>
+    public bool CanSortGroup(string groupName) => GetGroupSortDisabledReason(groupName) is null;
+
+    /// <summary>
+    ///     Sorts the repos listed directly under a group alphabetically by name and saves the new order.
+    /// </summary>
+    /// <remarks>
+    ///     The names are compared ignoring letter case, with the rules of the current culture; repos with
+    ///     the same name keep their order. The sorted repos take the places the group's repos had in the
+    ///     stored list, so the order of every other section, of the group's subgroups and of its
+    ///     favorites is untouched. The order counts as chosen by the user. It is a one-time action, not a
+    ///     setting: repos added or dragged into the group afterwards stay where they are put. Nothing
+    ///     changes (and nothing is saved) when sorting is not allowed.
+    /// </remarks>
+    /// <param name="groupName">The group's name; letter case is ignored.</param>
+    /// <returns><see langword="true"/> when the repos were sorted; <see langword="false"/> when sorting is
+    ///     not allowed (see <see cref="GetGroupSortDisabledReason"/>); nothing changed then.</returns>
+    public bool SortGroupByName(string groupName)
+    {
+        ArgumentNullException.ThrowIfNull(groupName);
+
+        var direct = GetDirectCards(groupName);
+        if (RepoGroupName.IsReserved(groupName) || GetGroupSortReason(direct) is not null)
+        {
+            return false;
+        }
+
+        // The sorted cards go into the slots the group's cards had
+        var sorted = SortByName(direct);
+        var ordered = new List<RepoCardViewModel>(RepoCards);
+        var next = 0;
+        var directSet = new HashSet<RepoCardViewModel>(direct, ReferenceEqualityComparer.Instance);
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            if (directSet.Contains(ordered[i]))
+            {
+                ordered[i] = sorted[next++];
+            }
+        }
+
+        var paths = ordered.Select(card => card.RepoPath).ToList();
+        CommitSettingsChange(settings =>
+        {
+            ApplyRepoOrder(settings.RecentRepos, paths);
+            settings.HasUserRepoOrder = true;
+        });
+
+        SyncCollection(RepoCards, ordered);
+        UpdateDisplayedRepoCards();
+        return true;
     }
 
     /// <summary>

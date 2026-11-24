@@ -340,8 +340,47 @@ public sealed class RepoGroupWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that the header's "..." menu sorts the group's repos by name, and that the "Sort by name"
+    ///     item is then unavailable, explaining in its tooltip that the repos are already sorted.
+    /// </summary>
+    [Fact]
+    public void MainWindow_HeaderMenu_SortByName_SortsGroupThenIsUnavailable() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, viewModel) = CreateWindow(("b", "Work", false), ("c", "Work", false), ("a", "Work", false));
+
+        try
+        {
+            var menuButton = window.GetVisualDescendantsOf<Button>("GroupHeaderMenuButton").Single(button => button.IsVisible);
+            var menu = OpenMenu(menuButton);
+            var item = FindMenuItem(menu, "GroupSortByNameMenuItem");
+            Assert.True(item.IsEffectivelyEnabled);
+            Assert.False(string.IsNullOrEmpty(ToolTip.GetTip(item)?.ToString()));
+
+            // Act
+            item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: sorted, shown in that order, and the item explains why it is unavailable now
+            Assert.Equal(["a", "b", "c"], viewModel.RepoCards.Select(card => card.RepoName));
+            Assert.Equal(["a", "b", "c"], RepoReorderWindowTests.RowNames(window));
+            menuButton = window.GetVisualDescendantsOf<Button>("GroupHeaderMenuButton").Single(button => button.IsVisible);
+            menu = OpenMenu(menuButton);
+            item = FindMenuItem(menu, "GroupSortByNameMenuItem");
+            Assert.False(item.IsEffectivelyEnabled);
+            Assert.Contains("already sorted", ToolTip.GetTip(item)?.ToString());
+            menu.Hide();
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that the header's "..." menu starts with "Add repository..." and "New subgroup..." (each with
-    ///     an AutomationId and a tooltip), followed by a separator, the Move up, Move down and Group color
+    ///     an AutomationId and a tooltip), followed by a separator, the Move up, Move down, Sort by name and Group color
     ///     items, another separator and then the rename and remove items - each item identified and
     ///     explained.
     /// </summary>
@@ -359,9 +398,9 @@ public sealed class RepoGroupWindowTests : IDisposable
             var menu = OpenMenu(menuButton);
             var items = menu.Items.OfType<Control>().ToList();
 
-            // Assert: Add repository..., New subgroup..., separator, Move up, Move down, Group color...,
-            // separator, Rename group..., Remove group
-            Assert.Equal(9, items.Count);
+            // Assert: Add repository..., New subgroup..., separator, Move up, Move down, Sort by name,
+            // Group color..., separator, Rename group..., Remove group
+            Assert.Equal(10, items.Count);
             var add = Assert.IsType<MenuItem>(items[0]);
             Assert.Equal("GroupAddRepoMenuItem", AutomationProperties.GetAutomationId(add));
             Assert.Equal("Add repository...", add.Header);
@@ -369,11 +408,11 @@ public sealed class RepoGroupWindowTests : IDisposable
             Assert.Equal("GroupNewSubgroupMenuItem", AutomationProperties.GetAutomationId(subgroup));
             Assert.Equal("New subgroup...", subgroup.Header);
             Assert.IsType<Separator>(items[2]);
-            Assert.IsType<Separator>(items[6]);
+            Assert.IsType<Separator>(items[7]);
             Assert.Equal(
                 [
                     "GroupAddRepoMenuItem", "GroupNewSubgroupMenuItem", "MoveGroupUpMenuItem", "MoveGroupDownMenuItem",
-                    "GroupColorMenuItem", "RenameGroupMenuItem", "RemoveGroupMenuItem"
+                    "GroupSortByNameMenuItem", "GroupColorMenuItem", "RenameGroupMenuItem", "RemoveGroupMenuItem"
                 ],
                 items.OfType<MenuItem>().Select(AutomationProperties.GetAutomationId));
             Assert.All(items.OfType<MenuItem>(), item => Assert.False(string.IsNullOrEmpty(ToolTip.GetTip(item)?.ToString())));

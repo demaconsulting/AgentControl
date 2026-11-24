@@ -3,11 +3,10 @@
 #### Verification Approach
 
 `RepoGroupHeaderViewModel` is verified with unit tests in `RepoGroupHeaderViewModelTests.cs`. Each test constructs a
-real header, drives it through its constructor, `Update`, `UpdateColor`, `UpdateOrder` and its commands, and reads
-its properties and the events it
-raises; nothing is mocked and no Avalonia `Window` is constructed. How the owning `MainWindowViewModel` creates,
-updates and reacts to headers is verified by that unit, and how the window shows them by the headless window tests of
-the `LauncherUI` subsystem (`RepoGroupWindowTests.cs`).
+real header, drives it through its constructor, `Update`, `UpdateColor`, `UpdateOrder`, `UpdateSort` and its commands,
+and reads its properties and the events it raises; nothing is mocked and no Avalonia `Window` is constructed. How the
+owning `MainWindowViewModel` creates, updates and reacts to headers is verified by that unit, and how the window shows
+them by the headless window tests of the `LauncherUI` subsystem (`RepoGroupWindowTests.cs`).
 
 #### Test Environment
 
@@ -108,6 +107,13 @@ that reason as its tooltip (with the tooltip's change notification) while the av
 scenario is tested by `RepoGroupHeaderViewModel_MoveCommands_RaiseRequestsAndFollowAvailability` and
 `RepoGroupHeaderViewModel_UpdateOrder_DisabledMoveExplainsWhy`, covering
 `AgentControl-RepoGroupHeaderViewModel-MoveRequests`.
+
+**RepoGroupHeaderViewModel_SortByNameRequest**: A new user group's Sort by name command cannot execute; after the owner
+makes sorting available, executing it raises a sort request and the tooltip says what the item does; after the owner
+gives a reason the command cannot execute and the reason is the tooltip (with its change notification). An *Ungrouped*
+header told that sorting is available still offers none and still has a non-empty tooltip. This scenario is tested by
+`RepoGroupHeaderViewModel_UpdateSort_AvailabilityTooltipAndRequest`, covering
+`AgentControl-RepoGroupHeaderViewModel-SortByNameRequest`.
 
 **RepoGroupHeaderViewModel_RequiresName**: A blank name and a `null` name are refused. This scenario is tested by
 `RepoGroupHeaderViewModel_Constructor_BlankName_Throws`, covering `AgentControl-RepoGroupHeaderViewModel-RequiresName`.

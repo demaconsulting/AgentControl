@@ -381,4 +381,44 @@ public class RepoGroupHeaderViewModelTests
         Assert.False(favorites.MoveDownCommand.CanExecute(null));
         Assert.False(string.IsNullOrWhiteSpace(favorites.MoveUpTooltip));
     }
+
+    /// <summary>
+    ///     Test that "Sort by name" is unavailable until the owner says the group can be sorted, raises its
+    ///     request when executed, explains why it is unavailable in its tooltip, and is never offered for
+    ///     Favorites or Ungrouped.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHeaderViewModel_UpdateSort_AvailabilityTooltipAndRequest()
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Work");
+        var ungrouped = new RepoGroupHeaderViewModel(RepoGroupKind.Ungrouped, "Ungrouped");
+        var requests = 0;
+        header.SortByNameRequested += (_, _) => requests++;
+        var changed = new List<string?>();
+        header.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        // Assert: unavailable until the owner says where the group stands
+        Assert.False(header.SortByNameCommand.CanExecute(null));
+
+        // Act: available
+        header.UpdateSort(null);
+        header.SortByNameCommand.Execute(null);
+
+        // Assert
+        Assert.Equal(1, requests);
+        Assert.True(header.SortByNameCommand.CanExecute(null));
+        Assert.Contains("alphabetically", header.SortByNameTooltip);
+
+        // Act: unavailable with a reason; the built-in section ignores an "available" answer
+        header.UpdateSort("Already sorted.");
+        ungrouped.UpdateSort(null);
+
+        // Assert
+        Assert.False(header.SortByNameCommand.CanExecute(null));
+        Assert.Equal("Already sorted.", header.SortByNameTooltip);
+        Assert.Contains(nameof(RepoGroupHeaderViewModel.SortByNameTooltip), changed);
+        Assert.False(ungrouped.SortByNameCommand.CanExecute(null));
+        Assert.False(string.IsNullOrWhiteSpace(ungrouped.SortByNameTooltip));
+    }
 }

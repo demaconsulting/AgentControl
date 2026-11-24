@@ -85,6 +85,15 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     /// <summary>Why "Move down" is unavailable now, or <see langword="null"/> when it is available.</summary>
     private string? _moveDownDisabledReason = NotMovableReason;
 
+    /// <summary>Why "Sort by name" is unavailable now, or <see langword="null"/> when it is available.</summary>
+    private string? _sortDisabledReason = NotSortableReason;
+
+    /// <summary>
+    ///     The explanation of a disabled Sort by name item before the owning view model has said where
+    ///     the group stands (a header that is not in the list yet has nothing to sort).
+    /// </summary>
+    private const string NotSortableReason = "This section cannot be sorted.";
+
     /// <summary>
     ///     The explanation of a disabled Move item before the owning view model has said where the
     ///     group stands (a header that is not in the list yet cannot be moved).
@@ -114,6 +123,8 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
             () => MoveRequested?.Invoke(this, RepoGroupMove.Up), () => _moveUpDisabledReason is null);
         MoveDownCommand = new RelayCommand(
             () => MoveRequested?.Invoke(this, RepoGroupMove.Down), () => _moveDownDisabledReason is null);
+        SortByNameCommand = new RelayCommand(
+            () => SortByNameRequested?.Invoke(this, EventArgs.Empty), () => _sortDisabledReason is null);
     }
 
     /// <summary>
@@ -400,6 +411,41 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     ///     Raised when the user asks to move the group up or down; the owning view model moves it.
     /// </summary>
     public event EventHandler<RepoGroupMove>? MoveRequested;
+
+    /// <summary>
+    ///     Gets the command that asks to sort the repos listed directly under the group by name; it
+    ///     raises <see cref="SortByNameRequested"/>. Available only when <see cref="UpdateSort"/> said so
+    ///     (never for Favorites or Ungrouped).
+    /// </summary>
+    public RelayCommand SortByNameCommand { get; }
+
+    /// <summary>
+    ///     Gets the tooltip of the "Sort by name" item: what it does, or why it is unavailable now.
+    /// </summary>
+    public string SortByNameTooltip =>
+        _sortDisabledReason ?? "Sort the repos in this group alphabetically by name (the repos in its subgroups are left as they are)";
+
+    /// <summary>
+    ///     Raised when the user asks to sort the group's repos by name; the owning view model sorts them.
+    /// </summary>
+    public event EventHandler? SortByNameRequested;
+
+    /// <summary>
+    ///     Brings the availability of "Sort by name" up to date.
+    /// </summary>
+    /// <param name="sortDisabledReason">Why the group's repos cannot be sorted now (shown as the item's
+    ///     tooltip), or <see langword="null"/> when they can. Ignored for Favorites and Ungrouped,
+    ///     which are never sorted.</param>
+    public void UpdateSort(string? sortDisabledReason)
+    {
+        var reason = IsUserGroup ? sortDisabledReason : NotSortableReason;
+        if (!string.Equals(reason, _sortDisabledReason, StringComparison.Ordinal))
+        {
+            _sortDisabledReason = reason;
+            OnPropertyChanged(nameof(SortByNameTooltip));
+            SortByNameCommand.RaiseCanExecuteChanged();
+        }
+    }
 
     /// <summary>
     ///     Gets the name of the palette color the user chose for this group, or

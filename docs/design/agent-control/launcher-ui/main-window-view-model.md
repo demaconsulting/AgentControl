@@ -204,12 +204,12 @@ code-behind.
 (keyed by kind and name, ignoring letter case), reused while the section exists so a header keeps
 keyboard focus when it is toggled.
 
-**RepoGroupHeaderViewModel**: the unit that represents a section's header (`Kind`, `Name`, `Count`,
-`IsCollapsed`, `IsToggleEnabled`, `AccessibleName`, the group's color, the move availability and the request-only
-commands; see its own design). This view model updates a header in place with
-`Update(count, isCollapsed, isToggleEnabled)`, `UpdateColor(color)` (the group's color, `null` for *Favorites* and
-*Ungrouped*) and, for a user group, `UpdateOrder(upReason, downReason)` (from `GetGroupMoveDisabledReason`), and handles
-its request events (toggle, rename, remove, add repository, move).
+**RepoGroupHeaderViewModel**: the unit that represents a section's header (`Kind`, `Name`, `Count`, `IsCollapsed`,
+`IsToggleEnabled`, `AccessibleName`, the group's color, the move and sort availability and the request-only commands;
+see its own design). This view model updates a header in place with `Update(count, isCollapsed, isToggleEnabled)`,
+`UpdateColor(color)` (the group's color, `null` for *Favorites* and *Ungrouped*) and, for a user group,
+`UpdateOrder(upReason, downReason)` (from `GetGroupMoveDisabledReason`) and `UpdateSort(reason)` (from
+`GetGroupSortDisabledReason`), and handles its request events (toggle, rename, remove, add repository, move, sort).
 
 **GroupNameViewModel**: the unit behind the group-name prompt (see its own design). The window shows it for a new
 group (from a card's menu) and for a rename (from a header), and this view model applies the name it completes with
@@ -287,12 +287,12 @@ the list - and the writer keeps the snapshot and writes it with the next change,
 failure of a streak through `WriteFailed`, which `OnSettingsWriteFailed` turns into `SettingsSaveFailed` with the reason
 (redacted by `SecretRedactor.SafeMessage`) and the note that the changes stay in effect; after the view model was
 disposed nothing is raised (`-SaveFailureReported`). The direct operations (`RemoveRepo`, `ToggleGroupCollapsed`,
-`RenameGroup`, `RemoveGroup`, `CreateSubgroup`, `SetGroupColor`, `MoveGroup`, `DropGroup`, `MoveCard`, `DropCard`) no
-longer throw or return `false` for a failed save. The changes that originate in a card are made through the private
-`CommitRepoChange(repo, change)`, handed to each card as its `commitChange` callback when `CreateCard` builds it: it
-applies the change to the repo's live entry through `CommitSettingsChange` (or directly, without saving, when the repo
-is no longer in the list) and returns `true`; the card applies its own property and raises its change event (see the
-`RepoCardViewModel` design).
+`RenameGroup`, `RemoveGroup`, `CreateSubgroup`, `SetGroupColor`, `MoveGroup`, `SortGroupByName`, `DropGroup`,
+`MoveCard`, `DropCard`) no longer throw or return `false` for a failed save. The changes that originate in a card are
+made through the private `CommitRepoChange(repo, change)`, handed to each card as its `commitChange` callback when
+`CreateCard` builds it: it applies the change to the repo's live entry through `CommitSettingsChange` (or directly,
+without saving, when the repo is no longer in the list) and returns `true`; the card applies its own property and raises
+its change event (see the `RepoCardViewModel` design).
 
 *Confirmed saves*: an add and the Settings window's values must be on disk before they are applied, so their failure can
 be answered (Retry/Discard, or the Settings window staying open) and Discard has nothing to undo. They go through the
@@ -790,15 +790,15 @@ siblings of each level are arranged by `RepoGroupHierarchy.GetChildren` - the na
 matches no group is skipped and names keep their spelling (`-GroupOrder`). Each header is given its count (the matches
 in its subtree) and the number directly in the group, its depth and its parent, its group's color
 (`header.UpdateColor(_settings.FindGroupColor(name))`, `null` for *Favorites* and *Ungrouped*, `-GroupColorShown`) and,
-for a user group, whether it can move up or down (`header.UpdateOrder` with the reasons of
-`GetGroupMoveDisabledReason`); each card is given the depth of the group that lists it. A group is listed when its
-subtree has a match or, with no filter, it is registered; a collapsed group lists nothing below its header
-(`-NestedGroupTree`, `-NestedGroupEmptyListed`). A section is collapsed only if no filter is active and its name is in
-`AppSettings.CollapsedGroups` (`AgentControl-MainWindowViewModel-GroupCollapse`, `-GroupFilter`). Both collections are
-brought to the new state **in place** (remove what is gone, move and insert the rest) rather than cleared, so unchanged
-rows keep their controls and focus. Also re-raises change notifications for `HasGroups`, `GroupNames`,
-`HasNoDisplayedRepos` and `EmptyStateMessage`, since every path that can change the displayed set (add/remove, filter,
-favorite-toggle, grouping) runs through this method.
+for a user group, whether it can move up or down (`header.UpdateOrder` with the reasons of `GetGroupMoveDisabledReason`)
+and whether its repos can be sorted (`header.UpdateSort`, `-GroupSortAvailability`); each card is given the depth of the
+group that lists it. A group is listed when its subtree has a match or, with no filter, it is registered; a collapsed
+group lists nothing below its header (`-NestedGroupTree`, `-NestedGroupEmptyListed`). A section is collapsed only if no
+filter is active and its name is in `AppSettings.CollapsedGroups` (`AgentControl-MainWindowViewModel-GroupCollapse`,
+`-GroupFilter`). Both collections are brought to the new state **in place** (remove what is gone, move and insert the
+rest) rather than cleared, so unchanged rows keep their controls and focus. Also re-raises change notifications for
+`HasGroups`, `GroupNames`, `HasNoDisplayedRepos` and `EmptyStateMessage`, since every path that can change the displayed
+set (add/remove, filter, favorite-toggle, grouping) runs through this method.
 
 **ToggleGroupCollapsed** / **IsGroupCollapsed**: Collapse or expand a section by name (a group, or
 `Favorites` / `Ungrouped`; letter case ignored), add or remove the name in
@@ -874,6 +874,28 @@ why (`AgentControl-MainWindowViewModel-MoveGroupAvailability`).
   placed before the previous one or after the next one) by `PlaceGroup`, without changing its parent; otherwise nothing
   changes and `false` is
   returned. A header's `MoveRequested` is wired to this method in `GetHeader`.
+
+**GetGroupSortDisabledReason** / **CanSortGroup**: Say whether the repos of a group can be sorted by name now, and if
+not why (`AgentControl-MainWindowViewModel-GroupSortAvailability`).
+
+- *Returns*: `null` when sorting is allowed; otherwise the text the header's menu shows as the tooltip of the disabled
+  item: `GroupSortDisabledWhileFilteringMessage` while the filter has text; "Favorites and Ungrouped cannot be sorted."
+  for a built-in name; "This group has fewer than two repos of its own, so there is nothing to sort." when fewer than
+  two repos are **listed directly** under the group (a favorite is listed under Favorites and a subgroup's repos under
+  the subgroup, so neither counts); "This group's repos are already sorted by name." when sorting would not change the
+  order. `CanSortGroup` is `true` exactly when there is no reason.
+
+**SortGroupByName**: Sorts the repos listed directly under a group by name and saves the new order
+(`AgentControl-MainWindowViewModel-GroupSortByName`).
+
+- *Postconditions*: When sorting is allowed the group's direct, non-favorite cards are ordered with
+  `StringComparer.CurrentCultureIgnoreCase` on `RepoName` (so the rules of the current culture apply; the sort is
+  stable, so repos with the same name keep their order) and written back into **the same slots** the group's cards had
+  in the stored list, so the order of every other section, of the group's subgroups and of its favorites is untouched.
+  The new order is stored through `ApplyRepoOrder` in one `CommitSettingsChange` that also sets `HasUserRepoOrder`,
+  `RepoCards` is brought to it and the list is recomputed; `true` is returned. Otherwise nothing changes, nothing is
+  saved and `false` is returned. Sorting is a one-time action, not a setting: nothing is kept that would sort repos
+  added or dragged in later. A header's `SortByNameRequested` is wired to this method in `GetHeader`.
 
 **CanDropGroup** / **DropGroup**: Whether a dragged group header may be dropped at a `GroupDropTarget`, and the drop
 itself (`AgentControl-MainWindowViewModel-DropGroup`, `-NestedGroupDrop`).
@@ -975,33 +997,30 @@ where the header is created.
 
 #### Error Handling
 
-`AddRepo` throws `ArgumentException` for a null, empty, or whitespace `repoPath`.
-`RemoveRepo`/`ApplySettingsAsync` throw `ArgumentNullException` for a null argument, and `ApplySettingsAsync`
-throws `InvalidOperationException` before adopting anything when a source location embeds a
-credential (synchronously) or when the settings file cannot be written (through its task), leaving the current settings
-in place. The changes made in the window (`RemoveRepo`, `ToggleGroupCollapsed`, `RenameGroup`, `RemoveGroup`,
-`MoveCard`, `DropCard`, `SetGroupColor`, `MoveGroup`, `DropGroup` and the card's own changes) never fail for a save:
-they are applied at once, and a background write that fails is reported once per failure streak through
-`SettingsSaveFailed` while the change stays in effect. `AddRepo` and `AddRepoToGroup` (for a new repo) throw
-`InvalidOperationException` when the settings file cannot be written, having changed nothing; the move placement of
-`AddRepoToGroup` reports it through `SettingsSaveFailed` and returns `MoveFailed`; `AddRepos` does not throw for a
-failed save either: nothing of
-the batch changed, every folder that would have been added or moved gets the `SaveFailed` outcome with the redacted
-reason, and the window shows the reason in the summary of `DescribeAddOutcomes`; `EnqueueAddReposAsync` turns a failed
-save into the Retry/Discard question (`AddSaveFailed`) and, on Discard, into the same `SaveFailed` outcomes, and its
-task never faults for an expected failure (a queued add whose predecessor faulted still runs); a cancellation before
-the commit is a canceled result, not an exception; `AddRepos` and `EnqueueAddReposAsync` throw `ArgumentNullException`
-for a null list and `ArgumentException` for an invalid group name before adding (or queuing) anything;
-`ToggleGroupCollapsed` throws
-`ArgumentException` for a blank name, while `RenameGroup` and `RemoveGroup` report an unknown group or unusable name
-by returning `false`, as `SetGroupColor` does for an unknown group or color. A folder that is not a Git repository is
-an outcome (`NotAGitRepository`), not an error. Group names read from
-settings are repaired (`RepoGroupName.Sanitize`) on the fly, a null collapsed list reads as empty, so
-damaged values never throw. A failed background write never throws into the UI thread: the settings writer reports
-it through `WriteFailed`, and `Dispose` logs what it could not write at the close. A pin file that cannot be
-read while a folder is added is captured in its `RepoCheapFacts` (the card then shows the reason) and never prevents
-the add from succeeding. A background card refresh after a settings save that is canceled (the window closed) ends
-quietly.
+`AddRepo` throws `ArgumentException` for a null, empty, or whitespace `repoPath`. `RemoveRepo`/`ApplySettingsAsync`
+throw `ArgumentNullException` for a null argument, and `ApplySettingsAsync` throws `InvalidOperationException` before
+adopting anything when a source location embeds a credential (synchronously) or when the settings file cannot be written
+(through its task), leaving the current settings in place. The changes made in the window (`RemoveRepo`,
+`ToggleGroupCollapsed`, `RenameGroup`, `RemoveGroup`, `MoveCard`, `DropCard`, `SetGroupColor`, `MoveGroup`,
+`SortGroupByName`, `DropGroup` and the card's own changes) never fail for a save: they are applied at once, and a
+background write that fails is reported once per failure streak through `SettingsSaveFailed` while the change stays in
+effect. `AddRepo` and `AddRepoToGroup` (for a new repo) throw `InvalidOperationException` when the settings file cannot
+be written, having changed nothing; the move placement of `AddRepoToGroup` reports it through `SettingsSaveFailed` and
+returns `MoveFailed`; `AddRepos` does not throw for a failed save either: nothing of the batch changed, every folder
+that would have been added or moved gets the `SaveFailed` outcome with the redacted reason, and the window shows the
+reason in the summary of `DescribeAddOutcomes`; `EnqueueAddReposAsync` turns a failed save into the Retry/Discard
+question (`AddSaveFailed`) and, on Discard, into the same `SaveFailed` outcomes, and its task never faults for an
+expected failure (a queued add whose predecessor faulted still runs); a cancellation before the commit is a canceled
+result, not an exception; `AddRepos` and `EnqueueAddReposAsync` throw `ArgumentNullException` for a null list and
+`ArgumentException` for an invalid group name before adding (or queuing) anything; `ToggleGroupCollapsed` throws
+`ArgumentException` for a blank name, while `RenameGroup` and `RemoveGroup` report an unknown group or unusable name by
+returning `false`, as `SetGroupColor` does for an unknown group or color. A folder that is not a Git repository is an
+outcome (`NotAGitRepository`), not an error. Group names read from settings are repaired (`RepoGroupName.Sanitize`) on
+the fly, a null collapsed list reads as empty, so damaged values never throw. A failed background write never throws
+into the UI thread: the settings writer reports it through `WriteFailed`, and `Dispose` logs what it could not write at
+the close. A pin file that cannot be read while a folder is added is captured in its `RepoCheapFacts` (the card then
+shows the reason) and never prevents the add from succeeding. A background card refresh after a settings save that is
+canceled (the window closed) ends quietly.
 
 #### Dependencies
 

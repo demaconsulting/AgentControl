@@ -5,18 +5,18 @@
 #### Purpose
 
 `RepoGroupHeaderViewModel` is the collapsible header row that starts a section of the main window's repo list: the
-section's name, how many repos match in it, and - for the user's own groups - the group's color and the actions that
-add a repository to, move, color, rename or remove the group. Its single responsibility is to describe one section to
-the user and to assistive technology and to report what the user asked for (collapse or expand, add a repository,
-move up or down, rename, remove); it never changes any state itself. The
-`RepoGroupKind` enumeration that accompanies it (`Favorites`, `Group`, `Ungrouped`) is part of this unit. Its
-behavior is specified by the unit requirements `AgentControl-RepoGroupHeaderViewModel-SectionKind`,
-`-DescribesSection`, `-AccessibleNameIsText`, `-UpdatesInPlace`, `-Toggle`, `-ToggleUnavailable`, `-ToggleExplained`,
-`-GroupActions`, `-RemoveGroupRequest`, `-AddRepoRequest`, `-NewSubgroupRequest`, `-NestedPlace`, `-RequiresName`,
-`-ShowsGroupColor` and `-MoveRequests`
-(each prefixed `AgentControl-RepoGroupHeaderViewModel`), and
-together with `MainWindowViewModel` (which decides which headers the list has) it provides
-`AgentControl-LauncherUI-RepoGroups`, `AgentControl-LauncherUI-GroupColor` and `AgentControl-LauncherUI-GroupMoveMenu`.
+section's name, how many repos match in it, and - for the user's own groups - the group's color and the actions that add
+a repository to, move, sort, color, rename or remove the group. Its single responsibility is to describe one section to
+the user and to assistive technology and to report what the user asked for (collapse or expand, add a repository, move
+up or down, sort by name, rename, remove); it never changes any state itself. The `RepoGroupKind` enumeration that
+accompanies it (`Favorites`, `Group`, `Ungrouped`) is part of this unit. Its behavior is specified by the unit
+requirements `AgentControl-RepoGroupHeaderViewModel-SectionKind`, `-DescribesSection`, `-AccessibleNameIsText`,
+`-UpdatesInPlace`, `-Toggle`, `-ToggleUnavailable`, `-ToggleExplained`, `-GroupActions`, `-RemoveGroupRequest`,
+`-AddRepoRequest`, `-NewSubgroupRequest`, `-NestedPlace`, `-RequiresName`, `-ShowsGroupColor`, `-MoveRequests` and
+`-SortByNameRequest` (each prefixed `AgentControl-RepoGroupHeaderViewModel`), and together with `MainWindowViewModel`
+(which decides which headers the list has) it provides `AgentControl-LauncherUI-RepoGroups`,
+`AgentControl-LauncherUI-GroupColor`, `AgentControl-LauncherUI-GroupMoveMenu` and
+`AgentControl-LauncherUI-GroupSortByName`.
 
 #### Data Model
 
@@ -72,6 +72,12 @@ does (`Move this group one place up in the list`, `... down ...`) or, while it i
 unavailable until the owner has called `UpdateOrder`, and always for *Favorites* and *Ungrouped*
 (`AgentControl-RepoGroupHeaderViewModel-MoveRequests`).
 
+**SortByNameCommand** (`RelayCommand`) and the event **SortByNameRequested**: the command only raises the event and can
+execute only while sorting is available. **SortByNameTooltip** says what the item does (it sorts the group's repos
+alphabetically by name and leaves the repos of its subgroups as they are) or, while it is unavailable, why. Sorting is
+unavailable until the owner has called `UpdateSort`, and always for *Favorites* and *Ungrouped*
+(`AgentControl-RepoGroupHeaderViewModel-SortByNameRequest`).
+
 #### Key Methods
 
 **Constructor(kind, name)**: Stores the kind and name and creates the commands. *Preconditions*: `name` is not
@@ -98,6 +104,11 @@ available); for *Favorites* and *Ungrouped* both are always unavailable whatever
 raises the change notification of the matching tooltip and the command's `CanExecuteChanged`
 (`AgentControl-RepoGroupHeaderViewModel-MoveRequests`).
 
+**UpdateSort(sortDisabledReason)**: Records why sorting the group's repos by name is unavailable now (`null` means
+available); for *Favorites* and *Ungrouped* it is always unavailable whatever is passed. When the reason changes it
+raises the change notification of `SortByNameTooltip` and the command's `CanExecuteChanged`
+(`AgentControl-RepoGroupHeaderViewModel-SortByNameRequest`).
+
 **ToString()**: Returns `AccessibleName`.
 
 #### Error Handling
@@ -115,8 +126,9 @@ simply ignored.
 
 #### Callers
 
-- **MainWindowViewModel** (`LauncherUI`) - creates one header per section, calls `Update`, `UpdateColor` and
-  `UpdateOrder` whenever the list is recomputed and handles the five request events (a move request moves the group).
-- **MainWindow** (view) - binds each header row to it (the accent bar, the Move up / Move down items with their
-  tooltips, the group palette's heading and chosen color) and shows the group-name prompt, the removal confirmation and
-  the folder picker for the requests the view model forwards.
+- **MainWindowViewModel** (`LauncherUI`) - creates one header per section, calls `Update`, `UpdateColor`,
+  `UpdateOrder` and `UpdateSort` whenever the list is recomputed and handles the request events (a move request moves
+  the group, a sort request sorts its repos).
+- **MainWindow** (view) - binds each header row to it (the accent bar, the Move up / Move down / Sort by name items with
+  their tooltips, the group palette's heading and chosen color) and shows the group-name prompt, the removal
+  confirmation and the folder picker for the requests the view model forwards.

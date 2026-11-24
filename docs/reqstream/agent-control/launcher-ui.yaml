@@ -469,6 +469,24 @@ sections:
         tests:
           - MainWindow_HeaderMenu_RenameAndRemoveGroup
 
+      - id: AgentControl-LauncherUI-GroupSortByName
+        title: >-
+          The LauncherUI subsystem shall offer "Sort by name" in the menu of each of the user's group
+          headers, which puts the repos listed directly in that group in name order and, when the repos
+          are in that order already, when the group has fewer than two of its own or while the filter has
+          text, is disabled with a tooltip that says why.
+        justification: |
+          A group's repos stay in the order they were added or dragged; sorting them by name in one
+          action makes a large group easy to scan, and an action that would change nothing must say so
+          instead of silently doing nothing.
+        children:
+          - AgentControl-MainWindowViewModel-GroupSortByName
+          - AgentControl-MainWindowViewModel-GroupSortAvailability
+          - AgentControl-RepoGroupHeaderViewModel-SortByNameRequest
+        tests:
+          - MainWindow_HeaderMenu_SortByName_SortsGroupThenIsUnavailable
+          - MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator
+
       - id: AgentControl-LauncherUI-RepoGroupCollapse
         title: >-
           The LauncherUI subsystem shall let the user collapse and expand a section from its

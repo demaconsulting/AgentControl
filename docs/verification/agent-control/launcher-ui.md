@@ -497,6 +497,15 @@ holds the items in the documented order (`MainWindow_HeaderMenu_AddRepositoryIsF
 cover `AgentControl-LauncherUI-GroupMoveMenu` (children `AgentControl-MainWindowViewModel-MoveGroup`,
 `-MoveGroupAvailability` and `AgentControl-RepoGroupHeaderViewModel-MoveRequests`).
 
+**LauncherUI_GroupSortByName_MenuSortsDirectReposAndExplainsWhenUnavailable**: A group header's menu has a **Sort by
+name** item with a tooltip; choosing it on a group whose repos are out of order lists them in name order, and the item
+is then disabled with a tooltip saying the repos are already sorted
+(`MainWindow_HeaderMenu_SortByName_SortsGroupThenIsUnavailable`); the menu holds the item after Move down
+(`MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator`). These cover `AgentControl-LauncherUI-GroupSortByName`
+(children `AgentControl-MainWindowViewModel-GroupSortByName`, `-GroupSortAvailability` and
+`AgentControl-RepoGroupHeaderViewModel-SortByNameRequest`). Which repos are sorted, how names are compared and when
+sorting is refused are verified in the unit tests of `MainWindowViewModel` (`RepoGroupSortTests.cs`).
+
 **LauncherUI_GroupDragReorder_HeaderDraggedAboveOrBelowAnotherGroup**: A group header's toggle is pressed and moved far
 enough to start a drag through the window's `DragStarter` seam: the section is not collapsed or expanded by the press,
 the header is dimmed, the line shows below the target group's header, the group lands below it, a collapsed group stays

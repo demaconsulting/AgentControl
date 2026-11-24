@@ -778,6 +778,14 @@ covering `AgentControl-System-NestedGroups`. That the headers are indented by de
 zones of another group's header nests, reorders and un-nests, and that a drop onto a group inside the dragged group is
 refused are verified in the headless window tests of the `LauncherUI` subsystem.
 
+**AgentControl_GroupSortByName_MenuSortsRepoCardsAndKeepsOrderAfterRestart**: With three repos in the group Work stored
+in the order Charlie, Alpha, Bravo, choosing "Sort by name" in the Work header's menu lists the cards as Alpha, Bravo,
+Charlie. After the application is closed and started again the cards are listed in that order. This scenario is tested
+by `windows@GroupHeaderMenu_SortByName_ListsRepoCardsInNameOrderAndKeepsItAfterRestart`, covering
+`AgentControl-System-GroupSortByName`. That only the group's own repos are sorted, how names are compared and when the
+item is unavailable are verified in the unit tests of `MainWindowViewModel` and the headless window tests of the
+`LauncherUI` subsystem.
+
 **AgentControl_ListChangesKept_FavoriteCollapseColorsAndGroupOrderAreKept**: The favorite star, a section's
 collapse, a card color, a group color and the order of the groups are each changed in the real application and found
 in the settings file. The collapse, the card color, the group color and the group order are also still there after a

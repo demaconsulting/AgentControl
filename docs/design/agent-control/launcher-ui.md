@@ -828,9 +828,10 @@ repository or its `.agentcontrol.json` (`AgentControl-System-RepoGroups`, `Agent
 repo card, and a section header - a fixed 8-pixel slot for the group's color accent, one flat button (chevron, icon,
 name, count chip) that collapses or expands the
 section, plus, for the user's own groups, a "..." menu (`GroupHeaderMenuButton`, tooltip "Add a repository to this
-group, or move, color, rename or remove the group") with **Add repository...** (`GroupAddRepoMenuItem`), **New
+group, or move, sort, color, rename or remove the group") with **Add repository...** (`GroupAddRepoMenuItem`), **New
 subgroup...** (`GroupNewSubgroupMenuItem`), a separator,
-**Move up** (`MoveGroupUpMenuItem`), **Move down** (`MoveGroupDownMenuItem`), **Group color...**
+**Move up** (`MoveGroupUpMenuItem`), **Move down** (`MoveGroupDownMenuItem`), **Sort by name**
+(`GroupSortByNameMenuItem`), **Group color...**
 (`GroupColorMenuItem`), a separator, **Rename group...** and **Remove group**. The header
 button's accessible name says the section, its count and its state (`Work, 2 repos, collapsed`, with `, inside Client`
 for a nested group); the group's color does
@@ -1004,7 +1005,12 @@ live in `MainWindowViewModel` and the window only translates input and shows fee
   down** (`MoveGroupUpMenuItem`, `MoveGroupDownMenuItem`, bound to the header's `MoveUpCommand`/`MoveDownCommand`,
   disabled with the reason as tooltip - shown even while disabled - at the first or last group and while the filter has
   text, `AgentControl-LauncherUI-GroupMoveMenu`) call `MoveGroup`, which swaps the group with its neighbor; and dragging
-  a header (`AgentControl-LauncherUI-GroupDragReorder`). **Group drag source**: a left-button press anywhere on a user
+  a header (`AgentControl-LauncherUI-GroupDragReorder`). *Sorting a group* (`AgentControl-System-GroupSortByName`,
+`AgentControl-LauncherUI-GroupSortByName`): the header menu's **Sort by name** (`GroupSortByNameMenuItem`, bound to the
+header's `SortByNameCommand`, tooltip `SortByNameTooltip` shown even while disabled) calls `SortGroupByName`, which
+puts the repos listed directly under the group in name order and leaves everything else as it was; it is disabled, with
+the reason as tooltip, while the filter has text, for a group with fewer than two repos of its own and when they are in
+order already. **Group drag source**: a left-button press anywhere on a user
   group's header (also on its toggle) while `IsReorderEnabled` is a possible drag, except on `GroupHeaderMenuButton`,
   its menu items, a text box or a scroll bar; past the same 6-pixel threshold `StartGroupDragAsync` releases the pointer
   capture the header's toggle button took (`press.Pointer.Capture(null)`), so the button loses its pressed state and

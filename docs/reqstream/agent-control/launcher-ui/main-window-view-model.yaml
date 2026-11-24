@@ -607,6 +607,36 @@ sections:
         tests:
           - MainWindowViewModel_MoveGroup_PersistsOrderForANewViewModel
 
+      - id: AgentControl-MainWindowViewModel-GroupSortByName
+        title: >-
+          The MainWindowViewModel class shall sort the repos listed directly in a group - not its
+          favorites, which are listed under Favorites, and not the repos of its subgroups - by name,
+          ignoring letter case and following the current culture, keeping repos with the same name in
+          their order, put the sorted repos into the places the group's repos had in the stored list so
+          that nothing else moves, and save the new order.
+        justification: |
+          Sorting must change only the group the user asked about, in the order a reader of that
+          language expects, and the result must be the user's order from then on.
+        tests:
+          - MainWindowViewModel_SortGroupByName_SortsDirectReposIntoTheirOwnSlots
+          - MainWindowViewModel_SortGroupByName_LeavesSubgroupsFavoritesAndEqualNamesAlone
+          - MainWindowViewModel_SortGroupByName_FollowsTheCurrentCulture
+          - MainWindowViewModel_SortGroupByName_SavesTheNewOrder
+
+      - id: AgentControl-MainWindowViewModel-GroupSortAvailability
+        title: >-
+          The MainWindowViewModel class shall refuse, with a reason and changing nothing, to sort a
+          group that has fewer than two repos of its own, whose repos are in name order already, that is
+          Favorites or Ungrouped, or any group while the filter has text, and shall give the group
+          headers that availability.
+        justification: |
+          The reason is what the disabled menu item shows, so the user knows why sorting is not offered
+          and how to get it back; while the filter has text only some of a group's repos are shown.
+        tests:
+          - MainWindowViewModel_SortGroupByName_NothingToSort_ExplainsAndChangesNothing
+          - MainWindowViewModel_SortGroupByName_WhileFiltering_IsRefusedUntilFilterCleared
+          - MainWindowViewModel_GroupHeaderSortCommand_FollowsAvailabilityAndSorts
+
       - id: AgentControl-MainWindowViewModel-GroupColor
         title: >-
           The MainWindowViewModel class shall store a color from the card color palette, or none,

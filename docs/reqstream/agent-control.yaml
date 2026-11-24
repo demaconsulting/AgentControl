@@ -520,6 +520,21 @@ sections:
           - windows@RepoList_DragGroupHeaderBelowAnother_ReordersGroups
           - windows@RepoList_DragGroupHeaderHeldStillAtBottomEdge_ScrollsAndDropsBeyondTheFirstView
 
+      - id: AgentControl-System-GroupSortByName
+        title: >-
+          The tool shall let the user sort the repos of a group alphabetically by name from the group
+          header's menu, changing no other group or section, and keep the sorted order in the user's own
+          settings so it is still there when the tool is started again.
+        tags: [system]
+        justification: |
+          Repos stay in the order they were added or dragged, which becomes hard to scan as a group
+          grows; one action puts them in a predictable order without dragging each one. The order is a
+          personal choice, so it is kept with the other organizing choices.
+        children:
+          - AgentControl-LauncherUI-GroupSortByName
+        tests:
+          - windows@GroupHeaderMenu_SortByName_ListsRepoCardsInNameOrderAndKeepsItAfterRestart
+
       - id: AgentControl-System-CardColorKeepsStatus
         title: >-
           The tool shall not change the status colors of a repo card when the user chooses the

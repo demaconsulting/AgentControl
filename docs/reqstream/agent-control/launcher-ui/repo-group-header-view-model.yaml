@@ -168,3 +168,15 @@ sections:
         tests:
           - RepoGroupHeaderViewModel_MoveCommands_RaiseRequestsAndFollowAvailability
           - RepoGroupHeaderViewModel_UpdateOrder_DisabledMoveExplainsWhy
+
+      - id: AgentControl-RepoGroupHeaderViewModel-SortByNameRequest
+        title: >-
+          The RepoGroupHeaderViewModel class shall request that the repos of its group be sorted by name
+          when the user chooses Sort by name, offer it only while its owner says sorting is possible,
+          explain an unavailable sort with its owner's reason as the tooltip, and never offer it for
+          Favorites or Ungrouped.
+        justification: |
+          The order of the repos is the owner's state; the header only reports what the user asked for
+          and shows why sorting is not offered.
+        tests:
+          - RepoGroupHeaderViewModel_UpdateSort_AvailabilityTooltipAndRequest
