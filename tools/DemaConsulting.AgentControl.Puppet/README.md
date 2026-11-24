@@ -151,11 +151,15 @@ without it.
 ### AutomationIds
 
 - **Main** (`Agent Control`): `AppLogo` (the logo in the app bar; its name is `AgentControl`), `FilterTextBox`,
-  `AddRepoButton`, `OpenSettingsButton`, `OpenAboutButton`, `EmptyStatePanel`, `EmptyStateText`, `RepoListBox`,
-  `ExternalDropOverlay` (the outline around the list area, shown only while folders dragged from File Explorer would
-  be added without a group), and - present only while bulk work runs (reading the cards at start-up, adding
-  repositories, or refreshing the cards after Settings are saved) - `GlobalProgressStrip` (the strip under the app
-  bar), `GlobalProgressBar` (its name is the status text), `GlobalProgressText` (for example
+  `AddRepoButton`, `OpenSettingsButton`, `OpenAboutButton`, `EmptyStatePanel`, `EmptyStateText`, `RepoListBox` (a list
+  that allows several selected items: it reports `Selection.CanSelectMultiple`, each list item has the selection-item
+  state - `read` shows `selected=True|False` - and `select RepoListBox <repo name>` selects that card alone; Ctrl+click,
+  Shift+click, Ctrl+A and Delete are real keyboard and mouse input, so see the safety rules below before using them:
+  Ctrl+A selects every card that is shown, never a section header, and Delete asks to remove the selected cards with a
+  confirmation that says how many), `ExternalDropOverlay` (the outline around the list area, shown only while folders
+  dragged from File Explorer would be added without a group), and - present only while bulk work runs (reading the cards
+  at start-up, adding repositories, or refreshing the cards after Settings are saved) - `GlobalProgressStrip` (the strip
+  under the app bar), `GlobalProgressBar` (its name is the status text), `GlobalProgressText` (for example
   `Adding 7 of 20 repositories...`, `Saving...` or `Refreshing repositories 3 of 12...`) and
   `GlobalProgressCancelButton` (only while repositories are being added and not yet saving; it stops the add). To wait
   until the cards have been read after `launch`, wait until `GlobalProgressStrip` and every `RepoRefreshingText` are
@@ -165,10 +169,16 @@ without it.
   `Work, 2 repos, collapsed`, and so does its list item), `GroupHeaderNameText`, `GroupHeaderCountText`, and, for
   the user's own groups, `GroupColorAccent` (the colored bar at the start of the header, only for a colored group;
   its name is the color, for example `Group color: Teal`) and `GroupHeaderMenuButton` with the menu items
-  `GroupAddRepoMenuItem`, `MoveGroupUpMenuItem`, `MoveGroupDownMenuItem` (disabled for the first and last group and
-  while the filter has text), `GroupColorMenuItem`, `RenameGroupMenuItem` and `RemoveGroupMenuItem`. A user group's
-  header can also be dragged (press anywhere on it except `GroupHeaderMenuButton`) above or below another group's
-  header to reorder the groups.
+  `GroupAddRepoMenuItem`, `GroupNewSubgroupMenuItem` (a new group inside this one), `MoveGroupUpMenuItem`,
+  `MoveGroupDownMenuItem` (disabled for the first and last group among its siblings and while the filter has text),
+  `GroupSortByNameMenuItem` (sorts the repos listed directly in the group by name; disabled, with the reason as its
+  tooltip, while the filter has text, for a group with fewer than two repos of its own and when they are sorted
+  already), `GroupColorMenuItem`, `RenameGroupMenuItem`, `RemoveGroupMenuItem` (its text is `Delete group, keep
+  contents`, or just `Delete group` for a group with no repo and no subgroup; both ask for a confirmation) and
+  `RemoveGroupWithContentsMenuItem` (`Delete group and its contents`; present only for a group that has a repo or a
+  subgroup). A nested group's header name also says `, inside {parent}`. A user group's header can also be dragged
+  (press anywhere on it except `GroupHeaderMenuButton`) above or below another group's header to reorder the groups, or
+  onto the middle of another group's header to put it inside that group.
   `--item` matches repo cards only, so a header command acts on the first header (the one at the top of the list);
   to start with a particular group collapsed, list it in `CollapsedGroups` in the settings file before `launch`.
 - **Repo card** (repeated, one per list item): `RepoNameText`, `RepoStatusAccent` (the status bar; its name is the
@@ -193,12 +203,13 @@ without it.
 - **Card menu** (pop-up of `MoreActionsButton`): `PullButton` (Git Pull), `RefreshMenuItem`, `SelectPackageMenuItem`
   (only for a repo that has no package yet), `ChangePackageMenuItem` (Change package..., only for a repo that has a
   package: it opens Select Package on the current choice), `UpgradeMenuItem` (only while an upgrade is available),
-  `MoveToGroupMenuItem` (its submenu, built when the menu opens: one `MoveToGroupItem` per group - find it by
-  name, for example `menu MoveToGroupMenuItem/Work` - then `NewGroupMenuItem`, and `RemoveFromGroupMenuItem` for a
-  grouped repo), `ReorderMenuItem` (a submenu, disabled while the filter has text and for the only repo of its
-  section) holding `MoveToTopMenuItem`, `MoveUpMenuItem`, `MoveDownMenuItem`, `MoveToBottomMenuItem` (reorder the
-  card within its section; disabled at the ends and while the filter has text; reach them as
-  `menu ReorderMenuItem/MoveDownMenuItem`), `CardColorMenuItem`, `RemoveMenuItem`.
+  `MoveToGroupMenuItem` (its submenu, built when the menu opens: one `MoveToGroupItem` per group - find it by name, for
+  example `menu MoveToGroupMenuItem/Work` - then `NewGroupMenuItem`, and `RemoveFromGroupMenuItem` for a grouped repo),
+  `ReorderMenuItem` (a submenu, disabled while the filter has text and for the only repo of its section) holding
+  `MoveToTopMenuItem`, `MoveUpMenuItem`, `MoveDownMenuItem`, `MoveToBottomMenuItem` (reorder the card within its
+  section; disabled at the ends and while the filter has text; reach them as `menu ReorderMenuItem/MoveDownMenuItem`),
+  `CardColorMenuItem`, `RemoveMenuItem` (its text is `Remove from list`, or `Remove {n} selected repos from list` when
+  the card is one of several selected cards, in which case it removes all of them after one confirmation).
 - **Card color palette** (pop-up under `MoreActionsButton`, opened by `CardColorMenuItem`): `CardColorPalette`,
   one `CardColorSwatch_<Name>` per color (`CardColorSwatch_Teal`, ...; the name is also the accessible name) and
   `CardColorAutomaticButton`.

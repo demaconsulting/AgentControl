@@ -835,6 +835,13 @@ twice the indent of one level and `IndentWidth` is announced as changed; given d
 indented level, the same as a header's. This scenario is tested by `RepoCardViewModel_Depth_SetsIndentAndNotifies`,
 covering `AgentControl-RepoCardViewModel-GroupDepthIndent`.
 
+**RepoCardViewModel_RemoveMenuText_FollowsTheSelectionSize**: Tested by `RepoMultiSelectTests.cs` (the owner sets the
+selection size). While three cards are selected, the menu text of each of the three is
+`Remove 3 selected repos from list` (and the tooltip says `3 selected repos`), the text of a card that is not selected
+is `Remove from list`, and the change is announced; with one card selected the text of every card is `Remove from list`.
+This scenario is tested by `RepoCardViewModel_RemoveMenuText_FollowsTheSelectionSize`, covering
+`AgentControl-RepoCardViewModel-RemoveMenuText`.
+
 **RepoCardViewModel_CardColor_ChooseResetRefuseAndFallBack**: The palette has one entry per avatar palette
 index with distinct names; a card with no choice uses the path-hash color; choosing "tEaL" stores `Teal` and moves
 the palette index and style class, and choosing Automatic returns to the hash color and clears the value

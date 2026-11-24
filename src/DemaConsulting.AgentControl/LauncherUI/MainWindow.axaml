@@ -178,16 +178,17 @@
 
             <!-- The shared card, chip, button and avatar styles live in RepoCardStyles.axaml (included
                  by App.axaml), with every color in its Light/Dark theme dictionaries. -->
-            <ListBox Name="RepoListBox"
+            <vm:RepoListBox Name="RepoListBox"
                       AutomationProperties.AutomationId="RepoListBox"
                       Classes="repoList"
+                      SelectionMode="Multiple"
                       DragDrop.AllowDrop="True"
                       Margin="-8,0,-8,0"
                       IsVisible="{Binding !HasNoDisplayedRepos}"
                       ItemsSource="{Binding DisplayedItems}">
             <!-- The list holds two kinds of rows: a section header (when repos are grouped) and a
                  repo card. Each has its own template, chosen by the row's type. -->
-            <ListBox.DataTemplates>
+            <vm:RepoListBox.DataTemplates>
                 <DataTemplate DataType="vm:RepoGroupHeaderViewModel" x:DataType="vm:RepoGroupHeaderViewModel">
                     <!-- Section header: one flat button (chevron, icon, name, count) collapses or
                          expands the section; a user's own group also has a color accent (when it has
@@ -617,8 +618,8 @@
                                             <Separator />
                                             <MenuItem Name="RemoveMenuItem"
                                                        AutomationProperties.AutomationId="RemoveMenuItem"
-                                                       Header="Remove from list"
-                                                       ToolTip.Tip="Remove this repo from AgentControl's recent-repos list (does not delete it from disk)"
+                                                       Header="{Binding RemoveMenuText}"
+                                                       ToolTip.Tip="{Binding RemoveMenuTooltip}"
                                                        Click="RemoveMenuItem_Click">
                                                 <MenuItem.Icon>
                                                     <materialIcons:MaterialIcon Kind="TrashCan" />
@@ -971,8 +972,8 @@
                         </Panel>
                     </Border>
                 </DataTemplate>
-            </ListBox.DataTemplates>
-            </ListBox>
+            </vm:RepoListBox.DataTemplates>
+            </vm:RepoListBox>
 
             <!-- Shown while folders dragged from the file manager would be added ungrouped -->
             <Border Name="ExternalDropOverlay"

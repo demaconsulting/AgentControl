@@ -40,7 +40,9 @@ no logic of its own, and the tests replace it with `GatedBackgroundWorkRunner` (
 of work at a gate until released) to prove the callers stay free while the work runs;
 `AsyncRelayCommand` and `ThirdPartyDependencies` have dedicated test files
 (`AsyncRelayCommandTests.cs`, `ThirdPartyDependenciesTests.cs`) because each is independent of any Avalonia control;
-and the pure display helpers - the value converters `FavoriteIconConverter`, `GroupIndentConverter` (the indent of a
+and the pure display helpers - the `RepoListBox` list control (the repo list with multiple selection, described under
+*Selecting several repos*, exercised through the window tests of `AgentControl-LauncherUI-RepoMultiSelect`), the value
+converters `FavoriteIconConverter`, `GroupIndentConverter` (the indent of a
 row of the tree as the margin that draws it, exercised through the window's indentation test),
 `AgentToolKindDisplayNameConverter` and
 `ThemePreferenceDisplayNameConverter` (each maps one value to its display text or glyph; the last two have their own
@@ -930,21 +932,53 @@ live in `MainWindowViewModel` and the window only translates input and shows fee
   events a row already handled). A press with the left button on a card is remembered as a possible drag, unless it is
   on a `Button`, `TextBox`, `MenuItem` or `ScrollBar` in the card (the star, the chips, the menu keep their own
   behavior), on a section header (a user group's header starts a group drag instead, see *Ordering groups*), or while
-  reordering is off; the drag starts once the pointer has moved 6
-  device-independent pixels in either direction with the button held, which keeps a plain or slightly unsteady click a
-  click. The dragged data is one item of the application data format `DemaConsulting.AgentControl.RepoCard` carrying the
-  card's repo path, and the dragged card's row gets the `dragging` style class (dimmed) until the drag ends however it
-  ends. The operating system's drag is started through the `DragStarter` seam, whose default is
+  reordering is off; the drag starts once the pointer has moved 6 device-independent pixels in either direction with the
+  button held, which keeps a plain or slightly unsteady click a click. The dragged data is one item of the application
+  data format `DemaConsulting.AgentControl.RepoCard` carrying the card's repo path - and one more item for each other
+  selected card when the card is one of several selected cards (`MainWindowViewModel.GetDragCards`, the grabbed card
+  first; see *Selecting several repos*) - and the dragged cards' rows get the `dragging` style class (dimmed) until the
+  drag ends however it ends. The operating system's drag is started through the `DragStarter` seam, whose default is
   `DragDrop.DoDragDropAsync`; as with the folder picker seam (`RepoFolderPicker`), a headless test supplies its own
   starter that records the data and then raises the drop events on the list. **Drop target**: the list is a drop target
   (`DragDrop.AllowDrop`) with drag-enter, drag-over, drag-leave and drop handlers. The row under the pointer is found
   from the realized rows' layout bounds (`GetRowAt`, not a renderer hit test, so it is right straight after an
   auto-scroll moved the rows): over a card, the upper half of the row (`IsUpperHalf`) means "before that card" and the
-  lower half "after
-  it", giving a `RepoDropTarget.ForCard` with the card's section (`GetSectionOf`); over a section header,
-  `RepoDropTarget.ForHeader` (no anchor: the end of that section). Drag-over asks `MainWindowViewModel.CanDrop` and
-  answers `Move` or `None` as the drag effect; drop calls `MainWindowViewModel.DropCard`. A drag that does not carry
-  this data format, or a repo that is not listed, is ignored.
+  lower half "after it", giving a `RepoDropTarget.ForCard` with the card's section (`GetSectionOf`); over a section
+  header, `RepoDropTarget.ForHeader` (no anchor: the end of that section). Drag-over asks `MainWindowViewModel.CanDrop`
+  (for several dragged cards `CanDropCards`) and answers `Move` or `None` as the drag effect; drop calls
+  `MainWindowViewModel.DropCard` (for several cards `DropCards`). A drag that does not carry this data format, or a repo
+  that is not listed, is ignored.
+- *Selecting several repos* (`AgentControl-System-RepoMultiSelect`, `AgentControl-System-RepoMultiSelectActions`,
+  `AgentControl-LauncherUI-RepoMultiSelect`, `-RepoMultiSelectHighlight`, `-RepoMultiDrag`, `-RepoMultiRemove`): the
+  list is a `RepoListBox` (a supporting type of this subsystem, a `ListBox` with `SelectionMode="Multiple"` that keeps
+  the `ListBox` styles and template through its style key, so the AutomationId `RepoListBox`, the UI Automation list and
+  list-item peers - `Selection.CanSelectMultiple`, `SelectionItem.IsSelected` on each row - and the `repoList` styles
+  are those of a plain list). The list's own selection logic gives Ctrl+click (toggle), Shift+click (the range from the
+  anchor to the clicked row, in the order of the flat list: favorites, the groups as a tree depth first, then the repos
+  in no group) and a plain click (one card); `RepoListBox` changes three things. (1) A plain left press on a row that is
+  already selected, while several rows are selected, does not reduce the selection on press (the list would, which was
+  confirmed by a spike on Avalonia 12.2.0, and a drag could then move only that card): `ShouldTriggerSelection` puts the
+  selection off to the release, which reduces it to that card only when the button is released inside the row without a
+  drag; the window calls `CancelDeferredSelection` when the press becomes a drag. (2) `Ctrl+A` selects every row that is
+  a repo card (`SelectAllCards`), never a section header, and consumes the key; the list's own select-all, which would
+  include the headers, is never reached. (3) `Delete` raises `DeleteRequested` while at least one row is selected; a key
+  pressed in a `TextBox` of a card is left to the text box. The window's `SelectionChanged` handler takes the section
+  headers out of the selection (a range or a click on a header can select one) and gives the cards to
+  `MainWindowViewModel.SetSelectedCards`; the other way, whenever the view model reports a changed `SelectedCards` (it
+  prunes the cards that stopped being shown, and the list deselects the rows it moves, for example in a drop) the window
+  selects the view model's cards in the list again (`SyncListSelectionFromViewModel`, guarded against feeding back). A
+  selected card is drawn by `AppStyles.axaml` (`ListBoxItem:selected Border.RepoCard`) with the accent border and shadow
+  it already had and, new, the background `RepoCardBackgroundSelected` - defined, like every color, in both the Light
+  and the Dark dictionary, so the selection is not carried by a border color alone - and `ThemeResourceTests` checks the
+  keys exist in both and that the text, chips, buttons and icons keep their contrast on it (status accents and the
+  favorite star at least 2.5:1: on the light theme they only just reach 3:1 on a white card, so any tint lowers it, and
+  the status is also told in words). **Mass drag**: the drag carries every selected card (above), a drop calls
+  `DropCards`, and the cards stay selected. **Mass remove**: `Delete` and the "Remove from list" item of a card that is
+  one of several selected cards (its text and tooltip come from the card's `RemoveMenuText`/`RemoveMenuTooltip`, which
+  say how many) go through `ConfirmAndRemoveCards`: one `ConfirmationWindow` saying "Remove {n} repos from
+  AgentControl's recent-repos list?" and that nothing on disk is deleted or modified, then
+  `MainWindowViewModel.RemoveRepos` in one change; with one card selected the question is the single card's. The item of
+  a card that is not selected removes that card alone.
 - *What a drop does* (`AgentControl-LauncherUI-RepoDragReorder`, `-RepoDragBetweenSections`,
   `-RepoDropOnHeader`): within a
   section it moves the card to the drop position. Into another section it first changes the card's section - the group

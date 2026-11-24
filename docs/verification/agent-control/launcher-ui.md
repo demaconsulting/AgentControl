@@ -1256,6 +1256,42 @@ name. The requirements are split by behavior; each is covered by the tests that 
 - `AgentControl-LauncherUI-NestedGroupRemembered`: `MainWindow_NestedGroups_TreeSurvivesAWindowRestart`: a group
   created inside another and a group dropped into it are written; a new window over the saved settings lists the same
   tree.
+- `AgentControl-LauncherUI-RepoMultiSelect` (selecting several cards; `RepoMultiSelectWindowTests.cs`):
+  `MainWindow_RepoList_CtrlAndShiftClick_SelectCardsOnlyAcrossGroups`: real pointer presses with and without Ctrl and
+  Shift select cards - Ctrl+click adds and removes one, Shift+click selects the range from the last clicked card across
+  a group boundary in the order of the list - and no section header is ever in the selection or selected in the list.
+  `MainWindow_RepoList_CtrlA_SelectsShownCardsOnly`: Ctrl+A selects every card that is shown and no header, and after a
+  group is collapsed the selected rows are the cards that are still shown.
+  `MainWindow_RepoList_PressOnSelectedCard_KeepsSelectionUntilReleaseWithoutDrag`: with three cards selected, a press on
+  one of them leaves the selection as it is, releasing the button without moving reduces it to that card, and a plain
+  click on a card that is not selected selects it alone. The behavior of the plain list that this replaces - the press
+  reduces the selection at once - was confirmed with a spike on Avalonia 12.2.0 (the same presses on a plain
+  multiple-selection list), and the Ctrl+A of the plain list was seen to select the headers too, which is why the
+  window's list is its own type.
+- `AgentControl-LauncherUI-RepoMultiSelectHighlight` (the selected look and what assistive technology sees):
+  `ThemeResources_SelectedCard_IsTintedAndStaysLegibleInLightAndDark` (`ThemeResourceTests.cs`): in the light and the
+  dark theme the selected card's surface is neither the normal card's nor the page's, differs from the card's by at
+  least 5% in luminance ratio, and the chips, secondary button, ghost icon buttons keep AA text contrast on it and the
+  status accents and the favorite star at least 2.5:1.
+  `MainWindow_RepoList_SelectedCard_UsesSelectedSurfaceInLightAndDark`: with the theme set to light and to dark a
+  selected card is drawn with the selected surface resource of that theme and an unselected one with the normal card
+  surface. `MainWindow_RepoList_SelectedCards_AreExposedThroughTheRowAndTheAutomationPeers`: the selected rows report
+  they are selected, the automation peer of a selected row answers `IsSelected` true through the selection-item pattern
+  and that of another row false, and the list's peer says several items can be selected.
+- `AgentControl-LauncherUI-RepoMultiDrag` (dragging the selection):
+  `MainWindow_RepoList_DragSelectedCard_CarriesAllSelectedAndDropsThemInTheGroup`: with two cards selected, grabbing one
+  starts a drag whose data holds both repo paths, the grabbed card first; releasing does not reduce the selection;
+  dropping on a group header moves both into the group after its repos, in the order of the list, and they are still
+  selected and shown selected. `MainWindow_RepoList_DragUnselectedCard_MovesOnlyThatCard`: grabbing a card that is not
+  selected carries it alone and selects it alone. `MainWindow_RepoList_DragSelection_DropNextToOwnCard_IsRefused`: over
+  a dragged card's own row no insertion line is shown, and the drop changes nothing.
+- `AgentControl-LauncherUI-RepoMultiRemove` (removing the selection):
+  `MainWindow_RepoList_DeleteKey_ConfirmsWithTheCountAndRemovesTheSelection`: the Delete key with three cards selected
+  asks one question that says `Remove 3 repos` and that nothing on disk is deleted or modified, No changes nothing and
+  keeps the selection, Yes removes exactly those cards; with one card selected the question is that card's.
+  `MainWindow_CardMenu_RemoveOnSelectedCard_RemovesTheWholeSelection`: the item of a card that is one of two selected
+  cards reads `Remove 2 selected repos from list` and removes both after one question, and the item of a card that is
+  not selected reads `Remove from list` and removes that card alone.
 - `AgentControl-LauncherUI-RepoGroupCollapse` (collapse and expand from the header):
   `MainWindow_HeaderToggle_CollapsesAndExpandsSection`.
 

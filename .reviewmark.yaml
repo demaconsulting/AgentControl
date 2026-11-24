@@ -142,6 +142,7 @@ reviews:
       - "src/**/LauncherUI/SelectPackageSourceViewModel.cs"
       - "src/**/LauncherUI/FavoriteIconConverter.cs"
       - "src/**/LauncherUI/GroupIndentConverter.cs"
+      - "src/**/LauncherUI/RepoListBox.cs"
       - "src/**/LauncherUI/AgentToolKindDisplayNameConverter.cs"
       - "src/**/LauncherUI/FavoriteColorConverter.cs"  # deleted: keeps the removal of the file reviewable
       - "src/**/LauncherUI/ThemePreferenceDisplayNameConverter.cs"
@@ -168,6 +169,7 @@ reviews:
       - "test/**/LauncherUI/MainWindowTests.cs"
       - "test/**/LauncherUI/RepoGroupWindowTests.cs"
       - "test/**/LauncherUI/RepoGroupTreeWindowTests.cs"
+      - "test/**/LauncherUI/RepoMultiSelectWindowTests.cs"
       - "test/**/LauncherUI/RepoReorderWindowTests.cs"
       - "test/**/LauncherUI/UsabilityWindowTests.cs"
       - "test/**/LauncherUI/ThirdPartyDependenciesTests.cs"
@@ -192,6 +194,7 @@ reviews:
       - "test/**/LauncherUI/RepoGroupTreeTests.cs"
       - "test/**/LauncherUI/RepoGroupSortTests.cs"
       - "test/**/LauncherUI/RepoGroupDeleteTests.cs"
+      - "test/**/LauncherUI/RepoMultiSelectTests.cs"
       - "test/**/LauncherUI/RepoOrderingTests.cs"
 
   - id: AgentControl-LauncherUI-RepoGroupHeaderViewModel

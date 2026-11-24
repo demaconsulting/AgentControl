@@ -39,8 +39,8 @@ package AgentControl_LauncherUISubsystem {
          * BackgroundWorkRunner - the seam under the repo refresh queue that runs blocking file-system
          * and git reads off the UI thread - and the shared AppStyles.axaml theme resources). The pure display helpers - the value
          * converters (FavoriteIconConverter, AgentToolKindDisplayNameConverter,
-         * ThemePreferenceDisplayNameConverter) and the PathEllipsisText and ColorPalettePanel
-         * controls - are documented
+         * ThemePreferenceDisplayNameConverter) and the PathEllipsisText, ColorPalettePanel and RepoListBox
+         * (the repo list with multiple selection) controls - are documented
          * as supporting types of this subsystem rather than as units of their own: each is a
          * presentational adapter with no behavior of its own beyond formatting or measuring for
          * the view, verified through the subsystem's requirements and its own test files

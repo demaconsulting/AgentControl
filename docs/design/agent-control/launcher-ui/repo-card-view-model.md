@@ -252,7 +252,13 @@ would change a repo's color on every launch. The view model carries no color: th
 repository or its pin file). **Depth** (set by `MainWindowViewModel` each time it builds the list) is how many groups
 the group that lists the card is inside, and **IndentWidth** the indent that depth gives, the same as the header's
 (`RepoGroupHeaderViewModel.GetIndentWidth`), so a card lines up with its group's header
-(`AgentControl-RepoCardViewModel-GroupDepthIndent`). **GroupName** reads the stored name through
+(`AgentControl-RepoCardViewModel-GroupDepthIndent`). **SelectionSize** is how many cards are selected together with this
+one (0 when it is not selected), set by `MainWindowViewModel` through `UpdateSelection`, and **RemoveMenuText** /
+**RemoveMenuTooltip** are the text and tooltip of the card menu's "Remove from list" item: the plain wording
+(`Remove from list`) unless the card is one of several selected cards, when they say
+`Remove {n} selected repos from list`, because the item then acts on all of them
+(`AgentControl-RepoCardViewModel-RemoveMenuText`); **RaiseOrganizationChanged** refreshes the favorite flag and the
+group properties after the owner changed them for several cards at once. **GroupName** reads the stored name through
 `RepoGroupName.Sanitize` (a blank, overlong or reserved stored value yields a valid name or none), **HasGroup** is
 `GroupName is not null`, and **ShowGroupChip** (`IsFavorite && HasGroup`,
 `AgentControl-RepoCardViewModel-GroupChipForFavorites`) tells the card to show its group as a chip - needed only for a

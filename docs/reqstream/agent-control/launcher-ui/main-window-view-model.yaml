@@ -987,6 +987,72 @@ sections:
         tests:
           - MainWindowViewModel_GetGroupContents_CountsReposAndSubgroups
 
+      - id: AgentControl-MainWindowViewModel-RepoSelection
+        title: >-
+          The MainWindowViewModel class shall hold the repo cards the list reports as selected in the order
+          the list shows them - favorites, then the groups as a tree, then the repos in no group - leaving
+          out a card that is not shown and counting a card given twice once.
+        justification: |
+          Shift+click ranges and mass actions follow the order the user sees, not the order the settings
+          store, and only shown cards may be acted on.
+        tests:
+          - MainWindowViewModel_SetSelectedCards_KeepsVisualOrderAcrossNestedGroups
+
+      - id: AgentControl-MainWindowViewModel-RepoSelectionPruned
+        title: >-
+          The MainWindowViewModel class shall take a card out of the selection when it stops being shown -
+          its group is collapsed, the filter hides it or it is removed - and keep the other cards selected.
+        justification: |
+          An action on the selection must never reach a repo the user cannot see.
+        tests:
+          - MainWindowViewModel_SelectedCards_CollapseAndFilterPruneTheSelection
+
+      - id: AgentControl-MainWindowViewModel-DragCards
+        title: >-
+          The MainWindowViewModel class shall name the cards a drag moves: all the selected cards, in the
+          order the list shows them, when the card the drag started on is selected, otherwise that card
+          alone.
+        justification: |
+          Dragging a selected card moves the selection, dragging any other card moves just that card, so
+          a drag never moves cards the user did not mean.
+        tests:
+          - MainWindowViewModel_GetDragCards_SelectedCardMovesTheSelectionUnselectedCardMovesAlone
+
+      - id: AgentControl-MainWindowViewModel-DropCards
+        title: >-
+          The MainWindowViewModel class shall drop several cards at a place in one saved change: each card
+          takes the section the place is in as a single dropped card would (favorite marks and groups
+          changed alike), and the cards are put together at the place, in the order the list shows them, the
+          first at the drop position and the others after it; the cards stay selected.
+        justification: |
+          A mass drop must give the same result as dropping the cards one by one, in one predictable order,
+          and be saved once.
+        tests:
+          - MainWindowViewModel_DropCards_OnNestedGroupHeader_MovesAllInVisualOrderAndSavesOnce
+          - MainWindowViewModel_DropCards_OnCard_InsertsTogetherAndRefusesAnchorInTheSet
+          - MainWindowViewModel_DropCards_OnFavoritesAndUngrouped_ChangeEveryCard
+
+      - id: AgentControl-MainWindowViewModel-DropCardsRefused
+        title: >-
+          The MainWindowViewModel class shall refuse, changing nothing, a drop of several cards when any
+          one of them could not be dropped there as a single card, when the place is next to one of the
+          dragged cards, when there is no card, and while the filter has text.
+        justification: |
+          A mass drop is all or nothing, so a refused card never leaves the others half moved.
+        tests:
+          - MainWindowViewModel_DropCards_FilterOrFlatListOtherTier_IsRefused
+          - MainWindowViewModel_DropCards_OnCard_InsertsTogetherAndRefusesAnchorInTheSet
+
+      - id: AgentControl-MainWindowViewModel-RemoveRepos
+        title: >-
+          The MainWindowViewModel class shall remove several repo cards from the list in one saved change,
+          stop the removed cards, take them out of the selection, count a card given twice or a card that is
+          not in the list once or not at all, and touch nothing on disk.
+        justification: |
+          Cleaning up many repos is one action with one save; the repos themselves are never deleted.
+        tests:
+          - MainWindowViewModel_RemoveRepos_RemovesOnlyTheGivenCardsAndSaves
+
       - id: AgentControl-MainWindowViewModel-GroupSettingsOnly
         title: >-
           The MainWindowViewModel class shall persist grouping, card color and collapsed sections to

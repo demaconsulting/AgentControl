@@ -978,6 +978,17 @@ sections:
         tests:
           - RepoCardViewModel_NewGroupCommand_RaisesRequest_AndChipShowsForGroupedFavorites
 
+      - id: AgentControl-RepoCardViewModel-RemoveMenuText
+        title: >-
+          The RepoCardViewModel class shall give the text and the tooltip of its "Remove from list" item as
+          the plain wording while the card is not selected or is the only selected card, and as wording that
+          says how many selected repos the item removes while the card is one of several selected cards.
+        justification: |
+          The item acts on the whole selection when its card is selected, so it must say so before the user
+          chooses it.
+        tests:
+          - RepoCardViewModel_RemoveMenuText_FollowsTheSelectionSize
+
       - id: AgentControl-RepoCardViewModel-GroupDepthIndent
         title: >-
           The RepoCardViewModel class shall expose how many groups the card is inside in the list

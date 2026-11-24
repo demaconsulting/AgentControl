@@ -783,6 +783,116 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<RepoCardViewModel> DisplayedRepoCards { get; }
 
     /// <summary>
+    ///     The cards the user selected in the list, in the order the list shows them; kept by
+    ///     <see cref="SetSelectedCards"/> and <see cref="UpdateDisplayedRepoCards"/>.
+    /// </summary>
+    private readonly List<RepoCardViewModel> _selectedCards = [];
+
+    /// <summary>
+    ///     Whether the list is being brought to a new state: the selection reported by the list then is not
+    ///     the user's (rows that move are deselected by the list itself), so it is ignored.
+    /// </summary>
+    private bool _isUpdatingList;
+
+    /// <summary>
+    ///     Gets the cards the user selected in the list (with Ctrl+click, Shift+click or Ctrl+A), in the
+    ///     order the list shows them: favorites first, then the groups as a tree, then the repos in no group.
+    /// </summary>
+    /// <remarks>
+    ///     Only cards that are shown can be selected: a card hidden by a collapsed group or by the filter is
+    ///     taken out of the selection when it disappears, so an action on the selection can never reach a
+    ///     repo the user cannot see. Section headers are never part of the selection. Change notifications
+    ///     are raised for this property whenever the list may have changed (also when the cards are the
+    ///     same), so a view that mirrors the selection can bring itself up to date.
+    /// </remarks>
+    public IReadOnlyList<RepoCardViewModel> SelectedCards => _selectedCards;
+
+    /// <summary>
+    ///     Gets how many cards are selected.
+    /// </summary>
+    public int SelectedCount => _selectedCards.Count;
+
+    /// <summary>
+    ///     Sets the selected cards, as the list reports them.
+    /// </summary>
+    /// <param name="cards">The selected cards in any order; a card that is not shown (or is listed twice)
+    ///     is left out, and so is every row that is not a card, as the caller passes only cards.
+    ///     <see langword="null"/> clears the selection.</param>
+    public void SetSelectedCards(IEnumerable<RepoCardViewModel>? cards)
+    {
+        // While the list is being rebuilt the view's selection is incomplete (moved rows are deselected by
+        // the list); the selection is pruned when the rebuild is done, which the view then mirrors
+        if (_isUpdatingList)
+        {
+            return;
+        }
+
+        ApplySelection(cards is null ? [] : OrderCards(cards).Where(DisplayedRepoCards.Contains).ToList());
+    }
+
+    /// <summary>
+    ///     Makes the selection the given cards (already in the order of the list) and tells the cards
+    ///     whether they are one of several, which their remove item says.
+    /// </summary>
+    /// <param name="wanted">The new selection.</param>
+    private void ApplySelection(List<RepoCardViewModel> wanted)
+    {
+        var changed = !wanted.SequenceEqual(_selectedCards, ReferenceEqualityComparer.Instance);
+        if (changed)
+        {
+            _selectedCards.Clear();
+            _selectedCards.AddRange(wanted);
+            var members = new HashSet<RepoCardViewModel>(wanted, ReferenceEqualityComparer.Instance);
+            foreach (var card in RepoCards)
+            {
+                card.UpdateSelection(members.Contains(card) ? wanted.Count : 0);
+            }
+
+            OnPropertyChanged(nameof(SelectedCount));
+        }
+
+        if (changed || _selectedCards.Count > 0)
+        {
+            OnPropertyChanged(nameof(SelectedCards));
+        }
+    }
+
+    /// <summary>
+    ///     Orders cards the way the list shows them; cards that are not shown follow, in the stored order.
+    /// </summary>
+    /// <param name="cards">The cards.</param>
+    /// <returns>The cards without duplicates, in that order.</returns>
+    private List<RepoCardViewModel> OrderCards(IEnumerable<RepoCardViewModel> cards)
+    {
+        var rank = new Dictionary<RepoCardViewModel, int>(ReferenceEqualityComparer.Instance);
+        for (var i = 0; i < DisplayedRepoCards.Count; i++)
+        {
+            rank.TryAdd(DisplayedRepoCards[i], i);
+        }
+
+        for (var i = 0; i < RepoCards.Count; i++)
+        {
+            rank.TryAdd(RepoCards[i], DisplayedRepoCards.Count + i);
+        }
+
+        var seen = new HashSet<RepoCardViewModel>(ReferenceEqualityComparer.Instance);
+        return [.. cards.Where(seen.Add).OrderBy(card => rank.GetValueOrDefault(card, int.MaxValue))];
+    }
+
+    /// <summary>
+    ///     Gets the cards a drag that starts on a card moves: all selected cards when the grabbed card is
+    ///     one of them, otherwise the grabbed card alone.
+    /// </summary>
+    /// <param name="card">The card the drag started on.</param>
+    /// <returns>The cards in the order the list shows them.</returns>
+    public IReadOnlyList<RepoCardViewModel> GetDragCards(RepoCardViewModel card)
+    {
+        ArgumentNullException.ThrowIfNull(card);
+
+        return _selectedCards.Contains(card) ? [.. _selectedCards] : [card];
+    }
+
+    /// <summary>
     ///     Gets what the main window's list binds to: the cards of <see cref="DisplayedRepoCards"/>
     ///     interleaved with the <see cref="RepoGroupHeaderViewModel"/> that starts each section.
     /// </summary>
@@ -3487,8 +3597,19 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _headers.Remove(stale);
         }
 
-        SyncCollection(DisplayedItems, items);
-        SyncCollection(DisplayedRepoCards, cards);
+        _isUpdatingList = true;
+        try
+        {
+            SyncCollection(DisplayedItems, items);
+            SyncCollection(DisplayedRepoCards, cards);
+        }
+        finally
+        {
+            _isUpdatingList = false;
+        }
+
+        // A card that is no longer shown (collapsed, filtered out, removed) is no longer selected
+        PruneSelection();
 
         OnPropertyChanged(nameof(HasGroups));
         OnPropertyChanged(nameof(GroupNames));
@@ -3621,6 +3742,21 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 PushGroups(pending, plan.Tree, name, work.Depth + 1);
             }
         }
+    }
+
+    /// <summary>
+    ///     Keeps in the selection only the cards that are shown, in the order of the list, and tells the
+    ///     view to bring its own selection up to date (the list deselects the rows it moved).
+    /// </summary>
+    private void PruneSelection()
+    {
+        if (_selectedCards.Count == 0)
+        {
+            return;
+        }
+
+        var shown = new HashSet<RepoCardViewModel>(DisplayedRepoCards, ReferenceEqualityComparer.Instance);
+        ApplySelection(OrderCards(_selectedCards.Where(shown.Contains)));
     }
 
     /// <summary>
@@ -4791,6 +4927,150 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         return PlaceCard(card, target.Anchor, target.InsertBefore);
+    }
+
+    /// <summary>
+    ///     Gets whether several dragged cards may be dropped at a place.
+    /// </summary>
+    /// <remarks>
+    ///     Pure: nothing is changed. Every card must be allowed at the place by the rules for a single card
+    ///     (see <see cref="CanDrop"/>), so the drop is refused as a whole if one card could not go there, and
+    ///     a drop next to a card that is itself one of the dragged cards is refused.
+    /// </remarks>
+    /// <param name="cards">The dragged cards.</param>
+    /// <param name="target">The place.</param>
+    /// <returns><see langword="true"/> when <see cref="DropCards"/> would accept the drop.</returns>
+    public bool CanDropCards(IReadOnlyList<RepoCardViewModel> cards, RepoDropTarget target)
+    {
+        ArgumentNullException.ThrowIfNull(cards);
+        ArgumentNullException.ThrowIfNull(target);
+
+        var dragged = OrderCards(cards);
+        return dragged.Count > 0 &&
+               !(target.Anchor is { } anchor && dragged.Contains(anchor)) &&
+               dragged.All(card => CanDrop(card, target));
+    }
+
+    /// <summary>
+    ///     Drops several dragged cards at a place in one change: each moves into the target section when it
+    ///     is in another one, and they are put together at the drop position, in the order the list shows
+    ///     them, and everything is saved once.
+    /// </summary>
+    /// <remarks>
+    ///     Each card changes section as a single dropped card does (see <see cref="DropCard"/>): dropping
+    ///     into Favorites marks the repos as favorites and keeps their groups, dropping into a group or into
+    ///     Ungrouped un-favorites them and sets that group or none. The first card (in the order of the list)
+    ///     lands at the drop position - before or after the anchor card, or at the end of the section for a
+    ///     drop on a header - and the others follow it in order. Cards that are not in the list, or the same
+    ///     card twice, count once. The selection is kept (the cards that are still shown stay selected).
+    /// </remarks>
+    /// <param name="cards">The dragged cards.</param>
+    /// <param name="target">The place; see <see cref="CanDropCards"/> for what is refused.</param>
+    /// <returns><see langword="true"/> when the cards are now at the place; <see langword="false"/> when
+    ///     the drop was refused, which changes nothing.</returns>
+    public bool DropCards(IReadOnlyList<RepoCardViewModel> cards, RepoDropTarget target)
+    {
+        if (!CanDropCards(cards, target))
+        {
+            return false;
+        }
+
+        var moved = OrderCards(cards);
+        var movedSet = new HashSet<RepoCardViewModel>(moved, ReferenceEqualityComparer.Instance);
+        var changing = moved.Where(card => !IsInSection(card, target.Kind, target.Name)).ToList();
+        var group = target.Kind == RepoGroupKind.Group
+            ? RepoGroupName.Canonicalize(target.Name, GroupNames)
+            : null;
+
+        // The cards that stay, and where the moved ones go among them
+        var rest = RepoCards.Where(card => !movedSet.Contains(card)).ToList();
+        int index;
+        if (target.Anchor is { } anchor)
+        {
+            index = rest.IndexOf(anchor) + (target.InsertBefore ? 0 : 1);
+        }
+        else
+        {
+            index = rest.FindLastIndex(other => IsInSection(other, target.Kind, target.Name)) + 1;
+            if (index == 0)
+            {
+                index = rest.Count;
+            }
+        }
+
+        var ordered = new List<RepoCardViewModel>(rest);
+        ordered.InsertRange(index, moved);
+        var orderChanged = !ordered.SequenceEqual(RepoCards, ReferenceEqualityComparer.Instance);
+        if (changing.Count == 0 && !orderChanged)
+        {
+            return true;
+        }
+
+        var paths = ordered.Select(card => card.RepoPath).ToList();
+        var changingPaths = new HashSet<string>(changing.Select(card => card.RepoPath), StringComparer.OrdinalIgnoreCase);
+        CommitSettingsChange(settings =>
+        {
+            foreach (var repo in settings.RecentRepos.Where(repo => changingPaths.Contains(repo.Path)))
+            {
+                repo.IsFavorite = target.Kind == RepoGroupKind.Favorites;
+                if (target.Kind != RepoGroupKind.Favorites)
+                {
+                    repo.GroupName = group;
+                }
+            }
+
+            if (orderChanged)
+            {
+                ApplyRepoOrder(settings.RecentRepos, paths);
+                settings.HasUserRepoOrder = true;
+            }
+        });
+
+        foreach (var card in changing)
+        {
+            card.RaiseOrganizationChanged();
+        }
+
+        SyncCollection(RepoCards, ordered);
+        UpdateDisplayedRepoCards();
+        return true;
+    }
+
+    /// <summary>
+    ///     Removes several repo cards from the recent-repos list, unconditionally, in one change, and
+    ///     persists the updated settings.
+    /// </summary>
+    /// <remarks>
+    ///     Like <see cref="RemoveRepo"/> this performs no confirmation - the window asks first, saying how
+    ///     many repos go - and only AgentControl's list changes, nothing on disk. The change is applied at
+    ///     once and saved in the background once; every removed card is retired (see
+    ///     <see cref="RepoCardViewModel.Retire"/>) and leaves the selection.
+    /// </remarks>
+    /// <param name="cards">The cards to remove; cards that are not in the list, or the same card twice,
+    ///     count once.</param>
+    /// <returns>How many cards were removed.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="cards"/> is
+    ///     <see langword="null"/>.</exception>
+    public int RemoveRepos(IReadOnlyList<RepoCardViewModel> cards)
+    {
+        ArgumentNullException.ThrowIfNull(cards);
+
+        var doomed = OrderCards(cards).Where(RepoCards.Contains).ToList();
+        if (doomed.Count == 0)
+        {
+            return 0;
+        }
+
+        var paths = new HashSet<string>(doomed.Select(card => card.RepoPath), StringComparer.OrdinalIgnoreCase);
+        CommitSettingsChange(settings => settings.RecentRepos.RemoveAll(repo => paths.Contains(repo.Path)));
+        foreach (var card in doomed)
+        {
+            RepoCards.Remove(card);
+            card.Retire();
+        }
+
+        UpdateDisplayedRepoCards();
+        return doomed.Count;
     }
 
     /// <summary>

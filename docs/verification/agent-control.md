@@ -778,6 +778,17 @@ covering `AgentControl-System-NestedGroups`. That the headers are indented by de
 zones of another group's header nests, reorders and un-nests, and that a drop onto a group inside the dragged group is
 refused are verified in the headless window tests of the `LauncherUI` subsystem.
 
+**AgentControl_RepoMultiSelect_SelectSeveralCardsAndDeleteRemovesOnlyTheSelectedRepos**: With three repos in no group,
+the repo list reports through UI Automation that several items can be selected. Selecting the first repo and adding the
+third to the selection marks exactly those two items as selected and the second as not. Pressing the Delete key asks one
+question that says two repos go; answering No changes nothing (three cards are still listed), and after pressing Delete
+again and answering Yes only the second repo is listed, the settings file no longer names the first, and the folders of
+the two removed repos are still on disk. This scenario is tested by
+`windows@RepoList_SelectSeveralCardsAndPressDelete_ConfirmsOnceAndRemovesOnlyTheSelectedRepos`, covering
+`AgentControl-System-RepoMultiSelect` and `AgentControl-System-RepoMultiSelectActions` (the removal). Ctrl+click,
+Shift+click, Ctrl+A, the dragging of a selection and the look of a selected card are verified in the headless window
+tests of the `LauncherUI` subsystem, because they depend on pointer and drag input.
+
 **AgentControl_GroupSortByName_MenuSortsRepoCardsAndKeepsOrderAfterRestart**: With three repos in the group Work stored
 in the order Charlie, Alpha, Bravo, choosing "Sort by name" in the Work header's menu lists the cards as Alpha, Bravo,
 Charlie. After the application is closed and started again the cards are listed in that order. This scenario is tested

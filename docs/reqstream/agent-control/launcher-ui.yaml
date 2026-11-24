@@ -504,6 +504,75 @@ sections:
           - MainWindow_HeaderMenu_DeleteEmptyGroup_OffersOnlyPlainDelete
           - MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator
 
+      - id: AgentControl-LauncherUI-RepoMultiSelect
+        title: >-
+          The LauncherUI subsystem shall let the user select several repo cards in the list - Ctrl+click adds
+          or removes a card, Shift+click selects the cards from the last clicked one to the one clicked in
+          the order the list shows them (also across the groups), Ctrl+A selects every card that is shown, a
+          plain click selects one card - and shall never select a section header, a card hidden by a
+          collapsed group or by the filter, or a card that was removed; pressing a card that is already one
+          of several selected cards keeps the selection for a drag and reduces it to that card only when the
+          button is released without one.
+        justification: |
+          The selection is what mass drag and mass remove act on, so it must hold exactly the cards the user
+          can see and chose, in the order the user sees them, and it must survive grabbing one of the cards.
+        children:
+          - AgentControl-MainWindowViewModel-RepoSelection
+          - AgentControl-MainWindowViewModel-RepoSelectionPruned
+        tests:
+          - MainWindow_RepoList_CtrlAndShiftClick_SelectCardsOnlyAcrossGroups
+          - MainWindow_RepoList_CtrlA_SelectsShownCardsOnly
+          - MainWindow_RepoList_PressOnSelectedCard_KeepsSelectionUntilReleaseWithoutDrag
+
+      - id: AgentControl-LauncherUI-RepoMultiSelectHighlight
+        title: >-
+          The LauncherUI subsystem shall show a selected card with a border and a tinted surface of its own
+          that are legible in the light and the dark theme, keep the text on a selected card legible, and
+          expose each card's selected state, and that the list allows several selected items, to assistive
+          technology.
+        justification: |
+          A selection that cannot be seen against both themes, or that only a mouse user can read, is not a
+          selection; the border and the tint together keep it from resting on one color cue.
+        tests:
+          - ThemeResources_SelectedCard_IsTintedAndStaysLegibleInLightAndDark
+          - MainWindow_RepoList_SelectedCard_UsesSelectedSurfaceInLightAndDark
+          - MainWindow_RepoList_SelectedCards_AreExposedThroughTheRowAndTheAutomationPeers
+
+      - id: AgentControl-LauncherUI-RepoMultiDrag
+        title: >-
+          The LauncherUI subsystem shall start a drag of all the selected cards when one of them is dragged
+          (and of the dragged card alone when it is not selected), carrying every card, drop them together at
+          the place under the pointer in the order the list shows them - into another group, Favorites,
+          Ungrouped or next to a card - keep them selected, and refuse a drop next to one of the dragged cards
+          without showing any feedback.
+        justification: |
+          Dragging the selection is the direct way to reorganize many repos at once, and a drop that cannot
+          be made must look as it is.
+        children:
+          - AgentControl-MainWindowViewModel-DragCards
+          - AgentControl-MainWindowViewModel-DropCards
+          - AgentControl-MainWindowViewModel-DropCardsRefused
+        tests:
+          - MainWindow_RepoList_DragSelectedCard_CarriesAllSelectedAndDropsThemInTheGroup
+          - MainWindow_RepoList_DragUnselectedCard_MovesOnlyThatCard
+          - MainWindow_RepoList_DragSelection_DropNextToOwnCard_IsRefused
+
+      - id: AgentControl-LauncherUI-RepoMultiRemove
+        title: >-
+          The LauncherUI subsystem shall remove the selected cards with the Delete key, or with the
+          "Remove from list" item of a card that is one of several selected cards (which says how many it
+          removes), after one confirmation that says how many repos go and that nothing on disk is deleted;
+          answering No changes nothing, and the item of a card that is not selected removes that card alone.
+        justification: |
+          Removing many repos is destructive to the list, so the number is always in the question and the
+          wider action is never silent.
+        children:
+          - AgentControl-MainWindowViewModel-RemoveRepos
+          - AgentControl-RepoCardViewModel-RemoveMenuText
+        tests:
+          - MainWindow_RepoList_DeleteKey_ConfirmsWithTheCountAndRemovesTheSelection
+          - MainWindow_CardMenu_RemoveOnSelectedCard_RemovesTheWholeSelection
+
       - id: AgentControl-LauncherUI-GroupSortByName
         title: >-
           The LauncherUI subsystem shall offer "Sort by name" in the menu of each of the user's group

@@ -425,6 +425,41 @@ the repos into the parent and puts its subgroups, in their own order, into the g
 (`MainWindowViewModel_RemoveGroup_Nested_KeepsRepoOrderAndSubgroupsTakeTheGroupsPlace`, covering
 `AgentControl-MainWindowViewModel-GroupRemove` and `-NestedGroupRemoveKeepsContents`).
 
+**MainWindowViewModel_RepoSelection_OrderPruneAndDragCards**: Tested by `RepoMultiSelectTests.cs`, with a list that has
+a favorite, the group Client with two subgroups (Alpha and Project) and a repo of its own, the group Home and two
+ungrouped repos. Cards given in any order, one of them twice, are selected in the order the list shows them: the
+favorite, the subgroup Alpha's repo, then Client's own repo, then the ungrouped one
+(`MainWindowViewModel_SetSelectedCards_KeepsVisualOrderAcrossNestedGroups`, covering
+`AgentControl-MainWindowViewModel-RepoSelection`). Collapsing Client takes the repo of its subgroup out of the selection
+and leaves the others, a card that is not shown cannot be selected, and a filter that hides the last selected card
+empties the selection (`MainWindowViewModel_SelectedCards_CollapseAndFilterPruneTheSelection`, covering
+`AgentControl-MainWindowViewModel-RepoSelectionPruned`). The cards a drag moves are the whole selection when the grabbed
+card is selected and the grabbed card alone when it is not
+(`MainWindowViewModel_GetDragCards_SelectedCardMovesTheSelectionUnselectedCardMovesAlone`, covering
+`AgentControl-MainWindowViewModel-DragCards`).
+
+**MainWindowViewModel_DropCards_MovesTheSelectionInOneChange**: Tested by `RepoMultiSelectTests.cs`. Dropping a
+favorite, a repo of Home and an ungrouped repo on the header of the nested group Project puts all three at the end of
+Project in the order the list showed them, none is a favorite and all are in Project, they stay selected, and the
+settings file read back holds the same order and groups - the saved order matches the list - from the one change
+(`MainWindowViewModel_DropCards_OnNestedGroupHeader_MovesAllInVisualOrderAndSavesOnce`, covering
+`AgentControl-MainWindowViewModel-DropCards`). Dropping two ungrouped repos before a third puts them together before it
+in list order, and a drop next to one of the dragged repos is refused and changes nothing
+(`MainWindowViewModel_DropCards_OnCard_InsertsTogetherAndRefusesAnchorInTheSet`, covering `-DropCards` and
+`-DropCardsRefused`). Dropping a group repo and an ungrouped repo on the Favorites header makes both favorites (the
+group repo keeps its group and shows its group chip), and dropping two favorites on the Ungrouped header makes them
+non-favorites with no group, after the repos already there
+(`MainWindowViewModel_DropCards_OnFavoritesAndUngrouped_ChangeEveryCard`, covering `-DropCards`). In a flat list a drop
+into the other tier is refused as a whole, and with filter text nothing can be dropped and an empty set of cards is
+refused (`MainWindowViewModel_DropCards_FilterOrFlatListOtherTier_IsRefused`, covering `-DropCardsRefused`).
+
+**MainWindowViewModel_RemoveRepos_RemovesOnlyTheGivenCardsAndSaves**: Tested by `RepoMultiSelectTests.cs`. Removing a
+repo of a group, a favorite and an ungrouped repo (one of them given twice) removes exactly those three cards, reports
+3, leaves the others in their order, saves the same list, leaves the card that was selected and not removed as the only
+selected card, stops the removed cards (their remove command raises no request), leaves every repo folder on disk, and
+removing nothing returns 0 (`MainWindowViewModel_RemoveRepos_RemovesOnlyTheGivenCardsAndSaves`, covering
+`AgentControl-MainWindowViewModel-RemoveRepos`).
+
 **MainWindowViewModel_DropGroup_BeforeOrAfterAnotherGroup**: Dropping a group header before or after another group's
 header puts the group there, a collapsed group stays collapsed and the order is saved
 (`MainWindowViewModel_DropGroup_BeforeOrAfterAnotherGroup_Reorders`); a drop on the group's own header, on *Favorites*

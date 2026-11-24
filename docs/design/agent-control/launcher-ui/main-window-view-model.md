@@ -66,6 +66,20 @@ disabled and the remembered collapsed names are left alone (`AgentControl-MainWi
 **DisplayedRepoCards**: `ObservableCollection<RepoCardViewModel>` — The filtered/sorted cards of
 `DisplayedItems` (those inside a collapsed section are not included), in the same order.
 
+**SelectedCards**: `IReadOnlyList<RepoCardViewModel>` and **SelectedCount**: `int` - The cards the user selected in the
+list (Ctrl+click, Shift+click, Ctrl+A), always in the order the list shows them (`DisplayedRepoCards`: favorites, the
+groups as a tree depth first, then the repos in no group), and never a section header or a card that is not shown
+(`AgentControl-MainWindowViewModel-RepoSelection`, `-RepoSelectionPruned`). **SetSelectedCards(cards)** replaces the
+selection with the given cards, ordered like the list, leaving out a card that is not in `DisplayedRepoCards` and
+counting a card given twice once; it is ignored while the list is being rebuilt (a private flag set around the two
+`SyncCollection` calls of `UpdateDisplayedRepoCards`), because the list itself deselects the rows it moves and what it
+reports then is not the user's choice. After every rebuild the selection is pruned to the cards still shown (a collapsed
+group, the filter or a removal drops a card from it) and a change notification for `SelectedCards` is raised even when
+the cards are the same, which is how the window selects the surviving rows again after a drop. Each change also tells
+the cards (`RepoCardViewModel.UpdateSelection`) how many cards are selected with them, which their "Remove from list"
+item says. **GetDragCards(card)** gives the cards a drag that starts on `card` moves: the whole selection when `card` is
+in it, otherwise `card` alone (`-DragCards`).
+
 **HasGroups**: `bool` (derived) — `true` when at least one repo is in a group or the hierarchy holds a group (one that
 may have no repo); selects sectioned over flat. **GroupNames**: `IReadOnlyList<string>` (derived) — the names of the
 groups that exist (`AppSettings.GetGroupNames`: those a repo is in and the registered ones), alphabetically (the card
@@ -996,6 +1010,29 @@ order.
   (`AgentControl-MainWindowViewModel-DropOnHeader`).
 - *Two changes*: a drop that changes the section makes two changes - the section, then the position. Both are applied
   at once and scheduled; the settings writer folds them into one write, and a failure of that write is reported once.
+
+**CanDropCards** / **DropCards**: Whether several dragged cards may be dropped at a `RepoDropTarget`, and the drop
+itself (`AgentControl-MainWindowViewModel-DropCards`, `-DropCardsRefused`).
+
+- *Postconditions*: `CanDropCards` is pure: it is `false` when there is no card, when the target's anchor is one of the
+  dragged cards, and when `CanDrop` is `false` for any of them, so a mass drop is all or nothing (the filter, a stale
+  anchor, a group that is gone and the flat list's tier rule apply to every card). `DropCards` orders the cards as the
+  list shows them, and decides the new stored order once: the cards that stay, with the moved cards inserted together at
+  the drop position - before or after the anchor, or after the last other member of the target section for a header drop
+  (at the end of the list when it has none) - so the first moved card lands at the position and the others follow it in
+  order. Every moved card that is not yet in the target section changes section as a single dropped card does:
+  **Favorites** sets the favorite flag and keeps the group, a **group** clears the flag and sets the group (in the
+  spelling the group has), **Ungrouped** clears both. All of it is applied in **one** `CommitSettingsChange` (one save)
+  directly on the repos' entries, then `RaiseOrganizationChanged` tells the changed cards to refresh their flag and
+  group properties, `RepoCards` is brought to the new order and the list is recomputed; nothing is saved when neither a
+  section nor the order changes. The selection is kept (the cards that are still shown stay selected).
+
+**RemoveRepos**: Removes several cards unconditionally, in one change (`AgentControl-MainWindowViewModel-RemoveRepos`).
+
+- *Postconditions*: The given cards that are in `RepoCards` (a card given twice, or not listed, counts once or not at
+  all) have their entries removed from `AppSettings.RecentRepos` in one `CommitSettingsChange`, leave `RepoCards`, and
+  are retired like a card removed by `RemoveRepo`; the list is recomputed, which also takes them out of the selection.
+  Returns how many were removed. It never asks (the window confirms, saying how many) and touches nothing on disk.
 
 **PlaceCard** (private): Puts a card next to an anchor card, or at the end of its (current) section, in the stored
 order.

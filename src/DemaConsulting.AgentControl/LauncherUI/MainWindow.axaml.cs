@@ -107,6 +107,7 @@ internal sealed partial class MainWindow : Window
         _autoScrollTimer = new DispatcherTimer { Interval = AutoScrollInterval };
         _autoScrollTimer.Tick += (_, _) => AutoScrollTick();
         WireRepoListDragAndDrop();
+        WireRepoListSelection();
         DataContextChanged += OnDataContextChanged;
         Closing += MainWindow_Closing;
         Closed += (_, _) =>
@@ -263,6 +264,13 @@ internal sealed partial class MainWindow : Window
         }
 
         viewModel.RepoCards.CollectionChanged += OnRepoCardsChanged;
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(MainWindowViewModel.SelectedCards))
+            {
+                SyncListSelectionFromViewModel(viewModel);
+            }
+        };
         // A change that could not be saved in the background is told once per failure streak; the
         // message box is not awaited, so the window keeps working behind it
         viewModel.SettingsSaveFailed += (_, message) => new MessageBoxWindow(message).ShowDialog(this);
@@ -516,13 +524,33 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
+    ///     Handles a card's request to be removed: when the card is one of several selected cards the
+    ///     request is for all of them (the menu item says how many), otherwise for the card alone. The
+    ///     user confirms first; see <see cref="ConfirmAndRemoveCards"/> and
+    ///     <see cref="ConfirmAndRemoveOneCard"/>.
+    /// </summary>
+    /// <param name="card">The card whose "Remove from list" item the user chose.</param>
+    private async Task ConfirmAndRemoveCard(RepoCardViewModel card)
+    {
+        if (DataContext is MainWindowViewModel viewModel &&
+            viewModel.SelectedCards.Count > 1 &&
+            viewModel.SelectedCards.Contains(card))
+        {
+            await ConfirmAndRemoveCards(viewModel, [.. viewModel.SelectedCards]);
+            return;
+        }
+
+        await ConfirmAndRemoveOneCard(card);
+    }
+
+    /// <summary>
     ///     Shows the <see cref="ConfirmationWindow"/> asking the user to confirm removing
     ///     <paramref name="card"/> from AgentControl's recent-repos list, and only calls
     ///     <see cref="MainWindowViewModel.RemoveRepo"/> if the user confirms. Never removes
     ///     anything from disk - the message text makes this explicit.
     /// </summary>
     /// <param name="card">The card the user asked to remove.</param>
-    private async Task ConfirmAndRemoveCard(RepoCardViewModel card)
+    private async Task ConfirmAndRemoveOneCard(RepoCardViewModel card)
     {
         if (DataContext is not MainWindowViewModel viewModel)
         {
@@ -911,7 +939,141 @@ internal sealed partial class MainWindow : Window
         MoveMenuItemClicked(sender, RepoMove.Bottom);
 
     /// <summary>
-    ///     The data format of a dragged repo card: one string item, the card's repo path.
+    ///     Whether the list's selection is being set from the view model, so the selection events that
+    ///     raises are not taken for the user's choice.
+    /// </summary>
+    private bool _isSyncingSelection;
+
+    /// <summary>
+    ///     Connects the repo list's selection: what the user selects (with Ctrl+click, Shift+click or
+    ///     Ctrl+A) is told to the view model, and the Delete key asks to remove the selected cards.
+    /// </summary>
+    private void WireRepoListSelection()
+    {
+        if (this.FindControl<ListBox>("RepoListBox") is not RepoListBox list)
+        {
+            return;
+        }
+
+        list.SelectionChanged += RepoList_SelectionChanged;
+        list.DeleteRequested += async (_, _) =>
+        {
+            if (DataContext is MainWindowViewModel { SelectedCards.Count: > 0 } viewModel)
+            {
+                await ConfirmAndRemoveCards(viewModel, [.. viewModel.SelectedCards]);
+            }
+        };
+    }
+
+    /// <summary>
+    ///     Tells the view model which cards are selected, after taking the section headers out of the
+    ///     selection (a range, a click on a header or a keyboard move can select one, but only cards are
+    ///     ever selected).
+    /// </summary>
+    /// <param name="sender">The list.</param>
+    /// <param name="e">The selection change (unused).</param>
+    private void RepoList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_isSyncingSelection || sender is not ListBox list || DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var headers = list.SelectedItems?.OfType<RepoGroupHeaderViewModel>().ToList() ?? [];
+        if (headers.Count > 0)
+        {
+            _isSyncingSelection = true;
+            try
+            {
+                foreach (var header in headers)
+                {
+                    list.SelectedItems!.Remove(header);
+                }
+            }
+            finally
+            {
+                _isSyncingSelection = false;
+            }
+        }
+
+        viewModel.SetSelectedCards(list.SelectedItems?.OfType<RepoCardViewModel>());
+    }
+
+    /// <summary>
+    ///     Brings the list's selection up to date with the view model's: the view model drops the cards it
+    ///     no longer shows from the selection, and the list deselects the rows it moved (after a drop, for
+    ///     one), so the cards that are still selected are selected again.
+    /// </summary>
+    /// <param name="viewModel">The window's view model.</param>
+    private void SyncListSelectionFromViewModel(MainWindowViewModel viewModel)
+    {
+        if (_isSyncingSelection || this.FindControl<ListBox>("RepoListBox") is not { } list)
+        {
+            return;
+        }
+
+        var wanted = viewModel.SelectedCards;
+        var current = list.SelectedItems!.Cast<object>().ToList();
+        if (current.Count == wanted.Count && wanted.All(card => current.Contains(card)))
+        {
+            return;
+        }
+
+        _isSyncingSelection = true;
+        list.Selection.BeginBatchUpdate();
+        try
+        {
+            list.Selection.Clear();
+            foreach (var card in wanted)
+            {
+                var index = list.Items.IndexOf(card);
+                if (index >= 0)
+                {
+                    list.Selection.Select(index);
+                }
+            }
+        }
+        finally
+        {
+            list.Selection.EndBatchUpdate();
+            _isSyncingSelection = false;
+        }
+    }
+
+    /// <summary>
+    ///     Shows the <see cref="ConfirmationWindow"/> asking the user to confirm removing the given cards
+    ///     from AgentControl's recent-repos list - for one card the question of
+    ///     <see cref="ConfirmAndRemoveCard"/>, for several a question that says how many - and removes them
+    ///     (in one change) only if the user confirms. Never removes anything from disk, which the message
+    ///     says.
+    /// </summary>
+    /// <param name="viewModel">The window's view model.</param>
+    /// <param name="cards">The cards the user asked to remove.</param>
+    private async Task ConfirmAndRemoveCards(MainWindowViewModel viewModel, IReadOnlyList<RepoCardViewModel> cards)
+    {
+        if (cards.Count == 1)
+        {
+            await ConfirmAndRemoveOneCard(cards[0]);
+            return;
+        }
+
+        var confirmed = await new ConfirmationWindow(
+                $"Remove {cards.Count} repos from AgentControl's recent-repos list?\n\n" +
+                "This only removes the repos from AgentControl's list - it does not delete or " +
+                "otherwise modify anything on disk.")
+            .ShowDialog<bool>(this);
+
+        if (confirmed)
+        {
+            // Applied at once and saved in the background; a failed save is reported once through
+            // SettingsSaveFailed
+            viewModel.RemoveRepos(cards);
+        }
+    }
+
+    /// <summary>
+    ///     The data format of a dragged repo card: one string item for each dragged card, its repo path (the
+    ///     card the drag started on first).
     /// </summary>
     internal static readonly DataFormat<string> RepoCardDataFormat =
         DataFormat.CreateStringApplicationFormat("DemaConsulting.AgentControl.RepoCard");
@@ -1149,17 +1311,34 @@ internal sealed partial class MainWindow : Window
 
     /// <summary>
     ///     Runs a drag of a card: dims the card, hands the card's path to the drag source and, when the
-    ///     drag ends however it ends, removes the dimming and any drop feedback.
+    ///     drag ends however it ends, removes the dimming and any drop feedback. When the card is one of
+    ///     several selected cards the drag carries all of them (one item each, the grabbed card first) and
+    ///     dims them all.
     /// </summary>
-    /// <param name="card">The dragged card.</param>
+    /// <param name="card">The card the drag started on.</param>
     /// <param name="container">The card's list row.</param>
     /// <param name="press">The press that started the drag.</param>
     /// <returns>A task that completes when the drag has ended.</returns>
     private async Task StartDragAsync(RepoCardViewModel card, ListBoxItem container, PointerPressedEventArgs press)
     {
+        // The selection stays as it is: the press that began this drag must not reduce it on release
+        var list = this.FindControl<ListBox>("RepoListBox");
+        (list as RepoListBox)?.CancelDeferredSelection();
+        var cards = DataContext is MainWindowViewModel viewModel ? viewModel.GetDragCards(card) : [card];
         var transfer = new DataTransfer();
         transfer.Add(DataTransferItem.Create(RepoCardDataFormat, card.RepoPath));
-        container.Classes.Add("dragging");
+        foreach (var other in cards.Where(other => !ReferenceEquals(other, card)))
+        {
+            transfer.Add(DataTransferItem.Create(RepoCardDataFormat, other.RepoPath));
+        }
+
+        var dimmed = cards.Select(other => ReferenceEquals(other, card) ? container : list?.ContainerFromItem(other))
+            .OfType<Control>().ToList();
+        foreach (var row in dimmed)
+        {
+            row.Classes.Add("dragging");
+        }
+
         try
         {
             var starter = DragStarter ?? DragDrop.DoDragDropAsync;
@@ -1167,7 +1346,11 @@ internal sealed partial class MainWindow : Window
         }
         finally
         {
-            container.Classes.Remove("dragging");
+            foreach (var row in dimmed)
+            {
+                row.Classes.Remove("dragging");
+            }
+
             ClearDropFeedback();
         }
     }
@@ -1206,27 +1389,50 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Gets the card that is being dragged over the list, from the data of the drag.
+    ///     Gets the cards that are being dragged over the list, from the data of the drag.
     /// </summary>
     /// <param name="data">The data of the drag.</param>
     /// <param name="viewModel">The window's view model.</param>
-    /// <param name="card">The dragged card when this returns <see langword="true"/>.</param>
-    /// <returns><see langword="true"/> when the drag carries a repo card that is in the list.</returns>
-    private bool TryGetDraggedCard(
+    /// <param name="cards">The dragged cards, the grabbed one first, when this returns
+    ///     <see langword="true"/>.</param>
+    /// <returns><see langword="true"/> when the drag carries at least one repo card that is in the list;
+    ///     a path that no card has any more is left out.</returns>
+    private bool TryGetDraggedCards(
         IDataTransfer data,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out MainWindowViewModel? viewModel,
-        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out RepoCardViewModel? card)
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IReadOnlyList<RepoCardViewModel>? cards)
     {
         viewModel = DataContext as MainWindowViewModel;
-        card = null;
-        if (viewModel is null || data.TryGetValue(RepoCardDataFormat) is not { } path)
+        cards = null;
+        if (viewModel is null)
         {
             return false;
         }
 
-        card = viewModel.RepoCards.FirstOrDefault(other => MainWindowViewModel.IsSameRepoPath(other.RepoPath, path));
-        return card is not null;
+        var found = new List<RepoCardViewModel>();
+        foreach (var path in data.TryGetValues(RepoCardDataFormat) ?? [])
+        {
+            var card = viewModel.RepoCards.FirstOrDefault(other => MainWindowViewModel.IsSameRepoPath(other.RepoPath, path));
+            if (card is not null && !found.Contains(card))
+            {
+                found.Add(card);
+            }
+        }
+
+        cards = found;
+        return found.Count > 0;
     }
+
+    /// <summary>
+    ///     Gets whether the dragged cards may be dropped at a place: one card by the rules for a single
+    ///     card, several by the rules for a selection.
+    /// </summary>
+    /// <param name="viewModel">The window's view model.</param>
+    /// <param name="cards">The dragged cards.</param>
+    /// <param name="target">The place.</param>
+    /// <returns><see langword="true"/> when the drop would be accepted.</returns>
+    private static bool CanDropCardsAt(MainWindowViewModel viewModel, IReadOnlyList<RepoCardViewModel> cards, RepoDropTarget target) =>
+        cards.Count == 1 ? viewModel.CanDrop(cards[0], target) : viewModel.CanDropCards(cards, target);
 
     /// <summary>
     ///     Gets the group whose header is being dragged over the list, from the data of the drag.
@@ -1390,32 +1596,32 @@ internal sealed partial class MainWindow : Window
     /// <param name="e">The drag event.</param>
     private void CardDragOver(DragEventArgs e)
     {
-        if (!TryGetDraggedCard(e.DataTransfer, out var viewModel, out var card))
+        if (!TryGetDraggedCards(e.DataTransfer, out var viewModel, out var cards))
         {
             return;
         }
 
         e.Handled = true;
         var point = e.GetPosition(this);
-        e.DragEffects = ShowCardDropFeedback(viewModel, card, point) ? DragDropEffects.Move : DragDropEffects.None;
+        e.DragEffects = ShowCardDropFeedback(viewModel, cards, point) ? DragDropEffects.Move : DragDropEffects.None;
         UpdateAutoScroll(e.DataTransfer, point);
     }
 
     /// <summary>
-    ///     Shows where a dragged card would land at a point (the insertion line or the header tint), or
-    ///     hides the feedback when it cannot be dropped there.
+    ///     Shows where dragged cards would land at a point (the insertion line or the header tint), or
+    ///     hides the feedback when they cannot be dropped there.
     /// </summary>
     /// <param name="viewModel">The window's view model.</param>
-    /// <param name="card">The dragged card.</param>
+    /// <param name="cards">The dragged cards.</param>
     /// <param name="pointInWindow">The pointer's position, relative to this window.</param>
-    /// <returns><see langword="true"/> when the card can be dropped there.</returns>
-    private bool ShowCardDropFeedback(MainWindowViewModel viewModel, RepoCardViewModel card, Point pointInWindow)
+    /// <returns><see langword="true"/> when the cards can be dropped there.</returns>
+    private bool ShowCardDropFeedback(MainWindowViewModel viewModel, IReadOnlyList<RepoCardViewModel> cards, Point pointInWindow)
     {
         var found = GetDropTarget(pointInWindow);
-        var allowed = found is { } target && viewModel.CanDrop(card, target.Target);
+        var allowed = found is { } target && CanDropCardsAt(viewModel, cards, target.Target);
 
-        // Nothing is shown next to the dragged card itself: dropping it there changes nothing
-        if (allowed && found is { } shown && !ReferenceEquals(shown.Target.Anchor, card))
+        // Nothing is shown next to a dragged card itself: dropping it there changes nothing
+        if (allowed && found is { } shown && !cards.Any(card => ReferenceEquals(shown.Target.Anchor, card)))
         {
             ShowDropFeedback(shown.Container, shown.Target);
         }
@@ -1514,18 +1720,19 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Drops the dragged card where the pointer is, through the view model.
+    ///     Drops the dragged card, or cards, where the pointer is, through the view model.
     /// </summary>
     /// <param name="e">The drag event.</param>
     private void CardDrop(DragEventArgs e)
     {
-        if (!TryGetDraggedCard(e.DataTransfer, out var viewModel, out var card))
+        if (!TryGetDraggedCards(e.DataTransfer, out var viewModel, out var cards))
         {
             return;
         }
 
         e.Handled = true;
-        if (GetDropTarget(e.GetPosition(this)) is { } found && viewModel.DropCard(card, found.Target))
+        if (GetDropTarget(e.GetPosition(this)) is { } found &&
+            (cards.Count == 1 ? viewModel.DropCard(cards[0], found.Target) : viewModel.DropCards(cards, found.Target)))
         {
             e.DragEffects = DragDropEffects.Move;
         }
@@ -2083,9 +2290,9 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        if (TryGetDraggedCard(data, out var viewModel, out var card))
+        if (TryGetDraggedCards(data, out var viewModel, out var cards))
         {
-            ShowCardDropFeedback(viewModel, card, pointInWindow);
+            ShowCardDropFeedback(viewModel, cards, pointInWindow);
         }
         else if (TryGetDraggedGroup(data, out viewModel, out var groupName))
         {

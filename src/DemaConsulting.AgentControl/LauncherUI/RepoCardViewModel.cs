@@ -670,6 +670,55 @@ internal sealed class RepoCardViewModel : ViewModelBase
     }
 
     /// <summary>
+    ///     Tells the view that this card's favorite mark and group may have changed because the owning
+    ///     <see cref="MainWindowViewModel"/> changed them for several cards at once (a drop of a selection).
+    /// </summary>
+    internal void RaiseOrganizationChanged()
+    {
+        OnPropertyChanged(nameof(IsFavorite));
+        RaiseGroupPropertiesChanged();
+    }
+
+    /// <summary>Backing field for <see cref="SelectionSize"/>.</summary>
+    private int _selectionSize;
+
+    /// <summary>
+    ///     Gets how many cards are selected together with this one, or 0 when this card is not selected;
+    ///     set by the owning <see cref="MainWindowViewModel"/> when the selection changes.
+    /// </summary>
+    public int SelectionSize
+    {
+        get => _selectionSize;
+        private set
+        {
+            if (SetField(ref _selectionSize, value))
+            {
+                OnPropertyChanged(nameof(RemoveMenuText));
+                OnPropertyChanged(nameof(RemoveMenuTooltip));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets the text of the "Remove from list" menu item: it says how many repos it removes when this
+    ///     card is one of several selected, because the item then acts on all of them.
+    /// </summary>
+    public string RemoveMenuText => _selectionSize > 1 ? $"Remove {_selectionSize} selected repos from list" : "Remove from list";
+
+    /// <summary>
+    ///     Gets the tooltip of the "Remove from list" menu item.
+    /// </summary>
+    public string RemoveMenuTooltip => _selectionSize > 1
+        ? $"Remove the {_selectionSize} selected repos from AgentControl's recent-repos list (does not delete them from disk)"
+        : "Remove this repo from AgentControl's recent-repos list (does not delete it from disk)";
+
+    /// <summary>
+    ///     Records how many cards are selected together with this one.
+    /// </summary>
+    /// <param name="size">The number of selected cards when this card is selected, otherwise 0.</param>
+    internal void UpdateSelection(int size) => SelectionSize = size;
+
+    /// <summary>
     ///     Tells the view that this card's group properties may have changed because the group was
     ///     renamed or removed from outside the card (by the owning view model).
     /// </summary>

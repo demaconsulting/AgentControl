@@ -539,6 +539,39 @@ sections:
           - windows@GroupHeaderMenu_DeleteGroupKeepContents_RemovesTheHeaderAndKeepsAllRepos
           - windows@GroupHeaderMenu_DeleteGroupAndItsContents_RemovesGroupAndReposFromTheListAndKeepsFoldersOnDisk
 
+      - id: AgentControl-System-RepoMultiSelect
+        title: >-
+          The tool shall let the user select several repo cards of the list - with Ctrl+click, with
+          Shift+click for a range, with Ctrl+A for every card, and through assistive technology - show the
+          selected cards in a way that does not depend on color alone, and never select a section header or
+          a card that is not shown.
+        tags: [system]
+        justification: |
+          Reorganizing or cleaning up many repos needs a way to name several of them at once; the selection
+          must be the same for a person using the keyboard, the mouse or a screen reader, and it must never
+          include something the user cannot see.
+        children:
+          - AgentControl-LauncherUI-RepoMultiSelect
+          - AgentControl-LauncherUI-RepoMultiSelectHighlight
+        tests:
+          - windows@RepoList_SelectSeveralCardsAndPressDelete_ConfirmsOnceAndRemovesOnlyTheSelectedRepos
+
+      - id: AgentControl-System-RepoMultiSelectActions
+        title: >-
+          The tool shall let the user drag any selected repo card to move all the selected cards together to
+          the place it is dropped, and remove all the selected cards from the list with the Delete key or the
+          card menu after one confirmation that says how many repos go and that nothing on disk is deleted,
+          changing nothing when the user declines.
+        tags: [system]
+        justification: |
+          Moving and removing many repos one at a time is the tedious work this saves; removal must never
+          happen by accident or touch the repos on disk, so the user is told the number first.
+        children:
+          - AgentControl-LauncherUI-RepoMultiDrag
+          - AgentControl-LauncherUI-RepoMultiRemove
+        tests:
+          - windows@RepoList_SelectSeveralCardsAndPressDelete_ConfirmsOnceAndRemovesOnlyTheSelectedRepos
+
       - id: AgentControl-System-GroupSortByName
         title: >-
           The tool shall let the user sort the repos of a group alphabetically by name from the group
