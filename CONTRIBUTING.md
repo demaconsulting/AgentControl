@@ -163,16 +163,18 @@ dotnet test --filter "FullyQualifiedName~YourTestName"
 dotnet test --collect "XPlat Code Coverage"
 ```
 
-`pwsh ./build.ps1` builds the solution and runs every test project, including the FlaUI UI tests in
-`test/DemaConsulting.AgentControl.UiTests`, which launch the application and take over the mouse and keyboard. Use
-`pwsh ./build.ps1 -SkipUiTests` to build everything but run only the headless test projects while you keep working on
-the machine; the UI tests still run in CI.
+`pwsh ./build.ps1 -All` builds the solution and runs every test project, including the FlaUI UI tests in
+`test/DemaConsulting.AgentControl.UiTests`, which launch the application and take over the mouse and keyboard. Add
+`-SkipUiTests` (`pwsh ./build.ps1 -All -SkipUiTests`) to build everything but run only the headless test projects while
+you keep working on the machine; the UI tests still run in CI. The script requires a scope: with no arguments it prints
+its usage and exits 1 (`pwsh ./build.ps1 -Help` shows it).
 
-While iterating, `pwsh ./build.ps1 -Affected -SkipUiTests` builds and tests only the projects affected by the files
-changed since `origin/main` (or `-Base <ref>`) plus uncommitted and untracked files. Any `src/` change also selects the
+While iterating, `pwsh ./build.ps1 -Changed -SkipUiTests` builds and tests only the projects affected by the files
+changed since `origin/main` (or `-Base <ref>`) plus uncommitted and untracked files, and
+`pwsh ./build.ps1 -Project Puppet -SkipUiTests` those affected by the named projects. Any `src/` change also selects the
 UI tests, which `-SkipUiTests` builds but does not run. Add `-DryRun` to print the selection. Changes to project
 files, `global.json`, `.editorconfig`, or the tool manifest fall back to the full build. Run the full
-`pwsh ./build.ps1 -SkipUiTests` (or the full build when the desktop is free) once before pushing.
+`pwsh ./build.ps1 -All -SkipUiTests` (or `-All` when the desktop is free) once before pushing.
 
 #### Self-Validation Tests
 
@@ -226,15 +228,15 @@ All tests must pass with zero warnings.
 ### 2. Linting
 
 ```pwsh
-# After making changes: applies dotnet format, markdown, and YAML fixes silently
-pwsh ./fix.ps1
-
-# While iterating: only the fixers and checks whose inputs changed (add -DryRun to lint.ps1 to preview)
+# While iterating: only the fixers and checks whose inputs changed (add -DryRun to preview)
 pwsh ./fix.ps1 -Changed
 pwsh ./lint.ps1 -Changed
 
+# After making changes: applies dotnet format, markdown, and YAML fixes silently to everything
+pwsh ./fix.ps1 -All
+
 # Before submitting a pull request: all linters must pass
-pwsh ./lint.ps1
+pwsh ./lint.ps1 -All
 ```
 
 ### 3. Code Coverage
