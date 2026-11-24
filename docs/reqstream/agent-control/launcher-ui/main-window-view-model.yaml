@@ -645,12 +645,13 @@ sections:
 
       - id: AgentControl-MainWindowViewModel-GroupSettingsKeptOnApplySettings
         title: >-
-          The MainWindowViewModel class shall keep the group colors and the group order when settings
-          are applied from the Settings window.
+          The MainWindowViewModel class shall keep the group colors, the group order and the group
+          hierarchy when settings are applied from the Settings window.
         justification: |
           The Settings window does not edit them, so applying its changes must not lose them.
         tests:
           - MainWindowViewModel_ApplySettings_KeepsGroupColorsAndOrder
+          - MainWindowViewModel_ApplySettingsAsync_GroupParents_KeptInMemoryAndWritten
 
       - id: AgentControl-MainWindowViewModel-GroupSectionHeaders
         title: >-

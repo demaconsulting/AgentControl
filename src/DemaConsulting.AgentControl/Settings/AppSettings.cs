@@ -84,8 +84,8 @@ internal sealed class AppSettings
     /// <summary>
     ///     Replaces every collection (and source text field) that an explicit JSON <c>null</c> may
     ///     have left <see langword="null"/> with an empty value, drops null list entries, and
-    ///     repairs the organizing values (group names, unknown card colors, and the group colors and
-    ///     group order - see <see cref="RepairGroupSettings"/>).
+    ///     repairs the organizing values (group names, unknown card colors, and the group hierarchy,
+    ///     group colors and group order - see <see cref="RepairGroupSettings"/>).
     /// </summary>
     /// <remarks>
     ///     <see cref="System.Text.Json.JsonSerializer"/> bypasses a property's initializer when the
@@ -153,39 +153,43 @@ internal sealed class AppSettings
                 .OfType<string>()
                 .Distinct(RepoGroupName.Comparer)];
 
-        // The group colors and order only for groups that exist, spelled like them
+        // The group hierarchy, colors and order only for groups that exist, spelled like them
         RepairGroupSettings();
     }
 
     /// <summary>
-    ///     Brings <see cref="GroupColors"/> and <see cref="GroupOrder"/> in line with the groups that
-    ///     exist: only entries for groups some repo is in, with known colors, one per group, spelled the
-    ///     way the group is spelled on its repos.
+    ///     Brings <see cref="GroupParents"/>, <see cref="GroupColors"/> and <see cref="GroupOrder"/> in
+    ///     line with the groups that exist: the hierarchy repaired (see
+    ///     <see cref="RepoGroupHierarchy.RepairParents"/>), and only color and order entries for groups
+    ///     that exist, with known colors, one per group, spelled the way the group is spelled.
     /// </summary>
     /// <remarks>
-    ///     A group exists only while a repo names it, so its color and position are forgotten once
-    ///     its last repo leaves it (or it is removed); a later group of the same name starts afresh
-    ///     instead of inheriting a stale choice. Called when the settings are loaded (so hand-edited
-    ///     or damaged entries never reach the window) and by the main window's view model after every
-    ///     change it saves (so the stored values follow renames, removals and repos leaving groups).
-    ///     The rules: each key or name is <see cref="RepoGroupName.Sanitize"/>d and dropped when
-    ///     nothing usable (or a built-in section's name) is left; a color is read through
+    ///     A group exists while a repo names it or while it is registered in <see cref="GroupParents"/>
+    ///     (see <see cref="GetGroupNames"/>), so its color and position are forgotten once its last
+    ///     repo leaves it (or it is removed) unless it is registered; a later group of the same name
+    ///     starts afresh instead of inheriting a stale choice. Called when the settings are loaded (so
+    ///     hand-edited or damaged entries never reach the window) and by the main window's view model
+    ///     after every change it saves (so the stored values follow renames, removals and repos leaving
+    ///     groups). The rules: each key or name is <see cref="RepoGroupName.Sanitize"/>d and dropped
+    ///     when nothing usable (or a built-in section's name) is left; a color is read through
     ///     <see cref="RecentRepo.NormalizeCardColor"/> and dropped when the palette does not know it;
-    ///     entries naming a group no repo is in (favorites count as members) are dropped; entries
+    ///     entries naming a group that does not exist (favorites count as members) are dropped; entries
     ///     that differ only in letter case are merged, the first one winning. Deterministic and
-    ///     idempotent, as <c>MainWindowViewModel.CommitSettingsChange</c> requires; replaces both
+    ///     idempotent, as <c>MainWindowViewModel.CommitSettingsChange</c> requires; replaces the
     ///     collections with new instances. Not thread-safe, like the rest of this type.
     /// </remarks>
     internal void RepairGroupSettings()
     {
-        // The groups that exist, each spelled the way its first repo spells it
+        // The hierarchy first: it decides which groups are registered, and so which exist
+        GroupParents = RepoGroupHierarchy.RepairParents(
+            GroupParents, (RecentRepos ?? []).Select(repo => repo?.GroupName));
+
+        // The groups that exist, each spelled the way its first repo spells it (a registered group
+        // no repo is in is spelled as registered)
         var spellings = new Dictionary<string, string>(RepoGroupName.Comparer);
-        foreach (var repo in RecentRepos ?? [])
+        foreach (var name in GetGroupNames())
         {
-            if (RepoGroupName.Sanitize(repo?.GroupName) is { } name)
-            {
-                spellings.TryAdd(name, name);
-            }
+            spellings.TryAdd(name, name);
         }
 
         // Colors: a known color for an existing group, the first entry of a group winning
@@ -220,13 +224,16 @@ internal sealed class AppSettings
     /// <remarks>
     ///     The single source for "which groups exist": the main window's group list, the group name
     ///     prompts and the repo cards' Move to group choices all read it, so a rule about what makes a
-    ///     group exist changes in one place. Today a group exists exactly while some repo names it.
-    ///     Pure; reads only.
+    ///     group exist changes in one place. A group exists while some repo names it, or while it is
+    ///     registered in <see cref="GroupParents"/> (a group created inside another, or moved within the
+    ///     hierarchy, stays until it is deleted, even with no repo in it). Pure; reads only.
     /// </remarks>
-    /// <returns>One name per group, spelled the way the first repo that uses it spells it, sorted
-    ///     in ordinal order ignoring letter case; empty when no repo is in a group.</returns>
+    /// <returns>One name per group, spelled the way the first repo that uses it spells it (a
+    ///     registered group no repo is in is spelled as registered), sorted in ordinal order ignoring
+    ///     letter case; empty when there is no group.</returns>
     internal IReadOnlyList<string> GetGroupNames() =>
-        RepoGroupName.DistinctNames((RecentRepos ?? []).Select(repo => repo?.GroupName));
+        RepoGroupName.DistinctNames(
+            (RecentRepos ?? []).Select(repo => repo?.GroupName).Concat((GroupParents ?? []).Keys));
 
     /// <summary>
     ///     Finds the color the user chose for one of their groups.
@@ -318,6 +325,12 @@ internal sealed class AppSettings
         }
 
         snapshot.GroupOrder = [.. GroupOrder ?? []];
+        snapshot.GroupParents = new Dictionary<string, string>(RepoGroupName.Comparer);
+        foreach (var (child, parent) in GroupParents ?? new Dictionary<string, string>())
+        {
+            snapshot.GroupParents.TryAdd(child, parent);
+        }
+
         return snapshot;
     }
 
@@ -639,6 +652,34 @@ internal sealed class AppSettings
     /// </remarks>
     [JsonConverter(typeof(StringListJsonConverter))]
     public List<string> GroupOrder { get; set; } = [];
+
+    /// <summary>
+    ///     Gets or sets how the user's groups nest: each registered group's name mapped to the name of
+    ///     the group it is inside, or to the empty string for a top-level group.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///     A per-user view choice stored only in the settings file. Group names are unique across the
+    ///     whole tree, so a group is still identified by its name alone. The keys are the
+    ///     <i>registered</i> groups: the groups that were created inside another group or moved within
+    ///     the hierarchy, and every group that has a registered group inside it. A registered group
+    ///     exists until it is deleted, even with no repo in it (see <see cref="GetGroupNames"/>); a
+    ///     group that is not registered still exists only while a repo names it and is top level. The
+    ///     order of the groups of one level is the relative order of those groups in
+    ///     <see cref="GroupOrder"/>. A file without this property (every file written before groups
+    ///     nested) reads as empty, so every group is top level exactly as before.
+    ///     </para>
+    ///     <para>
+    ///     Keyed by group name ignoring letter case. Anything in the file that is not an object of
+    ///     strings reads as empty or loses the offending entries, and
+    ///     <see cref="RepairGroupSettings"/> drops unusable names, makes an unknown or self parent top
+    ///     level and cuts cycles (see <see cref="RepoGroupHierarchy.RepairParents"/>), so the value can
+    ///     never keep the application from starting. A version that does not know this property ignores
+    ///     it and shows the groups as a flat list. Always written.
+    ///     </para>
+    /// </remarks>
+    [JsonConverter(typeof(StringMapJsonConverter))]
+    public Dictionary<string, string> GroupParents { get; set; } = new(RepoGroupName.Comparer);
 
     /// <summary>
     ///     Reads a JSON object of strings into a dictionary keyed ignoring letter case, skipping the

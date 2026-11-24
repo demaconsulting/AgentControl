@@ -85,7 +85,14 @@ path.
   the end of the group-name repair of `NormalizeNulls`) drops unusable or reserved names, colors the palette does not
   know and case duplicates (the first wins, respelled as the group is spelled on its repos), so a later `Save` does not
   write them back (`AgentControl-SettingsStore-InvalidGroupColorsAndOrderRepaired`), and drops the color and position
-  of a group that no repo is in (`AgentControl-SettingsStore-StaleGroupSettingsDropped`). The rules are described in
+  of a group that no repo is in and that is not part of the group hierarchy
+  (`AgentControl-SettingsStore-StaleGroupSettingsDropped`). `AppSettings.GroupParents` (child group to parent group, the
+  empty string for a top-level group) is always written and read back (`AgentControl-SettingsStore-GroupParents`); a
+  file without it loads as no hierarchy, every group top level (`-GroupParentsDefaults`). It is read as tolerantly as
+  the group colors and repaired by the same `RepairGroupSettings` through `RepoGroupHierarchy.RepairParents`: unusable
+  names are dropped, an unknown, self or built-in-section parent means top level, a cycle is cut, and the groups are
+  spelled as they are (`-InvalidGroupParentsRepaired`); a group in the hierarchy survives the load with no repo in it
+  (`-RegisteredGroupKept`). The rules are described in
   the *Settings* subsystem design.
 
 **Save**: Saves `AppSettings` to a configuration directory, creating the directory if needed.

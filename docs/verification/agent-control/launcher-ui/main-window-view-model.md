@@ -617,7 +617,8 @@ name starts without them (`MainWindowViewModel_RemoveGroup_ForgetsColorAndPositi
 leaves it forgets both like a removed group (`MainWindowViewModel_LastRepoLeavesGroup_ForgetsColorAndPosition`). These
 cover `AgentControl-MainWindowViewModel-GroupSettingsFollowRenameAndRemove`. Applying new settings as the Settings
 window builds them keeps the group colors and the group order
-(`MainWindowViewModel_ApplySettings_KeepsGroupColorsAndOrder`, covering
+(`MainWindowViewModel_ApplySettings_KeepsGroupColorsAndOrder`, and the group hierarchy
+(`MainWindowViewModel_ApplySettingsAsync_GroupParents_KeptInMemoryAndWritten`), covering
 `AgentControl-MainWindowViewModel-GroupSettingsKeptOnApplySettings`).
 
 **MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten**: A favorite, a group and a card color chosen on a card

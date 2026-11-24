@@ -70,6 +70,7 @@ input-files:
   - docs/verification/agent-control/settings/settings-store.md
   - docs/verification/agent-control/settings/settings-writer.md
   - docs/verification/agent-control/settings/repo-group-name.md
+  - docs/verification/agent-control/settings/repo-group-hierarchy.md
   - docs/verification/agent-control/logging.md
   - docs/verification/agent-control/startup.md
   - docs/verification/agent-control/startup/startup-options.md

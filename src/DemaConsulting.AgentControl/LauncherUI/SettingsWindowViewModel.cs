@@ -529,7 +529,8 @@ internal sealed class SettingsWindowViewModel : ViewModelBase, IDisposable
     /// <remarks>
     ///     The returned settings' <see cref="AppSettings.RecentRepos"/>,
     ///     <see cref="AppSettings.CollapsedGroups"/>, <see cref="AppSettings.GroupColors"/> and
-    ///     <see cref="AppSettings.GroupOrder"/> are left as fresh empty collections; callers
+    ///     <see cref="AppSettings.GroupOrder"/> and <see cref="AppSettings.GroupParents"/> are left as
+    ///     fresh empty collections; callers
     ///     (specifically <see cref="MainWindowViewModel.ApplySettingsAsync"/>) are
     ///     responsible for preserving the authoritative repo list (and its order, including
     ///     <see cref="AppSettings.HasUserRepoOrder"/>), the collapsed-group state and the group colors

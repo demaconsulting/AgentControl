@@ -8,13 +8,15 @@ the way the application does - through its public surface (`SettingsStore.Load` 
 
 - by saving in one session and loading in a later one against a real temporary configuration directory, and are the
 evidence of the theme, organization and background-writing requirements. The `SettingsStore` unit's
-test suite (`SettingsStoreTests.cs`, `SettingsStoreOrganizingTests.cs` and `SettingsStoreRepoOrderTests.cs`) and the
-`RepoGroupName` unit's test suite
-(`RepoGroupNameTests.cs`) and the `SettingsWriter` unit's test suite (`SettingsWriterTests.cs`) carry the unit
+test suite (`SettingsStoreTests.cs`, `SettingsStoreOrganizingTests.cs`, `SettingsStoreGroupHierarchyTests.cs` and
+`SettingsStoreRepoOrderTests.cs`), the `RepoGroupName` unit's test suite
+(`RepoGroupNameTests.cs`), the `RepoGroupHierarchy` unit's test suite (`RepoGroupHierarchyTests.cs`) and the
+`SettingsWriter` unit's test suite (`SettingsWriterTests.cs`) carry the unit
 requirements and, as before, the persistence and package-source requirements
 of the subsystem. The `AppSettings`, `RecentRepo`, `AgentToolKind` and `ThemePreference` data types have no dedicated
-test file and are exercised only as values round-tripped through `SettingsStore`; `RepoGroupName` is a unit with its
-own verification design. All tests use a real temporary configuration directory on disk.
+test file and are exercised only as values round-tripped through `SettingsStore`; `RepoGroupName` and
+`RepoGroupHierarchy` are units with their own verification designs. All tests use a real temporary configuration
+directory on disk.
 
 ### Test Environment
 
@@ -23,8 +25,10 @@ temporary configuration directory.
 
 ### Acceptance Criteria
 
-- All subsystem tests and all unit tests for `SettingsStore`, `SettingsWriter` and `RepoGroupName` pass with zero
-  failures.
+- All subsystem tests and all unit tests for `SettingsStore`, `SettingsWriter`, `RepoGroupName` and
+  `RepoGroupHierarchy` pass with zero failures.
+- The hierarchy of nested groups survives a later session, a group that takes part in it survives with no repo in it, a
+  file from before groups nested reads as a flat list, and a damaged hierarchy is repaired without failing the load.
 - Changes handed to the background writer on a thread guarded against blocking calls are written once, with the newest
   state, off that thread and read by the next session; a direct save on that thread is refused.
 - Saved settings survive a save-then-load round trip unchanged.
@@ -151,6 +155,22 @@ what was loaded does not write the stale group back. This scenario is tested by
 `AgentControl-SettingsStore-GroupColorsAndOrderDefaults`,
 `AgentControl-SettingsStore-InvalidGroupColorsAndOrderRepaired`
 and `AgentControl-SettingsStore-StaleGroupSettingsDropped`, whose unit tests are in `SettingsStoreOrganizingTests.cs`).
+
+**Settings_GroupHierarchy_NestedGroupsSurviveSessionsAndDamagedHierarchyIsRepaired**: A first session saves two repos
+(one in *Project*, one in *Home*), a hierarchy that registers *Client* with no repo in it and puts *Project* inside it,
+and a color for *Client*; a later session loads them and finds *Client*, *Home* and *Project* as existing groups,
+*Project* inside *Client*, *Home* at the top level and *Client* with its color, and the configuration directory holds
+the settings file and nothing else. A file written before groups nested loads with an empty hierarchy and its group as
+the only top-level group. Then a damaged file - two groups that are each other's parent, a group with an unknown parent
+and a setting after them - is loaded without failing: the cycle is cut at the group that sorts first, the unknown parent
+means top level, the setting after the damage is read, and saving what was loaded does not write the unknown parent
+back. This scenario is tested by
+`SettingsSubsystem_GroupHierarchy_NestedGroupsSurviveSessionsAndDamagedHierarchyIsRepaired`, covering
+`AgentControl-Settings-GroupHierarchy` (children: `AgentControl-SettingsStore-GroupParents`,
+`AgentControl-SettingsStore-GroupParentsDefaults`, `AgentControl-SettingsStore-InvalidGroupParentsRepaired` and
+`AgentControl-SettingsStore-RegisteredGroupKept`, whose unit tests are in `SettingsStoreGroupHierarchyTests.cs`, and the
+`AgentControl-RepoGroupHierarchy-*` requirements of the `RepoGroupHierarchy` unit, whose own tests are in its unit
+verification design).
 
 **SettingsSubsystem_BackgroundWriter_WritesNewestStateOffTheGuardedThread**: A `SettingsWriter` over the real
 `SettingsStore.Save`, on a clock the test moves: two changes are scheduled in quick succession on a thread guarded

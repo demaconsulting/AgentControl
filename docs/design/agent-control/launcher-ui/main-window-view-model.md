@@ -709,11 +709,12 @@ Performs no confirmation itself: `MainWindow`'s code-behind is responsible for s
 - *Preconditions*: `updated` is not null; a source location that embeds a credential is refused at once
   (`InvalidOperationException` thrown before anything is saved).
 - *Algorithm*: the candidate is a snapshot of `updated` with the live repo list, `HasUserRepoOrder`, collapsed
-  sections, group colors and group order; it is written by a confirmed save of the settings writer
+  sections, group colors, group order and group hierarchy; it is written by a confirmed save of the settings writer
   (`SaveConfirmedAsync`) on a worker thread, so the window does not wait for the settings file
   (`AgentControl-MainWindowViewModel-ApplySettingsSaveInBackground`); `AdoptSettings` runs once it is on disk.
 - *Postconditions*: The live settings instance is replaced (preserving the live recent-repos list in its order together
-  with its `HasUserRepoOrder` marker, the collapsed-section names, and the group colors and group order as they are at
+  with its `HasUserRepoOrder` marker, the collapsed-section names, and the group colors, group order and group
+  hierarchy as they are at
   adoption - so a change made in the main window while the settings were saved is kept and written after them - since
   `SettingsWindowViewModel` never owns them - `AgentControl-MainWindowViewModel-OrderKeptOnApplySettings`,
   `-GroupSettingsKeptOnApplySettings`) only after the candidate has been persisted successfully — if the write fails,

@@ -2125,6 +2125,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         candidate.CollapsedGroups = organizing.CollapsedGroups;
         candidate.GroupColors = organizing.GroupColors;
         candidate.GroupOrder = organizing.GroupOrder;
+        candidate.GroupParents = organizing.GroupParents;
         return candidate;
     }
 
@@ -2150,6 +2151,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         updated.CollapsedGroups = _settings.CollapsedGroups;
         updated.GroupColors = _settings.GroupColors;
         updated.GroupOrder = _settings.GroupOrder;
+        updated.GroupParents = _settings.GroupParents;
         _settings = updated;
         OnPropertyChanged(nameof(Settings));
 
@@ -2896,6 +2898,11 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             changes.Add($"group order: [{string.Join(", ", intended.GroupOrder)}]");
         }
 
+        if (!DescribeGroupParents(onDisk).SequenceEqual(DescribeGroupParents(intended)))
+        {
+            changes.Add($"group parents: [{string.Join(", ", DescribeGroupParents(intended))}]");
+        }
+
         if (!string.Equals(DescribeOtherSettings(onDisk), DescribeOtherSettings(intended), StringComparison.Ordinal))
         {
             changes.Add("the Settings window's settings");
@@ -2929,6 +2936,15 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         [.. settings.GroupColors.OrderBy(entry => entry.Key, StringComparer.Ordinal).Select(entry => $"{entry.Key}={entry.Value}")];
 
     /// <summary>
+    ///     Lists the group parents of settings in a stable order, for comparing and logging them.
+    /// </summary>
+    /// <param name="settings">The settings.</param>
+    /// <returns>One "group in parent" entry per registered group (an empty parent for a top-level
+    ///     group), ordered by group.</returns>
+    private static List<string> DescribeGroupParents(AppSettings settings) =>
+        [.. settings.GroupParents.OrderBy(entry => entry.Key, StringComparer.Ordinal).Select(entry => $"{entry.Key} in {entry.Value}")];
+
+    /// <summary>
     ///     Serializes the settings the Settings window edits (everything but the repos and how they
     ///     are organized), for telling whether they differ.
     /// </summary>
@@ -2942,6 +2958,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         others.CollapsedGroups = [];
         others.GroupColors = new Dictionary<string, string>();
         others.GroupOrder = [];
+        others.GroupParents = new Dictionary<string, string>();
         return JsonSerializer.Serialize(others);
     }
 

@@ -338,12 +338,60 @@ sections:
       - id: AgentControl-SettingsStore-StaleGroupSettingsDropped
         title: >-
           The SettingsStore class shall drop, on load, the color and the place in the order of a
-          group that no repo is in and of a built-in section's name.
+          group that no repo is in and that is not part of the group hierarchy, and of a built-in
+          section's name.
         justification: |
           A group exists only while a repo is in it; a choice left behind for a group that is gone
           must not come back on a new group of the same name.
         tests:
           - SettingsStore_Load_ColorAndOrderOfGroupWithoutRepos_AreDropped
+
+      - id: AgentControl-SettingsStore-GroupParents
+        title: >-
+          The SettingsStore class shall save and load the hierarchy of the user's groups - which
+          group is inside which, with an empty parent for a top-level group - the entries found by
+          group name ignoring letter case.
+        justification: |
+          How the user nested their groups is a personal choice that must survive restarts.
+        tests:
+          - SettingsStore_SaveThenLoad_GroupParents_RoundTrip
+
+      - id: AgentControl-SettingsStore-GroupParentsDefaults
+        title: >-
+          The SettingsStore class shall read a settings file without a group hierarchy as no
+          hierarchy, so every group is top level in its stored order, and shall write an empty
+          hierarchy back.
+        justification: |
+          A file written before groups nested must load with its groups as the flat list they
+          were.
+        tests:
+          - SettingsStore_Load_FileWithoutGroupParents_ReadsEveryGroupAsTopLevel
+
+      - id: AgentControl-SettingsStore-InvalidGroupParentsRepaired
+        title: >-
+          The SettingsStore class shall read a group hierarchy of the wrong kind as none, keep only
+          its usable entries, drop an entry of a blank or built-in section name, read an unknown,
+          self or built-in section parent as the top level, cut a cycle, and spell the groups as
+          they are spelled, without writing the damage back.
+        justification: |
+          A damaged, hand-edited or newer file must never fail the load nor leave groups that
+          cannot be shown.
+        tests:
+          - SettingsStore_Load_UnknownSelfAndCyclicParents_AreRepairedAndNotSavedBack
+          - SettingsStore_Load_ReservedAndBlankNamesInGroupParents_AreDropped
+          - SettingsStore_Load_DamagedGroupParents_KeepsOnlyUsableEntries
+          - SettingsStore_Load_GroupParentsInOtherLetterCase_AreSpelledLikeTheGroups
+
+      - id: AgentControl-SettingsStore-RegisteredGroupKept
+        title: >-
+          The SettingsStore class shall keep, on load, a group that takes part in the hierarchy
+          (with its color and place in the order) even when no repo is in it, while still dropping
+          the color and place of a group that is neither in the hierarchy nor has a repo.
+        justification: |
+          A group the user created inside another group exists until they delete it; a choice left
+          behind for a group that is gone must still not come back on a new group of the same name.
+        tests:
+          - SettingsStore_Load_RegisteredGroupWithoutRepos_SurvivesButUnregisteredIsDropped
 
       - id: AgentControl-SettingsStore-RefusesGuardedThread
         title: >-

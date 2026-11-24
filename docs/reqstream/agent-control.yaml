@@ -439,6 +439,7 @@ sections:
         children:
           - AgentControl-LauncherUI-RepoGroupsSettingsOnly
           - AgentControl-Settings-RepoOrganization
+          - AgentControl-Settings-GroupHierarchy
         tests:
           - windows@CardMenu_MoveToNewGroup_ShowsGroupHeaderAndStoresInSettingsOnly
           - windows@CardMenu_MoveToExistingGroup_JoinsThatSectionAndStoresInSettingsOnly
