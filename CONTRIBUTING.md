@@ -171,10 +171,11 @@ its usage and exits 1 (`pwsh ./build.ps1 -Help` shows it).
 
 While iterating, `pwsh ./build.ps1 -Changed -SkipUiTests` builds and tests only the projects affected by the files
 changed since `origin/main` (or `-Base <ref>`) plus uncommitted and untracked files, and
-`pwsh ./build.ps1 -Project Puppet -SkipUiTests` builds and tests only those affected by the named projects. Any `src/`
-change also selects the UI tests, which `-SkipUiTests` builds but does not run. Add `-DryRun` to print the selection.
-Changes to project files, `global.json`, `.editorconfig`, or the tool manifest fall back to the full build. Run the full
-`pwsh ./build.ps1 -All -SkipUiTests` (or `-All` when the desktop is free) once before pushing.
+`pwsh ./build.ps1 -Project Puppet -SkipUiTests` builds and tests only those affected by the named projects (full or
+short names: `Puppet` finds `DemaConsulting.AgentControl.Puppet`, `Core` is the application; `-Help` lists them). Any
+`src/` change also selects the UI tests, which `-SkipUiTests` builds but does not run. Add `-DryRun` to print the
+selection. Changes to project files, `global.json`, `.editorconfig`, or the tool manifest fall back to the full build.
+Run the full `pwsh ./build.ps1 -All -SkipUiTests` (or `-All` when the desktop is free) once before pushing.
 
 #### Self-Validation Tests
 
