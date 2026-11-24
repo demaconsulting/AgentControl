@@ -215,6 +215,20 @@ internal sealed class AppSettings
     }
 
     /// <summary>
+    ///     Gets the names of the groups that exist, alphabetically.
+    /// </summary>
+    /// <remarks>
+    ///     The single source for "which groups exist": the main window's group list, the group name
+    ///     prompts and the repo cards' Move to group choices all read it, so a rule about what makes a
+    ///     group exist changes in one place. Today a group exists exactly while some repo names it.
+    ///     Pure; reads only.
+    /// </remarks>
+    /// <returns>One name per group, spelled the way the first repo that uses it spells it, sorted
+    ///     in ordinal order ignoring letter case; empty when no repo is in a group.</returns>
+    internal IReadOnlyList<string> GetGroupNames() =>
+        RepoGroupName.DistinctNames((RecentRepos ?? []).Select(repo => repo?.GroupName));
+
+    /// <summary>
     ///     Finds the color the user chose for one of their groups.
     /// </summary>
     /// <remarks>

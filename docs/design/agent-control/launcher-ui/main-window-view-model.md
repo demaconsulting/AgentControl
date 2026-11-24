@@ -763,25 +763,23 @@ provider refuses (an unacceptable NuGet source, or a Git source whose address, t
 unusable).
 `MainWindow` passes it to `SettingsWindowViewModel` as the provider factory.
 
-**UpdateDisplayedRepoCards** (private): Recomputes `DisplayedItems` and `DisplayedRepoCards` from
-`RepoCards` — a case-insensitive substring match against `FilterText` on repo name or path
-(`AgentControl-MainWindowViewModel-SearchFilter`), then either the flat order (favorite status
-descending, then the order of `RepoCards` - a stable sort that never looks at `LastLaunchedUtc`:
-`AgentControl-MainWindowViewModel-SortOrder`) or, when `HasGroups`, the sections described under
-*DisplayedItems* (`AgentControl-MainWindowViewModel-GroupSections`), each filled in `RepoCards` order. The groups'
-sections are arranged by the private, pure `ArrangeGroups(names, order)`: the names with a position in the stored
-order (`AppSettings.GroupOrder`) in that order, then the others alphabetically by `RepoGroupName.Comparer`; a stored
-name that matches no group is skipped and names keep their spelling (`-GroupOrder`). Each header is given its group's
-color (`header.UpdateColor(_settings.FindGroupColor(name))`, `null` for *Favorites* and *Ungrouped*,
+**UpdateDisplayedRepoCards** (private): Recomputes `DisplayedItems` and `DisplayedRepoCards` from `RepoCards` — a
+case-insensitive substring match against `FilterText` on repo name or path
+(`AgentControl-MainWindowViewModel-SearchFilter`), then either the flat order (favorite status descending, then the
+order of `RepoCards` - a stable sort that never looks at `LastLaunchedUtc`:
+`AgentControl-MainWindowViewModel-SortOrder`) or, when `HasGroups`, the sections described under *DisplayedItems*
+(`AgentControl-MainWindowViewModel-GroupSections`), each filled in `RepoCards` order. The groups' sections are arranged
+by the pure `RepoGroupHierarchy.ArrangeGroups(names, order)` (in the Settings subsystem): the names with a position in
+the stored order (`AppSettings.GroupOrder`) in that order, then the others alphabetically by `RepoGroupName.Comparer`; a
+stored name that matches no group is skipped and names keep their spelling (`-GroupOrder`). Each header is given its
+group's color (`header.UpdateColor(_settings.FindGroupColor(name))`, `null` for *Favorites* and *Ungrouped*,
 `-GroupColorShown`) and, for a user group, whether it can move up or down (`header.UpdateOrder` with the reasons of
-`GetGroupMoveDisabledReason`). A section is
-collapsed only if
-no filter is active and its name is in `AppSettings.CollapsedGroups`
-(`AgentControl-MainWindowViewModel-GroupCollapse`, `-GroupFilter`). Both collections are brought to
-the new state **in place** (remove what is gone, move and insert the rest) rather than cleared, so
-unchanged rows keep their controls and focus. Also re-raises change notifications for
-`HasGroups`, `GroupNames`, `HasNoDisplayedRepos` and `EmptyStateMessage`, since every path that can
-change the displayed set (add/remove, filter, favorite-toggle, grouping) runs through this method.
+`GetGroupMoveDisabledReason`). A section is collapsed only if no filter is active and its name is in
+`AppSettings.CollapsedGroups` (`AgentControl-MainWindowViewModel-GroupCollapse`, `-GroupFilter`). Both collections are
+brought to the new state **in place** (remove what is gone, move and insert the rest) rather than cleared, so unchanged
+rows keep their controls and focus. Also re-raises change notifications for `HasGroups`, `GroupNames`,
+`HasNoDisplayedRepos` and `EmptyStateMessage`, since every path that can change the displayed set (add/remove, filter,
+favorite-toggle, grouping) runs through this method.
 
 **ToggleGroupCollapsed** / **IsGroupCollapsed**: Collapse or expand a section by name (a group, or
 `Favorites` / `Ungrouped`; letter case ignored), add or remove the name in
@@ -854,11 +852,11 @@ itself (`AgentControl-MainWindowViewModel-DropGroup`).
 **PlaceGroup** (private): Puts a group before or after another one and saves the order.
 
 - *Postconditions*: The new order is decided once, from the live state: the **full** arranged list of every group
-  (`ArrangeGroups(GroupNames, GroupOrder)`, which includes groups whose repos are all favorites, so the stored order
-  stays complete) without the group, with the group inserted next to the anchor. When that equals the current order
-  nothing is saved and `true` is returned. Otherwise the whole list is stored as `AppSettings.GroupOrder` through
-  `CommitSettingsChange` - so groups that had no stored position keep the place they were shown at - and the list is
-  recomputed; `true` is returned. The saved order is what the next start reads (`-GroupOrderPersisted`).
+  (`RepoGroupHierarchy.ArrangeGroups(GroupNames, GroupOrder)`, which includes groups whose repos are all favorites, so
+  the stored order stays complete) without the group, with the group inserted next to the anchor. When that equals the
+  current order nothing is saved and `true` is returned. Otherwise the whole list is stored as `AppSettings.GroupOrder`
+  through `CommitSettingsChange` - so groups that had no stored position keep the place they were shown at - and the
+  list is recomputed; `true` is returned. The saved order is what the next start reads (`-GroupOrderPersisted`).
 
 **GetSectionOf** (internal, static): The section a card is listed in: **Favorites** for a favorite, otherwise its group,
 otherwise **Ungrouped** - the rule `DisplayedItems` builds its sections with. With no repo in a group the list has no

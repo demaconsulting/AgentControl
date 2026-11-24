@@ -876,6 +876,7 @@ reviews:
       - "src/**/Settings/RecentRepo.cs"
       - "src/**/Settings/AgentToolKind.cs"
       - "src/**/Settings/ThemePreference.cs"
+      - "src/**/Settings/RepoGroupHierarchy.cs"
       - "test/**/Settings/SettingsSubsystemTests.cs"
 
   - id: AgentControl-Settings-SettingsStore

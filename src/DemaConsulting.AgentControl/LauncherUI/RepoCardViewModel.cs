@@ -599,8 +599,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     sorted, for the "Move to group" submenu.
     /// </summary>
     /// <returns>The distinct group names, alphabetically.</returns>
-    public IReadOnlyList<string> GetExistingGroupNames() =>
-        RepoGroupName.DistinctNames(_getSettings().RecentRepos.Select(repo => repo.GroupName));
+    public IReadOnlyList<string> GetExistingGroupNames() => _getSettings().GetGroupNames();
 
     /// <summary>
     ///     Moves this repo into a group, or out of every group.

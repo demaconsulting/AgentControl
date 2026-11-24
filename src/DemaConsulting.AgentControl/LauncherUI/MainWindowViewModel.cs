@@ -788,8 +788,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <summary>
     ///     Gets the names of the groups that exist now, alphabetically.
     /// </summary>
-    public IReadOnlyList<string> GroupNames =>
-        RepoGroupName.DistinctNames(_settings.RecentRepos.Select(repo => repo.GroupName));
+    public IReadOnlyList<string> GroupNames => _settings.GetGroupNames();
 
     /// <summary>
     ///     Gets a value indicating whether <see cref="DisplayedItems"/> is currently empty (no repo
@@ -3432,7 +3431,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // A favorite is listed only under Favorites; every other repo under its group or, with
             // none, under Ungrouped
             AddSection(RepoGroupKind.Favorites, RepoGroupName.FavoritesName, matches.Where(card => card.IsFavorite));
-            var groupNames = ArrangeGroups(
+            var groupNames = RepoGroupHierarchy.ArrangeGroups(
                 matches.Where(card => !card.IsFavorite && card.HasGroup).Select(card => card.GroupName!),
                 _settings.GroupOrder);
             foreach (var groupName in groupNames)
@@ -3765,42 +3764,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         "are shown, so their positions cannot be changed.";
 
     /// <summary>
-    ///     Puts group names in the order the list shows them: the ones with a stored position in that
-    ///     order, then the others alphabetically.
-    /// </summary>
-    /// <remarks>
-    ///     Pure. A stored name that matches none of <paramref name="names"/> is skipped; names are
-    ///     compared ignoring letter case and returned as spelled in <paramref name="names"/>.
-    /// </remarks>
-    /// <param name="names">The groups to arrange (duplicates ignoring letter case are dropped).</param>
-    /// <param name="order">The user's stored group order (<see cref="AppSettings.GroupOrder"/>), or
-    ///     <see langword="null"/> for none.</param>
-    /// <returns>The arranged names.</returns>
-    private static List<string> ArrangeGroups(IEnumerable<string> names, IReadOnlyList<string>? order)
-    {
-        var remaining = names.Distinct(RepoGroupName.Comparer).ToList();
-        var arranged = new List<string>();
-        foreach (var stored in order ?? [])
-        {
-            var match = remaining.FirstOrDefault(name => RepoGroupName.Comparer.Equals(name, stored));
-            if (match is not null)
-            {
-                arranged.Add(match);
-                remaining.Remove(match);
-            }
-        }
-
-        arranged.AddRange(remaining.Order(RepoGroupName.Comparer));
-        return arranged;
-    }
-
-    /// <summary>
     ///     Gets the groups that have a section of their own (at least one repo that is not a
     ///     favorite), in the order the list shows them - the groups a Move or a drag can reorder.
+    ///     (The pure arranging of names is <see cref="RepoGroupHierarchy.ArrangeGroups"/>.)
     /// </summary>
     /// <returns>The groups' names, first to last.</returns>
     private List<string> GetMovableGroups() =>
-        ArrangeGroups(
+        RepoGroupHierarchy.ArrangeGroups(
             RepoCards.Where(card => !card.IsFavorite && card.HasGroup).Select(card => card.GroupName!),
             _settings.GroupOrder);
 
@@ -3939,7 +3909,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         // Every group (also those whose repos are all favorites) keeps a place, so the order stays
         // complete
-        var current = ArrangeGroups(GroupNames, _settings.GroupOrder);
+        var current = RepoGroupHierarchy.ArrangeGroups(GroupNames, _settings.GroupOrder);
         var order = current.Where(group => !RepoGroupName.Comparer.Equals(group, groupName)).ToList();
         var index = order.FindIndex(group => RepoGroupName.Comparer.Equals(group, anchor));
         order.Insert(insertBefore ? index : index + 1, groupName);
