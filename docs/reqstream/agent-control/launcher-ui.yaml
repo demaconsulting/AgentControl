@@ -448,26 +448,61 @@ sections:
 
       - id: AgentControl-LauncherUI-RepoGroupManagement
         title: >-
-          The LauncherUI subsystem shall offer, in a group's header, renaming and removing the
-          group, the repos of a removed group going to the group it was inside or, at the top level,
-          becoming ungrouped.
+          The LauncherUI subsystem shall offer, in a group's header, renaming the group.
         justification: |
           Groups change over time; the header is where the user sees the group, so it is where the
           group is managed.
         children:
           - AgentControl-MainWindowViewModel-GroupManagement
           - AgentControl-MainWindowViewModel-GroupRenameRules
-          - AgentControl-MainWindowViewModel-GroupRemove
           - AgentControl-MainWindowViewModel-GroupHeaderRequests
           - AgentControl-MainWindowViewModel-NestedGroupRename
-          - AgentControl-MainWindowViewModel-NestedGroupRemoveKeepsContents
           - AgentControl-RepoGroupHeaderViewModel-GroupActions
-          - AgentControl-RepoGroupHeaderViewModel-RemoveGroupRequest
           - AgentControl-GroupNameViewModel-Rename
           - AgentControl-GroupNameViewModel-RenameStartsWithCurrentName
           - AgentControl-GroupNameViewModel-RenameAcceptsCaseChange
         tests:
           - MainWindow_HeaderMenu_RenameAndRemoveGroup
+
+      - id: AgentControl-LauncherUI-GroupDeleteKeepContents
+        title: >-
+          The LauncherUI subsystem shall offer "Delete group, keep contents" in the menu of each of the
+          user's group headers (plain "Delete group" for a group with nothing in it), which asks for a
+          confirmation that says where the group's repos and subgroups go and that nothing on disk or in
+          any repository changes, and then deletes the group, its repos and subgroups staying in the list
+          in the group it was inside or, at the top level, ungrouped; answering No changes nothing.
+        justification: |
+          Deleting a group must not lose the repos in it, and the user is told where they go before
+          anything changes.
+        children:
+          - AgentControl-MainWindowViewModel-GroupRemove
+          - AgentControl-MainWindowViewModel-NestedGroupRemoveKeepsContents
+          - AgentControl-MainWindowViewModel-GroupContentsCounted
+          - AgentControl-RepoGroupHeaderViewModel-RemoveGroupRequest
+        tests:
+          - MainWindow_HeaderMenu_RenameAndRemoveGroup
+          - MainWindow_HeaderMenu_DeleteGroupKeepContents_ConfirmationSaysWhereContentsGo
+          - MainWindow_HeaderMenu_DeleteEmptyGroup_OffersOnlyPlainDelete
+
+      - id: AgentControl-LauncherUI-GroupDeleteWithContents
+        title: >-
+          The LauncherUI subsystem shall offer "Delete group and its contents" in the menu of each of the
+          user's group headers that has a repo or a subgroup (and not for a group with nothing in it),
+          which asks for a confirmation that names the group and says how many repos - favorites
+          included - and how many subgroups go and that nothing on disk is deleted, and then removes the
+          group, the groups inside it and all their repos from the list; answering No changes nothing.
+        justification: |
+          Retiring a group should take one action, but removing repos must be confirmed with the numbers
+          in front of the user and must never delete anything on disk.
+        children:
+          - AgentControl-MainWindowViewModel-GroupRemoveWithContents
+          - AgentControl-MainWindowViewModel-GroupContentsCounted
+          - AgentControl-MainWindowViewModel-GroupRemoveWithContentsRefusals
+          - AgentControl-RepoGroupHeaderViewModel-RemoveGroupWithContentsRequest
+        tests:
+          - MainWindow_HeaderMenu_DeleteGroupWithContents_ConfirmationSaysCountsAndYesDeletesNoKeeps
+          - MainWindow_HeaderMenu_DeleteEmptyGroup_OffersOnlyPlainDelete
+          - MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator
 
       - id: AgentControl-LauncherUI-GroupSortByName
         title: >-

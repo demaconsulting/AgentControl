@@ -268,6 +268,7 @@ internal sealed partial class MainWindow : Window
         viewModel.SettingsSaveFailed += (_, message) => new MessageBoxWindow(message).ShowDialog(this);
         viewModel.GroupRenameRequested += async (_, name) => await ShowRenameGroupPrompt(viewModel, name);
         viewModel.GroupRemoveRequested += async (_, name) => await ConfirmAndRemoveGroup(viewModel, name);
+        viewModel.GroupRemoveWithContentsRequested += async (_, name) => await ConfirmAndRemoveGroupWithContents(viewModel, name);
         viewModel.GroupAddRepoRequested += async (_, name) => await ShowNoticeAsync(await AddRepoAsync(viewModel, name));
         viewModel.GroupNewSubgroupRequested += async (_, name) => await ShowNewSubgroupPrompt(viewModel, name);
         viewModel.AddSaveFailed += async (_, request) => await AskAddSaveRetryAsync(request);
@@ -2297,34 +2298,66 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Asks the user to confirm removing a group and, if confirmed, removes it (its repos and
-    ///     subgroups go to the group it was inside, or become ungrouped at the top level). Nothing on disk
-    ///     or in any repository changes, which the message says.
+    ///     Asks the user to confirm deleting a group but keeping what is in it and, if confirmed, deletes
+    ///     it (its repos and subgroups go to the group it was inside, or become ungrouped at the top
+    ///     level). Nothing on disk or in any repository changes, which the message says.
     /// </summary>
     /// <param name="viewModel">The main view model that owns the groups.</param>
-    /// <param name="groupName">The group to remove.</param>
+    /// <param name="groupName">The group to delete.</param>
     private async Task ConfirmAndRemoveGroup(MainWindowViewModel viewModel, string groupName)
     {
-        var members = viewModel.RepoCards.Count(card => RepoGroupName.Comparer.Equals(card.GroupName ?? string.Empty, groupName));
+        var contents = viewModel.GetGroupContents(groupName);
         var parent = viewModel.GetGroupParent(groupName);
-        var where = parent is null ? "ungrouped" : $"in the group \"{parent}\"";
-        var subgroups = viewModel.GetSubgroupCount(groupName);
-        var subgroupText = string.Empty;
-        if (subgroups > 0)
+        var message = $"Delete the group \"{groupName}\"?\n\n";
+        if (contents.IsEmpty)
         {
-            var target = parent is null ? "to the top level" : $"into \"{parent}\"";
-            subgroupText = $" Its {subgroups} subgroup(s) move {target} too.";
+            message += "The group has no repos or subgroups.";
         }
+        else
+        {
+            var where = parent is null ? "ungrouped" : $"in the group \"{parent}\"";
+            var subgroupText = string.Empty;
+            if (contents.DirectSubgroupCount > 0)
+            {
+                var target = parent is null ? "to the top level" : $"into \"{parent}\"";
+                subgroupText = $" Its {contents.DirectSubgroupCount} subgroup(s) move {target} too.";
+            }
+
+            message += $"Its {contents.DirectRepoCount} repo(s) stay in AgentControl's list, {where}.{subgroupText} " +
+                "This only changes how AgentControl lists them - nothing on disk or in any repository is changed.";
+        }
+
+        var confirmed = await new ConfirmationWindow(message).ShowDialog<bool>(this);
+        if (confirmed)
+        {
+            // Applied at once and saved in the background
+            viewModel.RemoveGroup(groupName);
+        }
+    }
+
+    /// <summary>
+    ///     Asks the user to confirm deleting a group together with everything in it - its repos, favorites
+    ///     included, and the groups inside it with theirs - saying how many go, and, if confirmed, deletes
+    ///     them from AgentControl's list. Nothing on disk or in any repository is deleted, which the message
+    ///     says.
+    /// </summary>
+    /// <param name="viewModel">The main view model that owns the groups.</param>
+    /// <param name="groupName">The group to delete with its contents.</param>
+    private async Task ConfirmAndRemoveGroupWithContents(MainWindowViewModel viewModel, string groupName)
+    {
+        var contents = viewModel.GetGroupContents(groupName);
+        var favorites = contents.FavoriteCount > 0 ? $" ({contents.FavoriteCount} of them favorites)" : string.Empty;
+        var subgroups = contents.SubgroupCount > 0 ? $" and its {contents.SubgroupCount} subgroup(s)" : string.Empty;
         var confirmed = await new ConfirmationWindow(
-                $"Remove the group \"{groupName}\"?\n\n" +
-                $"Its {members} repo(s) stay in AgentControl's list, {where}.{subgroupText} This only changes how " +
-                "AgentControl lists them - nothing on disk or in any repository is changed.")
+                $"Delete the group \"{groupName}\"{subgroups} together with its {contents.RepoCount} repo(s){favorites}?\n\n" +
+                "The repos are removed from AgentControl's list. This only removes them from AgentControl - nothing " +
+                "on disk or in any repository is deleted.")
             .ShowDialog<bool>(this);
 
         if (confirmed)
         {
             // Applied at once and saved in the background
-            viewModel.RemoveGroup(groupName);
+            viewModel.RemoveGroupWithContents(groupName);
         }
     }
 

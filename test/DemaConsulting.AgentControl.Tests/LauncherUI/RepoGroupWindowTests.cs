@@ -381,8 +381,8 @@ public sealed class RepoGroupWindowTests : IDisposable
     /// <summary>
     ///     Test that the header's "..." menu starts with "Add repository..." and "New subgroup..." (each with
     ///     an AutomationId and a tooltip), followed by a separator, the Move up, Move down, Sort by name and Group color
-    ///     items, another separator and then the rename and remove items - each item identified and
-    ///     explained.
+    ///     items, another separator and then the rename and the two delete items - each item identified and
+    ///     explained, the item that deletes the group with its contents only for a group that has contents.
     /// </summary>
     [Fact]
     public void MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator() => HeadlessTestApp.Run(() =>
@@ -399,8 +399,8 @@ public sealed class RepoGroupWindowTests : IDisposable
             var items = menu.Items.OfType<Control>().ToList();
 
             // Assert: Add repository..., New subgroup..., separator, Move up, Move down, Sort by name,
-            // Group color..., separator, Rename group..., Remove group
-            Assert.Equal(10, items.Count);
+            // Group color..., separator, Rename group..., Delete group (keep contents), Delete group and its contents
+            Assert.Equal(11, items.Count);
             var add = Assert.IsType<MenuItem>(items[0]);
             Assert.Equal("GroupAddRepoMenuItem", AutomationProperties.GetAutomationId(add));
             Assert.Equal("Add repository...", add.Header);
@@ -412,7 +412,8 @@ public sealed class RepoGroupWindowTests : IDisposable
             Assert.Equal(
                 [
                     "GroupAddRepoMenuItem", "GroupNewSubgroupMenuItem", "MoveGroupUpMenuItem", "MoveGroupDownMenuItem",
-                    "GroupSortByNameMenuItem", "GroupColorMenuItem", "RenameGroupMenuItem", "RemoveGroupMenuItem"
+                    "GroupSortByNameMenuItem", "GroupColorMenuItem", "RenameGroupMenuItem", "RemoveGroupMenuItem",
+                    "RemoveGroupWithContentsMenuItem"
                 ],
                 items.OfType<MenuItem>().Select(AutomationProperties.GetAutomationId));
             Assert.All(items.OfType<MenuItem>(), item => Assert.False(string.IsNullOrEmpty(ToolTip.GetTip(item)?.ToString())));

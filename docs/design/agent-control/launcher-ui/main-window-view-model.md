@@ -209,7 +209,8 @@ keyboard focus when it is toggled.
 see its own design). This view model updates a header in place with `Update(count, isCollapsed, isToggleEnabled)`,
 `UpdateColor(color)` (the group's color, `null` for *Favorites* and *Ungrouped*) and, for a user group,
 `UpdateOrder(upReason, downReason)` (from `GetGroupMoveDisabledReason`) and `UpdateSort(reason)` (from
-`GetGroupSortDisabledReason`), and handles its request events (toggle, rename, remove, add repository, move, sort).
+`GetGroupSortDisabledReason`) and `UpdateContents(hasContents)`, and handles its request events (toggle, rename,
+remove, remove with contents, add repository, move, sort).
 
 **GroupNameViewModel**: the unit behind the group-name prompt (see its own design). The window shows it for a new
 group (from a card's menu) and for a rename (from a header), and this view model applies the name it completes with
@@ -287,12 +288,12 @@ the list - and the writer keeps the snapshot and writes it with the next change,
 failure of a streak through `WriteFailed`, which `OnSettingsWriteFailed` turns into `SettingsSaveFailed` with the reason
 (redacted by `SecretRedactor.SafeMessage`) and the note that the changes stay in effect; after the view model was
 disposed nothing is raised (`-SaveFailureReported`). The direct operations (`RemoveRepo`, `ToggleGroupCollapsed`,
-`RenameGroup`, `RemoveGroup`, `CreateSubgroup`, `SetGroupColor`, `MoveGroup`, `SortGroupByName`, `DropGroup`,
-`MoveCard`, `DropCard`) no longer throw or return `false` for a failed save. The changes that originate in a card are
-made through the private `CommitRepoChange(repo, change)`, handed to each card as its `commitChange` callback when
-`CreateCard` builds it: it applies the change to the repo's live entry through `CommitSettingsChange` (or directly,
-without saving, when the repo is no longer in the list) and returns `true`; the card applies its own property and raises
-its change event (see the `RepoCardViewModel` design).
+`RenameGroup`, `RemoveGroup`, `RemoveGroupWithContents`, `CreateSubgroup`, `SetGroupColor`, `MoveGroup`,
+`SortGroupByName`, `DropGroup`, `MoveCard`, `DropCard`) no longer throw or return `false` for a failed save. The changes
+that originate in a card are made through the private `CommitRepoChange(repo, change)`, handed to each card as its
+`commitChange` callback when `CreateCard` builds it: it applies the change to the repo's live entry through
+`CommitSettingsChange` (or directly, without saving, when the repo is no longer in the list) and returns `true`; the
+card applies its own property and raises its change event (see the `RepoCardViewModel` design).
 
 *Confirmed saves*: an add and the Settings window's values must be on disk before they are applied, so their failure can
 be answered (Retry/Discard, or the Settings window staying open) and Discard has nothing to undo. They go through the
@@ -824,10 +825,32 @@ list. Both are applied through `CommitSettingsChange`, persist to the settings f
 `-GroupSettingsOnly`) and then refresh the cards' group properties (`FinishGroupEdit`, which calls
 `RaiseGroupPropertiesChanged` on every card) and the list. A group whose last repo leaves it by any other path (a card
 moved out, a repo removed) forgets its color and position the same way unless it is registered, through the repair that
-`CommitSettingsChange` runs after every change. A header's `RenameCommand`, `RemoveGroupCommand` and
-`NewSubgroupCommand` are forwarded as the `GroupRenameRequested`, `GroupRemoveRequested` and `GroupNewSubgroupRequested`
-events, which change nothing by themselves (`-GroupHeaderRequests`); `MainWindow` shows the name prompt or a
-confirmation and calls these methods.
+`CommitSettingsChange` runs after every change. A header's `RenameCommand`, `RemoveGroupCommand`,
+`RemoveGroupWithContentsCommand` and `NewSubgroupCommand` are forwarded as the `GroupRenameRequested`,
+`GroupRemoveRequested`, `GroupRemoveWithContentsRequested` and `GroupNewSubgroupRequested` events, which change nothing
+by themselves (`-GroupHeaderRequests`); `MainWindow` shows the name prompt or a confirmation and calls these methods.
+
+**RemoveGroupWithContents**: Deletes a group together with everything in it
+(`AgentControl-MainWindowViewModel-GroupRemoveWithContents`, `-GroupRemoveWithContentsRefusals`).
+
+- *Parameters*: `string name` (letter case ignored).
+- *Returns*: `bool` - `true` when the group existed and was deleted; `false`, changing nothing, for Favorites, Ungrouped
+  or a group that does not exist.
+- *Postconditions*: The subtree is `RepoGroupHierarchy.GetSubtree` (the group and every group inside it, however
+  deeply). In **one** `CommitSettingsChange` (one save, only the settings file) every `RecentRepo` whose group is in the
+  subtree is removed - favorites included, because a favorite keeps its group while it is listed under Favorites - and
+  the collapsed entry, color, place in the order and place in the hierarchy of every group of the subtree are forgotten.
+  Then each removed card is taken out of `RepoCards` and retired (`RepoCardViewModel.Retire`, as `RemoveRepo` does)
+  and the list is recomputed. Every other group and repo, their order and the repo folders on disk are untouched; a
+  registered empty group is deleted the same way. The window confirms first (`ConfirmAndRemoveGroupWithContents`); this
+  method never asks.
+
+**GetGroupContents**: Counts what is in a group, for the confirmations
+(`AgentControl-MainWindowViewModel-GroupContentsCounted`).
+
+- *Returns*: a `GroupContents` with the repos directly in the group, the groups directly inside it, the repos in the
+  whole subtree (favorites included) and how many of them are favorites, and the groups in the subtree besides the group
+  itself; all 0 for a group that does not exist. `IsEmpty` is true when the group has neither a repo nor a group inside.
 
 **CreateSubgroup**: Creates a group inside another group (`AgentControl-MainWindowViewModel-NestedGroupCreate`).
 
@@ -1001,18 +1024,18 @@ where the header is created.
 throw `ArgumentNullException` for a null argument, and `ApplySettingsAsync` throws `InvalidOperationException` before
 adopting anything when a source location embeds a credential (synchronously) or when the settings file cannot be written
 (through its task), leaving the current settings in place. The changes made in the window (`RemoveRepo`,
-`ToggleGroupCollapsed`, `RenameGroup`, `RemoveGroup`, `MoveCard`, `DropCard`, `SetGroupColor`, `MoveGroup`,
-`SortGroupByName`, `DropGroup` and the card's own changes) never fail for a save: they are applied at once, and a
-background write that fails is reported once per failure streak through `SettingsSaveFailed` while the change stays in
-effect. `AddRepo` and `AddRepoToGroup` (for a new repo) throw `InvalidOperationException` when the settings file cannot
-be written, having changed nothing; the move placement of `AddRepoToGroup` reports it through `SettingsSaveFailed` and
-returns `MoveFailed`; `AddRepos` does not throw for a failed save either: nothing of the batch changed, every folder
-that would have been added or moved gets the `SaveFailed` outcome with the redacted reason, and the window shows the
-reason in the summary of `DescribeAddOutcomes`; `EnqueueAddReposAsync` turns a failed save into the Retry/Discard
-question (`AddSaveFailed`) and, on Discard, into the same `SaveFailed` outcomes, and its task never faults for an
-expected failure (a queued add whose predecessor faulted still runs); a cancellation before the commit is a canceled
-result, not an exception; `AddRepos` and `EnqueueAddReposAsync` throw `ArgumentNullException` for a null list and
-`ArgumentException` for an invalid group name before adding (or queuing) anything; `ToggleGroupCollapsed` throws
+`ToggleGroupCollapsed`, `RenameGroup`, `RemoveGroup`, `RemoveGroupWithContents`, `MoveCard`, `DropCard`,
+`SetGroupColor`, `MoveGroup`, `SortGroupByName`, `DropGroup` and the card's own changes) never fail for a save: they are
+applied at once, and a background write that fails is reported once per failure streak through `SettingsSaveFailed`
+while the change stays in effect. `AddRepo` and `AddRepoToGroup` (for a new repo) throw `InvalidOperationException` when
+the settings file cannot be written, having changed nothing; the move placement of `AddRepoToGroup` reports it through
+`SettingsSaveFailed` and returns `MoveFailed`; `AddRepos` does not throw for a failed save either: nothing of the batch
+changed, every folder that would have been added or moved gets the `SaveFailed` outcome with the redacted reason, and
+the window shows the reason in the summary of `DescribeAddOutcomes`; `EnqueueAddReposAsync` turns a failed save into the
+Retry/Discard question (`AddSaveFailed`) and, on Discard, into the same `SaveFailed` outcomes, and its task never faults
+for an expected failure (a queued add whose predecessor faulted still runs); a cancellation before the commit is a
+canceled result, not an exception; `AddRepos` and `EnqueueAddReposAsync` throw `ArgumentNullException` for a null list
+and `ArgumentException` for an invalid group name before adding (or queuing) anything; `ToggleGroupCollapsed` throws
 `ArgumentException` for a blank name, while `RenameGroup` and `RemoveGroup` report an unknown group or unusable name by
 returning `false`, as `SetGroupColor` does for an unknown group or color. A folder that is not a Git repository is an
 outcome (`NotAGitRepository`), not an error. Group names read from settings are repaired (`RepoGroupName.Sanitize`) on
@@ -1066,22 +1089,19 @@ canceled (the window closed) ends quietly.
 
 - **App** — constructs `MainWindowViewModel` in `OnFrameworkInitializationCompleted`, passing the
   process-wide `PackageCredentialContext`, and assigns it as `MainWindow.DataContext`.
-- **MainWindow** (code-behind) — calls `EnqueueAddReposAsync` and `DescribeAddOutcomes` for the app bar's Add button,
-  a header's "Add repository..." (both with several folders) and folders dropped from the file manager (the drop's
-  add posted to the UI thread), binds the progress strip to `GlobalProgress`, answers `AddSaveFailed` with the
-  Retry/Discard `ConfirmationWindow`, and calls `RemoveRepo`,
-  `ToggleGroupCollapsed`, `RenameGroup` and
-  `RemoveGroup` (a failed save is reported through `SettingsSaveFailed`, in a message box it does not wait for), asks
-  `IsReorderEnabled`, `CanMoveCard`/`GetMoveDisabledReason`, `GetReorderDisabledReason`, `CanDrop` and `CanDropGroup`
-  and calls
-  `MoveCard`, `DropCard` and `DropGroup` for the
-  Move menu items and for drag and drop of cards and group headers (the failures are reported through
-  `SettingsSaveFailed`), calls `SetGroupColor` from the group color palette, starts the
-  upgrade check and the periodic re-check (`BeginUpgradeRefresh`, `StartPeriodicUpgradeRecheck`) when the view
-  model is attached, disposes the view model when it closes, subscribes to
-  `SettingsSaveFailed` to show a message for the changes that come from cards and headers, and reads `Settings` to open
-  `SettingsWindow`, passing `CreateConnectionTestProvider` as its provider factory, and once that window closes calls
-  `RecheckAfterSettingsClosed` with whether its `Saved` event was raised (not awaited); fills each card
-  menu's "Move to group" submenu when the menu opens, shows the `GroupNameWindow` prompt and the
-  removal confirmation for the `GroupRenameRequested`/`GroupRemoveRequested`/`NewGroupRequested`
-  requests, opens the card and group color palette pop-ups, and calls `RenameGroup`/`RemoveGroup`.
+- **MainWindow** (code-behind) — calls `EnqueueAddReposAsync` and `DescribeAddOutcomes` for the app bar's Add button, a
+  header's "Add repository..." (both with several folders) and folders dropped from the file manager (the drop's add
+  posted to the UI thread), binds the progress strip to `GlobalProgress`, answers `AddSaveFailed` with the Retry/Discard
+  `ConfirmationWindow`, and calls `RemoveRepo`, `ToggleGroupCollapsed`, `RenameGroup` and `RemoveGroup` (a failed save
+  is reported through `SettingsSaveFailed`, in a message box it does not wait for), asks `IsReorderEnabled`,
+  `CanMoveCard`/`GetMoveDisabledReason`, `GetReorderDisabledReason`, `CanDrop` and `CanDropGroup` and calls `MoveCard`,
+  `DropCard` and `DropGroup` for the Move menu items and for drag and drop of cards and group headers (the failures are
+  reported through `SettingsSaveFailed`), calls `SetGroupColor` from the group color palette, starts the upgrade check
+  and the periodic re-check (`BeginUpgradeRefresh`, `StartPeriodicUpgradeRecheck`) when the view model is attached,
+  disposes the view model when it closes, subscribes to `SettingsSaveFailed` to show a message for the changes that come
+  from cards and headers, and reads `Settings` to open `SettingsWindow`, passing `CreateConnectionTestProvider` as its
+  provider factory, and once that window closes calls `RecheckAfterSettingsClosed` with whether its `Saved` event was
+  raised (not awaited); fills each card menu's "Move to group" submenu when the menu opens, shows the `GroupNameWindow`
+  prompt and the removal confirmations for the
+  `GroupRenameRequested`/`GroupRemoveRequested`/`GroupRemoveWithContentsRequested`/`NewGroupRequested` requests, opens
+  the card and group color palette pop-ups, and calls `RenameGroup`/`RemoveGroup`.

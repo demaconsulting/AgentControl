@@ -421,4 +421,44 @@ public class RepoGroupHeaderViewModelTests
         Assert.False(ungrouped.SortByNameCommand.CanExecute(null));
         Assert.False(string.IsNullOrWhiteSpace(ungrouped.SortByNameTooltip));
     }
+
+    /// <summary>
+    ///     Test that "Delete group and its contents" can be chosen only while the owner says the group has
+    ///     contents, that choosing it raises its own request (not the plain delete's), that the plain delete
+    ///     is named "Delete group" for a group with nothing in it and "Delete group, keep contents"
+    ///     otherwise, and that Favorites never has contents.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHeaderViewModel_UpdateContents_OffersDeleteWithContentsOnlyForGroupsWithContents()
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Work");
+        var favorites = new RepoGroupHeaderViewModel(RepoGroupKind.Favorites, "Favorites");
+        var plain = 0;
+        var withContents = 0;
+        header.RemoveGroupRequested += (_, _) => plain++;
+        header.RemoveGroupWithContentsRequested += (_, _) => withContents++;
+        var changed = new List<string?>();
+        header.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        // Assert: nothing is known yet, so the group is treated as empty
+        Assert.False(header.HasContents);
+        Assert.False(header.RemoveGroupWithContentsCommand.CanExecute(null));
+        Assert.Equal("Delete group", header.RemoveGroupText);
+
+        // Act: the owner says the group has contents
+        header.UpdateContents(true);
+        favorites.UpdateContents(true);
+        header.RemoveGroupWithContentsCommand.Execute(null);
+        header.RemoveGroupCommand.Execute(null);
+
+        // Assert
+        Assert.True(header.HasContents);
+        Assert.True(header.RemoveGroupWithContentsCommand.CanExecute(null));
+        Assert.Equal("Delete group, keep contents", header.RemoveGroupText);
+        Assert.Contains("keep its repos and subgroups", header.RemoveGroupTooltip);
+        Assert.Equal((1, 1), (plain, withContents));
+        Assert.Contains(nameof(RepoGroupHeaderViewModel.RemoveGroupText), changed);
+        Assert.False(favorites.HasContents);
+    }
 }

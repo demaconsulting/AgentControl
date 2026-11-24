@@ -298,17 +298,17 @@ the events that need a dialog.
   disposes the `Bitmap` it publishes in `RepoImage`, and `Retire` clears it. The locator knows nothing of cards; any
   failure reaches the card as "no picture".
 - *`MainWindowViewModel` and `RepoGroupHeaderViewModel`*: the main view-model creates, and keeps one instance per
-  section (Favorites, each group, Ungrouped), and updates its `Count`, collapsed state, toggle availability, group
-  color (`UpdateColor`) and move availability (`UpdateOrder`) in place
-  so the header keeps keyboard focus. It subscribes to the header's five request events: `ToggleRequested` it handles
-  itself (`ToggleGroupCollapsed`, saved before applied), and `MoveRequested` too (`MoveGroup`, which reports a failed
-  save through `SettingsSaveFailed`); `RenameRequested`, `RemoveGroupRequested` and
-  `AddRepoRequested` it forwards, with the group's name, as its own `GroupRenameRequested`, `GroupRemoveRequested` and
-  `GroupAddRepoRequested` events, to which `MainWindow` responds with a prompt, a confirmation or the folder picker and
-  then calls `RenameGroup`/`RemoveGroup`/`EnqueueAddReposAsync`. The header's **Group color...** item needs no
-  request: the window
-  opens the group palette and calls `MainWindowViewModel.SetGroupColor` with the color chosen. The header holds no
-  settings and no reference to the main view-model.
+  section (Favorites, each group, Ungrouped), and updates its `Count`, collapsed state, toggle availability, group color
+  (`UpdateColor`) move availability (`UpdateOrder`), sort availability (`UpdateSort`) and whether the group has contents
+  (`UpdateContents`) in place so the header keeps keyboard focus. It subscribes to the header's five request events:
+  `ToggleRequested` it handles itself (`ToggleGroupCollapsed`, saved before applied), and `MoveRequested` too
+  (`MoveGroup`, which reports a failed save through `SettingsSaveFailed`); `RenameRequested`, `RemoveGroupRequested`,
+  `RemoveGroupWithContentsRequested` and `AddRepoRequested` it forwards, with the group's name, as its own
+  `GroupRenameRequested`, `GroupRemoveRequested`, `GroupRemoveWithContentsRequested` and `GroupAddRepoRequested` events,
+  to which `MainWindow` responds with a prompt, a confirmation or the folder picker and then calls
+  `RenameGroup`/`RemoveGroup`/`RemoveGroupWithContents`/`EnqueueAddReposAsync`. The header's **Group color...** item
+  needs no request: the window opens the group palette and calls `MainWindowViewModel.SetGroupColor` with the color
+  chosen. The header holds no settings and no reference to the main view-model.
 - *Add repositories*: `MainWindow.AddRepoAsync(viewModel, groupName)` is the one add-repo flow, shared by the
   top-bar `AddRepoButton` (no group) and the group header menu's **Add repository...** (the header's group): it asks
   for folders through the native folder picker with several folders allowed (`AllowMultiple`; a replaceable seam,
@@ -819,94 +819,92 @@ none applies) and *Organize* (**Move to group**, then **Reorder**, a submenu hol
 chip is a button that runs the same `UpgradeCommand` as the menu's Upgrade item
 (`AgentControl-RepoCardViewModel-UpgradeFromChip`).
 
-**Repo groups and card colors (user-specific).** Both are personal organizing choices stored only in the user's
-own settings file (on the repo's `RecentRepo`, and the collapsed section names, the group colors and the group order in
-`AppSettings`), never in the
-repository or its `.agentcontrol.json` (`AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
-`AgentControl-System-GroupColor`, `AgentControl-LauncherUI-RepoGroupsSettingsOnly`).
-*Sections.* The list is a single `ListBox` over `MainWindowViewModel.DisplayedItems` with two row templates: a
-repo card, and a section header - a fixed 8-pixel slot for the group's color accent, one flat button (chevron, icon,
-name, count chip) that collapses or expands the
-section, plus, for the user's own groups, a "..." menu (`GroupHeaderMenuButton`, tooltip "Add a repository to this
-group, or move, sort, color, rename or remove the group") with **Add repository...** (`GroupAddRepoMenuItem`), **New
-subgroup...** (`GroupNewSubgroupMenuItem`), a separator,
+**Repo groups and card colors (user-specific).** Both are personal organizing choices stored only in the user's own
+settings file (on the repo's `RecentRepo`, and the collapsed section names, the group colors and the group order in
+`AppSettings`), never in the repository or its `.agentcontrol.json` (`AgentControl-System-RepoGroups`,
+`AgentControl-System-CardColor`, `AgentControl-System-GroupColor`, `AgentControl-LauncherUI-RepoGroupsSettingsOnly`).
+*Sections.* The list is a single `ListBox` over `MainWindowViewModel.DisplayedItems` with two row templates: a repo
+card, and a section header - a fixed 8-pixel slot for the group's color accent, one flat button (chevron, icon, name,
+count chip) that collapses or expands the section, plus, for the user's own groups, a "..." menu
+(`GroupHeaderMenuButton`, tooltip "Add a repository to this group, or move, sort, color, rename or delete the group")
+with **Add repository...** (`GroupAddRepoMenuItem`), **New subgroup...** (`GroupNewSubgroupMenuItem`), a separator,
 **Move up** (`MoveGroupUpMenuItem`), **Move down** (`MoveGroupDownMenuItem`), **Sort by name**
-(`GroupSortByNameMenuItem`), **Group color...**
-(`GroupColorMenuItem`), a separator, **Rename group...** and **Remove group**. The header
-button's accessible name says the section, its count and its state (`Work, 2 repos, collapsed`, with `, inside Client`
-for a nested group); the group's color does
-not change it. The header template is wrapped in a `Panel` with two drop indicator borders
-(`GroupDropIndicatorAbove`, `GroupDropIndicatorBelow`) for dragging groups. *Nested groups.* Groups are listed as a
-tree (see the `MainWindowViewModel` design): the header's `Grid` and a card's outer `Border` take their left margin
-from the row's `IndentWidth` (`RepoGroupHeaderViewModel.IndentWidth`, `RepoCardViewModel.IndentWidth`: 20
-device-independent pixels per level, capped at eight levels) through `GroupIndentConverter`, a stateless
-`IValueConverter` that turns the number into a `Thickness` (the converter parameter is the header's unchanged top
-margin of 8), so a group's repos line up with its header and no UI type enters the view models
-(`AgentControl-LauncherUI-NestedGroupTree`). **New subgroup...** raises the header's `NewSubgroupRequested`, which the
-window answers with `ShowNewSubgroupPrompt`: the same `GroupNameWindow`, titled *New subgroup*, over a
-`GroupNameViewModel` that must be given a new name (it refuses the name of any group of the whole tree), and
-`MainWindowViewModel.CreateSubgroup` creates the group inside the header's group
-(`AgentControl-LauncherUI-NestedGroupCreate`). A decision
-made here: a favorite repo is listed **only** under *Favorites* (not a second time under its group), so every
-repo appears once and the counts add up; its card shows its group as a chip so the user can still see where it
-belongs, and it returns to its group when it stops being a favorite. When no repo is in a group the list has no
-headers at all and looks as it did before groups existed. While the filter box has text every section is shown
-expanded and sections without a match disappear, so a match can never be hidden by a collapsed group; the
-headers' toggles are disabled then, with a tooltip that says why.
-*Move to group.* The submenu depends on the groups that exist when the menu opens, which a XAML template cannot
-express as one list mixing groups and commands, so `MainWindow`'s code-behind fills it in the flyout's `Opening`
-event (a check mark on the repo's own group, a separator, **New group...**, and **Remove from group** for a
-grouped repo); the groups offered are all that exist, groups with no repo and nested groups included, a nested
-group's tooltip giving its path (`Client > Project`, `MainWindowViewModel.GetGroupPath`); the choices run
-`RepoCardViewModel.MoveToGroup` and its commands. Group names are shown in
-text blocks, so an underscore is not taken as an access key. **New group...** and **Rename group...** show the
-small `GroupNameWindow`, whose `GroupNameViewModel` validates while the user types (blank, longer than 40
-characters, and the built-in names *Favorites* and *Ungrouped* are refused; a duplicate is refused when renaming and
-joins the existing group, with a note, when creating); **Remove group** asks for a confirmation that says
-nothing on disk or in any repository changes and where the group's repos and subgroups go (the group it is inside, or
-ungrouped at the top level).
-*Card color.* **Card color...** opens a small palette pop-up (an attached `Flyout` on the "..." button, whose content is
-a `ColorPalettePanel` with AutomationId `CardColorPalette`) with one
-round swatch per `CardColorPalette` entry - the same ten theme-aware avatar colors the automatic color is drawn
-from - plus **Automatic**. Each swatch has an AutomationId (`CardColorSwatch_<Name>`), its name as tooltip and
-accessible name,
-and the chosen one shows a check mark and a ring, so the choice is not carried by color alone. The color goes only to
-the avatar tile (palette style classes `avatar0` ... `avatar9`, driven by bindings on the card's `AvatarStyleClass`);
-the status accent bar and chips are unaffected. A repo that shows its own picture keeps the tile's light backing
-so a logo drawn for a white page stays legible, and the chosen color - the card's own or its group's
-(`RepoCardViewModel.IsTileColorChosen`) - is drawn as a ring around the picture. The
-letters on every palette color use whichever of white and near-black reads better on that fill in each theme,
-at least 4.5:1 (`ThemeResourceTests` checks every entry in both themes).
-*Group color.* **Group color...** in a user group's header menu opens the same palette for the group (a
-`ColorPalettePanel` with AutomationId `GroupColorPalette` in a `Flyout` attached to `GroupHeaderMenuButton`, opened by
-the window's `GroupColorMenuItem_Click`, which posts the opening to the dispatcher like the card's), with **None**
-instead of
-**Automatic** (`GroupColorSwatch_<Name>`, `GroupColorHeadingText`, `GroupColorNoneButton`); its heading names the
-group's color (`Group color: Teal`, or `Group color: None`) and the chosen swatch is marked. The window's
-`GroupColorPalette_ColorChosen` calls `MainWindowViewModel.SetGroupColor`, which saves the choice first
-(`AgentControl-LauncherUI-GroupColor`). A colored group's header shows a 4 by 20 pixel rounded bar
-(`GroupColorAccent`) in its fixed-width slot, so headers stay aligned whether or not they are colored; the bar's
+(`GroupSortByNameMenuItem`), **Group color...** (`GroupColorMenuItem`), a separator, **Rename group...**, **Delete
+group, keep contents** and **Delete group and its contents**. The header button's accessible name says the section, its
+count and its state (`Work, 2 repos, collapsed`, with `, inside Client` for a nested group); the group's color does not
+change it. The header template is wrapped in a `Panel` with two drop indicator borders (`GroupDropIndicatorAbove`,
+`GroupDropIndicatorBelow`) for dragging groups. *Nested groups.* Groups are listed as a tree (see the
+`MainWindowViewModel` design): the header's `Grid` and a card's outer `Border` take their left margin from the row's
+`IndentWidth` (`RepoGroupHeaderViewModel.IndentWidth`, `RepoCardViewModel.IndentWidth`: 20 device-independent pixels per
+level, capped at eight levels) through `GroupIndentConverter`, a stateless `IValueConverter` that turns the number into
+a `Thickness` (the converter parameter is the header's unchanged top margin of 8), so a group's repos line up with its
+header and no UI type enters the view models (`AgentControl-LauncherUI-NestedGroupTree`). **New subgroup...** raises the
+header's `NewSubgroupRequested`, which the window answers with `ShowNewSubgroupPrompt`: the same `GroupNameWindow`,
+titled *New subgroup*, over a `GroupNameViewModel` that must be given a new name (it refuses the name of any group of
+the whole tree), and `MainWindowViewModel.CreateSubgroup` creates the group inside the header's group
+(`AgentControl-LauncherUI-NestedGroupCreate`). A decision made here: a favorite repo is listed **only** under
+*Favorites* (not a second time under its group), so every repo appears once and the counts add up; its card shows its
+group as a chip so the user can still see where it belongs, and it returns to its group when it stops being a favorite.
+When no repo is in a group the list has no headers at all and looks as it did before groups existed. While the filter
+box has text every section is shown expanded and sections without a match disappear, so a match can never be hidden by a
+collapsed group; the headers' toggles are disabled then, with a tooltip that says why. *Move to group.* The submenu
+depends on the groups that exist when the menu opens, which a XAML template cannot express as one list mixing groups and
+commands, so `MainWindow`'s code-behind fills it in the flyout's `Opening` event (a check mark on the repo's own group,
+a separator, **New group...**, and **Remove from group** for a grouped repo); the groups offered are all that exist,
+groups with no repo and nested groups included, a nested group's tooltip giving its path (`Client > Project`,
+`MainWindowViewModel.GetGroupPath`); the choices run `RepoCardViewModel.MoveToGroup` and its commands. Group names are
+shown in text blocks, so an underscore is not taken as an access key. **New group...** and **Rename group...** show the
+small `GroupNameWindow`, whose `GroupNameViewModel` validates while the user types (blank, longer than 40 characters,
+and the built-in names *Favorites* and *Ungrouped* are refused; a duplicate is refused when renaming and joins the
+existing group, with a note, when creating); the header menu deletes a group in two ways, each after a
+`ConfirmationWindow` (`AgentControl-System-GroupDelete`): **Delete group, keep contents** (`RemoveGroupMenuItem`, text
+and tooltip from the header's `RemoveGroupText` and `RemoveGroupTooltip`; plain **Delete group** for a group with
+nothing in it) says that nothing on disk or in any repository changes and where the group's repos and subgroups go (the
+group it is inside, or ungrouped at the top level, `ConfirmAndRemoveGroup`,
+`AgentControl-LauncherUI-GroupDeleteKeepContents`), and **Delete group and its contents**
+(`RemoveGroupWithContentsMenuItem`, shown only while the header's `HasContents` is true) names the group and says how
+many repos - favorites included, with how many of them are favorites - and how many subgroups are removed from
+AgentControl's list and that nothing on disk is deleted (`ConfirmAndRemoveGroupWithContents`,
+`AgentControl-LauncherUI-GroupDeleteWithContents`); the counts come from `MainWindowViewModel.GetGroupContents`, and
+answering No (or closing the dialog, which means No) changes nothing. *Card color.* **Card color...** opens a small
+palette pop-up (an attached `Flyout` on the "..." button, whose content is a `ColorPalettePanel` with AutomationId
+`CardColorPalette`) with one round swatch per `CardColorPalette` entry - the same ten theme-aware avatar colors the
+automatic color is drawn from - plus **Automatic**. Each swatch has an AutomationId (`CardColorSwatch_<Name>`), its name
+as tooltip and accessible name, and the chosen one shows a check mark and a ring, so the choice is not carried by color
+alone. The color goes only to the avatar tile (palette style classes `avatar0` ... `avatar9`, driven by bindings on the
+card's `AvatarStyleClass`); the status accent bar and chips are unaffected. A repo that shows its own picture keeps the
+tile's light backing so a logo drawn for a white page stays legible, and the chosen color - the card's own or its
+group's (`RepoCardViewModel.IsTileColorChosen`) - is drawn as a ring around the picture. The letters on every palette
+color use whichever of white and near-black reads better on that fill in each theme, at least 4.5:1
+(`ThemeResourceTests` checks every entry in both themes). *Group color.* **Group color...** in a user group's header
+menu opens the same palette for the group (a `ColorPalettePanel` with AutomationId `GroupColorPalette` in a `Flyout`
+attached to `GroupHeaderMenuButton`, opened by the window's `GroupColorMenuItem_Click`, which posts the opening to the
+dispatcher like the card's), with **None** instead of **Automatic** (`GroupColorSwatch_<Name>`, `GroupColorHeadingText`,
+`GroupColorNoneButton`); its heading names the group's color (`Group color: Teal`, or `Group color: None`) and the
+chosen swatch is marked. The window's `GroupColorPalette_ColorChosen` calls `MainWindowViewModel.SetGroupColor`, which
+saves the choice first (`AgentControl-LauncherUI-GroupColor`). A colored group's header shows a 4 by 20 pixel rounded
+bar (`GroupColorAccent`) in its fixed-width slot, so headers stay aligned whether or not they are colored; the bar's
 tooltip and accessible name name the color (`Group color: Teal`), so it is never conveyed by color alone, and
-*Favorites* and *Ungrouped* are never colored (they have no menu). The bar is drawn with its own brushes
-`GroupAccent0` ... `GroupAccent9` (style classes `groupAccent0` ... `groupAccent9`, from the header's
-`ColorStyleClass`) rather than the avatar fills, because a header accent is a graphic on the page and must reach 3:1
-on `PageBackground` and on the drop tint `RepoDropTargetBackground` over the page in both themes: the dark theme uses
-lighter tones, the light theme the avatar fills except Amber, which is darker there (`ThemeResourceTests`,
+*Favorites* and *Ungrouped* are never colored (they have no menu). The bar is drawn with its own brushes `GroupAccent0`
+... `GroupAccent9` (style classes `groupAccent0` ... `groupAccent9`, from the header's `ColorStyleClass`) rather than
+the avatar fills, because a header accent is a graphic on the page and must reach 3:1 on `PageBackground` and on the
+drop tint `RepoDropTargetBackground` over the page in both themes: the dark theme uses lighter tones, the light theme
+the avatar fills except Amber, which is darker there (`ThemeResourceTests`,
 `AgentControl-LauncherUI-GroupColorLegible`). The tiles of the group's repos that have no card color of their own take
-the group's color, a card's own color wins, a favorite keeps its group's color (its chip says which group), and the
-card palette's heading says `Card color: Automatic (group color Teal)` when a tile follows its group
-(`AgentControl-LauncherUI-GroupColorOnCards`). A group's color and its position in the group order follow a rename,
-are forgotten when the group is removed or its last repo leaves it, and are kept when settings are applied
-(`AgentControl-LauncherUI-GroupSettingsKeptInStep`).
-*The palette control.* `ColorPalettePanel` (built in code, no `.axaml`) has the styled properties `IdPrefix` (default
-`CardColor`), `Heading`, `SelectedColorName`, `ClearText` (default `Automatic`), `ClearTooltip` and `ClearIcon`, and
-the event `ColorChosen` (`ColorChosenEventArgs.ColorName`, `null` for the clear button). It builds a heading
-`TextBlock` named `{IdPrefix}HeadingText`, one swatch `Button` per `CardColorPalette.All` entry (classes `swatch` and
-`avatar{index}`, tag, accessible name and tooltip the color's name, AutomationId `{IdPrefix}Swatch_{Name}`, the
-`selected` class on the chosen one) and a clear `Button` (AutomationId and name `{IdPrefix}{ClearText}Button`, with a
-check mark while no color is chosen); the parts are rebuilt when `IdPrefix`, `ClearText`, `ClearIcon` or
-`ClearTooltip` change. The card's palette therefore keeps every identifier it had, and one control guarantees that the
-two palettes look and behave the same. The window finds the palette of an item with `FindControlOfItem(item, name)`.
+the group's color, a card's own color wins, a favorite keeps its group's color (its chip says which group), and the card
+palette's heading says `Card color: Automatic (group color Teal)` when a tile follows its group
+(`AgentControl-LauncherUI-GroupColorOnCards`). A group's color and its position in the group order follow a rename, are
+forgotten when the group is removed or its last repo leaves it, and are kept when settings are applied
+(`AgentControl-LauncherUI-GroupSettingsKeptInStep`). *The palette control.* `ColorPalettePanel` (built in code, no
+`.axaml`) has the styled properties `IdPrefix` (default `CardColor`), `Heading`, `SelectedColorName`, `ClearText`
+(default `Automatic`), `ClearTooltip` and `ClearIcon`, and the event `ColorChosen` (`ColorChosenEventArgs.ColorName`,
+`null` for the clear button). It builds a heading `TextBlock` named `{IdPrefix}HeadingText`, one swatch `Button` per
+`CardColorPalette.All` entry (classes `swatch` and `avatar{index}`, tag, accessible name and tooltip the color's name,
+AutomationId `{IdPrefix}Swatch_{Name}`, the `selected` class on the chosen one) and a clear `Button` (AutomationId and
+name `{IdPrefix}{ClearText}Button`, with a check mark while no color is chosen); the parts are rebuilt when `IdPrefix`,
+`ClearText`, `ClearIcon` or `ClearTooltip` change. The card's palette therefore keeps every identifier it had, and one
+control guarantees that the two palettes look and behave the same. The window finds the palette of an item with
+`FindControlOfItem(item, name)`.
 
 **Reordering repos (user-controlled order).** The order of the repo cards belongs to the user and nothing else
 changes it: the list is kept in `AppSettings.RecentRepos` order (see the `Settings` design), a new repo goes to the

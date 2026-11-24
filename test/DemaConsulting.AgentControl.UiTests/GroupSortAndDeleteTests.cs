@@ -25,7 +25,7 @@ namespace DemaConsulting.AgentControl.UiTests;
 
 /// <summary>
 ///     End-to-end tests of sorting a group's repos by name from the group header's menu in the real
-///     application, and (further tests in this class) of deleting a group.
+///     application, and of deleting a group - keeping what is in it, and together with its repos.
 /// </summary>
 public sealed class GroupSortAndDeleteTests
 {
@@ -71,6 +71,125 @@ public sealed class GroupSortAndDeleteTests
             () => RepoNames(restarted).SequenceEqual(["Alpha", "Bravo", "Charlie"]),
             TimeSpan.FromSeconds(10),
             TimeSpan.FromMilliseconds(200)).Result);
+    }
+
+    /// <summary>
+    ///     Choosing "Delete group and its contents" in a group header's menu and confirming removes the
+    ///     group and its repos from the list and from the settings file, leaves the repos' folders on disk
+    ///     and the ungrouped repo in the list; declining first changes nothing.
+    /// </summary>
+    [Fact]
+    public void GroupHeaderMenu_DeleteGroupAndItsContents_RemovesGroupAndReposFromTheListAndKeepsFoldersOnDisk()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: two repos in the group "Work" and one repo in no group
+        using var context = new AgentControlTestContext(customizeSettings: SeedWorkGroupWithTwoRepos);
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+
+        // Act: ... on the Work header > Delete group and its contents, declined first
+        Find(mainWindow, "GroupHeaderMenuButton").AsButton().Invoke();
+        Find(mainWindow, "RemoveGroupWithContentsMenuItem").AsMenuItem().Invoke();
+        var question = context.WaitForWindowWithDescendant("ConfirmationYesButton", TimeSpan.FromSeconds(15));
+        Assert.NotNull(question);
+        Assert.Contains("2 repo(s)", Find(question, "ConfirmationMessageText").Name, StringComparison.Ordinal);
+        Find(question, "ConfirmationNoButton").AsButton().Invoke();
+
+        // Assert: nothing changed
+        Assert.Equal(3, RepoNames(mainWindow).Count);
+
+        // Act: confirm
+        Find(mainWindow, "GroupHeaderMenuButton").AsButton().Invoke();
+        Find(mainWindow, "RemoveGroupWithContentsMenuItem").AsMenuItem().Invoke();
+        question = context.WaitForWindowWithDescendant("ConfirmationYesButton", TimeSpan.FromSeconds(15));
+        Assert.NotNull(question);
+        Find(question, "ConfirmationYesButton").AsButton().Invoke();
+
+        // Assert: only the ungrouped repo is listed, the settings no longer name the repos or the group, and
+        // the folders are still on disk
+        Assert.True(Retry.WhileFalse(
+            () => RepoNames(mainWindow).SequenceEqual(["elsewhere"]),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.True(Retry.WhileFalse(
+            () => !ReadSettings(context).Contains("\"Work\"", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.True(Directory.Exists(Path.Combine(context.RootDirectory, "Alpha")));
+        Assert.True(Directory.Exists(Path.Combine(context.RootDirectory, "Bravo")));
+    }
+
+    /// <summary>
+    ///     Choosing "Delete group, keep contents" in a group header's menu and confirming removes the group
+    ///     header but leaves all the repos in the list (ungrouped).
+    /// </summary>
+    [Fact]
+    public void GroupHeaderMenu_DeleteGroupKeepContents_RemovesTheHeaderAndKeepsAllRepos()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: two repos in the group "Work" and one repo in no group
+        using var context = new AgentControlTestContext(customizeSettings: SeedWorkGroupWithTwoRepos);
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+
+        // Act: ... on the Work header > Delete group, keep contents, confirmed
+        Find(mainWindow, "GroupHeaderMenuButton").AsButton().Invoke();
+        Find(mainWindow, "RemoveGroupMenuItem").AsMenuItem().Invoke();
+        var question = context.WaitForWindowWithDescendant("ConfirmationYesButton", TimeSpan.FromSeconds(15));
+        Assert.NotNull(question);
+        Find(question, "ConfirmationYesButton").AsButton().Invoke();
+
+        // Assert: no group header any more, all three repos still listed
+        Assert.True(Retry.WhileFalse(
+            () => mainWindow.FindAllDescendants(cf => cf.ByAutomationId("GroupHeaderToggleButton")).Length == 0 &&
+                  RepoNames(mainWindow).Count == 3,
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+    }
+
+    /// <summary>
+    ///     Seeds the settings with two repos in the group "Work" and a third repo in no group.
+    /// </summary>
+    /// <param name="settings">The settings dictionary to edit.</param>
+    /// <param name="context">The test context.</param>
+    private static void SeedWorkGroupWithTwoRepos(Dictionary<string, object?> settings, AgentControlTestContext context)
+    {
+        var alpha = Path.Combine(context.RootDirectory, "Alpha");
+        var bravo = Path.Combine(context.RootDirectory, "Bravo");
+        var other = Path.Combine(context.RootDirectory, "elsewhere");
+        foreach (var path in new[] { alpha, bravo, other })
+        {
+            Directory.CreateDirectory(path);
+        }
+
+        settings["HasUserRepoOrder"] = true;
+        settings["RecentRepos"] = new object[]
+        {
+            new { Path = alpha, GroupName = "Work" },
+            new { Path = bravo, GroupName = "Work" },
+            new { Path = other }
+        };
+    }
+
+    /// <summary>
+    ///     Reads the persisted settings file, or an empty string when it does not exist yet.
+    /// </summary>
+    /// <param name="context">The running test context.</param>
+    /// <returns>The file's text.</returns>
+    private static string ReadSettings(AgentControlTestContext context)
+    {
+        var path = Path.Combine(context.ConfigDirectory, "settings.json");
+        return File.Exists(path) ? SharedFile.ReadAllText(path) : string.Empty;
     }
 
     /// <summary>

@@ -6,17 +6,18 @@
 
 `RepoGroupHeaderViewModel` is the collapsible header row that starts a section of the main window's repo list: the
 section's name, how many repos match in it, and - for the user's own groups - the group's color and the actions that add
-a repository to, move, sort, color, rename or remove the group. Its single responsibility is to describe one section to
+a repository to, move, sort, color, rename or delete the group. Its single responsibility is to describe one section to
 the user and to assistive technology and to report what the user asked for (collapse or expand, add a repository, move
-up or down, sort by name, rename, remove); it never changes any state itself. The `RepoGroupKind` enumeration that
-accompanies it (`Favorites`, `Group`, `Ungrouped`) is part of this unit. Its behavior is specified by the unit
-requirements `AgentControl-RepoGroupHeaderViewModel-SectionKind`, `-DescribesSection`, `-AccessibleNameIsText`,
+up or down, sort by name, rename, delete, delete with contents); it never changes any state itself. The `RepoGroupKind`
+enumeration that accompanies it (`Favorites`, `Group`, `Ungrouped`) is part of this unit. Its behavior is specified by
+the unit requirements `AgentControl-RepoGroupHeaderViewModel-SectionKind`, `-DescribesSection`, `-AccessibleNameIsText`,
 `-UpdatesInPlace`, `-Toggle`, `-ToggleUnavailable`, `-ToggleExplained`, `-GroupActions`, `-RemoveGroupRequest`,
-`-AddRepoRequest`, `-NewSubgroupRequest`, `-NestedPlace`, `-RequiresName`, `-ShowsGroupColor`, `-MoveRequests` and
-`-SortByNameRequest` (each prefixed `AgentControl-RepoGroupHeaderViewModel`), and together with `MainWindowViewModel`
-(which decides which headers the list has) it provides `AgentControl-LauncherUI-RepoGroups`,
-`AgentControl-LauncherUI-GroupColor`, `AgentControl-LauncherUI-GroupMoveMenu` and
-`AgentControl-LauncherUI-GroupSortByName`.
+`-AddRepoRequest`, `-NewSubgroupRequest`, `-NestedPlace`, `-RequiresName`, `-ShowsGroupColor`, `-MoveRequests`,
+`-SortByNameRequest` and `-RemoveGroupWithContentsRequest` (each prefixed `AgentControl-RepoGroupHeaderViewModel`), and
+together with `MainWindowViewModel` (which decides which headers the list has) it provides
+`AgentControl-LauncherUI-RepoGroups`, `AgentControl-LauncherUI-GroupColor`, `AgentControl-LauncherUI-GroupMoveMenu`,
+`AgentControl-LauncherUI-GroupSortByName`, `AgentControl-LauncherUI-GroupDeleteKeepContents` and
+`AgentControl-LauncherUI-GroupDeleteWithContents`.
 
 #### Data Model
 
@@ -55,6 +56,13 @@ differs from `Count` (`AgentControl-RepoGroupHeaderViewModel-DescribesSection`, 
 each command only raises its
 event; `ToggleCommand` can execute only while `IsToggleEnabled` (`AgentControl-RepoGroupHeaderViewModel-Toggle`,
 `-ToggleUnavailable`, `-GroupActions`, `-RemoveGroupRequest`, `-AddRepoRequest`, `-NewSubgroupRequest`).
+
+**RemoveGroupWithContentsCommand** (`RelayCommand`) and the event **RemoveGroupWithContentsRequested**: the command
+only raises the event and can execute only while `HasContents` is true. **HasContents** says whether the group has a
+repo (a favorite too) or a group inside it; it is set by the owner through `UpdateContents` and is always false for
+*Favorites* and *Ungrouped*. With contents the plain delete item reads `RemoveGroupText` = `Delete group, keep contents`
+and the second item is shown; with none, the plain item reads `Delete group` and the second is hidden
+(`AgentControl-RepoGroupHeaderViewModel-RemoveGroupWithContentsRequest`).
 
 **ColorName** (`string?`): the palette color the user chose for the group, in its canonical spelling, or `null` for
 none - always `null` for *Favorites* and *Ungrouped*, which cannot be colored. **HasColor** shows the accent bar on the
@@ -109,6 +117,10 @@ available); for *Favorites* and *Ungrouped* it is always unavailable whatever is
 raises the change notification of `SortByNameTooltip` and the command's `CanExecuteChanged`
 (`AgentControl-RepoGroupHeaderViewModel-SortByNameRequest`).
 
+**UpdateContents(hasContents)**: Records whether the group has contents; raises the change notifications of
+`HasContents`, `RemoveGroupText` and `RemoveGroupTooltip` and the command's `CanExecuteChanged` when it changes; ignored
+(no contents) for *Favorites* and *Ungrouped* (`AgentControl-RepoGroupHeaderViewModel-RemoveGroupWithContentsRequest`).
+
 **ToString()**: Returns `AccessibleName`.
 
 #### Error Handling
@@ -126,8 +138,8 @@ simply ignored.
 
 #### Callers
 
-- **MainWindowViewModel** (`LauncherUI`) - creates one header per section, calls `Update`, `UpdateColor`,
-  `UpdateOrder` and `UpdateSort` whenever the list is recomputed and handles the request events (a move request moves
+- **MainWindowViewModel** (`LauncherUI`) - creates one header per section, calls `Update`, `UpdateColor`, `UpdateOrder`,
+  `UpdateSort` and `UpdateContents` whenever the list is recomputed and handles the request events (a move request moves
   the group, a sort request sorts its repos).
 - **MainWindow** (view) - binds each header row to it (the accent bar, the Move up / Move down / Sort by name items with
   their tooltips, the group palette's heading and chosen color) and shows the group-name prompt, the removal

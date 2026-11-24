@@ -223,6 +223,25 @@ internal enum RepoGroupMove
 internal sealed record GroupDropTarget(string GroupName, bool InsertBefore, bool Inside = false);
 
 /// <summary>
+///     What is in a group, for the confirmations of the two ways of deleting it.
+/// </summary>
+/// <param name="DirectRepoCount">The repos whose group it is, favorites included (a favorite keeps its
+///     group, though it is listed under Favorites).</param>
+/// <param name="DirectSubgroupCount">The groups directly inside it.</param>
+/// <param name="RepoCount">The repos in it and in every group inside it, favorites included.</param>
+/// <param name="SubgroupCount">The groups inside it, however deeply.</param>
+/// <param name="FavoriteCount">How many of the <paramref name="RepoCount"/> repos are favorites.</param>
+internal readonly record struct GroupContents(
+    int DirectRepoCount, int DirectSubgroupCount, int RepoCount, int SubgroupCount, int FavoriteCount)
+{
+    /// <summary>
+    ///     Gets a value indicating whether the group has no repo and no group inside it, so there is
+    ///     nothing to keep or to delete with it.
+    /// </summary>
+    public bool IsEmpty => RepoCount == 0 && SubgroupCount == 0;
+}
+
+/// <summary>
 ///     The four ways the "Move" items of a card's menu change a repo's place within its section.
 /// </summary>
 internal enum RepoMove
@@ -3529,6 +3548,16 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             var pending = new Stack<GroupWork>();
+
+            // The groups with a repo in them or in a group inside them, favorites included (a favorite
+            // keeps its group), which decides whether deleting the group has contents to keep or delete
+            var inGroup = new HashSet<string>(RepoGroupName.Comparer);
+            foreach (var group in RepoCards.Where(card => card.HasGroup).Select(card => card.GroupName!))
+            {
+                inGroup.Add(group);
+                inGroup.UnionWith(plan.Tree.GetAncestors(group));
+            }
+
             var stored = new Dictionary<string, List<RepoCardViewModel>>(RepoGroupName.Comparer);
             foreach (var card in RepoCards.Where(card => !card.IsFavorite && card.HasGroup))
             {
@@ -3575,6 +3604,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     GetGroupMoveReason(plan, name, RepoGroupMove.Up),
                     GetGroupMoveReason(plan, name, RepoGroupMove.Down));
                 header.UpdateSort(GetGroupSortReason(stored.TryGetValue(name, out var storedOwn) ? storedOwn : []));
+                header.UpdateContents(inGroup.Contains(name) || plan.Tree.GetChildren(name).Count > 0);
                 usedHeaders.Add(header);
                 items.Add(header);
                 if (collapsed)
@@ -3682,6 +3712,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         header.ToggleRequested += (_, _) => ToggleGroupCollapsed(header.Name);
         header.RenameRequested += (_, _) => GroupRenameRequested?.Invoke(this, header.Name);
         header.RemoveGroupRequested += (_, _) => GroupRemoveRequested?.Invoke(this, header.Name);
+        header.RemoveGroupWithContentsRequested += (_, _) => GroupRemoveWithContentsRequested?.Invoke(this, header.Name);
         header.AddRepoRequested += (_, _) => GroupAddRepoRequested?.Invoke(this, header.Name);
         header.NewSubgroupRequested += (_, _) => GroupNewSubgroupRequested?.Invoke(this, header.Name);
         header.MoveRequested += (_, move) => MoveGroup(header.Name, move);
@@ -3933,6 +3964,82 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             settings.GroupParents = parents;
             settings.GroupOrder = order;
         });
+
+        FinishGroupEdit();
+        return true;
+    }
+
+    /// <summary>
+    ///     Gets what is in a group, for the confirmation of deleting it.
+    /// </summary>
+    /// <param name="groupName">The group's name; letter case is ignored.</param>
+    /// <returns>The counts; all 0 for a group that does not exist.</returns>
+    public GroupContents GetGroupContents(string groupName)
+    {
+        ArgumentNullException.ThrowIfNull(groupName);
+
+        var tree = BuildGroupHierarchy();
+        var subtree = new HashSet<string>(tree.GetSubtree(groupName), RepoGroupName.Comparer);
+        var inside = RepoCards.Where(card => card.HasGroup && subtree.Contains(card.GroupName!)).ToList();
+        return new GroupContents(
+            DirectRepoCount: inside.Count(card => RepoGroupName.Comparer.Equals(card.GroupName, groupName)),
+            DirectSubgroupCount: tree.GetChildren(groupName).Count,
+            RepoCount: inside.Count,
+            SubgroupCount: Math.Max(subtree.Count - 1, 0),
+            FavoriteCount: inside.Count(card => card.IsFavorite));
+    }
+
+    /// <summary>
+    ///     Deletes a group together with everything in it: the group, every group inside it and every repo
+    ///     in any of them are removed from AgentControl's list (nothing on disk or in any repository is
+    ///     touched).
+    /// </summary>
+    /// <remarks>
+    ///     A repo is in the group when its group is the group or one of the groups inside it - a favorite
+    ///     is too, though it is listed under Favorites, so it is removed with its group. The removal is one
+    ///     change of the settings (one save): the repos' entries, with their colors and favorite marks,
+    ///     leave the list, and the collapsed state, color, place in the order and place in the hierarchy
+    ///     of every deleted group are forgotten. Each removed card is retired, as a card removed one at a
+    ///     time is, so nothing it still has running can report back. The caller confirms first.
+    /// </remarks>
+    /// <param name="name">The group's name; letter case is ignored.</param>
+    /// <returns><see langword="true"/> when the group existed and was deleted.</returns>
+    public bool RemoveGroupWithContents(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        if (!GroupNames.Contains(name, RepoGroupName.Comparer))
+        {
+            return false;
+        }
+
+        var tree = BuildGroupHierarchy();
+        var subtree = new HashSet<string>(tree.GetSubtree(name), RepoGroupName.Comparer);
+        var doomed = RepoCards.Where(card => card.HasGroup && subtree.Contains(card.GroupName!)).ToList();
+        var parents = tree.GetStoredParents();
+        foreach (var group in subtree)
+        {
+            parents.Remove(group);
+        }
+
+        CommitSettingsChange(settings =>
+        {
+            settings.RecentRepos.RemoveAll(repo => subtree.Contains(RepoGroupName.Sanitize(repo.GroupName) ?? string.Empty));
+            settings.CollapsedGroups?.RemoveAll(subtree.Contains);
+            settings.GroupOrder?.RemoveAll(subtree.Contains);
+            foreach (var group in subtree)
+            {
+                RemoveGroupColor(settings, group);
+            }
+
+            settings.GroupParents = parents;
+        });
+
+        foreach (var card in doomed)
+        {
+            RepoCards.Remove(card);
+            card.Retire();
+        }
 
         FinishGroupEdit();
         return true;
@@ -4427,6 +4534,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     confirms and calls <see cref="RemoveGroup"/>.
     /// </summary>
     public event EventHandler<string>? GroupRemoveRequested;
+
+    /// <summary>
+    ///     Raised when the user asks to delete a group together with everything in it (its name is the
+    ///     argument); the window confirms, saying how many repos and groups go, and calls
+    ///     <see cref="RemoveGroupWithContents"/>.
+    /// </summary>
+    public event EventHandler<string>? GroupRemoveWithContentsRequested;
 
     /// <summary>
     ///     Raised when the user asks to add a repository to a group from its header's menu (the

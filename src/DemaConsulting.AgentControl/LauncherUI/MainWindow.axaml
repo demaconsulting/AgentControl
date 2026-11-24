@@ -263,7 +263,7 @@
                                      Classes="iconGhost"
                                      Margin="0,0,15,0"
                                      IsVisible="{Binding IsUserGroup}"
-                                     ToolTip.Tip="Add a repository to this group, or move, color, rename or remove the group">
+                                     ToolTip.Tip="Add a repository to this group, or move, sort, color, rename or delete the group">
                                 <materialIcons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
                                 <Button.Flyout>
                                     <MenuFlyout>
@@ -339,11 +339,21 @@
                                         </MenuItem>
                                         <MenuItem Name="RemoveGroupMenuItem"
                                                    AutomationProperties.AutomationId="RemoveGroupMenuItem"
-                                                   Header="Remove group"
-                                                   ToolTip.Tip="Remove this group; its repos and subgroups stay in the list, in the group this one is inside (or ungrouped)"
+                                                   Header="{Binding RemoveGroupText}"
+                                                   ToolTip.Tip="{Binding RemoveGroupTooltip}"
                                                    Command="{Binding RemoveGroupCommand}">
                                             <MenuItem.Icon>
                                                 <materialIcons:MaterialIcon Kind="FolderRemove" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Name="RemoveGroupWithContentsMenuItem"
+                                                   AutomationProperties.AutomationId="RemoveGroupWithContentsMenuItem"
+                                                   Header="Delete group and its contents"
+                                                   ToolTip.Tip="Delete this group together with all its repos and subgroups: they are removed from AgentControl's list (nothing on disk is deleted)"
+                                                   IsVisible="{Binding HasContents}"
+                                                   Command="{Binding RemoveGroupWithContentsCommand}">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="DeleteForever" />
                                             </MenuItem.Icon>
                                         </MenuItem>
                                     </MenuFlyout>

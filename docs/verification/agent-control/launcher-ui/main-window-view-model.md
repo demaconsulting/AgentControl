@@ -399,6 +399,32 @@ follows that availability, sorts the group when executed and then is unavailable
 (`MainWindowViewModel_GroupHeaderSortCommand_FollowsAvailabilityAndSorts`). These cover
 `AgentControl-MainWindowViewModel-GroupSortAvailability`.
 
+**MainWindowViewModel_RemoveGroupWithContents_DeletesTheSubtreeOnly**: Tested by `RepoGroupDeleteTests.cs`. Deleting a
+group with its contents removes the group, every group inside it and every repo in them - a favorite too - from the list
+and from the saved repo entries, forgets the color, collapsed state, order and hierarchy of every deleted group, and
+leaves the group next to it with its repo, its color and its collapsed state
+(`MainWindowViewModel_RemoveGroupWithContents_RemovesSubtreeReposAndForgetsItsSettings`); a view model started from the
+saved settings lists only what is left and every repo folder, with a file in it, is still on disk
+(`MainWindowViewModel_RemoveGroupWithContents_SavesAndLeavesFoldersOnDisk`); a removed card no longer raises its remove
+request, so it is stopped like a card removed alone
+(`MainWindowViewModel_RemoveGroupWithContents_RetiresTheRemovedCards`); and a group with nothing in it is deleted and
+nothing else changes (`MainWindowViewModel_RemoveGroupWithContents_EmptyGroup_IsDeletedAndNothingElseChanges`). These
+cover `AgentControl-MainWindowViewModel-GroupRemoveWithContents`. Favorites, Ungrouped and a group that does not exist
+are refused, with or without contents, and nothing changes
+(`MainWindowViewModel_RemoveGroupWithContents_BuiltInOrUnknown_IsRefused`, covering
+`AgentControl-MainWindowViewModel-GroupRemoveWithContentsRefusals`). What is in a group is counted for the
+confirmation - its repos directly and in all, how many are favorites, its subgroups directly and in all
+(`MainWindowViewModel_GetGroupContents_CountsReposAndSubgroups`, covering
+`AgentControl-MainWindowViewModel-GroupContentsCounted`). The header's delete commands follow whether the group has
+contents and raise the requests of the view model with the group's name
+(`MainWindowViewModel_GroupHeader_DeleteCommands_FollowContentsAndRaiseRequests`, covering
+`AgentControl-MainWindowViewModel-GroupHeaderRequests`). Deleting a group but keeping its contents leaves the repos of a
+top-level group ungrouped where they were stored and forgets the group's settings
+(`MainWindowViewModel_RemoveGroup_TopLevel_LeavesReposUngroupedInPlaceAndForgetsTheGroup`), and for a nested group moves
+the repos into the parent and puts its subgroups, in their own order, into the group's place
+(`MainWindowViewModel_RemoveGroup_Nested_KeepsRepoOrderAndSubgroupsTakeTheGroupsPlace`, covering
+`AgentControl-MainWindowViewModel-GroupRemove` and `-NestedGroupRemoveKeepsContents`).
+
 **MainWindowViewModel_DropGroup_BeforeOrAfterAnotherGroup**: Dropping a group header before or after another group's
 header puts the group there, a collapsed group stays collapsed and the order is saved
 (`MainWindowViewModel_DropGroup_BeforeOrAfterAnotherGroup_Reorders`); a drop on the group's own header, on *Favorites*

@@ -70,6 +70,9 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     /// <summary>Backing field for <see cref="ParentName"/>.</summary>
     private string? _parentName;
 
+    /// <summary>Backing field for <see cref="HasContents"/>.</summary>
+    private bool _hasContents;
+
     /// <summary>Backing field for <see cref="IsCollapsed"/>.</summary>
     private bool _isCollapsed;
 
@@ -119,6 +122,8 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
         AddRepoCommand = new RelayCommand(() => AddRepoRequested?.Invoke(this, EventArgs.Empty));
         NewSubgroupCommand = new RelayCommand(() => NewSubgroupRequested?.Invoke(this, EventArgs.Empty));
         RemoveGroupCommand = new RelayCommand(() => RemoveGroupRequested?.Invoke(this, EventArgs.Empty));
+        RemoveGroupWithContentsCommand = new RelayCommand(
+            () => RemoveGroupWithContentsRequested?.Invoke(this, EventArgs.Empty), () => _hasContents);
         MoveUpCommand = new RelayCommand(
             () => MoveRequested?.Invoke(this, RepoGroupMove.Up), () => _moveUpDisabledReason is null);
         MoveDownCommand = new RelayCommand(
@@ -357,6 +362,46 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     public RelayCommand RemoveGroupCommand { get; }
 
     /// <summary>
+    ///     Gets the command that asks to delete the group together with its repos and the groups inside
+    ///     it; it raises <see cref="RemoveGroupWithContentsRequested"/>. Offered for the user's own groups
+    ///     that have contents only (see <see cref="HasContents"/>).
+    /// </summary>
+    public RelayCommand RemoveGroupWithContentsCommand { get; }
+
+    /// <summary>
+    ///     Gets a value indicating whether the group has a repo (a favorite too) or a group inside it, so
+    ///     that deleting it has contents to keep or to delete as well; the menu then offers both ways of
+    ///     deleting, otherwise one plain delete. Always <see langword="false"/> for Favorites and
+    ///     Ungrouped.
+    /// </summary>
+    public bool HasContents
+    {
+        get => _hasContents;
+        private set
+        {
+            if (SetField(ref _hasContents, value))
+            {
+                OnPropertyChanged(nameof(RemoveGroupText));
+                OnPropertyChanged(nameof(RemoveGroupTooltip));
+                RemoveGroupWithContentsCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets the text of the delete item that keeps what is in the group: <c>Delete group, keep
+    ///     contents</c>, or just <c>Delete group</c> for a group with nothing in it.
+    /// </summary>
+    public string RemoveGroupText => _hasContents ? "Delete group, keep contents" : "Delete group";
+
+    /// <summary>
+    ///     Gets the tooltip of the delete item that keeps what is in the group.
+    /// </summary>
+    public string RemoveGroupTooltip => _hasContents
+        ? "Delete this group but keep its repos and subgroups: they stay in the list, in the group this one is inside (or ungrouped)"
+        : "Delete this group; it has no repos or subgroups";
+
+    /// <summary>
     ///     Raised when the user asks to collapse or expand the section.
     /// </summary>
     public event EventHandler? ToggleRequested;
@@ -382,6 +427,19 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     ///     Raised when the user asks to remove the group; the window confirms first.
     /// </summary>
     public event EventHandler? RemoveGroupRequested;
+
+    /// <summary>
+    ///     Raised when the user asks to delete the group together with its contents; the window confirms
+    ///     first.
+    /// </summary>
+    public event EventHandler? RemoveGroupWithContentsRequested;
+
+    /// <summary>
+    ///     Brings what the header knows about the group's contents up to date.
+    /// </summary>
+    /// <param name="hasContents">Whether the group has a repo (a favorite too) or a group inside it.
+    ///     Ignored (no contents) for Favorites and Ungrouped.</param>
+    public void UpdateContents(bool hasContents) => HasContents = IsUserGroup && hasContents;
 
     /// <summary>
     ///     Gets the command that asks to move the group one place up; it raises

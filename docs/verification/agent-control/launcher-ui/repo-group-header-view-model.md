@@ -3,10 +3,10 @@
 #### Verification Approach
 
 `RepoGroupHeaderViewModel` is verified with unit tests in `RepoGroupHeaderViewModelTests.cs`. Each test constructs a
-real header, drives it through its constructor, `Update`, `UpdateColor`, `UpdateOrder`, `UpdateSort` and its commands,
-and reads its properties and the events it raises; nothing is mocked and no Avalonia `Window` is constructed. How the
-owning `MainWindowViewModel` creates, updates and reacts to headers is verified by that unit, and how the window shows
-them by the headless window tests of the `LauncherUI` subsystem (`RepoGroupWindowTests.cs`).
+real header, drives it through its constructor, `Update`, `UpdateColor`, `UpdateOrder`, `UpdateSort`, `UpdateContents`
+and its commands, and reads its properties and the events it raises; nothing is mocked and no Avalonia `Window` is
+constructed. How the owning `MainWindowViewModel` creates, updates and reacts to headers is verified by that unit, and
+how the window shows them by the headless window tests of the `LauncherUI` subsystem (`RepoGroupWindowTests.cs`).
 
 #### Test Environment
 
@@ -114,6 +114,14 @@ gives a reason the command cannot execute and the reason is the tooltip (with it
 header told that sorting is available still offers none and still has a non-empty tooltip. This scenario is tested by
 `RepoGroupHeaderViewModel_UpdateSort_AvailabilityTooltipAndRequest`, covering
 `AgentControl-RepoGroupHeaderViewModel-SortByNameRequest`.
+
+**RepoGroupHeaderViewModel_RemoveGroupWithContentsRequest**: A new user group has no contents, so its
+delete-with-contents command cannot execute and its plain delete item is named "Delete group"; after the owner says it
+has contents the command can execute, executing it raises a delete-with-contents request (and not the plain delete's),
+executing the plain delete raises its own request, and the plain item is named "Delete group, keep contents" with a
+tooltip that says the repos and subgroups are kept. A *Favorites* header told that it has contents has none. This
+scenario is tested by `RepoGroupHeaderViewModel_UpdateContents_OffersDeleteWithContentsOnlyForGroupsWithContents`,
+covering `AgentControl-RepoGroupHeaderViewModel-RemoveGroupWithContentsRequest`.
 
 **RepoGroupHeaderViewModel_RequiresName**: A blank name and a `null` name are refused. This scenario is tested by
 `RepoGroupHeaderViewModel_Constructor_BlankName_Throws`, covering `AgentControl-RepoGroupHeaderViewModel-RequiresName`.

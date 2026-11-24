@@ -393,6 +393,142 @@ public sealed class RepoGroupTreeWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that "Delete group and its contents" asks for a confirmation that names the group, the
+    ///     repos and the subgroups that go and says nothing on disk is deleted, that answering No changes
+    ///     nothing, and that answering Yes removes the group, its subgroups and all their repos from the
+    ///     list while the repo folders stay on disk.
+    /// </summary>
+    [Fact]
+    public void MainWindow_HeaderMenu_DeleteGroupWithContents_ConfirmationSaysCountsAndYesDeletesNoKeeps() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: Client holds c1 and the subgroups Project (p1) and Alpha (a1); loose is in no group
+        var (window, viewModel, _) = CreateClientWindow();
+        var folders = viewModel.RepoCards.Select(card => card.RepoPath).ToList();
+
+        try
+        {
+            // Act: Delete group and its contents on Client, answered No
+            ClickHeaderMenuItem(window, "Client", "RemoveGroupWithContentsMenuItem");
+            var confirmation = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+            var message = confirmation.FindControl<TextBlock>("ConfirmationMessageText")!.Text!;
+            DialogWindowTests.Click(confirmation, "ConfirmationNoButton");
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the question says what goes; nothing changed
+            Assert.Contains("\"Client\"", message);
+            Assert.Contains("2 subgroup(s)", message);
+            Assert.Contains("3 repo(s)", message);
+            Assert.Contains("nothing on disk", message);
+            Assert.Equal(4, viewModel.RepoCards.Count);
+            Assert.Equal(["Alpha", "Client", "Project"], viewModel.GroupNames);
+
+            // Act: answered Yes
+            ClickHeaderMenuItem(window, "Client", "RemoveGroupWithContentsMenuItem");
+            confirmation = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+            DialogWindowTests.Click(confirmation, "ConfirmationYesButton");
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: only the ungrouped repo is left, listed with no header, and every folder is still there
+            Assert.Equal(["loose"], viewModel.RepoCards.Select(card => card.RepoName));
+            Assert.Empty(viewModel.GroupNames);
+            Assert.Empty(window.GetVisualDescendantsOf<Button>("GroupHeaderToggleButton"));
+            Assert.All(folders, folder => Assert.True(Directory.Exists(folder)));
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that "Delete group, keep contents" asks for a confirmation that says where the repos and
+    ///     subgroups go and that nothing on disk changes, and that confirming moves the repos into the group
+    ///     the deleted group was inside.
+    /// </summary>
+    [Fact]
+    public void MainWindow_HeaderMenu_DeleteGroupKeepContents_ConfirmationSaysWhereContentsGo() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, viewModel, _) = CreateClientWindow();
+
+        try
+        {
+            // Act: Delete group, keep contents on Project (inside Client), answered Yes
+            ClickHeaderMenuItem(window, "Project", "RemoveGroupMenuItem");
+            var confirmation = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+            var message = confirmation.FindControl<TextBlock>("ConfirmationMessageText")!.Text!;
+            DialogWindowTests.Click(confirmation, "ConfirmationYesButton");
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert
+            Assert.Contains("Delete the group \"Project\"", message);
+            Assert.Contains("1 repo(s) stay in AgentControl's list, in the group \"Client\"", message);
+            Assert.Contains("nothing on disk", message);
+            Assert.Equal("Client", viewModel.RepoCards.Single(card => card.RepoName == "p1").GroupName);
+            Assert.Equal(["Alpha", "Client"], viewModel.GroupNames);
+            Assert.Equal(4, viewModel.RepoCards.Count);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that a group with no repo and no subgroup offers only one plain "Delete group" item (the
+    ///     item that deletes the contents is hidden), whose confirmation says the group is empty, while a
+    ///     group with contents shows both items.
+    /// </summary>
+    [Fact]
+    public void MainWindow_HeaderMenu_DeleteEmptyGroup_OffersOnlyPlainDelete() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: Empty is a group inside Client with nothing in it
+        var (window, viewModel, _) = CreateClientWindow();
+        Assert.True(viewModel.CreateSubgroup("Client", "Empty"));
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            // Act
+            var emptyMenu = OpenMenu(window.GetVisualDescendantsOf<Button>("GroupHeaderMenuButton")
+                .Single(candidate => candidate.DataContext is RepoGroupHeaderViewModel { Name: "Empty" }));
+            var plain = emptyMenu.Items.OfType<MenuItem>().Single(item => item.Name == "RemoveGroupMenuItem");
+            var withContents = emptyMenu.Items.OfType<MenuItem>().Single(item => item.Name == "RemoveGroupWithContentsMenuItem");
+            var plainText = plain.Header?.ToString();
+            var contentsShown = withContents.IsVisible;
+            emptyMenu.Hide();
+            var clientMenu = OpenMenu(window.GetVisualDescendantsOf<Button>("GroupHeaderMenuButton")
+                .Single(candidate => candidate.DataContext is RepoGroupHeaderViewModel { Name: "Client" }));
+            var clientPlain = clientMenu.Items.OfType<MenuItem>().Single(item => item.Name == "RemoveGroupMenuItem");
+            var clientWithContents = clientMenu.Items.OfType<MenuItem>().Single(item => item.Name == "RemoveGroupWithContentsMenuItem");
+            var clientPlainText = clientPlain.Header?.ToString();
+            var clientContentsShown = clientWithContents.IsVisible;
+            clientMenu.Hide();
+
+            // Assert
+            Assert.Equal("Delete group", plainText);
+            Assert.False(contentsShown);
+            Assert.Equal("Delete group, keep contents", clientPlainText);
+            Assert.True(clientContentsShown);
+
+            // Act: delete the empty group
+            ClickHeaderMenuItem(window, "Empty", "RemoveGroupMenuItem");
+            var confirmation = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+            var message = confirmation.FindControl<TextBlock>("ConfirmationMessageText")!.Text!;
+            DialogWindowTests.Click(confirmation, "ConfirmationYesButton");
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert
+            Assert.Contains("no repos or subgroups", message);
+            Assert.Equal(["Alpha", "Client", "Project"], viewModel.GroupNames);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Deletes the temporary folders the tests created.
     /// </summary>
     public void Dispose()

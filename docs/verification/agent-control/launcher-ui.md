@@ -1209,8 +1209,24 @@ name. The requirements are split by behavior; each is covered by the tests that 
   `MainWindow_NewGroupMenuItem_PromptsForNameAndCreatesGroup`.
 - `AgentControl-LauncherUI-GroupNamePrompt` (the prompt validates the typed name and can be canceled):
   `GroupNameWindow_ValidatesWhileTyping_AndAccepts` and `MainWindow_NewGroupPrompt_Canceled_ChangesNothing`.
-- `AgentControl-LauncherUI-RepoGroupManagement` (rename and remove from the header):
-  `MainWindow_HeaderMenu_RenameAndRemoveGroup`.
+- `AgentControl-LauncherUI-RepoGroupManagement` (rename from the header): `MainWindow_HeaderMenu_RenameAndRemoveGroup`.
+- `AgentControl-LauncherUI-GroupDeleteKeepContents` (deleting a group but keeping what is in it):
+  `MainWindow_HeaderMenu_RenameAndRemoveGroup` (a flat group is confirmed, declined and confirmed again; its repos are
+  still listed, ungrouped, and no header is left) and
+  `MainWindow_HeaderMenu_DeleteGroupKeepContents_ConfirmationSaysWhereContentsGo`: deleting a group that is inside
+  another asks a question that names the group, says its repos stay in AgentControl's list in the parent group and that
+  nothing on disk changes, and answering Yes moves the repos into the parent.
+  `MainWindow_HeaderMenu_DeleteEmptyGroup_OffersOnlyPlainDelete`: a group with nothing in it offers only **Delete
+  group**, whose question says it has no repos or subgroups.
+- `AgentControl-LauncherUI-GroupDeleteWithContents` (deleting a group together with its repos and subgroups):
+  `MainWindow_HeaderMenu_DeleteGroupWithContents_ConfirmationSaysCountsAndYesDeletesNoKeeps`: the question names the
+  group and says how many repos and subgroups go and that nothing on disk is deleted; answering No leaves the list and
+  the groups as they were; answering Yes leaves only the repo that was in no group, listed without a header, while every
+  repo folder is still on disk. `MainWindow_HeaderMenu_DeleteEmptyGroup_OffersOnlyPlainDelete`: the item that deletes
+  the contents is hidden for a group with nothing in it and shown for a group with contents.
+  `MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator` holds both items in the documented place and with
+  tooltips. What each deletion changes in the settings (colors, order, collapsed state, hierarchy) is verified in the
+  unit tests of `MainWindowViewModel` (`RepoGroupDeleteTests.cs`).
 - `AgentControl-LauncherUI-NestedGroupTree` (groups containing groups, listed as a tree):
   `MainWindow_NestedGroups_ListSubgroupsBeforeOwnReposAndCollapseHidesSubtree` (`RepoGroupTreeWindowTests.cs`): a group
   with two subgroups and a repo of its own is listed with the subgroups first, in order, and its own repo after them,

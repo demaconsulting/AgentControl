@@ -786,6 +786,17 @@ by `windows@GroupHeaderMenu_SortByName_ListsRepoCardsInNameOrderAndKeepsItAfterR
 item is unavailable are verified in the unit tests of `MainWindowViewModel` and the headless window tests of the
 `LauncherUI` subsystem.
 
+**AgentControl_GroupDelete_KeepContentsAndWithContentsAfterConfirmation**: With two repos in the group Work and a third
+in no group, choosing "Delete group, keep contents" in the Work header's menu and confirming leaves no group header and
+all three repos listed. With the same settings, choosing "Delete group and its contents" asks a question that says two
+repos go; answering No changes nothing, and confirming lists only the third repo, the settings file no longer names the
+group, and the two repo folders are still on disk. These scenarios are tested by
+`windows@GroupHeaderMenu_DeleteGroupKeepContents_RemovesTheHeaderAndKeepsAllRepos` and
+`windows@GroupHeaderMenu_DeleteGroupAndItsContents_RemovesGroupAndReposFromTheListAndKeepsFoldersOnDisk`, covering
+`AgentControl-System-GroupDelete`. That nested groups and favorites are handled, and what exactly the confirmations
+say, are verified in the unit tests of `MainWindowViewModel` and the headless window tests of the `LauncherUI`
+subsystem.
+
 **AgentControl_ListChangesKept_FavoriteCollapseColorsAndGroupOrderAreKept**: The favorite star, a section's
 collapse, a card color, a group color and the order of the groups are each changed in the real application and found
 in the settings file. The collapse, the card color, the group color and the group order are also still there after a

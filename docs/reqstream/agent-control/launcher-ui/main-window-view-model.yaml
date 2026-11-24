@@ -952,6 +952,41 @@ sections:
         tests:
           - MainWindowViewModel_RemoveGroup_LeavesMembersUngrouped
 
+      - id: AgentControl-MainWindowViewModel-GroupRemoveWithContents
+        title: >-
+          The MainWindowViewModel class shall delete a group together with its contents - the group, every
+          group inside it and every repo in any of them, favorites included - in one saved change, forget
+          the color, collapsed state, place in the order and place in the hierarchy of every deleted
+          group, stop the removed repos' cards, leave every other group and repo as it was, and touch
+          nothing on disk.
+        justification: |
+          Deleting a group with its contents must remove exactly the group's subtree from the list, save
+          it once, and never delete a repository folder.
+        tests:
+          - MainWindowViewModel_RemoveGroupWithContents_RemovesSubtreeReposAndForgetsItsSettings
+          - MainWindowViewModel_RemoveGroupWithContents_SavesAndLeavesFoldersOnDisk
+          - MainWindowViewModel_RemoveGroupWithContents_RetiresTheRemovedCards
+          - MainWindowViewModel_RemoveGroupWithContents_EmptyGroup_IsDeletedAndNothingElseChanges
+
+      - id: AgentControl-MainWindowViewModel-GroupRemoveWithContentsRefusals
+        title: >-
+          The MainWindowViewModel class shall refuse, changing nothing, to delete Favorites, Ungrouped or
+          a group that does not exist, with or without its contents.
+        justification: |
+          The built-in sections are not groups of the user's own, so they can never be deleted.
+        tests:
+          - MainWindowViewModel_RemoveGroupWithContents_BuiltInOrUnknown_IsRefused
+
+      - id: AgentControl-MainWindowViewModel-GroupContentsCounted
+        title: >-
+          The MainWindowViewModel class shall tell what is in a group - the repos directly in it, the repos
+          in it and in the groups inside it (favorites included, and how many are favorites) and its
+          subgroups, directly and in all - so a confirmation can state what a delete affects.
+        justification: |
+          The user must be told the numbers before repos and groups are removed.
+        tests:
+          - MainWindowViewModel_GetGroupContents_CountsReposAndSubgroups
+
       - id: AgentControl-MainWindowViewModel-GroupSettingsOnly
         title: >-
           The MainWindowViewModel class shall persist grouping, card color and collapsed sections to
@@ -963,13 +998,14 @@ sections:
 
       - id: AgentControl-MainWindowViewModel-GroupHeaderRequests
         title: >-
-          The MainWindowViewModel class shall forward a section header's rename and remove requests
-          to the window, with the group's name, changing nothing by itself.
+          The MainWindowViewModel class shall forward a section header's rename, delete and
+          delete-with-contents requests to the window, with the group's name, changing nothing by itself.
         justification: |
           The window shows the name prompt or the confirmation; the list must change only after
           the user has answered.
         tests:
           - MainWindowViewModel_HeaderCommands_RaiseGroupRequestsWithTheGroupName
+          - MainWindowViewModel_GroupHeader_DeleteCommands_FollowContentsAndRaiseRequests
 
       - id: AgentControl-MainWindowViewModel-ChangeAppliedWhenSaved
         title: >-

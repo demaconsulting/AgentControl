@@ -191,6 +191,7 @@ reviews:
       - "test/**/LauncherUI/RepoGroupingTests.cs"
       - "test/**/LauncherUI/RepoGroupTreeTests.cs"
       - "test/**/LauncherUI/RepoGroupSortTests.cs"
+      - "test/**/LauncherUI/RepoGroupDeleteTests.cs"
       - "test/**/LauncherUI/RepoOrderingTests.cs"
 
   - id: AgentControl-LauncherUI-RepoGroupHeaderViewModel
