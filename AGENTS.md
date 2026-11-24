@@ -92,8 +92,8 @@ commands that send real mouse or keyboard input.
   the FlaUI UI tests that take over the desktop. Add it (`pwsh ./build.ps1 -All -SkipUiTests`) when the user is
   working on the machine, unless they have given permission to drive the desktop.
 - **Scoped runs** - While iterating, check only what changed since `origin/main` (or `-Base <ref>`), including
-  uncommitted and untracked files: `pwsh ./build.ps1 -Changed -SkipUiTests` (or `-Project <names>`) builds and tests
-  only the affected projects (any `src/` change also selects the UI tests, so keep `-SkipUiTests`), and
+  uncommitted and untracked files: `pwsh ./build.ps1 -Changed -SkipUiTests` (or `-Project <names>`, full or short such as
+  `Puppet` or `Core`; `-Help` lists them) builds and tests only the affected projects (any `src/` change also selects the UI tests, so keep `-SkipUiTests`), and
   `pwsh ./lint.ps1 -Changed` / `pwsh ./fix.ps1 -Changed` run only the checks and fixers whose inputs changed. Add
   `-DryRun` to print the selection. Build-wide changes (project files, `global.json`, `.editorconfig`, the tool
   manifest) fall back to the full run. Before pushing, run the full `pwsh ./build.ps1 -All -SkipUiTests` (or

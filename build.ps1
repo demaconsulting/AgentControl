@@ -14,20 +14,25 @@
 #                                              (default origin/main, else main) plus uncommitted changes
 #   pwsh ./build.ps1 -Project Puppet -SkipUiTests
 #                                              Only the test projects affected by the named projects (full or
-#                                              short names: Core is the application, other short names are
-#                                              relative to it, so Puppet is DemaConsulting.AgentControl.Puppet)
+#                                              short names: Puppet finds DemaConsulting.AgentControl.Puppet, Core
+#                                              is the application; -Help lists this repository's names)
 #   Add -DryRun to any scope to print the selection without building anything.
 #   With no arguments the usage text is printed and the script exits 1 (a scope must be chosen).
 #
 #   A changed project selects every project that references it, directly or transitively, from the
-#   ProjectReference graph, and files linked into another project (Compile/None/EmbeddedResource items
-#   that point outside the project folder) select that project too. Changes that affect the whole
+#   ProjectReference graph, and files linked into another project (any item or file property that
+#   points outside the project folder) select that project too. Changes that affect the whole
 #   build (solution, project, props/targets, global.json, .editorconfig, nuget.config, tool manifest,
 #   this script, scripts/ProjectScripts.psm1) fall back to the full build; repository files tests read
 #   at run time select their test projects through $RuntimeReads; other changes the build does not
 #   read (documentation) select nothing. DemaConsulting.AgentControl.UiTests references the app, so any
 #   src/ change selects it: combine with -SkipUiTests to build it without running it while someone is
 #   working on the machine.
+#
+#   The test platform is detected from global.json: "test": { "runner": "Microsoft.Testing.Platform" } runs
+#   'dotnet test --project <path> --report-trx', anything else runs VSTest 'dotnet test <path> --logger trx';
+#   results go to artifacts/tests either way. This repository uses Microsoft.Testing.Platform and adds
+#   --max-parallel-test-modules 1 (see Invoke-DotnetTest).
 #
 # EXTENSION POINTS:
 #   Search for "[PROJECT-SPECIFIC]" comments to find the designated locations
@@ -77,6 +82,15 @@ Import-Module (Join-Path $PSScriptRoot 'scripts/ProjectScripts.psm1') -Force
 # executables) and files they create in temporary folders, never checked-in repository files.
 $RuntimeReads = [ordered]@{}
 
+# [PROJECT-SPECIFIC] Short -Project names that no resolution rule can derive (exact name, unique dot-segment suffix,
+# Core), as data: alias = project name. None needed: Puppet, Tests and the other short names resolve by suffix and
+# Core resolves to the application through the common prefix.
+$ProjectAliases = @{}
+
+# [PROJECT-SPECIFIC] Folders scanned for projects. The application is under src/, the test projects and the
+# ArgLoggerStub helper under test/, and the Puppet tool and its tests under tools/.
+$ProjectRoots = @('src', 'test', 'tools')
+
 # [PROJECT-SPECIFIC] The FlaUI test project that launches the app and drives the real desktop; -SkipUiTests never runs it
 $UiTestProjectName = 'DemaConsulting.AgentControl.UiTests'
 
@@ -89,11 +103,37 @@ $HeadlessTestProjects = @(
     'tools/DemaConsulting.AgentControl.Puppet.Tests/DemaConsulting.AgentControl.Puppet.Tests.csproj'
 )
 
-# Test projects are named *.Tests or *.UiTests; the other projects (the app, the ArgLoggerStub helper under
-# test/, the Puppet tool) are built only
+# [PROJECT-SPECIFIC] Test projects are named *.Tests or *.UiTests; the other projects (the app, the ArgLoggerStub
+# helper under test/, the Puppet tool) are built only
 function Test-TestProject {
     param($Entry)
     return $Entry.Name -match '\.(Ui)?Tests$'
+}
+
+# Test platform: global.json selects Microsoft.Testing.Platform with "test": { "runner": "Microsoft.Testing.Platform" };
+# otherwise VSTest is used. The platform decides the 'dotnet test' arguments (see Invoke-DotnetTest).
+$UseTestingPlatform = $false
+if (Test-Path global.json) {
+    try { $UseTestingPlatform = (Get-Content -Raw global.json | ConvertFrom-Json).test.runner -eq 'Microsoft.Testing.Platform' }
+    catch { Write-Host "Warning: global.json could not be read; assuming VSTest." }
+}
+
+function Invoke-DotnetTest {
+    # Runs the tests of one project, or of the whole solution when no path is given, against the existing build
+    param([string]$Path)
+
+    # @(...) keeps a one-element list an array, so the splat passes the path whole and not character by character
+    if ($UseTestingPlatform) {
+        # [PROJECT-SPECIFIC] --max-parallel-test-modules 1 runs the Tests and UiTests projects one after another
+        # rather than concurrently: both spawn real child processes (git subprocesses, FlaUI-driven app instances),
+        # and running them at the same time causes intermittent, non-deterministic contention failures between the
+        # two (confirmed via live CI runs).
+        $target = @(if ($Path) { '--project'; $Path })
+        dotnet test @target --no-build --configuration Release --max-parallel-test-modules 1 --report-trx --results-directory artifacts/tests
+    } else {
+        $target = @(if ($Path) { $Path })
+        dotnet test @target --no-build --configuration Release --logger trx --results-directory artifacts/tests
+    }
 }
 
 # ==============================================================================
@@ -112,8 +152,8 @@ function Show-Usage {
             '-DryRun'          = 'Print what would be built, tested, and skipped, then exit 0 without running anything.'
             '-Help'            = 'Print this text and exit 0.'
         }) `
-        -ChecksLabel 'Projects (-Project names; Core is the application)' `
-        -Checks @(try { (Get-ProjectGraph).Keys } catch { }) `
+        -ChecksLabel 'Projects and aliases (-Project names; short names such as Core or Puppet also work)' `
+        -Checks @(try { Get-ProjectNameList (Get-ProjectGraph -Root $ProjectRoots) $ProjectAliases } catch { }) `
         -Examples @('-Changed -SkipUiTests', '-Project Puppet -SkipUiTests', '-Changed -DryRun', '-All', '-All -SkipUiTests')
 }
 
@@ -141,19 +181,21 @@ $buildError = $false
 
 $scoped = $false
 if (-not $All) {
-    $graph = Get-ProjectGraph
+    $graph = Get-ProjectGraph -Root $ProjectRoots
     $selected = [System.Collections.Generic.HashSet[string]]::new()
     $fullReason = $null
 
     $names = @($Project | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $known = (Get-ProjectNameList $graph $ProjectAliases) -join ', '
     if ($Project -and $names.Count -eq 0) {
-        Write-Host "Error: no project named in '$($Project -join ' ')'. Known projects: $($graph.Keys -join ', ')"
+        Write-Host "Error: no project named in '$($Project -join ' ')'. Known projects: $known"
         exit 1
     }
     foreach ($single in $names) {
-        $resolved = Resolve-ProjectName $graph $single
+        try { $resolved = Resolve-ProjectName $graph $single $ProjectAliases }
+        catch { Write-Host "Error: $($_.Exception.Message)"; exit 1 }
         if (-not $resolved) {
-            Write-Host "Unknown project '$single'. Known projects: $($graph.Keys -join ', ')"
+            Write-Host "Unknown project '$single'. Known projects: $known"
             exit 1
         }
         [void]$selected.Add($resolved)
@@ -211,7 +253,7 @@ if (-not $All) {
         if (-not $buildError) {
             foreach ($entry in $tests) {
                 Write-Host "Running unit tests: $($entry.Name)..."
-                dotnet test --project $entry.Path --configuration Release --max-parallel-test-modules 1
+                Invoke-DotnetTest $entry.Path
                 if ($LASTEXITCODE -ne 0) { $buildError = $true }
             }
         } else {
@@ -228,29 +270,33 @@ if ($DryRun -and -not $scoped) { Write-Host "Dry run: would run $fullDescription
 
 if (-not $scoped) {
     # Each step runs only if the steps before it succeeded, so tests never run against stale binaries
-    Write-Host "Building project..."
-    dotnet build --configuration Release
-    if ($LASTEXITCODE -ne 0) { $buildError = $true }
+    $failedStep = $null   # the step that failed first, so the skip message names the real cause
+    Write-Host "Restoring dependencies..."
+    dotnet restore
+    if ($LASTEXITCODE -ne 0) { $buildError = $true; $failedStep = 'restore' }
+
+    if (-not $buildError) {
+        Write-Host "Building..."
+        dotnet build --no-restore --configuration Release
+        if ($LASTEXITCODE -ne 0) { $buildError = $true; $failedStep = 'build' }
+    }
 
     # [PROJECT-SPECIFIC] Add additional build steps here (e.g., packaging, publishing).
     # Guard steps that depend on the build with: if (-not $buildError) { ... }
 
     if ($buildError) {
-        Write-Host "Skipping tests: the build failed."
+        if ($failedStep -eq 'restore') { Write-Host "Skipping build and tests: restore failed." }
+        else { Write-Host "Skipping tests: the build failed." }
     } elseif ($SkipUiTests) {
-        Write-Host "Running unit tests (UI tests skipped: -SkipUiTests)..."
+        Write-Host "Running tests (UI tests skipped: -SkipUiTests)..."
         foreach ($testProject in $HeadlessTestProjects) {
-            dotnet test --project (Join-Path $PSScriptRoot $testProject) --configuration Release --max-parallel-test-modules 1
+            Invoke-DotnetTest (Join-Path $PSScriptRoot $testProject)
             if ($LASTEXITCODE -ne 0) { $buildError = $true }
         }
         Write-Host "UI tests skipped (-SkipUiTests): test/DemaConsulting.AgentControl.UiTests was not run."
     } else {
-        Write-Host "Running unit tests..."
-        # --max-parallel-test-modules 1 forces the Tests and UiTests projects to run one after
-        # another rather than concurrently: both spawn real child processes (git subprocesses,
-        # FlaUI-driven app instances), and running them at the same time causes intermittent,
-        # non-deterministic contention failures between the two (confirmed via live CI runs).
-        dotnet test --configuration Release --max-parallel-test-modules 1
+        Write-Host "Running tests..."
+        Invoke-DotnetTest
         if ($LASTEXITCODE -ne 0) { $buildError = $true }
     }
 
