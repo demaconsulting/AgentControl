@@ -1202,6 +1202,16 @@ name. The requirements are split by behavior; each is covered by the tests that 
   `GroupNameWindow_ValidatesWhileTyping_AndAccepts` and `MainWindow_NewGroupPrompt_Canceled_ChangesNothing`.
 - `AgentControl-LauncherUI-RepoGroupManagement` (rename and remove from the header):
   `MainWindow_HeaderMenu_RenameAndRemoveGroup`.
+- `AgentControl-LauncherUI-NestedGroupTree` (groups containing groups, listed as a tree):
+  `MainWindow_NestedGroups_ListSubgroupsBeforeOwnReposAndCollapseHidesSubtree` (`RepoGroupTreeWindowTests.cs`): a group
+  with two subgroups and a repo of its own is listed with the subgroups first, in order, and its own repo after them,
+  each header's accessible name saying which group it is inside and counting its whole subtree, and collapsing the top
+  group hides its subgroups and their repos, the header saying it is collapsed. The behaviors of the tree that are
+  observable only in the view-model layer (the same list without a hierarchy, a group created empty, creating, moving,
+  dropping, renaming and removing a group) are covered by the view-model tests of the units that realize them, cited at
+  this level as the subsystem's convention: `RepoGroupTreeTests.cs` for `MainWindowViewModel`
+  (`AgentControl-MainWindowViewModel-NestedGroupTree` through `-NestedGroupRemoveKeepsContents`),
+  `RepoGroupHeaderViewModelTests.cs` and `RepoCardColorTests.cs`.
 - `AgentControl-LauncherUI-RepoGroupCollapse` (collapse and expand from the header):
   `MainWindow_HeaderToggle_CollapsesAndExpandsSection`.
 

@@ -166,6 +166,7 @@ reviews:
       - "test/**/LauncherUI/HeadlessTestAppTests.cs"
       - "test/**/LauncherUI/MainWindowTests.cs"
       - "test/**/LauncherUI/RepoGroupWindowTests.cs"
+      - "test/**/LauncherUI/RepoGroupTreeWindowTests.cs"
       - "test/**/LauncherUI/RepoReorderWindowTests.cs"
       - "test/**/LauncherUI/UsabilityWindowTests.cs"
       - "test/**/LauncherUI/ThirdPartyDependenciesTests.cs"
@@ -187,6 +188,7 @@ reviews:
       - "test/**/LauncherUI/MainWindowViewModelPersistenceTests.cs"
       - "test/**/LauncherUI/MainWindowViewModelRecheckTests.cs"
       - "test/**/LauncherUI/RepoGroupingTests.cs"
+      - "test/**/LauncherUI/RepoGroupTreeTests.cs"
       - "test/**/LauncherUI/RepoOrderingTests.cs"
 
   - id: AgentControl-LauncherUI-RepoGroupHeaderViewModel

@@ -12,7 +12,8 @@ move up or down, rename, remove); it never changes any state itself. The
 `RepoGroupKind` enumeration that accompanies it (`Favorites`, `Group`, `Ungrouped`) is part of this unit. Its
 behavior is specified by the unit requirements `AgentControl-RepoGroupHeaderViewModel-SectionKind`,
 `-DescribesSection`, `-AccessibleNameIsText`, `-UpdatesInPlace`, `-Toggle`, `-ToggleUnavailable`, `-ToggleExplained`,
-`-GroupActions`, `-RemoveGroupRequest`, `-AddRepoRequest`, `-RequiresName`, `-ShowsGroupColor` and `-MoveRequests`
+`-GroupActions`, `-RemoveGroupRequest`, `-AddRepoRequest`, `-NewSubgroupRequest`, `-NestedPlace`, `-RequiresName`,
+`-ShowsGroupColor` and `-MoveRequests`
 (each prefixed `AgentControl-RepoGroupHeaderViewModel`), and
 together with `MainWindowViewModel` (which decides which headers the list has) it provides
 `AgentControl-LauncherUI-RepoGroups`, `AgentControl-LauncherUI-GroupColor` and `AgentControl-LauncherUI-GroupMoveMenu`.
@@ -26,22 +27,34 @@ flags for the view, exactly one of which is true for any kind; the rename and re
 `IsUserGroup` only (`AgentControl-RepoGroupHeaderViewModel-SectionKind`).
 
 **Count**: the number of repos in the section that match the current filter (all of them without a filter), whether
-or not the section is collapsed. **IsCollapsed** / **IsExpanded**: whether the section's cards are hidden (never true
+or not the section is collapsed; for a group it includes the repos of the groups inside it. **DirectCount**: how many
+of them are listed directly under the section (equal to `Count` when no group is inside it). **IsCollapsed** /
+**IsExpanded**: whether the section's cards are hidden (never true
 while a filter is active - a filter shows every match). **IsToggleEnabled**: whether the user can collapse or expand
 now - false while a filter is active.
 
-**AccessibleName**: the section, its count and its state in one sentence, for example `Work, 2 repos, collapsed`
-(singular for one repo), also the result of `ToString()`, which names the hosting list item for assistive technology
-(otherwise the item would be named after the type) (`AgentControl-RepoGroupHeaderViewModel-AccessibleNameIsText`).
-**ToggleTooltip** says `Collapse {Name}` or `Expand {Name}`, or -
-while toggling is disabled - that groups stay expanded while a filter is active so no match is hidden;
-**CountTooltip** says `1 repo` or `{n} repos` (`AgentControl-RepoGroupHeaderViewModel-DescribesSection`,
-`-ToggleExplained`).
+**Depth**, **ParentName**, **HasParent**, **IndentWidth**: where the group is in the tree - how many groups it is
+inside, the group it is directly inside (`null` at the top level and always for *Favorites* and *Ungrouped*, which are
+never inside a group) and the indent that depth gives: `IndentPerLevel` (20 device-independent pixels) for each level
+up to `MaxIndentedDepth` (8) levels, so a group nested deeper is drawn no further in while its depth in the data is not
+limited. The static `GetIndentWidth(depth)` is shared with `RepoCardViewModel` so a group and its repos line up
+(`AgentControl-RepoGroupHeaderViewModel-NestedPlace`).
 
-**ToggleCommand**, **RenameCommand**, **RemoveGroupCommand**, **AddRepoCommand** (`RelayCommand`) and the events
-**ToggleRequested**, **RenameRequested**, **RemoveGroupRequested**, **AddRepoRequested**: each command only raises its
+**AccessibleName**: the section, its count and its state in one sentence, for example `Work, 2 repos, collapsed`
+(singular for one repo), with `, inside {parent}` appended for a nested group so nested groups can be told apart (a
+top-level group's name is unchanged), also the result of `ToString()`, which names the hosting list item for assistive
+technology (otherwise the item would be named after the type)
+(`AgentControl-RepoGroupHeaderViewModel-AccessibleNameIsText`, `-NestedPlace`). **ToggleTooltip** says `Collapse {Name}`
+or `Expand {Name}`, or - while toggling is disabled - that groups stay expanded while a filter is active so no match is
+hidden; **CountTooltip** says `1 repo` or `{n} repos`, followed by `({m} directly in this group)` when `DirectCount`
+differs from `Count` (`AgentControl-RepoGroupHeaderViewModel-DescribesSection`, `-ToggleExplained`, `-NestedPlace`).
+
+**ToggleCommand**, **RenameCommand**, **RemoveGroupCommand**, **AddRepoCommand**, **NewSubgroupCommand**
+(`RelayCommand`) and the events
+**ToggleRequested**, **RenameRequested**, **RemoveGroupRequested**, **AddRepoRequested**, **NewSubgroupRequested**:
+each command only raises its
 event; `ToggleCommand` can execute only while `IsToggleEnabled` (`AgentControl-RepoGroupHeaderViewModel-Toggle`,
-`-ToggleUnavailable`, `-GroupActions`, `-RemoveGroupRequest`, `-AddRepoRequest`).
+`-ToggleUnavailable`, `-GroupActions`, `-RemoveGroupRequest`, `-AddRepoRequest`, `-NewSubgroupRequest`).
 
 **ColorName** (`string?`): the palette color the user chose for the group, in its canonical spelling, or `null` for
 none - always `null` for *Favorites* and *Ungrouped*, which cannot be colored. **HasColor** shows the accent bar on the
@@ -66,10 +79,14 @@ blank. *Postconditions*: `Count` is 0, the section is expanded, toggling is enab
 move is available. Throws `ArgumentException`
 (`ArgumentNullException` for `null`) for a blank name (`AgentControl-RepoGroupHeaderViewModel-RequiresName`).
 
-**Update(count, isCollapsed, isToggleEnabled)**: Brings the header up to date with the current list, in place, raising
-change notifications only for what changed (and for the derived accessible name and tooltips). The owner keeps one
-header instance per section and updates it rather than replacing it, so a header keeps the keyboard focus when it is
-toggled (`AgentControl-RepoGroupHeaderViewModel-UpdatesInPlace`).
+**Update(count, isCollapsed, isToggleEnabled, directCount = null)**: Brings the header up to date with the current list,
+in place, raising change notifications only for what changed (and for the derived accessible name and tooltips). The
+owner keeps one header instance per section and updates it rather than replacing it, so a header keeps the keyboard
+focus when it is toggled (`AgentControl-RepoGroupHeaderViewModel-UpdatesInPlace`).
+
+**UpdatePlace(depth, parentName)**: Sets where the group is in the tree - `Depth` and `ParentName` - and raises the
+notifications for `IndentWidth`, `HasParent` and the accessible name when they change; ignored (top level) for
+*Favorites* and *Ungrouped* (`AgentControl-RepoGroupHeaderViewModel-NestedPlace`).
 
 **UpdateColor(colorName)**: Sets `ColorName` to the palette color named by `colorName` (letter case ignored, through
 `CardColorPalette.Find`), or to `null` for `null`, a name the palette does not know, or a *Favorites* or *Ungrouped*

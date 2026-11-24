@@ -830,6 +830,11 @@ only raises its request (`AgentControl-RepoCardViewModel-NewGroupPrompt`) and th
 favorite that has a group (`AgentControl-RepoCardViewModel-GroupChipForFavorites`), both tested by
 `RepoCardViewModel_NewGroupCommand_RaisesRequest_AndChipShowsForGroupedFavorites`.
 
+**RepoCardViewModel_Depth_SetsIndentAndNotifies**: A card starts at depth 0 with no indent; given depth 2 its indent is
+twice the indent of one level and `IndentWidth` is announced as changed; given depth 100 its indent stops at the deepest
+indented level, the same as a header's. This scenario is tested by `RepoCardViewModel_Depth_SetsIndentAndNotifies`,
+covering `AgentControl-RepoCardViewModel-GroupDepthIndent`.
+
 **RepoCardViewModel_CardColor_ChooseResetRefuseAndFallBack**: The palette has one entry per avatar palette
 index with distinct names; a card with no choice uses the path-hash color; choosing "tEaL" stores `Teal` and moves
 the palette index and style class, and choosing Automatic returns to the hash color and clears the value

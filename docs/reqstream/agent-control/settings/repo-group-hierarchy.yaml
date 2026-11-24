@@ -80,15 +80,18 @@ sections:
 
       - id: AgentControl-RepoGroupHierarchy-PutInsideRegisters
         title: >-
-          The RepoGroupHierarchy class shall, when a group is put inside another group or at the
-          top level, register the moved group and every group it is now inside, so that they
-          exist until they are deleted.
+          The RepoGroupHierarchy class shall, when a group is put inside another group, register the
+          moved group and every group it is now inside so that they exist until they are deleted,
+          and shall, when a group is put at the top level, keep it registered if it was and leave it
+          unregistered if it was not.
         justification: |
           A group the user placed in the hierarchy must not vanish when its last repo leaves it,
-          and neither must the groups it sits in.
+          and neither must the groups it sits in; an ordinary top-level group that is only
+          reordered must behave exactly as before.
         tests:
           - RepoGroupHierarchy_PutInside_RegistersMovedGroupAndItsNewAncestors
           - RepoGroupHierarchy_PutInside_IntoUnregisteredGroup_RegistersIt
+          - RepoGroupHierarchy_PutInside_TopLevelUnregisteredGroup_StaysUnregistered
 
       # ---- Deleting a group but keeping what is in it ----
       - id: AgentControl-RepoGroupHierarchy-PopKeepsSubgroups

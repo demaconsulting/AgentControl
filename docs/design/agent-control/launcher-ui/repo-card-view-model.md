@@ -249,29 +249,34 @@ would change a repo's color on every launch. The view model carries no color: th
 `AvatarBackgroundN`/`AvatarForegroundN` resources (letter color chosen for contrast) from `AppStyles.axaml`.
 
 **Group and card color** (user-specific; stored only on the repo's `RecentRepo` in the per-user settings, never in the
-repository or its pin file). **GroupName** reads the stored name through `RepoGroupName.Sanitize` (a blank, overlong or
-reserved stored value yields a valid name or none), **HasGroup** is `GroupName is not null`, and **ShowGroupChip**
-(`IsFavorite && HasGroup`, `AgentControl-RepoCardViewModel-GroupChipForFavorites`) tells the card to show its group as a
-chip - needed only for a favorite, because a favorite is listed under Favorites instead of under its group.
-**MoveToGroup(name)** moves the repo into a group or, with `null`/blank, out of every group: the name is cleaned up,
-refused (returns `false`, nothing changes) when `RepoGroupName.Validate` fails (too long, or *Favorites*/*Ungrouped*),
-and given the spelling of an existing group that matches ignoring letter case (`GetExistingGroupNames()`, from the
-groups of all repos in the live settings, `AgentControl-RepoCardViewModel-GroupNameRules`, `-GroupList`); a real change
-is made through the owner (see *Changes go through the owner*) and, once saved, raises `GroupChanged` for
-`MainWindowViewModel` to re-section (`AgentControl-RepoCardViewModel-MoveToGroup`). **NewGroupCommand** raises
-`NewGroupRequested` (the view shows the name prompt and calls `MoveToGroup`; `-NewGroupPrompt`);
-**RemoveFromGroupCommand** (available while `HasGroup`) calls `MoveToGroup(null)`. **CardColorName** is the palette
-color's name read through `CardColorPalette.Find` - a missing, blank or unknown stored name gives `null`, the automatic
-color (**HasCustomCardColor**, **IsCardColorAutomatic**, `-CardColorStoredFallback`) - and **SetCardColor(name)** stores
-a palette name (letter case ignored; refused with `false` when not in the palette, `-CardColorUnknownRefused`) or `null`
-for Automatic, through the owner, then raises `CardColorChanged` and changes `AvatarColorIndex`/`AvatarStyleClass`
-(`-CardColor`, `-CardColorRecorded`). Only the tile changes: **Status**, the accent bar and every chip are independent
-of the color (`AgentControl-RepoCardViewModel-CardColorKeepsStatus`). `CardColorPalette` is a small static helper of
-this unit: ten named entries (Blue, Violet, Magenta, Green, Amber, Teal, Orange, Indigo, Red, Lime) whose position is
-the index of the theme-aware `AvatarBackgroundN`/`AvatarForegroundN` resources, so a chosen color is the same palette
-the automatic colors come from. Where the repo shows its own picture the tile keeps its light backing (so a logo drawn
-for a white page stays legible) and a chosen color is drawn as a 3 px ring around the picture (the `customColor` class);
-with no picture the color fills the tile and the letters use the entry's foreground resource.
+repository or its pin file). **Depth** (set by `MainWindowViewModel` each time it builds the list) is how many groups
+the group that lists the card is inside, and **IndentWidth** the indent that depth gives, the same as the header's
+(`RepoGroupHeaderViewModel.GetIndentWidth`), so a card lines up with its group's header
+(`AgentControl-RepoCardViewModel-GroupDepthIndent`). **GroupName** reads the stored name through
+`RepoGroupName.Sanitize` (a blank, overlong or reserved stored value yields a valid name or none), **HasGroup** is
+`GroupName is not null`, and **ShowGroupChip** (`IsFavorite && HasGroup`,
+`AgentControl-RepoCardViewModel-GroupChipForFavorites`) tells the card to show its group as a chip - needed only for a
+favorite, because a favorite is listed under Favorites instead of under its group. **MoveToGroup(name)** moves the repo
+into a group or, with `null`/blank, out of every group: the name is cleaned up, refused (returns `false`, nothing
+changes) when `RepoGroupName.Validate` fails (too long, or *Favorites*/*Ungrouped*), and given the spelling of an
+existing group that matches ignoring letter case (`GetExistingGroupNames()`, from the groups that exist in the live
+settings - those of all repos and the registered ones, `AppSettings.GetGroupNames`,
+`AgentControl-RepoCardViewModel-GroupNameRules`, `-GroupList`); a real change is made through the owner (see *Changes go
+through the owner*) and, once saved, raises `GroupChanged` for `MainWindowViewModel` to re-section
+(`AgentControl-RepoCardViewModel-MoveToGroup`). **NewGroupCommand** raises `NewGroupRequested` (the view shows the name
+prompt and calls `MoveToGroup`; `-NewGroupPrompt`); **RemoveFromGroupCommand** (available while `HasGroup`) calls
+`MoveToGroup(null)`. **CardColorName** is the palette color's name read through `CardColorPalette.Find` - a missing,
+blank or unknown stored name gives `null`, the automatic color (**HasCustomCardColor**, **IsCardColorAutomatic**,
+`-CardColorStoredFallback`) - and **SetCardColor(name)** stores a palette name (letter case ignored; refused with
+`false` when not in the palette, `-CardColorUnknownRefused`) or `null` for Automatic, through the owner, then raises
+`CardColorChanged` and changes `AvatarColorIndex`/`AvatarStyleClass` (`-CardColor`, `-CardColorRecorded`). Only the tile
+changes: **Status**, the accent bar and every chip are independent of the color
+(`AgentControl-RepoCardViewModel-CardColorKeepsStatus`). `CardColorPalette` is a small static helper of this unit: ten
+named entries (Blue, Violet, Magenta, Green, Amber, Teal, Orange, Indigo, Red, Lime) whose position is the index of the
+theme-aware `AvatarBackgroundN`/`AvatarForegroundN` resources, so a chosen color is the same palette the automatic
+colors come from. Where the repo shows its own picture the tile keeps its light backing (so a logo drawn for a white
+page stays legible) and a chosen color is drawn as a 3 px ring around the picture (the `customColor` class); with no
+picture the color fills the tile and the letters use the entry's foreground resource.
 
 **Group color on the tile** (`AgentControl-RepoCardViewModel-GroupColorFallback`). **GroupColorName** is the color the
 user chose for the repo's group, read from the live settings on every access through `AppSettings.FindGroupColor`

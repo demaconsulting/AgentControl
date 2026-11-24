@@ -23,7 +23,11 @@ N/A - standard test environment (no window, no files and no processes are involv
 - The toggle command can execute only while toggling is enabled and raises its request when executed; while it
   cannot, no request is raised and its tooltip explains the filter.
 - The rename and remove commands raise exactly one request per execution and change nothing themselves.
-- The add-repository command raises exactly one request per execution and changes nothing itself.
+- The add-repository command raises exactly one request per execution and changes nothing itself; so does the
+  new-subgroup command.
+- A nested group exposes its depth, its parent and the indent that depth gives (capped), names its parent in its
+  accessible name and, when its count includes groups inside it, says how many repos are directly in it; the built-in
+  sections stay top level.
 - A user group's color is exposed by name (canonical spelling), as the accent's style class, as the palette heading
   and as the accent's description, with change notifications; an unknown color or none leaves no color, and
   *Favorites* and *Ungrouped* never show one.
@@ -74,6 +78,19 @@ execution. This scenario is tested by `RepoGroupHeaderViewModel_RenameAndRemoveC
 **RepoGroupHeaderViewModel_AddRepoRequest**: The add-repository command is executed twice and two requests are raised.
 This scenario is tested by `RepoGroupHeaderViewModel_AddRepoCommand_RaisesRequest`, covering
 `AgentControl-RepoGroupHeaderViewModel-AddRepoRequest`.
+
+**RepoGroupHeaderViewModel_NewSubgroupRequest**: The new-subgroup command is executed once and one request is raised.
+This scenario is tested by `RepoGroupHeaderViewModel_NewSubgroupCommand_RaisesRequest`, covering
+`AgentControl-RepoGroupHeaderViewModel-NewSubgroupRequest`.
+
+**RepoGroupHeaderViewModel_NestedPlace**: A group updated to three repos with one directly in it is a top-level group
+(depth 0, no parent, no indent, a count tooltip that names the one directly in the group); given depth 2 and the parent
+`Client` it exposes both, an indent of twice the indent of a level and an accessible name that ends `, inside Client`;
+given depth 40 its indent stops at the deepest indented level while its depth stays 40. *Favorites* and *Ungrouped*
+headers given a depth and a parent stay top level. This scenario is tested by
+`RepoGroupHeaderViewModel_UpdatePlace_DescribesDepthParentIndentAndDirectCount` and the theory
+`RepoGroupHeaderViewModel_UpdatePlace_BuiltInSection_StaysTopLevel`, covering
+`AgentControl-RepoGroupHeaderViewModel-NestedPlace`.
 
 **RepoGroupHeaderViewModel_ShowsGroupColor**: A user group's header starts without a color (`Group color: None`); given
 `teal` it exposes `Teal`, `HasColor`, the style class `groupAccent5`, the heading and description `Group color: Teal`

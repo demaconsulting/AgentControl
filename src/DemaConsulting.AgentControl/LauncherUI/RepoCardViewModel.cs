@@ -594,6 +594,32 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     public bool ShowGroupChip => IsFavorite && HasGroup;
 
+    /// <summary>Backing field for <see cref="Depth"/>.</summary>
+    private int _depth;
+
+    /// <summary>
+    ///     Gets how many groups the card is inside in the list: the depth of the group whose section
+    ///     lists it, 0 for a card under Favorites, Ungrouped or a top-level group (and in a flat list).
+    ///     Set by the owning <see cref="MainWindowViewModel"/> each time it builds the list.
+    /// </summary>
+    public int Depth
+    {
+        get => _depth;
+        internal set
+        {
+            if (SetField(ref _depth, value))
+            {
+                OnPropertyChanged(nameof(IndentWidth));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets how far the card is indented from the left edge of the list, in device-independent
+    ///     pixels; the same indent as the header of the group that lists it.
+    /// </summary>
+    public double IndentWidth => RepoGroupHeaderViewModel.GetIndentWidth(Depth);
+
     /// <summary>
     ///     Gets the names of the groups that exist now (the groups of all repos in the settings),
     ///     sorted, for the "Move to group" submenu.

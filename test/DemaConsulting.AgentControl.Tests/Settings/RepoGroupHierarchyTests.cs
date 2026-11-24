@@ -220,6 +220,23 @@ public class RepoGroupHierarchyTests
     }
 
     /// <summary>
+    ///     Test that putting an ordinary top-level group at the top level changes nothing: it is not
+    ///     registered by being reordered.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_PutInside_TopLevelUnregisteredGroup_StaysUnregistered()
+    {
+        // Arrange
+        var hierarchy = new RepoGroupHierarchy(["Alpha", "Beta"], null, null);
+
+        // Act
+        var parents = hierarchy.PutInside("Beta", null);
+
+        // Assert
+        Assert.Empty(parents);
+    }
+
+    /// <summary>
     ///     Test that moving a group into itself or one of its descendants, or a group that does not
     ///     exist, is refused instead of making a loop.
     /// </summary>

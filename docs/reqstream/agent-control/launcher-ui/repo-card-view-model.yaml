@@ -978,6 +978,16 @@ sections:
         tests:
           - RepoCardViewModel_NewGroupCommand_RaisesRequest_AndChipShowsForGroupedFavorites
 
+      - id: AgentControl-RepoCardViewModel-GroupDepthIndent
+        title: >-
+          The RepoCardViewModel class shall expose how many groups the card is inside in the list
+          and the indent that depth gives, the same indent as the header of its group, and shall tell
+          the view when it changes.
+        justification: |
+          A repo listed in a nested group must line up with the header of the group that lists it.
+        tests:
+          - RepoCardViewModel_Depth_SetsIndentAndNotifies
+
       - id: AgentControl-RepoCardViewModel-CardColor
         title: >-
           The RepoCardViewModel class shall let the tile's color be chosen from the palette by

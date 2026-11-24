@@ -35,31 +35,42 @@ this order: it is **not** re-ordered when a repo is launched, refreshed, synced 
 (`AgentControl-MainWindowViewModel-StableOrder`). `DisplayedItems` and `DisplayedRepoCards` are derived from it
 (favorites first, then this order).
 
-**DisplayedItems**: `ObservableCollection<object>` — What the main window's list binds to: the
-visible repo cards interleaved with the `RepoGroupHeaderViewModel` of each section. While no repo
-is in a group the list is flat (no headers; favorites first, then the user's order from `RepoCards`,
-`AgentControl-MainWindowViewModel-FlatListWithoutGroups`, `-SortOrder`). Once
-at least one repo is in a group (`HasGroups`) it is sectioned: **Favorites** first (the favorite
-repos; a favorite is listed *only* there - not again under its group, so every repo appears once - while it keeps
-its group, and its card shows a chip with it, `-FavoriteListedOnce`), then **one section per group**, in the user's
-own group order - the groups with a position in `AppSettings.GroupOrder` in that order, then the groups without one
-alphabetically (ordinal, ignoring letter case), so the groups are alphabetical until the user orders them
-(`-GroupOrder`) - then **Ungrouped** last (`AgentControl-MainWindowViewModel-GroupSections`). Each
-section starts with a header that carries the section's name and count, and a section with no matching repo has no
+**DisplayedItems**: `ObservableCollection<object>` — What the main window's list binds to: the visible repo cards
+interleaved with the `RepoGroupHeaderViewModel` of each section. While no repo is in a group the list is flat (no
+headers; favorites first, then the user's order from `RepoCards`,
+`AgentControl-MainWindowViewModel-FlatListWithoutGroups`, `-SortOrder`). Once at least one repo is in a group
+(`HasGroups`) it is sectioned: **Favorites** first (the favorite repos; a favorite is listed *only* there - not again
+under its group, so every repo appears once - while it keeps its group, and its card shows a chip with it,
+`-FavoriteListedOnce`), then **one section per group**, in the user's own group order - the groups with a position in
+`AppSettings.GroupOrder` in that order, then the groups without one alphabetically (ordinal, ignoring letter case), so
+the groups are alphabetical until the user orders them (`-GroupOrder`) - then **Ungrouped** last
+(`AgentControl-MainWindowViewModel-GroupSections`). **Groups nest**: the groups form a tree (`AppSettings.GroupParents`,
+see the *Settings* design), and a group's header is followed by the headers (and repos) of its **subgroups**, in their
+own order, and only then by the group's **own repos** that are not favorites
+(`AgentControl-MainWindowViewModel-NestedGroupTree`). A group's header counts the matching repos of its **whole
+subtree**, and its tooltip says how many are directly in it; the headers and the cards under them know their depth
+(`RepoGroupHeaderViewModel.Depth`, `RepoCardViewModel.Depth`) so the window can indent them. A group is listed when
+something in its subtree matches or - with no filter - when it is *registered* (created inside another group or moved
+within the hierarchy), so an empty group stays visible with a count of 0 until it is removed
+(`-NestedGroupEmptyListed`); a group that is not registered is listed only while a repo is in it, as before. With no
+hierarchy stored every group is top level and the list is the one that always was (`-NestedGroupFlatListUnchanged`).
+Each section starts with a header that carries the section's name and count, and a section with no matching repo has no
 header (`-GroupSectionHeaders`). Within a section repos appear in their relative order in `RepoCards`, the user's own
-order (`-GroupSectionRepoOrder`).
-The cards of a collapsed section are left out; its header stays with its count. While a filter is
-active every section is shown expanded and counts only the matches; sections without a match have no header, the
-headers' toggles are disabled and the remembered collapsed names are left alone
-(`AgentControl-MainWindowViewModel-GroupCollapse`, `-GroupFilter`, `-GroupFilterCounts`, `-GroupFilterOmitsEmpty`,
-`-GroupFilterToggleDisabled`, `-GroupFilterKeepsCollapsedState`).
+order (`-GroupSectionRepoOrder`). The cards of a collapsed section are left out, and so is its whole subtree; its header
+stays with its count. While a filter is active every section is shown expanded and counts only the matches; sections
+without a match have no header (so the groups that hold a match are listed, the others not), the headers' toggles are
+disabled and the remembered collapsed names are left alone (`AgentControl-MainWindowViewModel-GroupCollapse`,
+`-GroupFilter`, `-GroupFilterCounts`, `-GroupFilterOmitsEmpty`, `-GroupFilterToggleDisabled`,
+`-GroupFilterKeepsCollapsedState`).
 
 **DisplayedRepoCards**: `ObservableCollection<RepoCardViewModel>` — The filtered/sorted cards of
 `DisplayedItems` (those inside a collapsed section are not included), in the same order.
 
-**HasGroups**: `bool` (derived) — `true` when at least one repo is in a group; selects sectioned
-over flat. **GroupNames**: `IReadOnlyList<string>` (derived) — the distinct group names,
-alphabetically (the card menu's "Move to group" list; the sections use the user's group order instead).
+**HasGroups**: `bool` (derived) — `true` when at least one repo is in a group or the hierarchy holds a group (one that
+may have no repo); selects sectioned over flat. **GroupNames**: `IReadOnlyList<string>` (derived) — the names of the
+groups that exist (`AppSettings.GetGroupNames`: those a repo is in and the registered ones), alphabetically (the card
+menu's "Move to group" list, which so offers empty and nested groups too, `-GroupNamesIncludeEmptyGroups`; the sections
+use the user's group order and the tree instead).
 
 **FilterText**: `string?` — The current filter text typed into the recent-repos search box;
 setting it recomputes `DisplayedItems` and `DisplayedRepoCards` and raises `IsReorderEnabled`.
@@ -76,8 +87,9 @@ text.
 
 **RepoMove**: `enum` (`Top`, `Up`, `Down`, `Bottom`) — the four moves of the card menu.
 **RepoGroupMove**: `enum` (`Up`, `Down`) — the two moves of a group header's menu.
-**GroupDropTarget**: `record` (`GroupName`, `InsertBefore`) — where a dragged group header lands: before (the upper
-half of its header) or after (the lower half) another of the user's groups.
+**GroupDropTarget**: `record` (`GroupName`, `InsertBefore`, `Inside`) — where a dragged group header lands: before (the
+upper part of its header) or after (the lower part) another of the user's groups, as that group's sibling, or - with
+`Inside` - inside it as its last subgroup (the middle part).
 **RepoDropTarget**: `record` (`Kind`, `Name`, `Anchor`, `InsertBefore`) — a place a dragged card may land: a section
 (its kind and display name) and either an anchor card of that section with "before/after it", or no anchor, which
 means the end of the section (a drop on its header). `RepoDropTarget.ForHeader(header)` and
@@ -269,18 +281,18 @@ through the private `CommitSettingsChange(change)`:
    worker thread shortly after the last change; the UI thread never waits for the settings file.
 3. *Refresh*: the callers then bring the cards and the displayed list up to date.
 
-The change therefore never fails: a write that fails leaves the change in effect - the settings in memory, the cards
-and the list - and the writer keeps the snapshot and writes it with the next change, the next flush or the close
-(`AgentControl-MainWindowViewModel-ChangeAppliedWhenSaved`, `-FailedSaveChangesNothing`). The writer reports the
-first failure of a streak through `WriteFailed`, which `OnSettingsWriteFailed` turns into `SettingsSaveFailed` with
-the reason (redacted by `SecretRedactor.SafeMessage`) and the note that the changes stay in effect; after the view
-model was disposed nothing is raised (`-SaveFailureReported`). The direct operations (`RemoveRepo`,
-`ToggleGroupCollapsed`, `RenameGroup`, `RemoveGroup`, `SetGroupColor`, `MoveGroup`, `DropGroup`, `MoveCard`,
-`DropCard`) no longer throw or return `false` for a failed save. The changes that originate in a card are made through
-the private `CommitRepoChange(repo, change)`, handed to each card as its `commitChange` callback when `CreateCard`
-builds it: it applies the change to the repo's live entry through `CommitSettingsChange` (or directly, without saving,
-when the repo is no longer in the list) and returns `true`; the card applies its own property and raises its change
-event (see the `RepoCardViewModel` design).
+The change therefore never fails: a write that fails leaves the change in effect - the settings in memory, the cards and
+the list - and the writer keeps the snapshot and writes it with the next change, the next flush or the close
+(`AgentControl-MainWindowViewModel-ChangeAppliedWhenSaved`, `-FailedSaveChangesNothing`). The writer reports the first
+failure of a streak through `WriteFailed`, which `OnSettingsWriteFailed` turns into `SettingsSaveFailed` with the reason
+(redacted by `SecretRedactor.SafeMessage`) and the note that the changes stay in effect; after the view model was
+disposed nothing is raised (`-SaveFailureReported`). The direct operations (`RemoveRepo`, `ToggleGroupCollapsed`,
+`RenameGroup`, `RemoveGroup`, `CreateSubgroup`, `SetGroupColor`, `MoveGroup`, `DropGroup`, `MoveCard`, `DropCard`) no
+longer throw or return `false` for a failed save. The changes that originate in a card are made through the private
+`CommitRepoChange(repo, change)`, handed to each card as its `commitChange` callback when `CreateCard` builds it: it
+applies the change to the repo's live entry through `CommitSettingsChange` (or directly, without saving, when the repo
+is no longer in the list) and returns `true`; the card applies its own property and raises its change event (see the
+`RepoCardViewModel` design).
 
 *Confirmed saves*: an add and the Settings window's values must be on disk before they are applied, so their failure can
 be answered (Retry/Discard, or the Settings window staying open) and Discard has nothing to undo. They go through the
@@ -769,13 +781,19 @@ case-insensitive substring match against `FilterText` on repo name or path
 (`AgentControl-MainWindowViewModel-SearchFilter`), then either the flat order (favorite status descending, then the
 order of `RepoCards` - a stable sort that never looks at `LastLaunchedUtc`:
 `AgentControl-MainWindowViewModel-SortOrder`) or, when `HasGroups`, the sections described under *DisplayedItems*
-(`AgentControl-MainWindowViewModel-GroupSections`), each filled in `RepoCards` order. The groups' sections are arranged
-by the pure `RepoGroupHierarchy.ArrangeGroups(names, order)` (in the Settings subsystem): the names with a position in
-the stored order (`AppSettings.GroupOrder`) in that order, then the others alphabetically by `RepoGroupName.Comparer`; a
-stored name that matches no group is skipped and names keep their spelling (`-GroupOrder`). Each header is given its
-group's color (`header.UpdateColor(_settings.FindGroupColor(name))`, `null` for *Favorites* and *Ungrouped*,
-`-GroupColorShown`) and, for a user group, whether it can move up or down (`header.UpdateOrder` with the reasons of
-`GetGroupMoveDisabledReason`). A section is collapsed only if no filter is active and its name is in
+(`AgentControl-MainWindowViewModel-GroupSections`), each filled in `RepoCards` order. The groups form a tree that is
+walked depth first with an explicit stack (so any depth works): `BuildGroupPlan` builds a `RepoGroupHierarchy` from the
+groups that exist, `GroupParents` and `GroupOrder` (a card's group the settings do not list yet is added, so a card is
+never lost), and the groups that have a section (registered, or with a non-favorite repo anywhere in their subtree). The
+siblings of each level are arranged by `RepoGroupHierarchy.GetChildren` - the names with a position in the stored order
+(`AppSettings.GroupOrder`) in that order, then the others alphabetically by `RepoGroupName.Comparer`; a stored name that
+matches no group is skipped and names keep their spelling (`-GroupOrder`). Each header is given its count (the matches
+in its subtree) and the number directly in the group, its depth and its parent, its group's color
+(`header.UpdateColor(_settings.FindGroupColor(name))`, `null` for *Favorites* and *Ungrouped*, `-GroupColorShown`) and,
+for a user group, whether it can move up or down (`header.UpdateOrder` with the reasons of
+`GetGroupMoveDisabledReason`); each card is given the depth of the group that lists it. A group is listed when its
+subtree has a match or, with no filter, it is registered; a collapsed group lists nothing below its header
+(`-NestedGroupTree`, `-NestedGroupEmptyListed`). A section is collapsed only if no filter is active and its name is in
 `AppSettings.CollapsedGroups` (`AgentControl-MainWindowViewModel-GroupCollapse`, `-GroupFilter`). Both collections are
 brought to the new state **in place** (remove what is gone, move and insert the rest) rather than cleared, so unchanged
 rows keep their controls and focus. Also re-raises change notifications for `HasGroups`, `GroupNames`,
@@ -792,23 +810,35 @@ kept by `ApplySettingsAsync` (`-GroupCollapseKeptOnApplySettings`). The built-in
 (a null list, blank, reserved or overlong names, names differing only in letter case) are read through
 `RepoGroupName` so that the list is still shown (`-DamagedGroupSettings`).
 
-**RenameGroup**: Renames a group — every member's group name and the group's collapsed entry, color and place in the
-group order move to
-the new name (`AgentControl-MainWindowViewModel-GroupManagement`, `-GroupSettingsFollowRenameAndRemove`; the color and
-the order are decided once, from the live state, before the change) — and returns `false` (changing nothing) for an
-unknown group, an invalid name or another group's name; changing only the letter case of the group's own name is
-allowed (`-GroupRenameRules`).
-**RemoveGroup**: Removes a group — its repos become ungrouped, its collapsed entry, color and place in the group order
-are forgotten
-(`-GroupRemove`, `-GroupSettingsFollowRenameAndRemove`). Both are applied through `CommitSettingsChange`, persist to
-the settings file only (never to a
-repository, `-GroupSettingsOnly`) and then refresh the cards' group properties (`FinishGroupEdit`, which calls
-`RaiseGroupPropertiesChanged` on every card) and the list. A group whose last repo leaves it by any other path (a
-card moved out, a repo removed) forgets its color and position the same way, through the repair that
-`CommitSettingsChange` runs after every change. A header's
-`RenameCommand` and `RemoveGroupCommand` are forwarded as the `GroupRenameRequested` and `GroupRemoveRequested`
+**RenameGroup**: Renames a group — every member's group name and the group's collapsed entry, color, place in the group
+order and place in the hierarchy (as the group and as the parent of other groups, `-NestedGroupRename`) move to the new
+name (`AgentControl-MainWindowViewModel-GroupManagement`, `-GroupSettingsFollowRenameAndRemove`; the color and the order
+are decided once, from the live state, before the change) — and returns `false` (changing nothing) for an unknown group,
+an invalid name or another group's name; changing only the letter case of the group's own name is allowed
+(`-GroupRenameRules`). **RemoveGroup**: Removes a group but keeps what is in it - the group's repos go to the group it
+was inside (they become ungrouped for a top-level group, so the flat behavior is unchanged), its subgroups go there too
+and take the group's place in the group order in their own order (`RepoGroupHierarchy.Pop`), and its collapsed entry,
+color, place in the group order and place in the hierarchy are forgotten (`-GroupRemove`,
+`-NestedGroupRemoveKeepsContents`, `-GroupSettingsFollowRenameAndRemove`). The repos keep their positions in the repo
+list. Both are applied through `CommitSettingsChange`, persist to the settings file only (never to a repository,
+`-GroupSettingsOnly`) and then refresh the cards' group properties (`FinishGroupEdit`, which calls
+`RaiseGroupPropertiesChanged` on every card) and the list. A group whose last repo leaves it by any other path (a card
+moved out, a repo removed) forgets its color and position the same way unless it is registered, through the repair that
+`CommitSettingsChange` runs after every change. A header's `RenameCommand`, `RemoveGroupCommand` and
+`NewSubgroupCommand` are forwarded as the `GroupRenameRequested`, `GroupRemoveRequested` and `GroupNewSubgroupRequested`
 events, which change nothing by themselves (`-GroupHeaderRequests`); `MainWindow` shows the name prompt or a
 confirmation and calls these methods.
+
+**CreateSubgroup**: Creates a group inside another group (`AgentControl-MainWindowViewModel-NestedGroupCreate`).
+
+- *Parameters*: `string parentName` (an existing group; letter case ignored), `string name`.
+- *Returns*: `bool` — `true` when the group was created; `false`, changing nothing, for a parent that does not exist, a
+  name that is invalid (`RepoGroupName.Validate`) or any group already has (names are unique across the whole tree, an
+  empty group's name included), or Favorites/Ungrouped.
+- *Postconditions*: The new group is registered as a child of the parent, and the parent and every group it is inside
+  are registered too, so all of them exist until deleted; the parent and its ancestors are expanded so the new group is
+  seen. Stored through `CommitSettingsChange` (applied at once, written in the background, only in the settings file).
+  The new group has no stored place, so it is listed after the siblings that have one, alphabetically with the others.
 
 **SetGroupColor**: Gives one of the user's groups a palette color, or takes it away
 (`AgentControl-MainWindowViewModel-GroupColor`, `-GroupColorShown`).
@@ -831,32 +861,41 @@ why (`AgentControl-MainWindowViewModel-MoveGroupAvailability`).
   item: `GroupReorderDisabledWhileFilteringMessage` while the filter has text; "Favorites always come first and
   Ungrouped last, so they cannot be moved." for a built-in name; "This group is no longer in the list." for a group
   that has no section of its own (all its repos are favorites, or it no longer exists); "This group is already the
-  first group." for Up on the first and "This group is already the last group." for Down on the last of the **movable
-  groups** - the groups that have a section, in the order they are shown (`GetMovableGroups`). `CanMoveGroup` is
+  first group." for Up on the first and "This group is already the last group." for Down on the last of the **sibling
+  groups** - the groups that have a section and are inside the same parent group (or at the top level), in the order
+  they are shown; for a nested group the wording ends "... in its parent group." (`-NestedGroupReorder`).
+  `CanMoveGroup` is
   `true` exactly when there is no reason.
 
-**MoveGroup**: Moves a group one place up or down and saves the new order (`AgentControl-MainWindowViewModel-MoveGroup`,
-`-GroupOrderPersisted`).
+**MoveGroup**: Moves a group one place up or down among its siblings and saves the new order
+(`AgentControl-MainWindowViewModel-MoveGroup`, `-GroupOrderPersisted`).
 
-- *Postconditions*: When the move is allowed the group swaps places with its neighbor among the movable groups (it is
-  placed before the previous one or after the next one) by `PlaceGroup`; otherwise nothing changes and `false` is
+- *Postconditions*: When the move is allowed the group swaps places with its neighbor among the sibling groups (it is
+  placed before the previous one or after the next one) by `PlaceGroup`, without changing its parent; otherwise nothing
+  changes and `false` is
   returned. A header's `MoveRequested` is wired to this method in `GetHeader`.
 
 **CanDropGroup** / **DropGroup**: Whether a dragged group header may be dropped at a `GroupDropTarget`, and the drop
-itself (`AgentControl-MainWindowViewModel-DropGroup`).
+itself (`AgentControl-MainWindowViewModel-DropGroup`, `-NestedGroupDrop`).
 
 - *Postconditions*: `CanDropGroup` is pure and refuses while the filter has text, a drop on the dragged group's own
-  header, and a dragged or target group that is not a movable group (no section of its own, unknown, or a built-in
-  section). `DropGroup` places the dragged group before or after the target group by `PlaceGroup`; a collapsed group
+  header, a dragged or target group that has no section of its own (unknown, or a built-in
+  section), and a drop that would put the group inside itself or one of its subgroups - next to or inside any of them
+  (`RepoGroupHierarchy.CanMove`). The group ends up inside the target when the drop is `Inside`, otherwise inside the
+  target's parent (or at the top level), so dropping next to a nested header takes the group out of its old parent.
+  `DropGroup` then places the group (as the last subgroup of the target for `Inside`, otherwise before or after the
+  target) by `PlaceGroup`; a collapsed group
   stays collapsed. It returns `false`, changing nothing, when refused.
 
-**PlaceGroup** (private): Puts a group before or after another one and saves the order.
+**PlaceGroup** (private): Puts a group inside a parent (or at the top level) and before or after another one, and saves.
 
-- *Postconditions*: The new order is decided once, from the live state: the **full** arranged list of every group
-  (`RepoGroupHierarchy.ArrangeGroups(GroupNames, GroupOrder)`, which includes groups whose repos are all favorites, so
-  the stored order stays complete) without the group, with the group inserted next to the anchor. When that equals the
-  current order nothing is saved and `true` is returned. Otherwise the whole list is stored as `AppSettings.GroupOrder`
-  through `CommitSettingsChange` - so groups that had no stored position keep the place they were shown at - and the
+- *Postconditions*: The new order and hierarchy are decided once, from the live state: the **full** arranged list of
+  every group (`RepoGroupHierarchy.ArrangeGroups`, which includes groups whose repos are all favorites, so
+  the stored order stays complete) without the group, with the group inserted next to the anchor (no anchor leaves the
+  order alone), and the stored parents from `RepoGroupHierarchy.PutInside` (a group put inside another is registered
+  with the groups it is inside; an ordinary top-level group that is only reordered is not, so a flat list is untouched).
+  When neither differs from what is stored nothing is saved and `true` is returned. Otherwise both are stored in **one**
+  `CommitSettingsChange` - so groups that had no stored position keep the place they were shown at - and the
   list is recomputed; `true` is returned. The saved order is what the next start reads (`-GroupOrderPersisted`).
 
 **GetSectionOf** (internal, static): The section a card is listed in: **Favorites** for a favorite, otherwise its group,
@@ -992,8 +1031,10 @@ quietly.
   **AppLogging** (`Logging` subsystem) — logs, through a `SecretRedactingLogger` (`PackageCredentials`), the settings
   that could not be written at the close;
   **RepoGroupName** (`Settings` subsystem) — the group-name rules used for sorting, validation and
-  repair; **AppSettings** (`Settings` subsystem data type) — `FindGroupColor` and `RepairGroupSettings` for the group
-  colors and group order.
+  repair; **RepoGroupHierarchy** (`Settings` subsystem) — the group tree: the listing order, the siblings of a group,
+  which moves are allowed and what a drop, a creation or a removal stores; **AppSettings** (`Settings` subsystem data
+  type) — `FindGroupColor`, `GetGroupNames` and `RepairGroupSettings` for the groups, their hierarchy, colors and
+  order.
 - **PackageVersionCache** (`AgentPackageManagement` subsystem) — shared across all cards; invalidated per source by
   `ApplySettingsAsync` when a package source was edited or removed, and entirely at the start of each periodic re-check
   round.

@@ -310,6 +310,25 @@ sections:
           - MainWindow_FavoriteInGroup_ShowsGroupChip
           - MainWindow_GroupOrder_StoredOrderThenAlphabeticalBetweenFavoritesAndUngrouped
 
+      - id: AgentControl-LauncherUI-NestedGroupTree
+        title: >-
+          The LauncherUI subsystem shall let a group contain other groups, listing them as a tree - each
+          group's header followed by its subgroups and then by its own repos, every header saying which
+          group it is inside and counting the repos of its whole subtree - with a collapsed group hiding
+          its whole subtree, a group that was created inside another listed even when no repo is in it,
+          and a list without any nested group looking exactly as it did.
+        justification: |
+          A flat list of groups cannot express customer and then project; a tree scales to a large
+          collection of repos and matches how developers organize their work.
+        children:
+          - AgentControl-MainWindowViewModel-NestedGroupTree
+          - AgentControl-MainWindowViewModel-NestedGroupFlatListUnchanged
+          - AgentControl-MainWindowViewModel-NestedGroupEmptyListed
+          - AgentControl-RepoGroupHeaderViewModel-NestedPlace
+          - AgentControl-RepoCardViewModel-GroupDepthIndent
+        tests:
+          - MainWindow_NestedGroups_ListSubgroupsBeforeOwnReposAndCollapseHidesSubtree
+
       - id: AgentControl-LauncherUI-GroupAddRepository
         title: >-
           The LauncherUI subsystem shall offer "Add repository..." as the first item of the menu of
@@ -352,6 +371,7 @@ sections:
           - AgentControl-RepoCardViewModel-GroupNameRules
           - AgentControl-RepoCardViewModel-GroupList
           - AgentControl-RepoCardViewModel-NewGroupPrompt
+          - AgentControl-MainWindowViewModel-GroupNamesIncludeEmptyGroups
         tests:
           - MainWindow_CardMenu_MoveToGroupSubmenu_ListsChoicesAndMovesRepo
           - MainWindow_NewGroupMenuItem_PromptsForNameAndCreatesGroup
@@ -383,7 +403,8 @@ sections:
       - id: AgentControl-LauncherUI-RepoGroupManagement
         title: >-
           The LauncherUI subsystem shall offer, in a group's header, renaming and removing the
-          group, the repos of a removed group becoming ungrouped.
+          group, the repos of a removed group going to the group it was inside or, at the top level,
+          becoming ungrouped, and creating a new group inside the group.
         justification: |
           Groups change over time; the header is where the user sees the group, so it is where the
           group is managed.
@@ -392,8 +413,12 @@ sections:
           - AgentControl-MainWindowViewModel-GroupRenameRules
           - AgentControl-MainWindowViewModel-GroupRemove
           - AgentControl-MainWindowViewModel-GroupHeaderRequests
+          - AgentControl-MainWindowViewModel-NestedGroupCreate
+          - AgentControl-MainWindowViewModel-NestedGroupRename
+          - AgentControl-MainWindowViewModel-NestedGroupRemoveKeepsContents
           - AgentControl-RepoGroupHeaderViewModel-GroupActions
           - AgentControl-RepoGroupHeaderViewModel-RemoveGroupRequest
+          - AgentControl-RepoGroupHeaderViewModel-NewSubgroupRequest
           - AgentControl-GroupNameViewModel-Rename
           - AgentControl-GroupNameViewModel-RenameStartsWithCurrentName
           - AgentControl-GroupNameViewModel-RenameAcceptsCaseChange
@@ -1218,6 +1243,7 @@ sections:
         children:
           - AgentControl-MainWindowViewModel-MoveGroup
           - AgentControl-MainWindowViewModel-MoveGroupAvailability
+          - AgentControl-MainWindowViewModel-NestedGroupReorder
           - AgentControl-RepoGroupHeaderViewModel-MoveRequests
         tests:
           - MainWindow_HeaderMenu_MoveUpDown_ReorderGroupsAndDisableAtTheEnds
@@ -1234,6 +1260,7 @@ sections:
           group drag must not change how cards are dragged or toggle the section it was grabbed by.
         children:
           - AgentControl-MainWindowViewModel-DropGroup
+          - AgentControl-MainWindowViewModel-NestedGroupDrop
         tests:
           - MainWindow_DragGroupHeader_BelowAnotherGroup_ReordersGroupsWithLineFeedback
           - MainWindow_DragGroupHeader_OntoBuiltInSectionOrCard_IsRefused

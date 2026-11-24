@@ -155,6 +155,86 @@ public class RepoGroupHeaderViewModelTests
     }
 
     /// <summary>
+    ///     Test that the new-subgroup command only raises its request.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHeaderViewModel_NewSubgroupCommand_RaisesRequest()
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Work");
+        var requests = 0;
+        header.NewSubgroupRequested += (_, _) => requests++;
+
+        // Act
+        header.NewSubgroupCommand.Execute(null);
+
+        // Assert
+        Assert.Equal(1, requests);
+    }
+
+    /// <summary>
+    ///     Test that a nested group knows its depth, parent and indent (capped so a deep group stays in
+    ///     view), says which group it is inside in its accessible name, and that a count that includes
+    ///     subgroups says how many repos are directly in the group.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHeaderViewModel_UpdatePlace_DescribesDepthParentIndentAndDirectCount()
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Project");
+        header.Update(count: 3, isCollapsed: false, isToggleEnabled: true, directCount: 1);
+
+        // Assert: a top-level group
+        Assert.Multiple(
+            () => Assert.Equal(0, header.Depth),
+            () => Assert.False(header.HasParent),
+            () => Assert.Equal(0, header.IndentWidth),
+            () => Assert.Equal("Project, 3 repos, expanded", header.AccessibleName),
+            () => Assert.Equal("3 repos (1 directly in this group)", header.CountTooltip));
+
+        // Act
+        header.UpdatePlace(depth: 2, parentName: "Client");
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal(2, header.Depth),
+            () => Assert.Equal("Client", header.ParentName),
+            () => Assert.True(header.HasParent),
+            () => Assert.Equal(2 * RepoGroupHeaderViewModel.IndentPerLevel, header.IndentWidth),
+            () => Assert.Equal("Project, 3 repos, expanded, inside Client", header.AccessibleName));
+
+        // Act: deeper than the indent goes
+        header.UpdatePlace(depth: 40, parentName: "Deep");
+
+        // Assert
+        Assert.Equal(
+            RepoGroupHeaderViewModel.MaxIndentedDepth * RepoGroupHeaderViewModel.IndentPerLevel, header.IndentWidth);
+        Assert.Equal(40, header.Depth);
+    }
+
+    /// <summary>
+    ///     Test that the built-in sections are never inside a group and so ignore the place they are given.
+    /// </summary>
+    /// <param name="kindName">The name of the kind of built-in section.</param>
+    [Theory]
+    [InlineData(nameof(RepoGroupKind.Favorites))]
+    [InlineData(nameof(RepoGroupKind.Ungrouped))]
+    public void RepoGroupHeaderViewModel_UpdatePlace_BuiltInSection_StaysTopLevel(string kindName)
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(Enum.Parse<RepoGroupKind>(kindName), "Section");
+
+        // Act
+        header.UpdatePlace(depth: 3, parentName: "Client");
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal(0, header.Depth),
+            () => Assert.Null(header.ParentName),
+            () => Assert.Equal(0, header.IndentWidth));
+    }
+
+    /// <summary>
     ///     Test that the header's text form is its accessible name, which names the hosting list item
     ///     for assistive technology instead of the type name.
     /// </summary>

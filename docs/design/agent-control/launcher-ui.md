@@ -78,12 +78,14 @@ collapsed sections.)
   order. The order is the user's own, never the launch time: with no repo in a group it is flat - favorites
   first, then the other repos in the order the user keeps them in (a new repo at the end, Move and drag reorder it).
   Once a repo is in a group it is sectioned - Favorites (a favorite only
-  there), the user's groups in the user's own order (alphabetically until the user orders them), Ungrouped - with
+  there), the user's groups in the user's own order (alphabetically until the user orders them; groups may contain
+  other groups and are then listed as a tree, each group's subgroups before its own repos), Ungrouped - with
   collapsible sections that a filter shows in
   full, each section showing its repos in that same relative order
   (`AgentControl-LauncherUI-RecentReposDisplay`, `AgentControl-LauncherUI-SearchFilter`,
   `AgentControl-LauncherUI-SortOrder`, `AgentControl-LauncherUI-StableRepoOrder`,
-  `AgentControl-LauncherUI-RepoGroups`, `AgentControl-LauncherUI-GroupOrder`).
+  `AgentControl-LauncherUI-RepoGroups`, `AgentControl-LauncherUI-GroupOrder`,
+  `AgentControl-LauncherUI-NestedGroupTree`).
 - *Constraints*: Recomputed synchronously on the UI thread whenever a dependency changes, updating the
   collection in place so unchanged rows keep their controls.
 

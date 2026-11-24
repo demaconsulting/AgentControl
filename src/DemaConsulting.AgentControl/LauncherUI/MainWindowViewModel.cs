@@ -210,12 +210,17 @@ internal enum RepoGroupMove
 }
 
 /// <summary>
-///     Where a dragged group header is dropped: next to another of the user's groups.
+///     Where a dragged group header is dropped: next to another of the user's groups, or inside it.
 /// </summary>
 /// <param name="GroupName">The group whose header the dragged one is dropped on.</param>
 /// <param name="InsertBefore"><see langword="true"/> to put the dragged group before
-///     <paramref name="GroupName"/> (the upper half of its header), <see langword="false"/> after it.</param>
-internal sealed record GroupDropTarget(string GroupName, bool InsertBefore);
+///     <paramref name="GroupName"/> (the upper third of its header), <see langword="false"/> after it
+///     (the lower third). The dragged group becomes a sibling of <paramref name="GroupName"/>, so it
+///     leaves the group it was in when that is another one. Ignored when <paramref name="Inside"/> is
+///     set.</param>
+/// <param name="Inside"><see langword="true"/> to put the dragged group inside
+///     <paramref name="GroupName"/>, as its last subgroup (the middle third of the header).</param>
+internal sealed record GroupDropTarget(string GroupName, bool InsertBefore, bool Inside = false);
 
 /// <summary>
 ///     The four ways the "Move" items of a card's menu change a repo's place within its section.
@@ -780,10 +785,11 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<object> DisplayedItems { get; }
 
     /// <summary>
-    ///     Gets a value indicating whether at least one repo is in a group of the user's own, which
-    ///     is what switches the list from flat to sectioned (with headers).
+    ///     Gets a value indicating whether at least one repo is in a group of the user's own, or a
+    ///     group exists in the hierarchy with no repo in it, which is what switches the list from flat to
+    ///     sectioned (with headers).
     /// </summary>
-    public bool HasGroups => RepoCards.Any(card => card.HasGroup);
+    public bool HasGroups => RepoCards.Any(card => card.HasGroup) || (_settings.GroupParents?.Count ?? 0) > 0;
 
     /// <summary>
     ///     Gets the names of the groups that exist now, alphabetically.
@@ -3437,6 +3443,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // No group anywhere: a flat list, favorites first, then the user's own order
             foreach (var card in filtered.OrderByDescending(card => card.IsFavorite))
             {
+                card.Depth = 0;
                 items.Add(card);
                 cards.Add(card);
             }
@@ -3444,22 +3451,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         else
         {
             var matches = filtered.ToList();
+            var plan = BuildGroupPlan();
 
-            // A favorite is listed only under Favorites; every other repo under its group or, with
-            // none, under Ungrouped
+            // A favorite is listed only under Favorites; every other repo under its group, or, with
+            // none, under Ungrouped. The groups form a tree: a group's header is followed by its
+            // subgroups (each with theirs) and then by the group's own repos.
             AddSection(RepoGroupKind.Favorites, RepoGroupName.FavoritesName, matches.Where(card => card.IsFavorite));
-            var groupNames = RepoGroupHierarchy.ArrangeGroups(
-                matches.Where(card => !card.IsFavorite && card.HasGroup).Select(card => card.GroupName!),
-                _settings.GroupOrder);
-            foreach (var groupName in groupNames)
-            {
-                AddSection(
-                    RepoGroupKind.Group,
-                    groupName,
-                    matches.Where(card =>
-                        !card.IsFavorite && card.HasGroup && RepoGroupName.Comparer.Equals(card.GroupName!, groupName)));
-            }
-
+            AddGroupTree(matches, plan);
             AddSection(
                 RepoGroupKind.Ungrouped, RepoGroupName.UngroupedName, matches.Where(card => !card.IsFavorite && !card.HasGroup));
         }
@@ -3478,8 +3476,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasNoDisplayedRepos));
         OnPropertyChanged(nameof(EmptyStateMessage));
 
-        // Adds one section: its header (when it has any match) and, unless collapsed, its cards. A
-        // filter shows everything, whatever the remembered collapsed state.
+        // Adds one built-in section: its header (when it has any match) and, unless collapsed, its
+        // cards. A filter shows everything, whatever the remembered collapsed state.
         void AddSection(RepoGroupKind kind, string name, IEnumerable<RepoCardViewModel> sectionCards)
         {
             var members = sectionCards.ToList();
@@ -3491,21 +3489,125 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var collapsed = !isFiltering && IsGroupCollapsed(name);
             var header = GetHeader(kind, name);
             header.Update(members.Count, collapsed, isToggleEnabled: !isFiltering);
-            header.UpdateColor(kind == RepoGroupKind.Group ? _settings.FindGroupColor(name) : null);
-            if (kind == RepoGroupKind.Group)
-            {
-                header.UpdateOrder(
-                    GetGroupMoveDisabledReason(name, RepoGroupMove.Up),
-                    GetGroupMoveDisabledReason(name, RepoGroupMove.Down));
-            }
-
+            header.UpdatePlace(depth: 0, parentName: null);
+            header.UpdateColor(null);
             usedHeaders.Add(header);
             items.Add(header);
             if (!collapsed)
             {
+                foreach (var member in members)
+                {
+                    member.Depth = 0;
+                }
+
                 items.AddRange(members);
                 cards.AddRange(members);
             }
+        }
+
+        // Adds the user's groups depth first with an explicit stack (so any depth works): each
+        // group's header, then its subgroups, then its own repos. A group is listed when something in
+        // it (itself or any subgroup) matches, or, with no filter, when it is registered - so a group
+        // created empty is shown. A collapsed group hides its whole subtree; a filter ignores that.
+        void AddGroupTree(List<RepoCardViewModel> matches, GroupPlan plan)
+        {
+            // The repos listed under each group itself, and how many are in each group's subtree
+            var own = new Dictionary<string, List<RepoCardViewModel>>(RepoGroupName.Comparer);
+            var subtreeCount = new Dictionary<string, int>(RepoGroupName.Comparer);
+            foreach (var card in matches.Where(card => !card.IsFavorite && card.HasGroup))
+            {
+                if (!own.TryGetValue(card.GroupName!, out var members))
+                {
+                    own[card.GroupName!] = members = [];
+                }
+
+                members.Add(card);
+                foreach (var name in plan.Tree.GetAncestors(card.GroupName).Prepend(card.GroupName!))
+                {
+                    subtreeCount[name] = subtreeCount.GetValueOrDefault(name) + 1;
+                }
+            }
+
+            var pending = new Stack<GroupWork>();
+            PushGroups(pending, plan.Tree, parent: null, depth: 0);
+            while (pending.Count > 0)
+            {
+                var work = pending.Pop();
+
+                // A group's own repos come after its whole subtree of subgroups
+                if (work.OwnCards is not null)
+                {
+                    foreach (var member in work.OwnCards)
+                    {
+                        member.Depth = work.Depth;
+                    }
+
+                    items.AddRange(work.OwnCards);
+                    cards.AddRange(work.OwnCards);
+                    continue;
+                }
+
+                var name = work.Name;
+                var count = subtreeCount.GetValueOrDefault(name);
+                if (count == 0 && (isFiltering || !plan.Tree.IsRegistered(name)))
+                {
+                    continue;
+                }
+
+                var members = own.TryGetValue(name, out var found) ? found : [];
+                var collapsed = !isFiltering && IsGroupCollapsed(name);
+                var header = GetHeader(RepoGroupKind.Group, name);
+                header.Update(count, collapsed, isToggleEnabled: !isFiltering, directCount: members.Count);
+                header.UpdatePlace(work.Depth, work.Parent);
+                header.UpdateColor(_settings.FindGroupColor(name));
+                header.UpdateOrder(
+                    GetGroupMoveReason(plan, name, RepoGroupMove.Up),
+                    GetGroupMoveReason(plan, name, RepoGroupMove.Down));
+                usedHeaders.Add(header);
+                items.Add(header);
+                if (collapsed)
+                {
+                    continue;
+                }
+
+                // Pushed first so they are handled last, after the subgroups pushed next
+                if (members.Count > 0)
+                {
+                    pending.Push(new GroupWork(name, work.Depth, work.Parent, members));
+                }
+
+                PushGroups(pending, plan.Tree, name, work.Depth + 1);
+            }
+        }
+    }
+
+    /// <summary>
+    ///     One step of the depth-first listing of the group tree in
+    ///     <see cref="UpdateDisplayedRepoCards"/>: either a group still to be listed, or a group's own
+    ///     repos, which are listed once all of its subgroups have been.
+    /// </summary>
+    /// <param name="Name">The group's name.</param>
+    /// <param name="Depth">How many groups the group is inside.</param>
+    /// <param name="Parent">The group it is inside, or <see langword="null"/> at the top level.</param>
+    /// <param name="OwnCards">The group's own repos to list, or <see langword="null"/> when this step
+    ///     is the group itself.</param>
+    private readonly record struct GroupWork(
+        string Name, int Depth, string? Parent, List<RepoCardViewModel>? OwnCards);
+
+    /// <summary>
+    ///     Pushes the groups directly inside a group (or at the top level) onto a stack so that the
+    ///     first of them is popped first.
+    /// </summary>
+    /// <param name="stack">The stack to push onto.</param>
+    /// <param name="tree">The group tree.</param>
+    /// <param name="parent">The parent group, or <see langword="null"/> for the top level.</param>
+    /// <param name="depth">The depth of the groups pushed.</param>
+    private static void PushGroups(Stack<GroupWork> stack, RepoGroupHierarchy tree, string? parent, int depth)
+    {
+        var children = tree.GetChildren(parent);
+        for (var index = children.Count - 1; index >= 0; index--)
+        {
+            stack.Push(new GroupWork(children[index], depth, parent, null));
         }
     }
 
@@ -3569,6 +3671,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         header.RenameRequested += (_, _) => GroupRenameRequested?.Invoke(this, header.Name);
         header.RemoveGroupRequested += (_, _) => GroupRemoveRequested?.Invoke(this, header.Name);
         header.AddRepoRequested += (_, _) => GroupAddRepoRequested?.Invoke(this, header.Name);
+        header.NewSubgroupRequested += (_, _) => GroupNewSubgroupRequested?.Invoke(this, header.Name);
         header.MoveRequested += (_, move) => MoveGroup(header.Name, move);
         _headers[key] = header;
         return header;
@@ -3634,13 +3737,20 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return false;
         }
 
-        // Every member takes the new spelling; the collapsed state, the color and the place in the
-        // user's group order follow the name
+        // Every member takes the new spelling; the collapsed state, the color, the place in the
+        // user's group order and the place in the hierarchy (as the group and as a parent) follow the name
         var wasCollapsed = IsGroupCollapsed(oldName);
         var color = _settings.FindGroupColor(oldName);
         var order = (_settings.GroupOrder ?? [])
             .Select(entry => RepoGroupName.Comparer.Equals(entry, oldName) ? target : entry)
             .ToList();
+        var parents = new Dictionary<string, string>(RepoGroupName.Comparer);
+        foreach (var (child, parent) in BuildGroupHierarchy().GetStoredParents())
+        {
+            parents[RepoGroupName.Comparer.Equals(child, oldName) ? target : child] =
+                RepoGroupName.Comparer.Equals(parent, oldName) ? target : parent;
+        }
+
         CommitSettingsChange(settings =>
         {
             foreach (var repo in settings.RecentRepos.Where(repo => IsInGroup(repo, oldName)))
@@ -3661,6 +3771,59 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             settings.GroupOrder = [.. order];
+            settings.GroupParents = parents;
+        });
+
+        FinishGroupEdit();
+        return true;
+    }
+
+    /// <summary>
+    ///     Creates a group inside another group and saves it.
+    /// </summary>
+    /// <remarks>
+    ///     The new group has no repo yet, so it is <em>registered</em> in the hierarchy (see
+    ///     <see cref="AppSettings.GroupParents"/>) and exists, shown with its header and no repos, until it
+    ///     is deleted; the parent and every group the parent is inside are registered too. The parent
+    ///     and the groups it is inside are expanded so the new group is seen. Nothing on disk or in any repository changes. Group names are
+    ///     unique across the whole tree, so a name that any group already has - whatever its place - is
+    ///     refused.
+    /// </remarks>
+    /// <param name="parentName">The group to create the new group inside; letter case is ignored. It must
+    ///     exist.</param>
+    /// <param name="name">The new group's name. It must be valid (see
+    ///     <see cref="RepoGroupName.Validate"/>) and must not be any existing group's name.</param>
+    /// <returns><see langword="true"/> when the group was created; <see langword="false"/> when the
+    ///     parent does not exist or the name cannot be used, in which case nothing changed.</returns>
+    public bool CreateSubgroup(string parentName, string name)
+    {
+        ArgumentNullException.ThrowIfNull(parentName);
+
+        var tree = BuildGroupHierarchy();
+        var parent = tree.GetName(parentName);
+        var created = RepoGroupName.Normalize(name);
+        if (parent is null ||
+            created is null ||
+            RepoGroupName.Validate(created) != RepoGroupNameProblem.None ||
+            tree.Contains(created))
+        {
+            return false;
+        }
+
+        // The new group, its parent and everything the parent is inside take part in the hierarchy
+        var parents = tree.GetStoredParents();
+        parents[created] = parent;
+        foreach (var registered in tree.GetAncestors(parent).Prepend(parent))
+        {
+            parents.TryAdd(registered, tree.GetParent(registered) ?? string.Empty);
+        }
+
+        CommitSettingsChange(settings =>
+        {
+            settings.GroupParents = parents;
+            settings.CollapsedGroups?.RemoveAll(entry =>
+                RepoGroupName.Comparer.Equals(entry, parent) ||
+                tree.GetAncestors(parent).Contains(entry, RepoGroupName.Comparer));
         });
 
         FinishGroupEdit();
@@ -3682,9 +3845,15 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    ///     Removes a group: its repos become ungrouped (nothing on disk or in any repository changes)
-    ///     and its remembered collapsed state, color and place in the group order are forgotten.
+    ///     Removes a group but keeps everything in it: its repos move to the group it was inside (or
+    ///     become ungrouped when it was at the top level), its subgroups move there too, and its
+    ///     remembered collapsed state, color, place in the group order and place in the hierarchy are
+    ///     forgotten (nothing on disk or in any repository changes).
     /// </summary>
+    /// <remarks>
+    ///     The group's repos keep their positions in the repo list, and its subgroups take the group's
+    ///     place in the group order in their own order (see <see cref="RepoGroupHierarchy.Pop"/>).
+    /// </remarks>
     /// <param name="name">The group's name; letter case is ignored.</param>
     /// <returns><see langword="true"/> when the group existed and was removed.</returns>
     public bool RemoveGroup(string name)
@@ -3694,16 +3863,21 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return false;
         }
 
+        var tree = BuildGroupHierarchy();
+        var removed = tree.GetName(name)!;
+        var parent = tree.GetParent(removed);
+        var (parents, order) = tree.Pop(removed);
         CommitSettingsChange(settings =>
         {
             foreach (var repo in settings.RecentRepos.Where(repo => IsInGroup(repo, name)))
             {
-                repo.GroupName = null;
+                repo.GroupName = parent;
             }
 
             settings.CollapsedGroups?.RemoveAll(entry => RepoGroupName.Comparer.Equals(entry, name));
             RemoveGroupColor(settings, name);
-            settings.GroupOrder?.RemoveAll(entry => RepoGroupName.Comparer.Equals(entry, name));
+            settings.GroupParents = parents;
+            settings.GroupOrder = order;
         });
 
         FinishGroupEdit();
@@ -3781,32 +3955,85 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         "are shown, so their positions cannot be changed.";
 
     /// <summary>
-    ///     Gets the groups that have a section of their own (at least one repo that is not a
-    ///     favorite), in the order the list shows them - the groups a Move or a drag can reorder.
-    ///     (The pure arranging of names is <see cref="RepoGroupHierarchy.ArrangeGroups"/>.)
+    ///     The groups as the window needs them to decide what can be moved where: the group tree and
+    ///     which groups have a section of their own.
     /// </summary>
-    /// <returns>The groups' names, first to last.</returns>
-    private List<string> GetMovableGroups() =>
-        RepoGroupHierarchy.ArrangeGroups(
-            RepoCards.Where(card => !card.IsFavorite && card.HasGroup).Select(card => card.GroupName!),
+    /// <param name="Tree">The group tree, including the groups that only a favorite repo is in and
+    ///     the registered groups with no repo.</param>
+    /// <param name="WithSection">The groups that have a header in the list: those with a repo that is
+    ///     not a favorite anywhere in their subtree, and the registered groups.</param>
+    private sealed record GroupPlan(RepoGroupHierarchy Tree, HashSet<string> WithSection);
+
+    /// <summary>
+    ///     Builds the group tree from the live settings and the cards.
+    /// </summary>
+    /// <remarks>
+    ///     The groups of the cards are added to the groups the settings name, so a card whose group the
+    ///     settings do not list yet (a moment while a repo is being added) is still shown.
+    /// </remarks>
+    /// <returns>The tree.</returns>
+    private RepoGroupHierarchy BuildGroupHierarchy() =>
+        new(
+            _settings.GetGroupNames().Concat(RepoCards.Where(card => card.HasGroup).Select(card => card.GroupName!)),
+            _settings.GroupParents,
             _settings.GroupOrder);
+
+    /// <summary>
+    ///     Builds the group tree and works out which groups have a section of their own.
+    /// </summary>
+    /// <returns>The plan.</returns>
+    private GroupPlan BuildGroupPlan()
+    {
+        var tree = BuildGroupHierarchy();
+        var withSection = new HashSet<string>(tree.Groups.Where(tree.IsRegistered), RepoGroupName.Comparer);
+        foreach (var group in RepoCards.Where(card => !card.IsFavorite && card.HasGroup).Select(card => card.GroupName!))
+        {
+            withSection.Add(group);
+            withSection.UnionWith(tree.GetAncestors(group));
+        }
+
+        return new GroupPlan(tree, withSection);
+    }
+
+    /// <summary>
+    ///     Gets the groups next to a group that have a section of their own (the group itself
+    ///     included), in the order the list shows them - the groups a Move or a drag can put it between.
+    /// </summary>
+    /// <param name="plan">The plan.</param>
+    /// <param name="parent">The group they are inside, or <see langword="null"/> for the top level.</param>
+    /// <returns>The groups' names, first to last.</returns>
+    private static List<string> GetSiblingGroups(GroupPlan plan, string? parent) =>
+        [.. plan.Tree.GetChildren(parent).Where(plan.WithSection.Contains)];
 
     /// <summary>
     ///     Gets why a group cannot be moved up or down now.
     /// </summary>
     /// <remarks>
     ///     The wording is what the header's menu shows as the tooltip of the disabled item. A group is
-    ///     moved among the groups that have a section, so a group whose repos are all favorites (it has
-    ///     no header) cannot be moved; Favorites stays first and Ungrouped last.
+    ///     moved among the groups next to it (inside the same parent group, or at the top level) that
+    ///     have a section, so a group whose repos are all favorites (it has no header) cannot be moved;
+    ///     Favorites stays first and Ungrouped last.
     /// </remarks>
     /// <param name="groupName">The group's name; letter case is ignored.</param>
     /// <param name="move">The move.</param>
     /// <returns>The reason, or <see langword="null"/> when the move is allowed: the filter has no
-    ///     text, the group has a section, and it is not already at that end of the groups.</returns>
+    ///     text, the group has a section, and it is not already at that end of the groups next to it.</returns>
     public string? GetGroupMoveDisabledReason(string groupName, RepoGroupMove move)
     {
         ArgumentNullException.ThrowIfNull(groupName);
 
+        return GetGroupMoveReason(BuildGroupPlan(), groupName, move);
+    }
+
+    /// <summary>
+    ///     Gets why a group cannot be moved up or down now, for a plan that is already built.
+    /// </summary>
+    /// <param name="plan">The plan.</param>
+    /// <param name="groupName">The group's name; letter case is ignored.</param>
+    /// <param name="move">The move.</param>
+    /// <returns>The reason, or <see langword="null"/> when the move is allowed.</returns>
+    private string? GetGroupMoveReason(GroupPlan plan, string groupName, RepoGroupMove move)
+    {
         if (!IsReorderEnabled)
         {
             return GroupReorderDisabledWhileFilteringMessage;
@@ -3817,13 +4044,15 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return "Favorites always come first and Ungrouped last, so they cannot be moved.";
         }
 
-        var groups = GetMovableGroups();
-        var index = groups.FindIndex(group => RepoGroupName.Comparer.Equals(group, groupName));
+        var parent = plan.Tree.GetParent(groupName);
+        var siblings = GetSiblingGroups(plan, parent);
+        var index = siblings.FindIndex(group => RepoGroupName.Comparer.Equals(group, groupName));
+        var within = parent is null ? string.Empty : " in its parent group";
         return index switch
         {
             < 0 => "This group is no longer in the list.",
-            0 when move == RepoGroupMove.Up => "This group is already the first group.",
-            _ when move == RepoGroupMove.Down && index == groups.Count - 1 => "This group is already the last group.",
+            0 when move == RepoGroupMove.Up => $"This group is already the first group{within}.",
+            _ when move == RepoGroupMove.Down && index == siblings.Count - 1 => $"This group is already the last group{within}.",
             _ => null
         };
     }
@@ -3837,13 +4066,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool CanMoveGroup(string groupName, RepoGroupMove move) => GetGroupMoveDisabledReason(groupName, move) is null;
 
     /// <summary>
-    ///     Moves a group one place up or down among the groups and saves the new order.
+    ///     Moves a group one place up or down among the groups next to it and saves the new order.
     /// </summary>
     /// <remarks>
-    ///     The group swaps places with the group before (or after) it in the list. The whole order of
-    ///     the groups as shown is then stored (<see cref="AppSettings.GroupOrder"/>), so groups that had
-    ///     no stored position yet keep the place they were shown at. Nothing changes (and nothing is
-    ///     saved) when the move is not allowed.
+    ///     The group swaps places with the group before (or after) it inside the same parent group (or at
+    ///     the top level). The whole order of the groups as shown is then stored
+    ///     (<see cref="AppSettings.GroupOrder"/>), so groups that had no stored position yet keep the
+    ///     place they were shown at. Nothing changes (and nothing is saved) when the move is not allowed.
     /// </remarks>
     /// <param name="groupName">The group's name; letter case is ignored.</param>
     /// <param name="move">The move.</param>
@@ -3851,15 +4080,17 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     is not allowed (see <see cref="GetGroupMoveDisabledReason"/>); nothing changed then.</returns>
     public bool MoveGroup(string groupName, RepoGroupMove move)
     {
-        if (!CanMoveGroup(groupName, move))
+        var plan = BuildGroupPlan();
+        if (GetGroupMoveReason(plan, groupName, move) is not null)
         {
             return false;
         }
 
-        var groups = GetMovableGroups();
-        var index = groups.FindIndex(group => RepoGroupName.Comparer.Equals(group, groupName));
-        var neighbor = groups[move == RepoGroupMove.Up ? index - 1 : index + 1];
-        return PlaceGroup(groups[index], neighbor, insertBefore: move == RepoGroupMove.Up);
+        var parent = plan.Tree.GetParent(groupName);
+        var siblings = GetSiblingGroups(plan, parent);
+        var index = siblings.FindIndex(group => RepoGroupName.Comparer.Equals(group, groupName));
+        var neighbor = siblings[move == RepoGroupMove.Up ? index - 1 : index + 1];
+        return PlaceGroup(plan, siblings[index], parent, neighbor, insertBefore: move == RepoGroupMove.Up);
     }
 
     /// <summary>
@@ -3867,8 +4098,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     /// <remarks>
     ///     Pure: nothing is changed. Refused while the filter has text, for a group (dragged or
-    ///     target) that has no section of its own, for Favorites and Ungrouped, and for a drop on the
-    ///     dragged group's own header.
+    ///     target) that has no section of its own, for Favorites and Ungrouped, for a drop on the
+    ///     dragged group's own header, and for a drop that would put the group inside itself or one of
+    ///     its own subgroups (next to or inside any of them).
     /// </remarks>
     /// <param name="groupName">The dragged group's name; letter case is ignored.</param>
     /// <param name="target">The place.</param>
@@ -3883,17 +4115,31 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return false;
         }
 
-        var groups = GetMovableGroups();
-        return groups.Contains(groupName, RepoGroupName.Comparer) && groups.Contains(target.GroupName, RepoGroupName.Comparer);
+        var plan = BuildGroupPlan();
+        return plan.WithSection.Contains(groupName) &&
+               plan.WithSection.Contains(target.GroupName) &&
+               plan.Tree.CanMove(groupName, GetDropParent(plan, target));
     }
 
     /// <summary>
-    ///     Drops a dragged group header before or after another group's header, and saves the new
-    ///     order of the groups.
+    ///     Gets the group a dragged group would be inside after a drop.
+    /// </summary>
+    /// <param name="plan">The plan.</param>
+    /// <param name="target">The place.</param>
+    /// <returns>The target itself when the drop is inside it, otherwise the group the target is inside
+    ///     (<see langword="null"/> for the top level).</returns>
+    private static string? GetDropParent(GroupPlan plan, GroupDropTarget target) =>
+        target.Inside ? plan.Tree.GetName(target.GroupName) : plan.Tree.GetParent(target.GroupName);
+
+    /// <summary>
+    ///     Drops a dragged group header before or after another group's header (as that group's sibling,
+    ///     so it may leave the group it was in), or inside it, and saves the new tree and order.
     /// </summary>
     /// <remarks>
-    ///     Stores the whole order of the groups as shown (see <see cref="MoveGroup"/>). A collapsed
-    ///     group stays collapsed. A drop that leaves the order as it was saves nothing.
+    ///     Stores the whole order of the groups as shown (see <see cref="MoveGroup"/>) and, when the group
+    ///     changes its parent, the hierarchy, in one save. Dropped inside a group the dragged group
+    ///     becomes its last subgroup. A collapsed group stays collapsed. A drop that leaves everything
+    ///     as it was saves nothing.
     /// </remarks>
     /// <param name="groupName">The dragged group's name; letter case is ignored.</param>
     /// <param name="target">The place; see <see cref="CanDropGroup"/> for what is refused.</param>
@@ -3906,36 +4152,73 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return false;
         }
 
-        var groups = GetMovableGroups();
-        var dragged = groups.First(group => RepoGroupName.Comparer.Equals(group, groupName));
-        var anchor = groups.First(group => RepoGroupName.Comparer.Equals(group, target.GroupName));
-        return PlaceGroup(dragged, anchor, target.InsertBefore);
+        var plan = BuildGroupPlan();
+        var dragged = plan.Tree.GetName(groupName)!;
+        var anchorGroup = plan.Tree.GetName(target.GroupName)!;
+        var newParent = GetDropParent(plan, target);
+        if (!target.Inside)
+        {
+            return PlaceGroup(plan, dragged, newParent, anchorGroup, target.InsertBefore);
+        }
+
+        // Inside: after the target's last other subgroup; with none, the order needs no change
+        var last = plan.Tree.GetChildren(anchorGroup)
+            .LastOrDefault(child => !RepoGroupName.Comparer.Equals(child, dragged));
+        return PlaceGroup(plan, dragged, newParent, last, insertBefore: false);
     }
 
     /// <summary>
-    ///     Puts a group before or after another one in the order of all groups, saves that order and
-    ///     updates the list.
+    ///     Puts a group inside a parent group (or at the top level) and before or after another group in
+    ///     the order of all groups, saves the hierarchy and the order together and updates the list.
     /// </summary>
+    /// <param name="plan">The plan the placement is decided on.</param>
     /// <param name="groupName">The group to place, as spelled.</param>
-    /// <param name="anchor">The group to place it next to, as spelled.</param>
+    /// <param name="newParent">The group it ends up inside, or <see langword="null"/> for the top
+    ///     level; the placement must be allowed (<see cref="RepoGroupHierarchy.CanMove"/>).</param>
+    /// <param name="anchor">The group to place it next to, as spelled, or <see langword="null"/> to leave
+    ///     the order as it is.</param>
     /// <param name="insertBefore"><see langword="true"/> to place it before <paramref name="anchor"/>,
     ///     <see langword="false"/> after it.</param>
     /// <returns><see langword="true"/>: the group is at the place (including when it already was, in
     ///     which case nothing is saved).</returns>
-    private bool PlaceGroup(string groupName, string anchor, bool insertBefore)
+    private bool PlaceGroup(GroupPlan plan, string groupName, string? newParent, string? anchor, bool insertBefore)
     {
         // Every group (also those whose repos are all favorites) keeps a place, so the order stays
         // complete
-        var current = RepoGroupHierarchy.ArrangeGroups(GroupNames, _settings.GroupOrder);
+        var current = RepoGroupHierarchy.ArrangeGroups(plan.Tree.Groups, _settings.GroupOrder);
         var order = current.Where(group => !RepoGroupName.Comparer.Equals(group, groupName)).ToList();
-        var index = order.FindIndex(group => RepoGroupName.Comparer.Equals(group, anchor));
-        order.Insert(insertBefore ? index : index + 1, groupName);
-        if (order.SequenceEqual(current, RepoGroupName.Comparer))
+        if (anchor is null)
+        {
+            order = [.. current];
+        }
+        else
+        {
+            var index = order.FindIndex(group => RepoGroupName.Comparer.Equals(group, anchor));
+            order.Insert(insertBefore ? index : index + 1, groupName);
+        }
+
+        var parents = plan.Tree.PutInside(groupName, newParent);
+        var stored = plan.Tree.GetStoredParents();
+        var parentsChanged = parents.Count != stored.Count ||
+                             parents.Any(pair => !stored.TryGetValue(pair.Key, out var was) || was != pair.Value);
+        var orderChanged = !order.SequenceEqual(current, RepoGroupName.Comparer);
+        if (!parentsChanged && !orderChanged)
         {
             return true;
         }
 
-        CommitSettingsChange(settings => settings.GroupOrder = [.. order]);
+        CommitSettingsChange(settings =>
+        {
+            if (parentsChanged)
+            {
+                settings.GroupParents = parents;
+            }
+
+            if (orderChanged)
+            {
+                settings.GroupOrder = [.. order];
+            }
+        });
         UpdateDisplayedRepoCards();
         return true;
     }
@@ -3968,6 +4251,13 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     chosen) and calls <see cref="AddRepos"/> with the group.
     /// </summary>
     public event EventHandler<string>? GroupAddRepoRequested;
+
+    /// <summary>
+    ///     Raised when the user asks to create a group inside a group from its header's menu (the
+    ///     parent group's name is the argument); the window shows the name prompt and calls
+    ///     <see cref="CreateSubgroup"/>.
+    /// </summary>
+    public event EventHandler<string>? GroupNewSubgroupRequested;
 
     /// <summary>
     ///     Gets the section a card is listed in: Favorites for a favorite, otherwise its group, otherwise

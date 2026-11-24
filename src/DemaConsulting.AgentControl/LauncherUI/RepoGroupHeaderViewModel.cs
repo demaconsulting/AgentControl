@@ -61,6 +61,15 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     /// <summary>Backing field for <see cref="Count"/>.</summary>
     private int _count;
 
+    /// <summary>Backing field for <see cref="DirectCount"/>.</summary>
+    private int _directCount;
+
+    /// <summary>Backing field for <see cref="Depth"/>.</summary>
+    private int _depth;
+
+    /// <summary>Backing field for <see cref="ParentName"/>.</summary>
+    private string? _parentName;
+
     /// <summary>Backing field for <see cref="IsCollapsed"/>.</summary>
     private bool _isCollapsed;
 
@@ -99,6 +108,7 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
             () => ToggleRequested?.Invoke(this, EventArgs.Empty), () => IsToggleEnabled);
         RenameCommand = new RelayCommand(() => RenameRequested?.Invoke(this, EventArgs.Empty));
         AddRepoCommand = new RelayCommand(() => AddRepoRequested?.Invoke(this, EventArgs.Empty));
+        NewSubgroupCommand = new RelayCommand(() => NewSubgroupRequested?.Invoke(this, EventArgs.Empty));
         RemoveGroupCommand = new RelayCommand(() => RemoveGroupRequested?.Invoke(this, EventArgs.Empty));
         MoveUpCommand = new RelayCommand(
             () => MoveRequested?.Invoke(this, RepoGroupMove.Up), () => _moveUpDisabledReason is null);
@@ -134,7 +144,8 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
 
     /// <summary>
     ///     Gets the number of repos in the section that match the current filter (all of its repos
-    ///     when there is no filter), whether or not the section is collapsed.
+    ///     when there is no filter), whether or not the section is collapsed. For a group this
+    ///     includes the repos in the groups inside it, however deeply.
     /// </summary>
     public int Count
     {
@@ -148,6 +159,87 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
             }
         }
     }
+
+    /// <summary>
+    ///     Gets the number of repos listed directly under this section (those in a group inside it are
+    ///     not counted); equal to <see cref="Count"/> for a group with no group inside it and for the
+    ///     built-in sections.
+    /// </summary>
+    public int DirectCount
+    {
+        get => _directCount;
+        private set
+        {
+            if (SetField(ref _directCount, value))
+            {
+                OnPropertyChanged(nameof(CountTooltip));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets how many groups this section is inside: 0 for a top-level group and for the built-in
+    ///     sections.
+    /// </summary>
+    public int Depth
+    {
+        get => _depth;
+        private set
+        {
+            if (SetField(ref _depth, value))
+            {
+                OnPropertyChanged(nameof(IndentWidth));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets the name of the group this group is inside, or <see langword="null"/> for a top-level
+    ///     group and for the built-in sections.
+    /// </summary>
+    public string? ParentName
+    {
+        get => _parentName;
+        private set
+        {
+            if (SetField(ref _parentName, value))
+            {
+                OnPropertyChanged(nameof(HasParent));
+                OnPropertyChanged(nameof(AccessibleName));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether this group is inside another group.
+    /// </summary>
+    public bool HasParent => _parentName is not null;
+
+    /// <summary>
+    ///     Gets how far the header is indented from the left edge of the list, in device-independent
+    ///     pixels: <see cref="IndentPerLevel"/> for each level the group is inside, up to
+    ///     <see cref="MaxIndentedDepth"/> levels (a deeper group is shown as deep as that, so the
+    ///     header can never be pushed out of view; its depth in the data is not limited).
+    /// </summary>
+    public double IndentWidth => GetIndentWidth(Depth);
+
+    /// <summary>
+    ///     The indent for each level a group is inside, in device-independent pixels.
+    /// </summary>
+    public const double IndentPerLevel = 20;
+
+    /// <summary>
+    ///     The deepest level that is indented further; deeper groups are drawn at this level.
+    /// </summary>
+    public const int MaxIndentedDepth = 8;
+
+    /// <summary>
+    ///     Gets the indent for a depth, shared by the headers and the repo cards under them so a group
+    ///     and its repos line up.
+    /// </summary>
+    /// <param name="depth">How many groups the row is inside; a negative depth counts as 0.</param>
+    /// <returns>The indent in device-independent pixels.</returns>
+    public static double GetIndentWidth(int depth) => Math.Clamp(depth, 0, MaxIndentedDepth) * IndentPerLevel;
 
     /// <summary>
     ///     Gets a value indicating whether the section's cards are hidden. Never
@@ -192,10 +284,12 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
 
     /// <summary>
     ///     Gets the header's accessible name, which says the section, how many repos it has and
-    ///     whether it is collapsed, so a screen reader (and a UI test) needs no other context.
+    ///     whether it is collapsed, so a screen reader (and a UI test) needs no other context. A group
+    ///     that is inside another group says which one, so nested groups are told apart.
     /// </summary>
     public string AccessibleName =>
-        $"{Name}, {Count} {(Count == 1 ? "repo" : "repos")}, {(IsCollapsed ? "collapsed" : "expanded")}";
+        $"{Name}, {Count} {(Count == 1 ? "repo" : "repos")}, {(IsCollapsed ? "collapsed" : "expanded")}" +
+        (_parentName is null ? string.Empty : $", inside {_parentName}");
 
     /// <summary>
     ///     Gets the tooltip of the collapse toggle.
@@ -214,9 +308,12 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Gets the tooltip of the repo count.
+    ///     Gets the tooltip of the repo count; for a group with a group inside it, it also says how many
+    ///     of the repos are directly in the group.
     /// </summary>
-    public string CountTooltip => Count == 1 ? "1 repo" : $"{Count} repos";
+    public string CountTooltip =>
+        (Count == 1 ? "1 repo" : $"{Count} repos") +
+        (DirectCount == Count ? string.Empty : $" ({DirectCount} directly in this group)");
 
     /// <summary>
     ///     Gets the command that collapses or expands the section; it raises
@@ -229,6 +326,12 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     ///     <see cref="AddRepoRequested"/>. Offered for the user's own groups only.
     /// </summary>
     public RelayCommand AddRepoCommand { get; }
+
+    /// <summary>
+    ///     Gets the command that asks to create a new group inside this group; it raises
+    ///     <see cref="NewSubgroupRequested"/>. Offered for the user's own groups only.
+    /// </summary>
+    public RelayCommand NewSubgroupCommand { get; }
 
     /// <summary>
     ///     Gets the command that asks to rename the group; it raises <see cref="RenameRequested"/>.
@@ -252,6 +355,12 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     ///     picker and adds the chosen folder to this group.
     /// </summary>
     public event EventHandler? AddRepoRequested;
+
+    /// <summary>
+    ///     Raised when the user asks to create a group inside this group; the window shows the name
+    ///     prompt.
+    /// </summary>
+    public event EventHandler? NewSubgroupRequested;
 
     /// <summary>
     ///     Raised when the user asks to rename the group; the window shows the name prompt.
@@ -384,13 +493,30 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     /// <summary>
     ///     Brings the header up to date with the current list.
     /// </summary>
-    /// <param name="count">The number of repos in the section that match the filter.</param>
+    /// <param name="count">The number of repos in the section that match the filter (for a group, in
+    ///     the group and all the groups inside it).</param>
     /// <param name="isCollapsed">Whether the section's cards are hidden.</param>
     /// <param name="isToggleEnabled">Whether the user can collapse or expand the section now.</param>
-    public void Update(int count, bool isCollapsed, bool isToggleEnabled)
+    /// <param name="directCount">The number of those repos listed directly under the section, or
+    ///     <see langword="null"/> when that is all of them.</param>
+    public void Update(int count, bool isCollapsed, bool isToggleEnabled, int? directCount = null)
     {
         Count = count;
+        DirectCount = directCount ?? count;
         IsCollapsed = isCollapsed;
         IsToggleEnabled = isToggleEnabled;
+    }
+
+    /// <summary>
+    ///     Brings the header's place in the group tree up to date.
+    /// </summary>
+    /// <param name="depth">How many groups the section is inside; ignored (0) for Favorites and
+    ///     Ungrouped, which are never inside a group.</param>
+    /// <param name="parentName">The group it is inside, or <see langword="null"/> for a top-level
+    ///     group; ignored for Favorites and Ungrouped.</param>
+    public void UpdatePlace(int depth, string? parentName)
+    {
+        Depth = IsUserGroup ? Math.Max(depth, 0) : 0;
+        ParentName = IsUserGroup ? parentName : null;
     }
 }

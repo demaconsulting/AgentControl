@@ -65,9 +65,11 @@ throws. This scenario is tested by `RepoGroupHierarchy_CanMove_RefusesLoopsAndUn
 
 **RepoGroupHierarchy_PutInside_RegistersMovedGroupAndItsNewAncestors**: Moving a group named only by a repo inside the
 deepest of a registered chain registers it next to the chain; moving a group to the top level makes its stored parent
-empty, and a group moved inside a group that no key registers registers that group as well. This scenario is tested by
-`RepoGroupHierarchy_PutInside_RegistersMovedGroupAndItsNewAncestors` and
-`RepoGroupHierarchy_PutInside_IntoUnregisteredGroup_RegistersIt`, covering
+empty, and a group moved inside a group that no key registers registers that group as well; an ordinary top-level group
+put at the top level is not registered. This scenario is tested by
+`RepoGroupHierarchy_PutInside_RegistersMovedGroupAndItsNewAncestors`,
+`RepoGroupHierarchy_PutInside_IntoUnregisteredGroup_RegistersIt` and
+`RepoGroupHierarchy_PutInside_TopLevelUnregisteredGroup_StaysUnregistered`, covering
 `AgentControl-RepoGroupHierarchy-PutInsideRegisters`.
 
 **RepoGroupHierarchy_Pop_SubgroupsKeepTheirPlace**: A group in the middle of its parent's subgroups, with two subgroups

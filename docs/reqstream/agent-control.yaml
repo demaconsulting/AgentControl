@@ -398,6 +398,7 @@ sections:
           - AgentControl-LauncherUI-RepoGroupsFlatList
           - AgentControl-LauncherUI-RepoGroupCollapse
           - AgentControl-LauncherUI-GroupAddRepository
+          - AgentControl-LauncherUI-NestedGroupTree
         tests:
           - windows@RepoList_FavoritesAndGroups_SectionsAreFavoritesThenGroupsAlphabeticallyThenUngrouped
           - windows@CardMenu_RemoveFromGroup_ReturnsRepoToUngroupedAndRemovesTheHeader

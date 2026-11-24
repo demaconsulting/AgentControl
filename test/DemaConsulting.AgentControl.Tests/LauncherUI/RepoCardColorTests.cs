@@ -260,6 +260,38 @@ public class RepoCardColorTests
     }
 
     /// <summary>
+    ///     Test that a card knows how deep it is in the group tree and so how far it is indented, the same
+    ///     as the header of its group, and tells the view when that changes; a card in a flat list is not
+    ///     indented, and a very deep card is indented no further than a header is.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_Depth_SetsIndentAndNotifies()
+    {
+        // Arrange
+        var card = CreateCard(new RecentRepo { Path = @"C:\repos\sample", GroupName = "Work" });
+        var changed = new List<string?>();
+        card.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        // Assert: not indented to start with
+        Assert.Equal(0, card.Depth);
+        Assert.Equal(0, card.IndentWidth);
+
+        // Act
+        card.Depth = 2;
+
+        // Assert
+        Assert.Equal(2 * RepoGroupHeaderViewModel.IndentPerLevel, card.IndentWidth);
+        Assert.Contains(nameof(RepoCardViewModel.IndentWidth), changed);
+
+        // Act
+        card.Depth = 100;
+
+        // Assert
+        Assert.Equal(
+            RepoGroupHeaderViewModel.MaxIndentedDepth * RepoGroupHeaderViewModel.IndentPerLevel, card.IndentWidth);
+    }
+
+    /// <summary>
     ///     Test that a card without a color of its own takes its group's color for the tile, and that
     ///     the tile counts as a chosen color (the ring around a picture).
     /// </summary>

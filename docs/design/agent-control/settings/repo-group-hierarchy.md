@@ -81,8 +81,10 @@ the others answer `-Navigation`. An unknown name gives `null`, an empty list or 
 
 **CanMove / PutInside**: `CanMove(group, newParent)` is `false` for a group or parent that does not exist (the built-in
 sections never do) and when the new parent is the group itself or one of its descendants (`-RefusesLoops`);
-`newParent == null` means the top level. `PutInside` returns the new stored parents with the moved group and every group
-it is now inside registered (`-PutInsideRegisters`); it does not change the order, which the caller places among the new
+`newParent == null` means the top level. `PutInside` returns the new stored parents: a group put inside another group is
+registered together with every group it is now inside, a group put at the top level keeps the registration it had (an
+ordinary top-level group that is only reordered stays unregistered, so flat lists behave exactly as before)
+(`-PutInsideRegisters`); it does not change the order, which the caller places among the new
 siblings. *Preconditions*: `CanMove` is `true`; otherwise `InvalidOperationException`.
 
 **Pop**: The stored values after the group is deleted but its contents are kept: its subgroups get the group's parent

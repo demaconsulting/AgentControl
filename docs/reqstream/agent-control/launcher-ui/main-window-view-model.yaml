@@ -653,6 +653,112 @@ sections:
           - MainWindowViewModel_ApplySettings_KeepsGroupColorsAndOrder
           - MainWindowViewModel_ApplySettingsAsync_GroupParents_KeptInMemoryAndWritten
 
+      # ---- Nested groups ----
+      - id: AgentControl-MainWindowViewModel-NestedGroupTree
+        title: >-
+          The MainWindowViewModel class shall list nested groups depth first - each group's header
+          followed by its subgroups (in the order of the groups) and then by its own repos, which are
+          not favorites - with the number of matching repos in the whole subtree on each header, shall
+          hide the whole subtree of a collapsed group, and, while a filter has text, shall show every
+          match under the headers of the groups that hold it, whatever is collapsed.
+        justification: |
+          Nested groups are shown as a tree so that related groups, for example by customer and then
+          by project, can be organized and still scanned top to bottom.
+        tests:
+          - MainWindowViewModel_DisplayedItems_NestedGroups_ListedDepthFirstSubgroupsBeforeOwnRepos
+          - MainWindowViewModel_DisplayedItems_CollapsedGroup_HidesSubtreeAndFilterShowsAncestors
+
+      - id: AgentControl-MainWindowViewModel-NestedGroupFlatListUnchanged
+        title: >-
+          The MainWindowViewModel class shall list groups exactly as before - every group at the top
+          level, none inside another - while the settings hold no group hierarchy.
+        justification: |
+          A user who does not nest groups, and every settings file written before groups nested, must
+          see no change.
+        tests:
+          - MainWindowViewModel_DisplayedItems_NoHierarchy_FlatGroupsShownAsBefore
+          - MainWindowViewModel_MoveGroup_FlatGroups_DoesNotCreateAHierarchy
+
+      - id: AgentControl-MainWindowViewModel-NestedGroupEmptyListed
+        title: >-
+          The MainWindowViewModel class shall keep listing a group that was created inside another
+          group, or moved within the hierarchy, with a count of 0 when no repo is in it - until it is
+          removed - shall hide it while a filter has text, and shall keep listing a nested group whose
+          only repo is a favorite, the favorite staying under Favorites.
+        justification: |
+          A group the user placed in the hierarchy must not vanish because its last repo moved away; a
+          group that only exists while a repo is in it would make an empty group impossible to create.
+        tests:
+          - MainWindowViewModel_RegisteredEmptyGroup_StaysUntilRemoved
+          - MainWindowViewModel_DisplayedItems_NestedGroupWithOnlyFavorite_StaysListedWithNoRepos
+
+      - id: AgentControl-MainWindowViewModel-NestedGroupCreate
+        title: >-
+          The MainWindowViewModel class shall create a group inside another group, listing it with no
+          repos, expanding the groups it is inside and saving it only in the settings, and shall refuse
+          a name that is invalid or that any group - wherever it is - already has, and a parent that
+          does not exist.
+        justification: |
+          Group names are unique across the whole tree so that a group is identified by its name
+          alone; creating a group inside another is how a hierarchy is started.
+        tests:
+          - MainWindowViewModel_CreateSubgroup_ListsEmptyGroupRegistersAncestorsAndSaves
+          - MainWindowViewModel_CreateSubgroup_RefusesTakenInvalidAndUnknownParent
+
+      - id: AgentControl-MainWindowViewModel-NestedGroupReorder
+        title: >-
+          The MainWindowViewModel class shall move a nested group up or down among the groups inside
+          the same parent group, saying in the reason it gives for a disabled move when the group is
+          the first or last of its parent group, without changing the places of other groups.
+        justification: |
+          The Move items of a group header keep working the same way at every level.
+        tests:
+          - MainWindowViewModel_MoveGroup_NestedGroups_SwapWithinTheirParent
+
+      - id: AgentControl-MainWindowViewModel-NestedGroupDrop
+        title: >-
+          The MainWindowViewModel class shall, when a group header is dropped before or after another
+          group's header, put the dragged group next to it inside the same parent group (so it leaves
+          the group it was in when that differs), shall, when it is dropped inside a group, make it
+          that group's last subgroup, shall save the hierarchy and the order together, and shall refuse
+          a drop onto itself or a group inside itself, onto Favorites or Ungrouped, onto a group that
+          does not exist, and while a filter has text.
+        justification: |
+          Dragging a header is the direct way to nest and to un-nest a group; a group inside itself
+          would be a loop, and the built-in sections have fixed places.
+        tests:
+          - MainWindowViewModel_DropGroup_NestsReordersAndLeavesTheOldParent
+          - MainWindowViewModel_DropGroup_RefusesLoopsBuiltInSectionsAndFilter
+
+      - id: AgentControl-MainWindowViewModel-NestedGroupRename
+        title: >-
+          The MainWindowViewModel class shall keep a renamed group's place in the hierarchy, both as a
+          group and as the parent of other groups.
+        justification: |
+          Renaming a group must not move it or empty its parent.
+        tests:
+          - MainWindowViewModel_RenameGroup_KeepsTheHierarchy
+
+      - id: AgentControl-MainWindowViewModel-NestedGroupRemoveKeepsContents
+        title: >-
+          The MainWindowViewModel class shall, when a nested group is removed, move its repos and its
+          subgroups to the group it was inside (or, at the top level, make its repos ungrouped and its
+          subgroups top-level groups) and forget the group.
+        justification: |
+          Removing a group must not lose the repos and groups in it; they stay where they were seen.
+        tests:
+          - MainWindowViewModel_RemoveGroup_NestedGroups_KeepsRepoAndSubgroupsInTheParent
+
+      - id: AgentControl-MainWindowViewModel-GroupNamesIncludeEmptyGroups
+        title: >-
+          The MainWindowViewModel class shall offer, as the groups that exist, the groups that have no
+          repo in them as well as those that have, so a repo can be moved into an empty or nested
+          group.
+        justification: |
+          A repo can only be moved into a group that is offered.
+        tests:
+          - MainWindowViewModel_GroupNames_IncludeEmptyAndNestedGroups
+
       - id: AgentControl-MainWindowViewModel-GroupSectionHeaders
         title: >-
           The MainWindowViewModel class shall introduce each section of repos with a header that

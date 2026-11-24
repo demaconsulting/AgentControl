@@ -4,32 +4,33 @@
 
 `MainWindowViewModel` is verified with unit tests defined in `MainWindowViewModelTests.cs` (including adding one folder
 or several and the Git-repository check), `RepoGroupingTests.cs` (sections, collapse, filter, rename and removal of
-groups, group colors), `RepoOrderingTests.cs` (the user's own order: stability, new repos, the legacy seed, Move, drag
-and drop, filtering, persistence, and the order of the groups), `MainWindowViewModelPersistenceTests.cs` (every change
-the user makes when the settings file cannot be written, including the Retry/Discard question of a background add) and
-`MainWindowViewModelRecheckTests.cs` (the periodic upgrade re-check, on a fake clock). The background add and the
-background card refresh after a settings save are verified through the view model's two constructor seams rather than
-timing: `backgroundWork` takes a `GatedBackgroundWorkRunner` (a test helper that counts every piece of work and holds it
-until the test releases it), so a test asserts what holds while the folders are still being checked - the add has
-returned to its caller, nothing is added, the global progress shows the count - and `saveSettings` takes a delegate that
-counts saves, can hold them at a gate (or one write at a `TaskCompletionSource` of its own, released to succeed or to
-fail), records every write's start and end in order, and can fail on demand, so "one save per batch", Cancel, Retry,
-Discard, a change made while a save is held and the order of the close's write are deterministic. Every save runs
-through the view model's background settings writer
-on a worker thread, so a test that reads the settings file after a change first awaits `FlushSettingsAsync` (which
-writes what is waiting and completes when the writes have ended), or, after a close that did not wait,
-`CloseSettingsWrite`, and the persistence tests create their view model with
-no synchronization context current, so a failed background write is reported before that flush completes; two of them
-use a `FakeTimeProvider` so a change stays waiting until the test flushes. Tests that apply settings or add in the
-background await `PendingRefresh`, the apply's task or the add's task before asserting. Each test constructs a real
-`MainWindowViewModel` against a unique temporary configuration directory (via `SettingsStore`) and unique temporary repo
-directories, so tests are hermetic and can run in parallel with each other, subject to the `RealProcess` xUnit
-collection (which disables parallelization) since constructing a view model with recent repos starts background git
-reads through the shared refresh queue, which spawn real git subprocesses via `GitStub` or the system git executable.
-The temporary repo folders that tests add are made the top folder of a Git repository as far as the add is concerned by
-a `.git` folder whose `HEAD` names a branch (`ref: refs/heads/main`), so the real `GitClient.IsRepositoryRoot` accepts
-them and the branch is read without starting git; the tests of the Git check create folders without `.git`, with a
-`.git` file, and subfolders. No Avalonia `Window` is constructed; only the view-model class itself is under test.
+groups, group colors), `RepoGroupTreeTests.cs` (nested groups: the tree listing, creating, moving, dropping, renaming
+and removing a group inside another), `RepoOrderingTests.cs` (the user's own order: stability, new repos, the legacy
+seed, Move, drag and drop, filtering, persistence, and the order of the groups),
+`MainWindowViewModelPersistenceTests.cs` (every change the user makes when the settings file cannot be written,
+including the Retry/Discard question of a background add) and `MainWindowViewModelRecheckTests.cs` (the periodic upgrade
+re-check, on a fake clock). The background add and the background card refresh after a settings save are verified
+through the view model's two constructor seams rather than timing: `backgroundWork` takes a `GatedBackgroundWorkRunner`
+(a test helper that counts every piece of work and holds it until the test releases it), so a test asserts what holds
+while the folders are still being checked - the add has returned to its caller, nothing is added, the global progress
+shows the count - and `saveSettings` takes a delegate that counts saves, can hold them at a gate (or one write at a
+`TaskCompletionSource` of its own, released to succeed or to fail), records every write's start and end in order, and
+can fail on demand, so "one save per batch", Cancel, Retry, Discard, a change made while a save is held and the order of
+the close's write are deterministic. Every save runs through the view model's background settings writer on a worker
+thread, so a test that reads the settings file after a change first awaits `FlushSettingsAsync` (which writes what is
+waiting and completes when the writes have ended), or, after a close that did not wait, `CloseSettingsWrite`, and the
+persistence tests create their view model with no synchronization context current, so a failed background write is
+reported before that flush completes; two of them use a `FakeTimeProvider` so a change stays waiting until the test
+flushes. Tests that apply settings or add in the background await `PendingRefresh`, the apply's task or the add's task
+before asserting. Each test constructs a real `MainWindowViewModel` against a unique temporary configuration directory
+(via `SettingsStore`) and unique temporary repo directories, so tests are hermetic and can run in parallel with each
+other, subject to the `RealProcess` xUnit collection (which disables parallelization) since constructing a view model
+with recent repos starts background git reads through the shared refresh queue, which spawn real git subprocesses via
+`GitStub` or the system git executable. The temporary repo folders that tests add are made the top folder of a Git
+repository as far as the add is concerned by a `.git` folder whose `HEAD` names a branch (`ref: refs/heads/main`), so
+the real `GitClient.IsRepositoryRoot` accepts them and the branch is read without starting git; the tests of the Git
+check create folders without `.git`, with a `.git` file, and subfolders. No Avalonia `Window` is constructed; only the
+view-model class itself is under test.
 
 #### Test Environment
 
@@ -620,6 +621,56 @@ window builds them keeps the group colors and the group order
 (`MainWindowViewModel_ApplySettings_KeepsGroupColorsAndOrder`, and the group hierarchy
 (`MainWindowViewModel_ApplySettingsAsync_GroupParents_KeptInMemoryAndWritten`), covering
 `AgentControl-MainWindowViewModel-GroupSettingsKeptOnApplySettings`).
+
+**MainWindowViewModel_NestedGroups_ListedAsATree**: Tested by `RepoGroupTreeTests.cs` (real view models over temporary
+repo folders, no window). A group with two subgroups, a repo of its own and a repo in each subgroup is listed depth
+first - the subgroups in alphabetical order before the group's own repo - with the header of the top group counting the
+three repos of its subtree and naming the one directly in it, each header and card knowing its depth and parent
+(`MainWindowViewModel_DisplayedItems_NestedGroups_ListedDepthFirstSubgroupsBeforeOwnRepos`); collapsing the top group
+hides its whole subtree, and a filter for a repo deep in the tree lists only that repo under the headers of the groups
+that hold it, with the count of matches
+(`MainWindowViewModel_DisplayedItems_CollapsedGroup_HidesSubtreeAndFilterShowsAncestors`) - covering
+`AgentControl-MainWindowViewModel-NestedGroupTree`. With no hierarchy in the settings the groups are shown as
+before: every header top level (depth 0, no parent), the same sections and counts, no hierarchy stored; moving a group
+among top-level groups by Move or by a drop does not create a hierarchy
+(`MainWindowViewModel_DisplayedItems_NoHierarchy_FlatGroupsShownAsBefore` and
+`MainWindowViewModel_MoveGroup_FlatGroups_DoesNotCreateAHierarchy`, covering
+`AgentControl-MainWindowViewModel-NestedGroupFlatListUnchanged`). A group created inside another is listed with a count
+of 0, stays when a repo is moved into it and out again, is hidden while a filter has text and is gone once removed
+(`MainWindowViewModel_RegisteredEmptyGroup_StaysUntilRemoved`), and a nested group whose only repo is a favorite is
+listed with no repos while the favorite is under Favorites with its chip
+(`MainWindowViewModel_DisplayedItems_NestedGroupWithOnlyFavorite_StaysListedWithNoRepos`) - covering
+`AgentControl-MainWindowViewModel-NestedGroupEmptyListed`. The names the card menu offers include the empty and nested
+groups, and a repo can be moved into an empty group by a name in another letter case
+(`MainWindowViewModel_GroupNames_IncludeEmptyAndNestedGroups`, covering
+`AgentControl-MainWindowViewModel-GroupNamesIncludeEmptyGroups`).
+
+**MainWindowViewModel_CreateSubgroup_AddsRegisteredEmptyGroup**: Creating groups inside a nested group and inside an
+ordinary group lists them with no repos, expands the collapsed groups they are inside, and, after a flush, the settings
+file holds the new groups and every group they are inside as registered
+(`MainWindowViewModel_CreateSubgroup_ListsEmptyGroupRegistersAncestorsAndSaves`); a name that any group already has (in
+another letter case, or a nested group's), Favorites, Ungrouped, a blank name, a name over the limit and a parent that
+does not exist or is a built-in section are refused and change nothing
+(`MainWindowViewModel_CreateSubgroup_RefusesTakenInvalidAndUnknownParent`) - covering
+`AgentControl-MainWindowViewModel-NestedGroupCreate`.
+
+**MainWindowViewModel_NestedGroups_ReorderDropRenameAndRemove**: Move up and Move down swap a nested group only with
+the other groups inside its parent, the reasons for a disabled move name the parent group for a nested group and keep
+the top-level wording, and Move leaves the other levels alone
+(`MainWindowViewModel_MoveGroup_NestedGroups_SwapWithinTheirParent`, covering
+`AgentControl-MainWindowViewModel-NestedGroupReorder`). Dropping a header inside another group makes it that group's
+last subgroup, before a nested group puts it first in that group, and after a group puts it next to that group in the
+group's parent (taking it out of the group it was in); one save holds the hierarchy and the order
+(`MainWindowViewModel_DropGroup_NestsReordersAndLeavesTheOldParent`); dropping a group on itself, inside or next to
+one of its own subgroups, on Favorites or Ungrouped, on an unknown group or while the filter has text is refused and
+changes nothing (`MainWindowViewModel_DropGroup_RefusesLoopsBuiltInSectionsAndFilter`) - covering
+`AgentControl-MainWindowViewModel-NestedGroupDrop`. Renaming a group keeps it where it was in the hierarchy as a group
+and as a parent, and its color (`MainWindowViewModel_RenameGroup_KeepsTheHierarchy`, covering
+`AgentControl-MainWindowViewModel-NestedGroupRename`). Removing a nested group moves its repo to the group it was
+inside, and removing the top-level group makes its repos ungrouped and its subgroup a top-level group, with the
+stored hierarchy and order forgetting the removed groups
+(`MainWindowViewModel_RemoveGroup_NestedGroups_KeepsRepoAndSubgroupsInTheParent`, covering
+`AgentControl-MainWindowViewModel-NestedGroupRemoveKeepsContents`).
 
 **MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten**: A favorite, a group and a card color chosen on a card
 are applied and, after a flush, read back from the settings file in the stored (canonical) spelling, and no failure is

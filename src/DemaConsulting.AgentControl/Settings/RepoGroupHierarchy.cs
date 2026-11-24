@@ -449,9 +449,11 @@ internal sealed class RepoGroupHierarchy
     ///     level.
     /// </summary>
     /// <remarks>
-    ///     The moved group and every group it is now inside become registered (a group that takes
-    ///     part in the hierarchy exists until deleted). The order of the groups is not touched here;
-    ///     the caller places the group among its new siblings. Pure.
+    ///     A group put inside another group, and every group it is now inside, become registered (a
+    ///     group that takes part in the hierarchy exists until deleted). A group put at the top level
+    ///     stays registered when it was, and is not registered when it was not, so putting an ordinary
+    ///     top-level group at the top level changes nothing. The order of the groups is not touched
+    ///     here; the caller places the group among its new siblings. Pure.
     /// </remarks>
     /// <param name="group">The group to move.</param>
     /// <param name="newParent">The group to put it inside, or <see langword="null"/> for the top
@@ -469,7 +471,10 @@ internal sealed class RepoGroupHierarchy
         var result = GetStoredParents();
         var moved = _spellings[group];
         var parent = newParent is null ? string.Empty : _spellings[newParent];
-        result[moved] = parent;
+        if (parent.Length > 0 || _registered.Contains(moved))
+        {
+            result[moved] = parent;
+        }
 
         // Every group the moved one is now inside takes part in the hierarchy as well
         for (var ancestor = parent; ancestor.Length > 0; ancestor = GetParent(ancestor) ?? string.Empty)
