@@ -43,7 +43,7 @@ places them in the .github folders (normally git-ignored), and launches the agen
 
 ## Installation
 
-1. Download the latest `AgentControl-{version}.msi` from the [releases][link-releases] page.
+1. Download the latest `AgentControl-{version}-win-x64.msi` from the [releases][link-releases] page.
 2. Run the installer and follow the prompts.
 3. Launch **AgentControl** from the Start menu.
 
