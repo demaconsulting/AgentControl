@@ -177,6 +177,35 @@ public static class HeadlessTestApp
     }
 
     /// <summary>
+    ///     Renders frames and runs the UI thread's jobs until <paramref name="condition"/> holds, for a test
+    ///     that must wait for an animation or transition of a control to finish.
+    /// </summary>
+    /// <remarks>
+    ///     The headless render timer is driven by the wall clock, not by a virtual clock, so a fixed number
+    ///     of forced frames finishes a timed transition only when the frames happen to take long enough.
+    ///     This polls in real time instead and fails the test with <paramref name="failure"/> when the
+    ///     condition does not hold after about five seconds.
+    /// </remarks>
+    /// <param name="condition">The condition to wait for.</param>
+    /// <param name="failure">The failure message when it never holds.</param>
+    internal static void RunJobsAndRenderUntil(Func<bool> condition, string failure)
+    {
+        for (var attempt = 0; attempt < 250; attempt++)
+        {
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+            Dispatcher.UIThread.RunJobs();
+            if (condition())
+            {
+                return;
+            }
+
+            Thread.Sleep(20);
+        }
+
+        Assert.Fail(failure);
+    }
+
+    /// <summary>
     ///     Runs blocking test work - an arrange step that writes a pin or hashes a package, or an assertion
     ///     that reads a pin - on a worker thread and waits for it, for a test body that runs on the guarded
     ///     UI thread.

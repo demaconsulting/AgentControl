@@ -119,7 +119,8 @@ public sealed class RepoGroupTreeTests : IDisposable
         Assert.Equal(["[Client 3 collapsed]", "[Ungrouped 1]", "loose"], Describe(viewModel));
 
         // Act: filter for a repo deep in the tree
-        viewModel.FilterText = "p1";
+        // (the card's full path, because the filter also matches paths and the temp root may contain "p1")
+        viewModel.FilterText = viewModel.RepoCards.Single(card => card.RepoName == "p1").RepoPath;
 
         // Assert: the ancestors are listed with only the match counted, nothing collapsed
         Assert.Equal(["[Client 1]", "[Project 1]", "p1"], Describe(viewModel));
@@ -236,7 +237,8 @@ public sealed class RepoGroupTreeTests : IDisposable
         Assert.Equal(["[Work 1]", "[Admin 0]", "w1", "[Ungrouped 1]", "loose"], Describe(viewModel));
 
         // Act / Assert: hidden while filtering
-        viewModel.FilterText = "w1";
+        // (the card's full path, because the filter also matches paths and the temp root may contain "w1")
+        viewModel.FilterText = viewModel.RepoCards.Single(card => card.RepoName == "w1").RepoPath;
         Assert.Equal(["[Work 1]", "w1"], Describe(viewModel));
         viewModel.FilterText = string.Empty;
 

@@ -572,17 +572,22 @@ public sealed class RepoMultiSelectWindowTests : IDisposable
         {
             Dispatcher.UIThread.RunJobs();
 
-            // Act: u1 selected, u2 not; let the card's short color transition finish
+            // Act: u1 selected, u2 not; wait for the card's short color transition to finish (in real time)
             Click(window, "u1");
-            for (var tick = 0; tick < 30; tick++)
-            {
-                AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
-                Dispatcher.UIThread.RunJobs();
-            }
-
-            // Assert
             var selectedBorder = CardBorder(window, "u1");
             var otherBorder = CardBorder(window, "u2");
+            HeadlessTestApp.RunJobsAndRenderUntil(
+                () => selectedBorder.TryFindResource("RepoCardBackgroundSelected", application.ActualThemeVariant, out var target) &&
+                      selectedBorder.Background is ISolidColorBrush shown &&
+                      target is ISolidColorBrush targetBrush &&
+                      shown.Color == targetBrush.Color &&
+                      otherBorder.TryFindResource("RepoCardBackground", application.ActualThemeVariant, out var otherTarget) &&
+                      otherBorder.Background is ISolidColorBrush otherShown &&
+                      otherTarget is ISolidColorBrush otherTargetBrush &&
+                      otherShown.Color == otherTargetBrush.Color,
+                "The cards' background transition did not reach the theme's colors.");
+
+            // Assert
             Assert.True(selectedBorder.TryFindResource("RepoCardBackgroundSelected", application.ActualThemeVariant, out var selectedBrush));
             Assert.True(otherBorder.TryFindResource("RepoCardBackground", application.ActualThemeVariant, out var cardBrush));
             Assert.Equal(((ISolidColorBrush)selectedBrush!).Color, ((ISolidColorBrush)selectedBorder.Background!).Color);

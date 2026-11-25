@@ -90,7 +90,8 @@ public sealed class RepoMultiSelectTests : IDisposable
         Assert.Equal(["h1"], Names(viewModel.SelectedCards));
 
         // Act: the filter hides what does not match
-        viewModel.FilterText = "l1";
+        // (the card's full path, because the filter also matches paths and the temp root may contain "l1")
+        viewModel.FilterText = Card(viewModel, "l1").RepoPath;
 
         // Assert
         Assert.Empty(viewModel.SelectedCards);

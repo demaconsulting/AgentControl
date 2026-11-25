@@ -225,7 +225,8 @@ public sealed class RepoGroupingTests : IDisposable
         Assert.Equal(["[Home 1]", "alpha-home", "[Work 3 collapsed]", "[Ungrouped 1]", "gamma"], Describe(viewModel));
 
         // Act: filter on a name that matches inside the collapsed group and another group
-        viewModel.FilterText = "ALPHA";
+        // (the hyphen keeps a temp root, which the filter also matches, from matching)
+        viewModel.FilterText = "ALPHA-";
 
         // Assert: matches are expanded, counts are of the matches, empty sections are gone
         Assert.Equal(["[Home 1]", "alpha-home", "[Work 2]", "alpha-one", "alpha-two"], Describe(viewModel));
