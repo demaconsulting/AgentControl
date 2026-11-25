@@ -3972,18 +3972,6 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    ///     Gets how many groups are directly inside a group.
-    /// </summary>
-    /// <param name="groupName">The group's name; letter case is ignored.</param>
-    /// <returns>The number of subgroups, 0 for a group with none or a group that does not exist.</returns>
-    public int GetSubgroupCount(string groupName)
-    {
-        ArgumentNullException.ThrowIfNull(groupName);
-
-        return BuildGroupHierarchy().GetChildren(groupName).Count;
-    }
-
-    /// <summary>
     ///     Gets the path of a group through the tree, for telling nested groups apart in a menu: the groups
     ///     it is inside, outermost first, then the group itself, joined by <c> &gt; </c>.
     /// </summary>
