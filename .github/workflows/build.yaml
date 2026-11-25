@@ -92,7 +92,9 @@ jobs:
       contents: read
       pull-requests: write
 
+    # fail-fast is off so a failure on one OS does not cancel the others and lose their results.
     strategy:
+      fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
 

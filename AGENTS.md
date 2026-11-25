@@ -190,6 +190,14 @@ and exit 1.
 - Run `pwsh ./<script> -Help` for the switches of a repository; do not guess
 - Never report a targeted check as the full gate - state which full gates ran in your report
 
+## Targeted Tests on CI (UI tests)
+
+UiTests take over the local desktop, so run them on a GitHub runner instead of the ~45-minute pipeline. Push the
+branch first, then: `gh workflow run targeted_tests.yaml --ref <branch> -f project=UiTests -f filter="/*/*/<Class>/*"`
+and `gh run watch`. `filter` is an xUnit v3 `--filter-query` (`/assembly/namespace/class/method`, `*` wildcards);
+`project` is `UiTests`, `Tests` or `Puppet.Tests`; `os` defaults to `windows-latest`. The workflow can only be
+dispatched once it exists on the default branch.
+
 # Scope Discipline (ALL Agents Must Follow)
 
 - **No generated file access**: Files inside any `generated/` folder are build

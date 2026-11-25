@@ -1,0 +1,121 @@
+---
+# Targeted Tests
+#
+# Runs a filtered subset of one test project on a real GitHub runner, so a single test (or class)
+# can be verified without the full build.yaml pipeline (~45 minutes). Its main use is the FlaUI
+# UiTests, which take over the desktop and so cannot be run on a developer/agent machine without
+# disturbing it: dispatch them here instead and read the result from the run.
+#
+# Manual use only (workflow_dispatch); it runs on whichever branch is chosen at dispatch time:
+#
+#   gh workflow run targeted_tests.yaml --ref <branch> -f project=UiTests \
+#     -f filter="/*/*/SomeTestClass/*"
+#   gh run watch
+#
+# Limits: GitHub only lists a workflow for dispatch once the file exists on the default branch,
+# and the branch under test must already be pushed. It does no Sonar, coverage, or packaging.
+name: Targeted Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: >-
+          Test filter (xUnit v3 / Microsoft.Testing.Platform --filter-query), formatted as
+          /assembly/namespace/class/method with * wildcards. Examples:
+          a whole class "/*/*/ProgramTests/*";
+          one method "/*/*/*/Program_Version_ReturnsNonEmptyString";
+          a namespace "/*/DemaConsulting.AgentControl.Tests.GitIntegration/*/*".
+        required: true
+        type: string
+      project:
+        description: Test project to run (everything except Tests needs a Windows runner)
+        required: true
+        type: choice
+        default: UiTests
+        options:
+          - UiTests
+          - Tests
+          - Puppet.Tests
+      os:
+        description: Runner OS (UiTests and Puppet.Tests are Windows-only)
+        required: true
+        type: choice
+        default: windows-latest
+        options:
+          - windows-latest
+          - ubuntu-latest
+          - macos-latest
+
+jobs:
+  test:
+    name: Test ${{ inputs.project }} on ${{ inputs.os }}
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      # Inputs are passed through environment variables, never interpolated into scripts.
+      - name: Select test project
+        id: select
+        shell: bash
+        env:
+          PROJECT: ${{ inputs.project }}
+          RUNNER_OS_INPUT: ${{ inputs.os }}
+        run: |
+          case "${PROJECT}" in
+            UiTests)       path="test/DemaConsulting.AgentControl.UiTests/DemaConsulting.AgentControl.UiTests.csproj" ;;
+            Tests)         path="test/DemaConsulting.AgentControl.Tests/DemaConsulting.AgentControl.Tests.csproj" ;;
+            Puppet.Tests)  path="tools/DemaConsulting.AgentControl.Puppet.Tests/DemaConsulting.AgentControl.Puppet.Tests.csproj" ;;
+            *) echo "::error::Unknown project '${PROJECT}'"; exit 1 ;;
+          esac
+          # These projects target net10.0-windows: they restore everywhere, but their test host
+          # (and the UI under test) only runs on Windows. See the note on the Test step in build.yaml.
+          if [ "${PROJECT}" != "Tests" ] && [ "${RUNNER_OS_INPUT}" != "windows-latest" ]; then
+            echo "::error::Project '${PROJECT}' can only run on windows-latest (selected: ${RUNNER_OS_INPUT})"
+            exit 1
+          fi
+          echo "path=${path}" >> "${GITHUB_OUTPUT}"
+
+      # Same checkout and .NET setup as the build job in build.yaml.
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup dotnet
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.x
+            9.x
+            10.x
+
+      # Building the test project also builds what it launches: UiTests has project references
+      # to the AgentControl app and the ArgLoggerStub, which TestPaths.cs finds under bin/Release.
+      - name: Build
+        shell: bash
+        run: dotnet build "${{ steps.select.outputs.path }}" --configuration Release
+
+      # A filter that matches nothing makes the test run fail (exit code 8), which is intended.
+      - name: Test
+        shell: bash
+        env:
+          TEST_FILTER: ${{ inputs.filter }}
+        run: >
+          dotnet test "${{ steps.select.outputs.path }}"
+          --no-build
+          --configuration Release
+          --filter-query "${TEST_FILTER}"
+          --report-trx
+          --report-trx-filename "${{ inputs.os }}_{asm}_{tfm}_{arch}.trx"
+          --results-directory artifacts
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: targeted-tests-${{ inputs.project }}-${{ inputs.os }}
+          path: artifacts/
+          if-no-files-found: ignore
