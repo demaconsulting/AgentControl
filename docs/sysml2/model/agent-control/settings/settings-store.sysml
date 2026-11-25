@@ -1,5 +1,6 @@
 package AgentControl_SettingsStore {
     private import AgentControl_BlockingCallGuard::*;
+    private import AgentControl_RepoGroupHierarchy::*;
     private import SoftwareItemMetadata::*;
 
     part def SettingsStore {
@@ -16,4 +17,7 @@ package AgentControl_SettingsStore {
 
     // Asks the blocking-call guard before every save, so the tests catch a settings save made on the UI thread
     dependency SettingsStore to BlockingCallGuard;
+
+    // Repairs the stored group tree on load (through AppSettings), so the window never sees a damaged hierarchy
+    dependency SettingsStore to RepoGroupHierarchy;
 }

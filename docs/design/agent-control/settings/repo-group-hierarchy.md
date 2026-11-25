@@ -73,6 +73,9 @@ copy of the stored order).
 ignored, a parent that does not exist or is the group itself means top level and a cycle is cut like `RepairParents`
 does, so a damaged file still shows every group (`-RepairCycles`).
 
+**Groups** (property): The existing groups, one spelling each (`IReadOnlyCollection<string>`, in no particular order).
+Use `GetTreeOrder` for the order the list shows.
+
 **GetTreeOrder / GetChildren / GetDescendants / GetSubtree / GetAncestors / GetDepth / GetParent / IsSameOrDescendant /
 Contains / IsRegistered / GetName**: Read-only answers about the tree, all ignoring letter case and returning the
 spelling the group has. `GetTreeOrder` lists every group depth first, each followed by its subtree, with the groups of

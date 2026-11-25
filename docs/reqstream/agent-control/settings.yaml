@@ -164,12 +164,13 @@ sections:
           The Settings subsystem shall persist, per user and only in the user's own settings file, a
           color and a place in the order for each of the user's groups, found by group name ignoring
           letter case, shall read missing, null or invalid values of these as none, and shall drop
-          unknown colors and the entries of groups that no repo is in.
+          unknown colors and the entries of groups that do not exist (no repo names them and they are
+          not registered in the hierarchy).
         justification: |
           Group colors and the order of the groups are personal choices that must survive restarts
           but must not be shared through a repository; a damaged or hand-edited file must never keep
-          the application from starting, and a choice left behind for a group that is gone must not
-          come back on a new group of the same name.
+          the application from starting, and a choice left behind for a group that does not exist
+          any more must not come back on a new group of the same name.
         children:
           - AgentControl-SettingsStore-GroupColorsAndOrder
           - AgentControl-SettingsStore-GroupColorsAndOrderDefaults

@@ -4,8 +4,9 @@
 
 #### Purpose
 
-`GroupNameViewModel` backs the small prompt that asks for a repo group's name. It is used both to create a group (and
-move a repo into it) and to rename one. Its single responsibility is to validate the typed name as the user types and
+`GroupNameViewModel` backs the small prompt that asks for a repo group's name. It is used to create a group (and
+move a repo into it), to rename one and to create a subgroup inside another group. Its single responsibility is to
+validate the typed name as the user types and
 let only a usable name through, and to run the prompt's accept/cancel lifecycle so the window itself stays free of
 logic. The rules for what a name may be live in `RepoGroupName` (`Settings` subsystem unit); this unit adds the
 messages, the "does it clash with another group" check that needs the existing groups, and completion. Its behavior is
@@ -52,7 +53,8 @@ accept text or list of groups (`AgentControl-GroupNameViewModel-RequiresArgument
 
 **Accept** (via `AcceptCommand`): Does nothing unless `CanAccept`. A usable name completes with the name cleaned of
 surrounding and repeated white space (`AgentControl-GroupNameViewModel-AcceptsUsableName`). A *rename* completes with
-exactly what was typed (cleaned of surrounding white space), so changing only the letter case works
+the name as typed (cleaned of surrounding and repeated white space, letter case kept), so changing only the letter
+case works
 (`-RenameAcceptsCaseChange`); when renaming, the prompt starts with the group's current name
 (`-RenameStartsWithCurrentName`); a group created inside another group (a new name is required) also completes with the
 typed name (`-NewSubgroup`). Creating a group that may join an existing one completes with the
@@ -79,8 +81,9 @@ Only the constructor's argument validation throws. An unusable name is not an er
 
 #### Callers
 
-- **MainWindow** (view) - creates one prompt for a new group (from a card's menu) and one for a rename (from a
-  header), shows it in `GroupNameWindow` and passes the answer on to `RepoCardViewModel.MoveToGroup` or
-  `MainWindowViewModel.RenameGroup`.
+- **MainWindow** (view) - creates one prompt for a new group (from a card's menu), one for a rename (from a header)
+  and one for a new subgroup (from a header's menu: `MainWindow.ShowNewSubgroupPrompt`, with `requireNewName: true`
+  and the names of every group in the tree), shows it in `GroupNameWindow` and passes the answer on to
+  `RepoCardViewModel.MoveToGroup`, `MainWindowViewModel.RenameGroup` or `MainWindowViewModel.CreateSubgroup`.
 - **GroupNameWindow** (view) - binds to it and closes when it completes; it applies `DialogBehavior` and cancels the
   prompt when the window is closed by any other route.

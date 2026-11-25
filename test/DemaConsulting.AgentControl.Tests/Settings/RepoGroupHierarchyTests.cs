@@ -373,7 +373,8 @@ public class RepoGroupHierarchyTests
     [Fact]
     public void RepoGroupHierarchy_RepairParents_Cycle_CutAtFirstMemberDeterministicallyAndIdempotently()
     {
-        // Arrange: B > C > A > B is a cycle (A inside B inside C inside A... see the entries); D hangs off it
+        // Arrange: the entries put b inside A, C inside B and A inside C, which is a cycle of three
+        // (A inside C inside B inside A); D is inside C and hangs off the cycle
         List<KeyValuePair<string, string>> forward =
         [
             new("b", "A"), new("C", "B"), new("A", "C"), new("D", "C")

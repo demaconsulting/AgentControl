@@ -2,7 +2,7 @@ package AgentControl_GroupNameViewModel {
     private import SoftwareItemMetadata::*;
 
     part def GroupNameViewModel {
-        doc /* View-model of the prompt that asks for a repo group's name (new group or rename): validates as the user types, lets only a usable name through, lets a new group join an existing one of the same name, and completes exactly once. */
+        doc /* View-model of the prompt that asks for a repo group's name (new group, rename or new subgroup): validates as the user types, lets only a usable name through, lets a new group join an existing one of the same name (but, when creating a subgroup, refuses every name that exists anywhere in the group tree), and completes exactly once. */
 
         metadata info : SoftwareInfo {
             sourceFiles = ("src/DemaConsulting.AgentControl/LauncherUI/GroupNameViewModel.cs");

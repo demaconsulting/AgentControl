@@ -118,7 +118,8 @@ sections:
       - id: AgentControl-GroupNameViewModel-RenameAcceptsCaseChange
         title: >-
           The GroupNameViewModel class shall, when renaming a group, accept a change of letter
-          case only, completing with exactly what was typed.
+          case only, completing with the name as typed, cleaned of surrounding and repeated white
+          space (letter case kept).
         justification: |
           A change of letter case only must be possible, or a group could never be corrected.
         tests:
@@ -128,7 +129,8 @@ sections:
         title: >-
           The GroupNameViewModel class shall, when asking for the name of a group created inside
           another group, refuse the name of every existing group, in any letter case, saying that
-          it already exists and not offering to join it, and shall complete with the name as typed.
+          it already exists and not offering to join it, and shall complete with the name as typed,
+          cleaned of surrounding and repeated white space (letter case kept).
         justification: |
           Group names are unique across the whole tree, so a group created inside another cannot
           join an existing group the way a repo moved into a new group can.

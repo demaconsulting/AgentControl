@@ -211,7 +211,8 @@ Each repo card shows:
   of them applies - see below. **Organize**: **Move to group**, **Reorder** (a submenu with **Move to top**,
   **Move up**, **Move down** and **Move to bottom**) and **Card color...** (see *Organizing Repos with Groups*,
   *Ordering Your Repos* and *Choosing a Card Color*). Then **Remove from list**; when several cards are selected
-  and you open the menu of one of them, this item removes all of them (see *Selecting Several Repos*).
+  and you open the menu **of one of the selected cards**, this item removes all of them (see *Selecting Several
+  Repos*).
 
 ![A card with the repo's own picture and an up-to-date package, a group header with its teal color bar, and a card
 with a teal tile from its group, an upgrade chip and an uncommitted-changes warning](images/repo-card-anatomy.png)
@@ -290,7 +291,8 @@ project. The groups are then listed as a **tree**: a group's header is followed 
 (each with its own repos) and then by the group's own repos, and every header and card is drawn further in for each
 group it is inside. A header's count is the number of repos in the whole group, subgroups included, and its
 accessible name says which group it is inside (for example "Phase 1, 2 repos, expanded, inside Work"). Collapsing a
-group hides everything inside it.
+group hides everything inside it. Headers and cards are drawn further in for each level only down to the eighth level:
+a group nested deeper looks as deep as level 8, and its accessible name still says which group it is inside.
 
 - **Create a subgroup.** Choose **New subgroup...** in the "..." menu of the group that is to contain it and type a
   name. The prompt checks the name as you type like the **New group...** prompt does, and also refuses the name of
@@ -438,8 +440,8 @@ the order.
 
 Everything you change in the main window - a favorite, a group (creating, nesting, sorting, renaming or deleting it),
 a card or group color, the order of your repos or groups, collapsing a section, removing one or several repos, and
-the time of a launch - takes effect
-at once and is saved to your settings file in the background a moment later, so the window never waits for the
+the time of a launch - takes effect at once and is saved to your settings file in the background a moment later, so
+the window never waits for the
 disk (another program, such as a virus scanner or a sync client, can hold the file for a while). Several quick changes
 are saved together. Repositories you add, and the values you save in **Settings**, are the exception: they are
 applied only once they are saved (see *Adding a Repository* and *Settings*).

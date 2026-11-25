@@ -56,7 +56,7 @@ sections:
 
       - id: AgentControl-RepoGroupHierarchy-AnyDepth
         title: >-
-          The RepoGroupHierarchy class shall handle groups nested to any depth, thousands of levels
+          The RepoGroupHierarchy class shall handle groups nested to any depth, at least 5000 levels
           included, without failing.
         justification: |
           A hand-edited or damaged file must never be able to crash the window, however deep it

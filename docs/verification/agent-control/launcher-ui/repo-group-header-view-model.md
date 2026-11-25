@@ -33,6 +33,11 @@ N/A - standard test environment (no window, no files and no processes are involv
 - The Move up and Move down commands are unavailable until the owner says where the group stands, raise their request
   only while available, explain an unavailable move in their tooltips, and are never available for *Favorites* and
   *Ungrouped*.
+- The Sort by name command is unavailable until the owner says the group can be sorted, raises its request only while
+  available, explains an unavailable sort in its tooltip, and is never available for *Favorites* and *Ungrouped*.
+- The delete-with-contents command is available only for a group that has contents (a repo or a group inside it), is
+  hidden otherwise with the plain delete reading `Delete group`, raises exactly one request per execution, and is
+  never available for *Favorites* and *Ungrouped*.
 - A header without a name (blank or `null`) is refused.
 
 #### Test Scenarios

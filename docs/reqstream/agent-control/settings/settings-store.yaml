@@ -109,8 +109,9 @@ sections:
           Virus scanners, search indexers and sync clients routinely open a file for a moment
           without allowing it to be replaced; a user must not see a "settings could not be saved"
           error, or lose a change, because of such a transient hold, while a real failure such as a
-          full disk must still be reported at once. The wait is bounded because saves commonly run
-          on the UI thread.
+          full disk must still be reported at once. The wait is bounded because saves run on a
+          background worker one at a time, and the next change, and closing the window, wait for
+          the one in progress.
         tests:
           - SettingsStore_Save_ReplaceBrieflyLocked_RetriesAndSaves
           - SettingsStore_Save_ReplaceLockedBeyondRetries_ThrowsInvalidOperationAndCleansUp
@@ -371,7 +372,8 @@ sections:
         title: >-
           The SettingsStore class shall read a group hierarchy of the wrong kind as none, keep only
           its usable entries, drop an entry of a blank or built-in section name, read an unknown,
-          self or built-in section parent as the top level, cut a cycle, and spell the groups as
+          self or built-in section parent as the top level (the group itself stays registered, as a
+          top-level group, even with no repo in it), cut a cycle, and spell the groups as
           they are spelled, without writing the damage back.
         justification: |
           A damaged, hand-edited or newer file must never fail the load nor leave groups that

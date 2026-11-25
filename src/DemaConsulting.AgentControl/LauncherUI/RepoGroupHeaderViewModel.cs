@@ -46,14 +46,20 @@ internal enum RepoGroupKind
 /// <summary>
 ///     The collapsible header row that starts a section of the main window's repo list: the
 ///     section's name, how many repos match in it, and (for the user's own groups) the group's
-///     color and the actions that add a repo to, move, color, rename or remove the group.
+///     color, its place in the tree of groups inside groups, and the actions that add a repo to,
+///     create a subgroup in, move, sort by name, color, rename or delete (keeping the contents or
+///     together with them) the group.
 /// </summary>
 /// <remarks>
 ///     Headers sit among the repo cards in <see cref="MainWindowViewModel.DisplayedItems"/>. The
 ///     owning <see cref="MainWindowViewModel"/> keeps one instance per section and updates its
-///     <see cref="Count"/>, collapsed state, color (<see cref="UpdateColor"/>) and move availability
-///     (<see cref="UpdateOrder"/>) in place (so a header keeps keyboard focus when it is toggled), and
-///     handles the request events; the actions that need a dialog are forwarded to the window. Not
+///     <see cref="Count"/>, collapsed state, tree place (<see cref="UpdatePlace"/>), color
+///     (<see cref="UpdateColor"/>), move availability (<see cref="UpdateOrder"/>), sort availability
+///     (<see cref="UpdateSort"/>) and whether the group has contents (<see cref="UpdateContents"/>)
+///     in place (so a header keeps keyboard focus when it is toggled), and handles the request
+///     events; the actions that need a dialog are forwarded to the window. A group nested deeper
+///     than <see cref="MaxIndentedDepth"/> levels is drawn no further in (its depth in the data is
+///     not limited), and its accessible name still says which group it is inside. Not
 ///     thread-safe; used on the UI thread only.
 /// </remarks>
 internal sealed class RepoGroupHeaderViewModel : ViewModelBase

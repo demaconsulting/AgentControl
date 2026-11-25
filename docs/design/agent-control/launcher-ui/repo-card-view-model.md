@@ -251,7 +251,8 @@ would change a repo's color on every launch. The view model carries no color: th
 **Group and card color** (user-specific; stored only on the repo's `RecentRepo` in the per-user settings, never in the
 repository or its pin file). **Depth** (set by `MainWindowViewModel` each time it builds the list) is how many groups
 the group that lists the card is inside, and **IndentWidth** the indent that depth gives, the same as the header's
-(`RepoGroupHeaderViewModel.GetIndentWidth`), so a card lines up with its group's header
+(`RepoGroupHeaderViewModel.GetIndentWidth`), so a card lines up with its group's header; a card in a group nested
+deeper than 8 levels is drawn as deep as level 8, like the header
 (`AgentControl-RepoCardViewModel-GroupDepthIndent`). **SelectionSize** is how many cards are selected together with this
 one (0 when it is not selected), set by `MainWindowViewModel` through `UpdateSelection`, and **RemoveMenuText** /
 **RemoveMenuTooltip** are the text and tooltip of the card menu's "Remove from list" item: the plain wording

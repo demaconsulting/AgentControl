@@ -21,7 +21,9 @@ N/A - standard test environment (no window, no files and no processes are involv
 - Creating a group with an existing group's name in another letter case shows a note (not an error), can be accepted
   and completes with the existing group's spelling.
 - Renaming starts with the group's own name, refuses another group's name, accepts a change of letter case only and
-  completes with exactly what was typed.
+  completes with the name as typed, cleaned of surrounding and repeated white space.
+- A prompt for a new subgroup (a new name is required) refuses the name of every existing group in any letter case,
+  shows no hint about joining it, and completes with the cleaned name when a fresh one is typed.
 - The prompt completes exactly once - with the name when accepted, with none when canceled - whatever is done
   afterwards.
 - A missing title, prompt, accept text or list of groups is refused.

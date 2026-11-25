@@ -121,13 +121,14 @@ internal sealed class AppSettings
     /// <summary>
     ///     Repairs the organizing values the user may have edited by hand or an older/newer version
     ///     may have written: group names are cleaned up and unified, the collapsed list is made
-    ///     a list of distinct clean names, and the group colors and group order are repaired.
+    ///     a list of distinct clean names, and the group hierarchy, colors and order are repaired.
     /// </summary>
     /// <remarks>
     ///     Each repo's group name is sanitized (see <see cref="RepoGroupName.Sanitize"/>), and
     ///     repos whose names differ only in letter case are given the spelling of the first of them
-    ///     in the list, so a group has exactly one display name. The group colors and order are
-    ///     repaired last (see <see cref="RepairGroupSettings"/>), against the repaired group names.
+    ///     in the list, so a group has exactly one display name. The group hierarchy is repaired
+    ///     first, then the group colors and order, last (see <see cref="RepairGroupSettings"/>),
+    ///     against the repaired group names and the groups the repaired hierarchy registers.
     ///     Idempotent.
     /// </remarks>
     private void NormalizeGroups()
@@ -633,8 +634,9 @@ internal sealed class AppSettings
     ///     without an entry has no color. The main window shows the color on the group's header and
     ///     uses it for the tiles of the group's repos that have no card color of their own. Anything in
     ///     the file that is not an object of strings reads as empty or loses the offending entries,
-    ///     and <see cref="RepairGroupSettings"/> drops unknown colors and entries of groups no repo is
-    ///     in, so the value can never keep the application from starting. Always written.
+    ///     and <see cref="RepairGroupSettings"/> drops unknown colors and entries of groups that do not
+    ///     exist (no repo names them and they are not registered in <see cref="GroupParents"/>), so the
+    ///     value can never keep the application from starting. Always written.
     /// </remarks>
     [JsonConverter(typeof(StringMapJsonConverter))]
     public Dictionary<string, string> GroupColors { get; set; } = new(RepoGroupName.Comparer);
@@ -647,7 +649,8 @@ internal sealed class AppSettings
     ///     first, then the groups named here in this order, then the groups that have no position
     ///     yet alphabetically, then Ungrouped. Compared ignoring letter case. Anything in the file that
     ///     is not a list of strings reads as empty or loses the offending entries, and
-    ///     <see cref="RepairGroupSettings"/> drops duplicates and names of groups no repo is in. Always
+    ///     <see cref="RepairGroupSettings"/> drops duplicates and names of groups that do not exist (no
+    ///     repo names them and they are not registered in <see cref="GroupParents"/>). Always
     ///     written.
     /// </remarks>
     [JsonConverter(typeof(StringListJsonConverter))]

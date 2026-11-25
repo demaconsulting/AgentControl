@@ -37,7 +37,8 @@ now - false while a filter is active.
 **Depth**, **ParentName**, **HasParent**, **IndentWidth**: where the group is in the tree - how many groups it is
 inside, the group it is directly inside (`null` at the top level and always for *Favorites* and *Ungrouped*, which are
 never inside a group) and the indent that depth gives: `IndentPerLevel` (20 device-independent pixels) for each level
-up to `MaxIndentedDepth` (8) levels, so a group nested deeper is drawn no further in while its depth in the data is not
+up to `MaxIndentedDepth` (8) levels, so a group nested deeper is drawn no further in (it looks as deep as level 8, and
+its accessible name still says which group it is inside) while its depth in the data is not
 limited. The static `GetIndentWidth(depth)` is shared with `RepoCardViewModel` so a group and its repos line up
 (`AgentControl-RepoGroupHeaderViewModel-NestedPlace`).
 
@@ -61,8 +62,9 @@ event; `ToggleCommand` can execute only while `IsToggleEnabled` (`AgentControl-R
 only raises the event and can execute only while `HasContents` is true. **HasContents** says whether the group has a
 repo (a favorite too) or a group inside it; it is set by the owner through `UpdateContents` and is always false for
 *Favorites* and *Ungrouped*. With contents the plain delete item reads `RemoveGroupText` = `Delete group, keep contents`
-and the second item is shown; with none, the plain item reads `Delete group` and the second is hidden
-(`AgentControl-RepoGroupHeaderViewModel-RemoveGroupWithContentsRequest`).
+and the second item is shown; with none, the plain item reads `Delete group` and the second is hidden.
+**RemoveGroupTooltip** is the plain item's tooltip: it explains where the group's repos and subgroups go, or says the
+group has none (`AgentControl-RepoGroupHeaderViewModel-RemoveGroupWithContentsRequest`).
 
 **ColorName** (`string?`): the palette color the user chose for the group, in its canonical spelling, or `null` for
 none - always `null` for *Favorites* and *Ungrouped*, which cannot be colored. **HasColor** shows the accent bar on the

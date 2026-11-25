@@ -20,7 +20,7 @@ N/A - standard test environment (no files, windows or processes are involved).
   parents every group is top level.
 - The tree is listed depth first with each group's parent and depth, and the navigation answers (parent, children,
   descendants, subtree, ancestors, depth, inside) are right, ignoring letter case and for unknown names; a tree
-  thousands of levels deep is handled without failing.
+  at least 5000 levels deep is handled without failing.
 - A group cannot be put inside itself or one of its descendants, nor an unknown group be moved or used as a parent; a
   move registers the moved group and every group it is now inside.
 - Deleting a group with its contents kept gives its subgroups to its parent in the group's place in the order.
@@ -57,10 +57,10 @@ scenario is tested by `RepoGroupHierarchy_Navigation_AnswersParentChildrenAncest
 descendants counted and the deepest depth asked without a stack overflow. This scenario is tested by
 `RepoGroupHierarchy_DeepTree_WalkedIteratively`, covering `AgentControl-RepoGroupHierarchy-AnyDepth`.
 
-**RepoGroupHierarchy_CanMove_RefusesLoops**: In a chain of three groups, the bottom group may go to the top level or
-inside the top group, the top group may go inside an unrelated group, and the top group may not go inside itself, its
-child or its grandchild; unknown groups, the built-in section names and `null` are refused. Moving into a refused place
-throws. This scenario is tested by `RepoGroupHierarchy_CanMove_RefusesLoopsAndUnknownGroups` and
+**RepoGroupHierarchy_CanMove_RefusesLoopsAndUnknownGroups**: In a chain of three groups, the bottom group may go to the
+top level or inside the top group, the top group may go inside an unrelated group, and the top group may not go inside
+itself, its child or its grandchild; unknown groups, the built-in section names and `null` are refused. Moving into a
+refused place throws. This scenario is tested by `RepoGroupHierarchy_CanMove_RefusesLoopsAndUnknownGroups` and
 `RepoGroupHierarchy_PutInside_NotAllowed_Throws`, covering `AgentControl-RepoGroupHierarchy-RefusesLoops`.
 
 **RepoGroupHierarchy_PutInside_RegistersMovedGroupAndItsNewAncestors**: Moving a group named only by a repo inside the
@@ -72,26 +72,26 @@ put at the top level is not registered. This scenario is tested by
 `RepoGroupHierarchy_PutInside_TopLevelUnregisteredGroup_StaysUnregistered`, covering
 `AgentControl-RepoGroupHierarchy-PutInsideRegisters`.
 
-**RepoGroupHierarchy_Pop_SubgroupsKeepTheirPlace**: A group in the middle of its parent's subgroups, with two subgroups
-of its own, is deleted: the subgroups go to the parent in the group's slot of the stored order, in their own order, and
-the group is forgotten; a top-level group with no stored place leaves its subgroup top level and the order untouched.
-This scenario is tested by `RepoGroupHierarchy_Pop_SubgroupsGoToTheParentInTheGroupsPlace` and
+**RepoGroupHierarchy_Pop_SubgroupsGoToTheParentInTheGroupsPlace**: A group in the middle of its parent's subgroups, with
+two subgroups of its own, is deleted: the subgroups go to the parent in the group's slot of the stored order, in their
+own order, and the group is forgotten; a top-level group with no stored place leaves its subgroup top level and the
+order untouched. This scenario is tested by `RepoGroupHierarchy_Pop_SubgroupsGoToTheParentInTheGroupsPlace` and
 `RepoGroupHierarchy_Pop_TopLevelGroupWithoutPlace_SubgroupsBecomeTopLevel`, covering
 `AgentControl-RepoGroupHierarchy-PopKeepsSubgroups`.
 
-**RepoGroupHierarchy_RepairParents_DropsAndRegisters**: Stored parents with a padded name, a case duplicate, the
-built-in `Favorites`, a blank name, a self parent, an unknown parent, a reserved parent and a blank parent are repaired
-as described: usable keys kept and spelled like their repos, the others dropped or made top level. A parent that only a
-repo names is registered. This scenario is tested by
+**RepoGroupHierarchy_RepairParents_DropsUnusableEntriesAndTopLevelsBadParents**: Stored parents with a padded name, a
+case duplicate, the built-in `Favorites`, a blank name, a self parent, an unknown parent, a reserved parent and a blank
+parent are repaired as described: usable keys kept and spelled like their repos, the others dropped or made top level. A
+parent that only a repo names is registered. This scenario is tested by
 `RepoGroupHierarchy_RepairParents_DropsUnusableEntriesAndTopLevelsBadParents` and
 `RepoGroupHierarchy_RepairParents_ParentNamedByRepo_IsRegisteredAsTopLevel`, covering
 `AgentControl-RepoGroupHierarchy-RepairDropsUnusable` and `AgentControl-RepoGroupHierarchy-RepairRegistersParents`.
 
-**RepoGroupHierarchy_RepairParents_Cycle_CutDeterministicallyAndIdempotently**: Three groups inside each other in a
-circle (with a fourth hanging off it) are repaired the same way whichever order they are stored in and when the result
-is repaired again, the first member in ordinal order, ignoring letter case, becoming top level; a hierarchy built from a
-damaged value (a cycle, an unknown parent, a self parent, an entry about a group that does not exist) still lists every
-group. This scenario is tested by
+**RepoGroupHierarchy_RepairParents_Cycle_CutAtFirstMemberDeterministicallyAndIdempotently**: Three groups inside each
+other in a circle (with a fourth hanging off it) are repaired the same way whichever order they are stored in and when
+the result is repaired again, the first member in ordinal order, ignoring letter case, becoming top level; a hierarchy
+built from a damaged value (a cycle, an unknown parent, a self parent, an entry about a group that does not exist) still
+lists every group. This scenario is tested by
 `RepoGroupHierarchy_RepairParents_Cycle_CutAtFirstMemberDeterministicallyAndIdempotently` and
 `RepoGroupHierarchy_Constructor_DamagedParents_StillListsEveryGroup`, covering
 `AgentControl-RepoGroupHierarchy-RepairCycles`.

@@ -3,8 +3,9 @@
 #
 # RepoGroupName holds the rules for the names of the user's own repo groups: how a typed or stored
 # name is cleaned up, which names are acceptable, how a stored name is repaired and how names that
-# differ only in letter case are treated as one group. A group exists only as a name stored on its
-# repos, so these rules are one shared, pure unit that the settings loader, the view models and the
+# differ only in letter case are treated as one group. A group exists while a repo names it or while it
+# is registered in the stored group tree (a name is unique across the whole tree), so these rules are
+# one shared, pure unit that the settings loader, the view models and the
 # name prompt all agree on. Each requirement states one observable behavior.
 
 sections:

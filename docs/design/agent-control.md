@@ -89,13 +89,15 @@ flowchart TD
     MainWindowViewModel -->|progress strip of bulk work| GlobalProgressViewModel
     MainWindowViewModel --> RepoGroupName
     MainWindowViewModel -->|the group tree and its moves| RepoGroupHierarchy
-    RepoGroupHierarchy --> RepoGroupName    MainWindowViewModel -->|repository-root check| GitClient
+    RepoGroupHierarchy --> RepoGroupName
+    MainWindowViewModel -->|repository-root check| GitClient
     MainWindowViewModel -.->|MainWindow view shows| GroupNameViewModel
     RepoCardViewModel --> RepoImageLocator
     RepoCardViewModel --> RepoGroupName
     GroupNameViewModel --> RepoGroupName
     SettingsStore --> RepoGroupName
-    SettingsStore -->|repairs the stored group tree| RepoGroupHierarchy    MainWindowViewModel -.->|dialog windows apply| DialogBehavior
+    SettingsStore -->|repairs the stored group tree| RepoGroupHierarchy
+    MainWindowViewModel -.->|dialog windows apply| DialogBehavior
     SettingsWindowViewModel -.->|dialog windows apply| DialogBehavior
     SourceEditorViewModel -.->|dialog windows apply| DialogBehavior
     SelectPackageWindowViewModel -.->|dialog windows apply| DialogBehavior
@@ -817,10 +819,11 @@ an unwanted or repeated file write.
 - Package authenticity: a source that requires signed packages never supplies one that fails the check, never
   skips the check, and decides trusted signers from its own description alone
   (`AgentControl-System-PackageAuthenticity`). Signature verification is supported on Windows, Linux and macOS.
-- Personal choices stay personal: favorites, groups, card colors, group colors, the order of the groups, collapsed
-  sections and the theme are written only
-  to the per-user settings file, never to a repo (`AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
-  `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`). A change is applied at once and written in the
+- Personal choices stay personal: favorites, groups, the tree of groups inside groups, card colors, group colors,
+  the order of the groups, collapsed sections and the theme are written only
+  to the per-user settings file, never to a repo (`AgentControl-System-RepoGroups`, `AgentControl-System-NestedGroups`,
+  `AgentControl-System-CardColor`, `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`); the tree is
+  stored as `GroupParents`. A change is applied at once and written in the
   background by `SettingsWriter` (the newest snapshot, a short delay after the last change, one write at a time on a
   worker thread), so the window never waits for the settings file; a failed write is reported once per failure streak
   and the change stays in effect and is written with the next change or when the window closes; an add and the
