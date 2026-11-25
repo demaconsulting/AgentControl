@@ -62,7 +62,9 @@ the units, `GitCredentialClient` (in `GitIntegration`) and `SignatureVerificatio
 `PackageContentIdentity` (in `AgentPackageManagement`) to the package-content-integrity feature. `GitSourceProvider`,
 `GitRepositoryAddress` and `GitTagPattern` (in `AgentPackageManagement`) and `GitRemoteClient` (in `GitIntegration`)
 belong to the Git repository source feature. `RepoGroupName` (in
-`Settings`) is the unit holding the rules for the names of the user's repo groups, and `RepoImageLocator`,
+`Settings`) is the unit holding the rules for the names of the user's repo groups, `RepoGroupHierarchy` (in `Settings`)
+the unit holding the rules for how those groups nest (which group is inside which, the order within a level, which
+moves keep the tree a tree and how a stored tree is repaired), and `RepoImageLocator`,
 `RepoGroupHeaderViewModel`, `GroupNameViewModel` and `DialogBehavior` (in `LauncherUI`) belong to the repo-picture,
 repo-group and dialog features; `GlobalProgressViewModel` (in `LauncherUI`) backs the progress strip under the app bar
 that shows bulk work (adding repositories, refreshing the cards at start-up and after Settings are saved);
@@ -72,9 +74,10 @@ that shows bulk work (adding repositories, refreshing the cards at start-up and 
 `BackgroundPackageSourceProvider` is a documented supporting type of the `PackageSourceRegistry` unit (in
 `AgentPackageManagement`), not a unit: the registry wraps every built-in package source in it so that listing and
 acquiring a package, and hashing what was delivered, run on the thread pool; `PathEllipsisText`,
-`ColorPalettePanel` (the shared content of the card and group color pop-ups), `ThemePreferenceDisplayNameConverter`
-and `BackgroundWorkRunner` (the seam that runs file-system and git reads off the UI thread) are documented
-supporting types of `LauncherUI`, not units.
+`ColorPalettePanel` (the shared content of the card and group color pop-ups), `ThemePreferenceDisplayNameConverter`,
+`GroupIndentConverter` (turns a nesting depth into the indentation of a header or card), `RepoListBox` (the repo list
+control that keeps a multi-selection while a selected card is pressed to start a drag) and `BackgroundWorkRunner` (the
+seam that runs file-system and git reads off the UI thread) are documented supporting types of `LauncherUI`, not units.
 
 ![Software Structure](SoftwareStructureView.svg)
 
@@ -92,13 +95,14 @@ Settings, Logging, Startup and Utilities](architecture.svg)
 
 - **src/** - source files and projects
   - **DemaConsulting.AgentControl/** - main Avalonia desktop application source
-    - **LauncherUI/** - main window, repo cards, package-selection, settings, package-source editor
-      (including the signature options and "Forget saved sign-in") and sign-in windows; the user's group colors and
-      group order (header menu, drag and drop), adding several repos at once (multi-select picker and folders dropped
-      from the file manager, checked in the background, with progress and Cancel in the global progress strip under
-      the app bar, `GlobalProgressViewModel`, and a Retry/Discard question when the add cannot be saved), the shared
-      repo refresh queue (`RepoRefreshQueue`), the background-work seam (`BackgroundWorkRunner`) and the About window
-      with its banner
+    - **LauncherUI/** - main window, repo cards, package-selection, settings, package-source editor (including the
+      signature options and "Forget saved sign-in") and sign-in windows; the user's groups - nested as a tree, with
+      their colors, order (header menu, drag and drop), sorting by name and the two ways to delete one - and the
+      selection of several repo cards to move or remove together, adding several repos at once (multi-select picker and
+      folders dropped from the file manager, checked in the background, with progress and Cancel in the global progress
+      strip under the app bar, `GlobalProgressViewModel`, and a Retry/Discard question when the add cannot be saved),
+      the shared repo refresh queue (`RepoRefreshQueue`), the background-work seam (`BackgroundWorkRunner`) and the
+      About window with its banner
     - **AgentPackageManagement/** - package source model, source providers (zip folder, NuGet
       folder and server, Git repository) and registry (which wraps each built-in provider in
       `BackgroundPackageSourceProvider`, so its work runs off the UI thread), package discovery, version comparison,
@@ -115,10 +119,11 @@ Settings, Logging, Startup and Utilities](architecture.svg)
     - **GitIntegration/** - git status/pull/branch queries, the repository-root check, the user's Git credential helper
       (saved package-feed sign-ins) and hardened git against remote repositories (the Git package source)
     - **Settings/** - application-wide settings persistence (including the package sources and the user's repo
-      groups, card colors, group colors, group order and theme; `SettingsStore`, which repairs unusable stored values on
-      load - an unknown card color reads as automatic, and unknown or stale group colors and positions are dropped),
-      the `SettingsWriter` unit, which writes the settings in the background, and the `RepoGroupName` unit, the rules
-      for the names of the user's repo groups
+      groups and their hierarchy, card colors, group colors, group order and theme; `SettingsStore`, which repairs
+      unusable stored values on load - an unknown card color reads as automatic, unknown or stale group colors and
+      positions are dropped, and a damaged group hierarchy is repaired), the `SettingsWriter` unit, which writes the
+      settings in the background, the `RepoGroupName` unit, the rules for the names of the user's repo groups, and the
+      `RepoGroupHierarchy` unit, the rules for how those groups nest
     - **Logging/** - diagnostic file logging setup
     - **Startup/** - startup-argument parsing
     - **Utilities/** - shared utilities subsystem (safe path combination, the test-enabled blocking-call guard)

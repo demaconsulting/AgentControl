@@ -113,4 +113,5 @@ class library.
 
 - **AppSettings** (same subsystem) — `RepairGroupSettings`, run by `SettingsStore.Load` and after every change the main
   window saves, repairs the stored parents through `RepairParents`.
-- **MainWindowViewModel** (`LauncherUI`) — arranges the group sections with `ArrangeGroups`.
+- **MainWindowViewModel** (`LauncherUI`) — builds the group tree it lists from the groups, parents and order in the
+  settings, asks it whether a move is allowed, and arranges the groups of one level with `ArrangeGroups`.

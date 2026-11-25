@@ -954,8 +954,10 @@ live in `MainWindowViewModel` and the window only translates input and shows fee
   the `ListBox` styles and template through its style key, so the AutomationId `RepoListBox`, the UI Automation list and
   list-item peers - `Selection.CanSelectMultiple`, `SelectionItem.IsSelected` on each row - and the `repoList` styles
   are those of a plain list). The list's own selection logic gives Ctrl+click (toggle), Shift+click (the range from the
-  anchor to the clicked row, in the order of the flat list: favorites, the groups as a tree depth first, then the repos
-  in no group) and a plain click (one card); `RepoListBox` changes three things. (1) A plain left press on a row that is
+  anchor to the clicked row, always in the visual tree order of the flat list - the order the rows are shown in
+  top to bottom, not the order of the stored list: favorites, the groups as a tree depth first, then the repos
+  in no group; rows that are not shown, such as the cards of a collapsed group, are not in the range) and a plain
+  click (one card); `RepoListBox` changes three things. (1) A plain left press on a row that is
   already selected, while several rows are selected, does not reduce the selection on press (the list would, which was
   confirmed by a spike on Avalonia 12.2.0, and a drag could then move only that card): `ShouldTriggerSelection` puts the
   selection off to the release, which reduces it to that card only when the button is released inside the row without a

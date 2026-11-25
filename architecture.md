@@ -132,7 +132,10 @@ AgentControl
 │   ├── MainWindowViewModel - owns the recent-repos list in the user's own
 │   │                         order (Move/drag reorder it); creates a
 │   │                         RepoCardViewModel per repo and a
-│   │                         RepoGroupHeaderViewModel per list section;
+│   │                         RepoGroupHeaderViewModel per list section; lists
+│   │                         nested groups as a tree, sorts, deletes and
+│   │                         nests groups, and moves or removes several
+│   │                         selected cards together;
 │   │                         saves every change (candidate copy -> save ->
 │   │                         commit -> refresh) through Settings
 │   ├── RepoCardViewModel - one repo's status and actions; asks
@@ -141,9 +144,11 @@ AgentControl
 │   │                       with CardColorPalette
 │   ├── RepoImageLocator - finds and safely decodes a repo's icon.png/logo.png
 │   │                      (called by RepoCardViewModel only)
-│   ├── RepoGroupHeaderViewModel - a section's collapsible header row; raises
-│   │                              toggle/rename/remove requests that
-│   │                              MainWindowViewModel handles or forwards
+│   ├── RepoGroupHeaderViewModel - a section's collapsible header row (its
+│   │                              depth in the group tree); raises
+│   │                              toggle/rename/sort/delete/new-subgroup
+│   │                              requests that MainWindowViewModel handles
+│   │                              or forwards
 │   ├── GroupNameViewModel - validates the group-name prompt with
 │   │                        RepoGroupName; shown by the main window when a
 │   │                        card asks for a new group or a header for a rename
@@ -154,7 +159,9 @@ AgentControl
 │   └── supporting types (documented in the LauncherUI design, not units):
 │       CardColorPalette (built from the Settings card-color names),
 │       PathEllipsisText (card path control),
-│       ThemePreferenceDisplayNameConverter (theme picker text)
+│       ThemePreferenceDisplayNameConverter (theme picker text),
+│       GroupIndentConverter (nesting depth to indentation),
+│       RepoListBox (keeps a multi-selection while a drag starts)
 ├── GitIntegration - git status check (gates pull offer on clean working tree),
 │                     git pull, configurable git executable path override;
 │                     the user's own Git credential helper (saved package-feed
@@ -193,14 +200,18 @@ AgentControl
     │          folder-browse dialog), git executable path override, agent
     │          tool selection (Copilot CLI / Cursor / Claude Code / Custom
     │          command), shell/terminal preference, color theme, and the
-    │          user's own repo groups, card colors, collapsed sections and
-    │          repo order (seeded once for an older file)
+    │          user's own repo groups (nested as a tree), card colors, collapsed
+    │          sections and repo order (seeded once for an older file)
     ├── SettingsStore - loads (repairing unusable values, such as an unknown
-    │                   card color, and seeding the repo order once) and saves
-    │                   the settings file
-    └── RepoGroupName - the rules for group names, used by SettingsStore,
-                        RepoCardViewModel, MainWindowViewModel and
-                        GroupNameViewModel
+    │                   card color or a damaged group tree, and seeding the
+    │                   repo order once) and saves the settings file
+    ├── RepoGroupName - the rules for group names, used by SettingsStore,
+    │                   RepoCardViewModel, MainWindowViewModel and
+    │                   GroupNameViewModel
+    └── RepoGroupHierarchy - the rules for how groups nest (parent of a group,
+                             order within a level, valid moves, repair of a
+                             stored tree), used by AppSettings and
+                             MainWindowViewModel
 ```
 
 ## Architectural Decisions

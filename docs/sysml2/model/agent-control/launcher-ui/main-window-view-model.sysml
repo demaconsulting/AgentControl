@@ -3,6 +3,7 @@ package AgentControl_MainWindowViewModel {
     private import AgentControl_GlobalProgressViewModel::*;
     private import AgentControl_SettingsWriter::*;
     private import AgentControl_RepoRefreshQueue::*;
+    private import AgentControl_RepoGroupHierarchy::*;
     private import SoftwareItemMetadata::*;
 
     part def MainWindowViewModel {
@@ -28,4 +29,7 @@ package AgentControl_MainWindowViewModel {
 
     // Owns the one repo refresh queue: the cards' start-up reads and an add's folder checks go through it, it is handed to every card, and its progress wave is shown in the strip
     dependency MainWindowViewModel to RepoRefreshQueue;
+
+    // The group tree the list shows, the moves that keep it a tree and the order within a level are the group hierarchy's rules
+    dependency MainWindowViewModel to RepoGroupHierarchy;
 }

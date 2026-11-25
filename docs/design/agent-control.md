@@ -69,6 +69,7 @@ flowchart TD
     subgraph Settings
         SettingsStore
         RepoGroupName
+        RepoGroupHierarchy
     end
     subgraph Logging
         LoggingSetup
@@ -87,13 +88,14 @@ flowchart TD
     MainWindowViewModel --> RepoGroupHeaderViewModel
     MainWindowViewModel -->|progress strip of bulk work| GlobalProgressViewModel
     MainWindowViewModel --> RepoGroupName
-    MainWindowViewModel -->|repository-root check| GitClient
+    MainWindowViewModel -->|the group tree and its moves| RepoGroupHierarchy
+    RepoGroupHierarchy --> RepoGroupName    MainWindowViewModel -->|repository-root check| GitClient
     MainWindowViewModel -.->|MainWindow view shows| GroupNameViewModel
     RepoCardViewModel --> RepoImageLocator
     RepoCardViewModel --> RepoGroupName
     GroupNameViewModel --> RepoGroupName
     SettingsStore --> RepoGroupName
-    MainWindowViewModel -.->|dialog windows apply| DialogBehavior
+    SettingsStore -->|repairs the stored group tree| RepoGroupHierarchy    MainWindowViewModel -.->|dialog windows apply| DialogBehavior
     SettingsWindowViewModel -.->|dialog windows apply| DialogBehavior
     SourceEditorViewModel -.->|dialog windows apply| DialogBehavior
     SelectPackageWindowViewModel -.->|dialog windows apply| DialogBehavior
@@ -222,12 +224,47 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   backed by `GroupNameViewModel` that validates while the user types. `MainWindowViewModel` builds
   `DisplayedItems`, the one list the window shows: the cards interleaved with one `RepoGroupHeaderViewModel` per
   section - Favorites, the user's groups in the user's own order (alphabetically until the user orders them), then
-  Ungrouped - or no headers at all while no repo is in a
-  group. A header's collapse toggle, move, rename and remove requests are events the main view-model handles or
-  forwards to
+  Ungrouped - or no headers at all while no group exists; the user's groups are a tree (see *Nested groups*), listed
+  depth-first with each group's subgroups before its own repos. A header's collapse toggle, move, rename, sort and
+  delete requests are events the main view-model handles or forwards to
   the window (which shows the prompt or a confirmation and then calls `RenameGroup`/`RemoveGroup`). Which sections
   are collapsed is kept in the user's settings; while the filter has text every section is shown expanded so a
   match is never hidden, without changing the remembered state.
+- *Nested groups* (`AgentControl-System-NestedGroups`): a group can be inside another group, to any depth. "New
+  subgroup..." in a header's menu asks for a name with the same prompt as a new group (a name already used anywhere in
+  the tree is refused, because a group is identified by its name alone) and creates the group inside that one, even
+  with no repo in it yet. A header can be dragged onto another header: its upper third places it before that group,
+  its middle third inside it and its lower third after it, at that group's level; a drop onto the group itself or one
+  of its own subgroups is refused. The tree is the user's own choice and is kept in the settings
+  (`AppSettings.GroupParents`, child to parent, beside the existing group order); `RepoGroupHierarchy` (a `Settings`
+  unit) holds the rules - which moves keep it a tree, the order within a level and the repair of a stored tree that was
+  edited by hand or is stale - and `MainWindowViewModel` builds the listing from it. Collapsing a group hides its whole
+  subtree, a rename keeps the group's place, and the header and the cards of a nested group are indented by depth. A
+  file written before groups nested loads with every group at the top level, exactly as it was shown.
+- *Sorting a group* (`AgentControl-System-GroupSortByName`): **Sort by name** in a header's menu puts the group's own
+  repos in alphabetical order of their names (ignoring letter case, by the current culture, ties keeping their order)
+  by writing them back into the same places of the stored list, so no other section is touched; it is unavailable,
+  with a tooltip that says why, while the filter has text, for fewer than two repos and when they are already sorted.
+  Favorites and subgroups are not sorted and there is no automatic sorting; the sorted order is simply the user's
+  repo order from then on.
+- *Deleting a group* (`AgentControl-System-GroupDelete`): the header's menu offers two kinds of delete. **Delete
+  group, keep contents** removes the group and moves its repos and subgroups to the group it was inside (or to
+  Ungrouped), so nothing leaves the list; **Delete group and its contents** removes the group, every group inside it
+  and every repo in any of them from the list (a repo that is also a favorite goes too, which the confirmation says).
+  Each asks first and says how many repos and groups are affected and that nothing on disk is deleted; Cancel changes
+  nothing. A group with nothing in it offers one plain **Delete group**.
+- *Selecting several repos* (`AgentControl-System-RepoMultiSelect`, `AgentControl-System-RepoMultiSelectActions`): the
+  repo list uses the list control's multiple selection - a plain click selects one card, Ctrl+click adds or removes
+  one, Shift+click selects the range from the last clicked card, and Ctrl+A selects every card. A range follows the
+  order the list shows the cards in, top to bottom - Favorites, then the group tree depth-first, then Ungrouped - and
+  only shown cards are ever selected (a collapsed group's cards and cards the filter hides are not), a section header
+  never is. Selected cards have their own surface color besides the accent border, so the selection never rests on one
+  color, and every selected row reports itself as selected to assistive technology. Dragging any selected card moves
+  all the selected
+  cards together to the drop place, in list order and as one change; dragging a card that is not selected moves it
+  alone. The Delete key, or Remove in the menu of a selected card, removes all the selected cards from the list after
+  one confirmation that says how many go and that nothing on disk is deleted. A plain press on an already selected card
+  keeps the selection until the button is released, so it can start a drag (`RepoListBox`).
 - *Group colors* (`AgentControl-System-GroupColor`): a user group's header menu has **Group color...**, which opens
   the card palette (the shared `ColorPalettePanel`) with None instead of Automatic;
   `MainWindowViewModel.SetGroupColor` saves the color in `AppSettings.GroupColors`, the header shows it as an accent bar
@@ -236,10 +273,12 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   uses its own theme brushes so it is legible on the page in both themes.
 - *Group order* (`AgentControl-System-GroupReorder`): the order of the groups is the user's own
   (`AppSettings.GroupOrder`; groups without a stored position follow alphabetically) and is changed with **Move up** /
-  **Move down** in a header's menu or by dragging a header above or below another group's header;
+  **Move down** in a header's menu or by dragging a header above or below another group's header; the order is that
+  of the groups of one level (the siblings inside one parent), kept in the one stored order;
   `MainWindowViewModel.MoveGroup`, `CanDropGroup` and `DropGroup` hold the rules, and every change stores the full
   order. Favorites stays first and Ungrouped last, nothing is reordered while the filter has text, and a group's color
-  and position follow a rename and are forgotten when the group is removed or loses its last repo.
+  and position follow a rename and are forgotten when the group is removed or - for a group that is not part of the
+  tree - loses its last repo.
 - *Adding repos* (`AgentControl-System-AddRemoveRepo`, `AgentControl-System-AddSeveralRepos`,
   `AgentControl-System-AddGitReposOnly`): the folder picker of the app bar's Add button and of a header's "Add
   repository..." allows several folders, and folders dragged from the file manager onto the list are added too - into
@@ -311,7 +350,8 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   and dependency list below it in one scrolling region, with the banner and Close always in view.
 
 **Where the user's choices live, and what a failed save does.** Favorites, last-launch times, the order of the repos,
-groups, card colors, group colors, the order of the groups, which sections are collapsed and the theme are the user's
+groups and the tree they are nested in, card colors, group colors, the order of the groups, which sections are collapsed
+and the theme are the user's
 own: they are stored only in the per-user
 settings file (`Settings`), never in a repo and not in its `.agentcontrol.json`, which holds nothing but the package
 pin. A change the user makes in the main window is made as one transaction by `MainWindowViewModel`: it is tried on a
@@ -321,7 +361,8 @@ through a callback the owner supplies to `RepoCardViewModel`. When the save fail
 the cards, the displayed list and the file stay as they were, so a later unrelated save can never write the failed
 change, and the user is told. Card and header changes (including collapsing a section) are reported through the
 view-model's `SettingsSaveFailed` event, which the main window shows in a message box; removing a repo and
-renaming or removing a group fail with an `InvalidOperationException` that the window reports, and adding folders
+renaming, sorting or deleting a group (either kind) and removing one or several repos fail with an
+`InvalidOperationException` that the window reports, and adding folders
 saves the whole batch once: when that save fails nothing of the batch is applied and the window asks whether to
 retry the save or discard the add (`MainWindowViewModel.AddSaveFailed`); Discard reports every folder that would have
 been added or moved as not saved. Settings edited in the
@@ -344,8 +385,10 @@ longer raise an error box, release notes or a prompt, and the window releases it
   Remove, plus the favorite star and
   the upgrade chip; the list is flat, or sectioned (Favorites, the user's groups in the user's order, Ungrouped) once a
   repo is in a
-  group, in the user's own order (a card can also be dragged to reorder it, and a group header to reorder the groups);
-  a user group's header menu adds repositories, moves the group up or down, colors it, renames or removes it; the
+  group, in the user's own order (a card can also be dragged to reorder it, and a group header to reorder or nest the
+  groups; several cards can be selected and moved or removed together); a user group's header menu adds repositories,
+  creates a subgroup, moves the group up or down, sorts its repos by name, colors it, renames it or deletes it - keeping
+  what is in it or together with its repos and subgroups; the
   toolbar-level app bar holds the
   filter, Add (one or several folders), Settings and About; folders can also be dropped onto the list; while repos are
   added or the cards are read at start-up or refreshed after Settings are saved, a progress strip directly under the
@@ -353,7 +396,9 @@ longer raise an error box, release notes or a prompt, and the window releases it
   (`AgentControl-System-RecentRepos`, `AgentControl-System-AddRemoveRepo`, `AgentControl-System-SearchFilter`,
   `AgentControl-System-RepoOrder`, `AgentControl-System-RepoReorder`, `AgentControl-System-RepoOrderRemembered`,
   `AgentControl-System-Favorites`, `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
-  `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`, `AgentControl-System-AddSeveralRepos`,
+  `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`, `AgentControl-System-NestedGroups`,
+  `AgentControl-System-GroupSortByName`, `AgentControl-System-GroupDelete`, `AgentControl-System-RepoMultiSelect`,
+  `AgentControl-System-RepoMultiSelectActions`, `AgentControl-System-AddSeveralRepos`,
   `AgentControl-System-AddGitReposOnly`,
   `AgentControl-System-MissingRepoRecheck`, `AgentControl-System-UpgradeFromChip`,
   `AgentControl-System-About`). Settings offers the color theme (`AgentControl-System-Appearance`). Every dialog is
@@ -522,11 +567,12 @@ override for hermetic testing).
   recent-repos list, kept in the user's own display order (with a marker that the order is already the user's), with,
   per repo, its favorite flag, last-launch time and the
   user's own organizing choices (its group and its card color), plus the names of the collapsed list sections, the color
-  of each of the user's groups and the order of the groups
+  of each of the user's groups, the order of the groups and the hierarchy of nested groups (which group is inside
+  which)
   (`AgentControl-System-Settings`, `AgentControl-System-KeepShellOpen`, `AgentControl-System-MultipleSources`,
   `AgentControl-System-Appearance`,
   `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`, `AgentControl-System-RepoOrderRemembered`,
-  `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`);
+  `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`, `AgentControl-System-NestedGroups`);
   a legacy single package-folder path is carried forward
   as the source named `Default`. Contains no password, token or other secret. Returns default
   settings when no file exists yet (first-ever run); a value that is unusable is repaired as the file is read and
@@ -534,7 +580,9 @@ override for hermetic testing).
   keep-shell-open value as on, an unusable repo-order marker as "not yet the user's order" (so the legacy arrangement
   is seeded once), an unknown card color as
   automatic, an unusable group name as no group, and an unusable, unknown or stale group color or group position (a
-  group no repo is in) is dropped. The choices in it exist only here, never in a repo, and a change
+  group no repo is in and that is not part of the group tree) is dropped, and a damaged group tree (a parent that does
+  not exist, a loop, a built-in section's name) is repaired - the group goes to the top level. The choices in it exist
+  only here, never in a repo, and a change
   is written before it is applied (see *Architecture*).
 - *Constraints*: Location can be overridden by a startup argument to isolate FlaUI end-to-end
   tests (see `docs/design/agent-control/startup.md`).
@@ -714,18 +762,24 @@ an unwanted or repeated file write.
    not found, time out, an unverified ssh host key) is reported with a fixed message that names the source alias and
    never repeats git's text or the address. A tag that was moved to other files after the pin was made is caught by
    the identity check: the files are not applied, and only Change package accepts them after a confirmation.
-6. The user's own choices - favorite, group, card color, group color, the order of the groups, collapsed section,
-   renaming or removing a group, adding or
-   removing a repo, and a launch being recorded - flow from the card or the group header through
+6. The user's own choices - favorite, group, card color, group color, the order of the groups, where a group is nested,
+   collapsed section, sorting, renaming or deleting a group, adding or
+   removing one or several repos, moving several selected cards, and a launch being recorded - flow from the card or
+   the group header through
    `MainWindowViewModel.CommitSettingsChange`: the live settings are changed at once and `DisplayedItems` rebuilt
-   (sections built from the repos' groups with `RepoGroupName` and arranged in the stored group order, the collapsed
-   ones leaving out their cards; the color and position of a group that no repo is in any more are dropped), and a
+   (sections built from the repos' groups with `RepoGroupName` and arranged as a tree by `RepoGroupHierarchy` from the
+   stored parents and group order, the collapsed
+   ones leaving out their cards and their subtree; the color and position of a group that no repo is in any more and
+   that is not part of the tree are dropped; a mass move or remove of several cards, and a delete of a group with its
+   contents, are one such change and so one write), and a
    snapshot of the settings is handed to `SettingsWriter`, which writes the newest one through `SettingsStore.Save` on
    a worker thread a moment after the last change. A failed write keeps the change in effect, is reported to the user
    once per failure streak and is written with the next change or at the close; a removed repo's card is retired once
    it was removed (`AgentControl-System-ListChangesKept`,
    `AgentControl-System-Favorites`, `AgentControl-System-RepoGroups`, `AgentControl-System-CardColor`,
-   `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`,
+   `AgentControl-System-GroupColor`, `AgentControl-System-GroupReorder`, `AgentControl-System-NestedGroups`,
+   `AgentControl-System-GroupSortByName`, `AgentControl-System-GroupDelete`,
+   `AgentControl-System-RepoMultiSelectActions`,
    `AgentControl-System-AddRemoveRepo`). Folders to add - picked several at once or dropped from the file manager - are
    read off the UI thread (whether each exists, whether it is the top folder of a Git repository and, for a new repo,
    its pin, branch and committed agent folders), with the count shown in the progress strip; then, on the UI thread,
