@@ -822,6 +822,8 @@ reviews:
       - "docs/verification/agent-control/git-integration/git-client.md"
       - "src/**/GitIntegration/GitClient.cs"
       - "test/**/GitIntegration/GitClientTests.cs"
+      - "test/**/GitIntegration/GitClientRealRepositoryTests.cs"
+      - "test/**/GitIntegration/GitClientListLogger.cs"
       - "test/**/GitIntegration/GitStub.cs"
 
   - id: AgentControl-GitIntegration-GitCredentialClient

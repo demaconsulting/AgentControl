@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.Utilities;
 using Microsoft.Extensions.Logging;
@@ -1039,5 +1040,780 @@ public class GitClientTests
             Directory.Delete(repoDir, recursive: true);
             File.Delete(invocationLog);
         }
+    }
+
+    /// <summary>
+    ///     Test that GetBranches reports the local branches and the remote-tracking branches, marks the
+    ///     checked-out one, splits a remote whose name contains a slash correctly, and drops the remote
+    ///     HEAD pointer and a remote branch that has a local twin.
+    /// </summary>
+    [Fact]
+    public void GitClient_GetBranches_ListsLocalAndRemoteWithCurrentMarked()
+    {
+        // Arrange: a repository with two local branches and remote branches of two remotes
+        var stub = GitStub.Create(extraCommands:
+        [
+            new GitStub.Command(
+                "for-each-ref",
+                Output: "*\trefs/heads/main\n \trefs/heads/feature/x\n \trefs/remotes/origin/HEAD\n" +
+                        " \trefs/remotes/origin/main\n \trefs/remotes/origin/feature/y\n \trefs/remotes/up/stream/z\n"),
+            new GitStub.Command("remote", Output: "origin\nup/stream\n")
+        ]);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act
+            var branches = client.GetBranches(repoDir, TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.Equal("main", branches.CurrentBranch);
+            Assert.Null(branches.DetachedAt);
+            Assert.Equal(["feature/x", "main"], branches.Local);
+            Assert.Equal(
+                [new GitRemoteBranch("origin", "feature/y", "origin/feature/y"), new GitRemoteBranch("up/stream", "z", "up/stream/z")],
+                branches.Remote);
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that GetBranches reports a detached HEAD: no current branch, the short commit id.
+    /// </summary>
+    [Fact]
+    public void GitClient_GetBranches_DetachedHead_ReportsNullBranchAndShortCommit()
+    {
+        // Arrange: no ref carries the HEAD marker
+        var stub = GitStub.Create(extraCommands:
+        [
+            new GitStub.Command("for-each-ref", Output: " \trefs/heads/main\n"),
+            new GitStub.Command("remote"),
+            new GitStub.Command("rev-parse", "--short", Output: "1a2b3c4\n")
+        ]);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act
+            var branches = client.GetBranches(repoDir, TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.Null(branches.CurrentBranch);
+            Assert.Equal("1a2b3c4", branches.DetachedAt);
+            Assert.Equal(["main"], branches.Local);
+            Assert.Empty(branches.Remote);
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that GetBranches throws an InvalidOperationException carrying git's error when the ref
+    ///     listing fails (for example the folder is not a repository).
+    /// </summary>
+    [Fact]
+    public void GitClient_GetBranches_ForEachRefFails_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        var stub = GitStub.Create(extraCommands:
+        [
+            new GitStub.Command("for-each-ref", Error: "fatal: not a git repository", ExitCode: 128)
+        ]);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act / Assert
+            var ex = Assert.Throws<InvalidOperationException>(() => client.GetBranches(repoDir, TestContext.Current.CancellationToken));
+            Assert.Contains("fatal: not a git repository", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that switching to a local branch runs <c>git switch -- name</c>.
+    /// </summary>
+    [Fact]
+    public void GitClient_SwitchBranch_Local_RunsSwitchWithDoubleDash()
+    {
+        // Arrange
+        var argumentLog = TempFilePath();
+        var stub = GitStub.Create(
+            argumentLogPath: argumentLog,
+            extraCommands: [new GitStub.Command("switch", Error: "Switched to branch 'feature/x'")]);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act
+            var result = client.SwitchBranch(repoDir, "feature/x", createTrackingFromRemote: false, TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.True(result.Succeeded);
+            Assert.Contains("Switched to branch", result.StandardError, StringComparison.Ordinal);
+            Assert.Equal(["switch -- feature/x"], ReadLines(argumentLog));
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+            File.Delete(argumentLog);
+        }
+    }
+
+    /// <summary>
+    ///     Test that switching to a remote-tracking branch runs <c>git switch --track -- remote/name</c>.
+    /// </summary>
+    [Fact]
+    public void GitClient_SwitchBranch_Remote_RunsSwitchTrackWithRemoteName()
+    {
+        // Arrange
+        var argumentLog = TempFilePath();
+        var stub = GitStub.Create(argumentLogPath: argumentLog, extraCommands: [new GitStub.Command("switch")]);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act
+            var result = client.SwitchBranch(repoDir, "origin/feature/y", createTrackingFromRemote: true, TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.True(result.Succeeded);
+            Assert.Equal(["switch --track -- origin/feature/y"], ReadLines(argumentLog));
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+            File.Delete(argumentLog);
+        }
+    }
+
+    /// <summary>
+    ///     Test that no switch ever passes an option that forces the checkout or discards, merges or
+    ///     creates anything.
+    /// </summary>
+    /// <param name="remote">Whether the switch is to a remote-tracking branch.</param>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GitClient_SwitchBranch_NeverPassesForceOrDiscardOptions(bool remote)
+    {
+        // Arrange
+        var argumentLog = TempFilePath();
+        var stub = GitStub.Create(argumentLogPath: argumentLog, extraCommands: [new GitStub.Command("switch")]);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act
+            _ = client.SwitchBranch(repoDir, remote ? "origin/x" : "x", remote, TestContext.Current.CancellationToken);
+
+            // Assert: the options are exactly the safe ones
+            var options = ReadLines(argumentLog).Single().Split(' ').Where(word => word.StartsWith('-')).ToList();
+            Assert.Equal(remote ? ["--track", "--"] : ["--"], options);
+            Assert.DoesNotContain(options, option => option is "-f" or "--force" or "--discard-changes" or "-C" or "-c" or "--merge" or "-m");
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+            File.Delete(argumentLog);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a checkout git refuses is returned as a result carrying git's message, not thrown.
+    /// </summary>
+    [Fact]
+    public void GitClient_SwitchBranch_Refused_ReturnsGitsMessageWithoutThrowing()
+    {
+        // Arrange: git refuses because a local change would be overwritten
+        var stub = GitStub.Create(extraCommands:
+        [
+            new GitStub.Command(
+                "switch",
+                Error: "error: Your local changes to the following files would be overwritten by checkout:\n\tfile.txt\n",
+                ExitCode: 1)
+        ]);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act
+            var result = client.SwitchBranch(repoDir, "other", createTrackingFromRemote: false, TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.False(result.Succeeded);
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("would be overwritten by checkout", result.StandardError, StringComparison.Ordinal);
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a blank, option-like or multi-line branch name is refused before git starts.
+    /// </summary>
+    /// <param name="name">The refused name.</param>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("-f")]
+    [InlineData("--detach")]
+    [InlineData("a\nb")]
+    public void GitClient_SwitchBranch_BlankOrOptionLikeName_ThrowsArgumentException(string name)
+    {
+        // Arrange
+        var invocationLog = TempFilePath();
+        var stub = GitStub.Create(invocationLogPath: invocationLog);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act / Assert: refused, and git never started
+            Assert.ThrowsAny<ArgumentException>(() => client.SwitchBranch(repoDir, name, createTrackingFromRemote: false, TestContext.Current.CancellationToken));
+            Assert.ThrowsAny<ArgumentException>(() => client.SwitchBranch(repoDir, name, createTrackingFromRemote: true, TestContext.Current.CancellationToken));
+            Assert.False(File.Exists(invocationLog));
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+            File.Delete(invocationLog);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a switch runs under the switch limit, not the much shorter local-command limit.
+    /// </summary>
+    [Fact]
+    public void GitClient_SwitchBranch_UsesSwitchTimeoutNotLocalTimeout()
+    {
+        // Arrange: a switch that takes two seconds, a one-second local limit and a generous switch limit
+        var stub = GitStub.Create(extraCommands: [new GitStub.Command("switch", SleepSeconds: 2)]);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(
+                stub.Path,
+                _logger,
+                new GitClientTimeouts(TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(10)));
+
+            // Act
+            var result = client.SwitchBranch(repoDir, "other", createTrackingFromRemote: false, TestContext.Current.CancellationToken);
+
+            // Assert: it ran to its end and succeeded
+            Assert.True(result.Succeeded);
+            Assert.True(stub.WroteFinishedMarker());
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a successful clone runs <c>git clone -- url destination</c> in the parent folder.
+    /// </summary>
+    [Fact]
+    public void GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList()
+    {
+        // Arrange
+        var argumentLog = TempFilePath();
+        var stub = GitStub.Create(
+            argumentLogPath: argumentLog,
+            extraCommands: [new GitStub.Command("clone", Error: "Cloning into 'repo'...")]);
+        var parent = CreateTempDirectory();
+        var destination = Path.Combine(parent, "repo");
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act: the URL is padded, as a text box may deliver it
+            var result = client.Clone("  https://example.com/team/repo.git ", destination, TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.True(result.Succeeded);
+            Assert.Contains("Cloning into", result.StandardError, StringComparison.Ordinal);
+            var line = Assert.Single(ReadLines(argumentLog));
+            Assert.StartsWith("clone -- https://example.com/team/repo.git ", line, StringComparison.Ordinal);
+            Assert.Contains(destination, line, StringComparison.Ordinal);
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+            File.Delete(argumentLog);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a URL that git could read as an option, a remote helper or a second line is refused
+    ///     before git starts.
+    /// </summary>
+    /// <param name="url">The refused URL.</param>
+    [Theory]
+    [InlineData("-u=evil")]
+    [InlineData("--upload-pack=calc")]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("https://example.com/a.git\nhttps://example.com/b.git")]
+    [InlineData("ext::sh -c touch% /tmp/pwned")]
+    [InlineData("fd::17")]
+    [InlineData("EXT::sh -c id")]
+    public void GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit(string url)
+    {
+        // Arrange
+        var invocationLog = TempFilePath();
+        var stub = GitStub.Create(invocationLogPath: invocationLog);
+        var parent = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act / Assert: refused with a reason, and git never started
+            var ex = Assert.ThrowsAny<ArgumentException>(() => client.Clone(url, Path.Combine(parent, "repo"), TestContext.Current.CancellationToken));
+            Assert.False(string.IsNullOrWhiteSpace(ex.Message));
+            Assert.False(File.Exists(invocationLog));
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+            File.Delete(invocationLog);
+        }
+    }
+
+    /// <summary>
+    ///     Test that CheckCloneUrl accepts the usual kinds of repository address.
+    /// </summary>
+    /// <param name="url">The address.</param>
+    [Theory]
+    [InlineData("https://github.com/demaconsulting/AgentControl.git")]
+    [InlineData("ssh://git@host.example/team/repo.git")]
+    [InlineData("git@github.com:demaconsulting/AgentControl.git")]
+    [InlineData("C:\\repos\\project")]
+    [InlineData("/srv/git/project.git")]
+    [InlineData("file:///srv/git/project.git")]
+    public void GitClient_CheckCloneUrl_UsualAddress_ReturnsNull(string url)
+    {
+        // Act / Assert
+        Assert.Null(GitClient.CheckCloneUrl(url));
+    }
+
+    /// <summary>
+    ///     Test that a destination that already holds something is refused, and that what it holds is
+    ///     left alone.
+    /// </summary>
+    [Fact]
+    public void GitClient_Clone_DestinationExistsNotEmpty_ThrowsArgumentExceptionAndTouchesNothing()
+    {
+        // Arrange: a destination folder with a file in it
+        var invocationLog = TempFilePath();
+        var stub = GitStub.Create(invocationLogPath: invocationLog);
+        var parent = CreateTempDirectory();
+        var destination = Path.Combine(parent, "repo");
+        Directory.CreateDirectory(destination);
+        var existing = Path.Combine(destination, "mine.txt");
+        File.WriteAllText(existing, "precious");
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act / Assert: refused with a reason naming the folder; git never started; the file is intact
+            var ex = Assert.Throws<ArgumentException>(() => client.Clone("https://example.com/r.git", destination, TestContext.Current.CancellationToken));
+            Assert.Contains("not empty", ex.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(invocationLog));
+            Assert.Equal("precious", File.ReadAllText(existing));
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+            File.Delete(invocationLog);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a destination whose parent folder does not exist, a relative destination, and a
+    ///     destination that is a file are refused.
+    /// </summary>
+    [Fact]
+    public void GitClient_Clone_ParentMissingRelativeOrFile_ThrowsArgumentException()
+    {
+        // Arrange
+        var parent = CreateTempDirectory();
+        var file = Path.Combine(parent, "plain-file");
+        File.WriteAllText(file, "x");
+        var stub = GitStub.Create();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act / Assert
+            var missing = Assert.Throws<ArgumentException>(() => client.Clone("https://example.com/r.git", Path.Combine(parent, "nope", "repo"), TestContext.Current.CancellationToken));
+            Assert.Contains("does not exist", missing.Message, StringComparison.Ordinal);
+            var relative = Assert.Throws<ArgumentException>(() => client.Clone("https://example.com/r.git", Path.Combine("relative", "repo"), TestContext.Current.CancellationToken));
+            Assert.Contains("absolute", relative.Message, StringComparison.Ordinal);
+            var isFile = Assert.Throws<ArgumentException>(() => client.Clone("https://example.com/r.git", file, TestContext.Current.CancellationToken));
+            Assert.Contains("is a file", isFile.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
+    ///     Test that CheckCloneDestination accepts a new folder and an empty existing one.
+    /// </summary>
+    [Fact]
+    public void GitClient_CheckCloneDestination_NewOrEmptyFolder_ReturnsNull()
+    {
+        // Arrange
+        var parent = CreateTempDirectory();
+        var empty = Path.Combine(parent, "empty");
+        Directory.CreateDirectory(empty);
+        try
+        {
+            // Act / Assert
+            Assert.Null(GitClient.CheckCloneDestination(Path.Combine(parent, "new")));
+            Assert.Null(GitClient.CheckCloneDestination(empty));
+            Assert.Null(GitClient.CheckCloneDestination(empty + Path.DirectorySeparatorChar));
+        }
+        finally
+        {
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a URL with a password never reaches the log, a result or an exception message.
+    /// </summary>
+    [Fact]
+    public void GitClient_Clone_UrlWithPassword_IsNeverWrittenToLogOrExceptionText()
+    {
+        // Arrange: a clone that fails and echoes the URL, as git does, and a git that cannot be started
+        const string password = "Hunter2PasswordValue";
+        var url = $"https://alice:{password}@example.com/team/repo.git";
+        var stub = GitStub.Create(extraCommands:
+        [
+            new GitStub.Command(
+                "clone",
+                Error: $"fatal: unable to access '{url}/': Could not resolve host: example.com",
+                ExitCode: 128)
+        ]);
+        var parent = CreateTempDirectory();
+        var logger = new GitClientListLogger();
+        try
+        {
+            var client = new GitClient(stub.Path, logger);
+            var missingGit = new GitClient(Path.Combine(parent, "no-such-git.exe"), logger);
+
+            // Act
+            var result = client.Clone(url, Path.Combine(parent, "repo"), TestContext.Current.CancellationToken);
+            var startFailure = Assert.Throws<InvalidOperationException>(() => missingGit.Clone(url, Path.Combine(parent, "repo2"), TestContext.Current.CancellationToken));
+
+            // Assert: the host and path survive for diagnosis; the password is nowhere
+            Assert.False(result.Succeeded);
+            Assert.Contains("example.com", result.StandardError, StringComparison.Ordinal);
+            Assert.DoesNotContain(password, result.StandardError, StringComparison.Ordinal);
+            Assert.DoesNotContain(password, startFailure.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain(password, startFailure.Message, StringComparison.Ordinal);
+            var lines = logger.Inner.Snapshot();
+            Assert.NotEmpty(lines);
+            Assert.All(lines, line => Assert.DoesNotContain(password, line, StringComparison.Ordinal));
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
+    ///     Test that canceling a clone kills git and removes the folder the clone created, even though
+    ///     git left read-only files in it.
+    /// </summary>
+    [Fact]
+    public async Task GitClient_Clone_Canceled_RemovesDestinationItCreated()
+    {
+        // Arrange: a clone that creates its destination (with a read-only pack file) and then hangs
+        var stub = GitStub.Create(extraCommands:
+        [
+            new GitStub.Command("clone", SleepSeconds: GitStub.HangSeconds, CreatesDestination: true)
+        ]);
+        var parent = CreateTempDirectory();
+        var destination = Path.Combine(parent, "repo");
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            var clone = Task.Run(() => client.Clone("https://example.com/r.git", destination, cancellation.Token), TestContext.Current.CancellationToken);
+            Assert.True(WaitForReadOnlyPackFile(destination), "The stub never created its read-only file.");
+
+            // Act: cancel while git is writing
+            await cancellation.CancelAsync();
+
+            // Assert: canceled, git killed, the folder this call created is gone, the parent is not
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => clone);
+            Assert.False(Directory.Exists(destination));
+            Assert.True(Directory.Exists(parent));
+            Assert.False(await stub.RanToTheEndOfItsHangAsync());
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
+    ///     Test that canceling a clone into an existing empty folder keeps the folder and removes only
+    ///     what the clone put into it.
+    /// </summary>
+    [Fact]
+    public async Task GitClient_Clone_CanceledIntoExistingEmptyFolder_RemovesContentsKeepsFolder()
+    {
+        // Arrange: an empty destination folder that existed before
+        var stub = GitStub.Create(extraCommands:
+        [
+            new GitStub.Command("clone", SleepSeconds: GitStub.HangSeconds, CreatesDestination: true)
+        ]);
+        var parent = CreateTempDirectory();
+        var destination = Path.Combine(parent, "repo");
+        Directory.CreateDirectory(destination);
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            var clone = Task.Run(() => client.Clone("https://example.com/r.git", destination, cancellation.Token), TestContext.Current.CancellationToken);
+            Assert.True(WaitForReadOnlyPackFile(destination), "The stub never created its read-only file.");
+
+            // Act
+            await cancellation.CancelAsync();
+
+            // Assert: the folder is still there, and empty
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => clone);
+            Assert.True(Directory.Exists(destination));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(destination));
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a clone that fails (git exits with an error) deletes nothing: git cleans up after
+    ///     itself, and a deletion could only remove somebody else's folder.
+    /// </summary>
+    [Fact]
+    public void GitClient_Clone_Fails_LeavesFolderAlone()
+    {
+        // Arrange: a clone that leaves its destination behind and fails
+        var stub = GitStub.Create(extraCommands:
+        [
+            new GitStub.Command("clone", Error: "fatal: repository not found", ExitCode: 128, CreatesDestination: true)
+        ]);
+        var parent = CreateTempDirectory();
+        var destination = Path.Combine(parent, "repo");
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act
+            var result = client.Clone("https://example.com/r.git", destination, TestContext.Current.CancellationToken);
+
+            // Assert: the failure is a result, and the folder is left as git left it
+            Assert.False(result.Succeeded);
+            Assert.Contains("repository not found", result.StandardError, StringComparison.Ordinal);
+            Assert.True(Directory.Exists(destination));
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a clone that outlives the clone limit is stopped, reported as timed out and its
+    ///     partial folder removed.
+    /// </summary>
+    [Fact]
+    public async Task GitClient_Clone_TimesOut_StopsGitAndRemovesDestinationItCreated()
+    {
+        // Arrange: a clone that hangs well past a one-second clone limit
+        var stub = GitStub.Create(extraCommands:
+        [
+            new GitStub.Command("clone", SleepSeconds: GitStub.HangSeconds, CreatesDestination: true)
+        ]);
+        var parent = CreateTempDirectory();
+        var destination = Path.Combine(parent, "repo");
+        try
+        {
+            var client = new GitClient(
+                stub.Path,
+                _logger,
+                new GitClientTimeouts(TimeSpan.FromSeconds(60), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(10))
+                {
+                    CloneRepository = TimeSpan.FromSeconds(1)
+                });
+
+            // Act
+            var failure = Assert.Throws<GitCommandTimeoutException>(() => client.Clone("https://example.com/r.git", destination, TestContext.Current.CancellationToken));
+
+            // Assert: reported as a timeout of the clone limit, nothing left behind, git never finished
+            Assert.Equal(TimeSpan.FromSeconds(1), failure.Timeout);
+            Assert.Contains("git clone", failure.Message, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(destination));
+            Assert.False(await stub.RanToTheEndOfItsHangAsync());
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a clone runs under the clone limit, not the much shorter local-command limit.
+    /// </summary>
+    [Fact]
+    public void GitClient_Clone_UsesCloneTimeoutNotLocalTimeout()
+    {
+        // Arrange: a clone that takes two seconds and a one-second local limit
+        var stub = GitStub.Create(extraCommands: [new GitStub.Command("clone", SleepSeconds: 2)]);
+        var parent = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(
+                stub.Path,
+                _logger,
+                new GitClientTimeouts(TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(10)));
+
+            // Act
+            var result = client.Clone("https://example.com/r.git", Path.Combine(parent, "repo"), TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.True(result.Succeeded);
+            Assert.True(stub.WroteFinishedMarker());
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
+    ///     Test that constructing a client with a zero switch or clone limit is refused.
+    /// </summary>
+    [Fact]
+    public void GitClient_Constructor_NonPositiveSwitchOrCloneLimit_ThrowsArgumentOutOfRangeException()
+    {
+        // Arrange
+        var valid = new GitClientTimeouts(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+
+        // Act / Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() => new GitClient("git", _logger, valid with { SwitchBranch = TimeSpan.Zero }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new GitClient("git", _logger, valid with { CloneRepository = TimeSpan.Zero }));
+    }
+
+    /// <summary>
+    ///     Test that listing, switching and cloning on a guarded thread are refused before anything is
+    ///     read or started.
+    /// </summary>
+    [Fact]
+    public void GitClient_BranchAndCloneCommands_OnGuardedThread_ThrowBlockingCallOnGuardedThread()
+    {
+        // Arrange
+        var invocationLog = TempFilePath();
+        var stub = GitStub.Create(invocationLogPath: invocationLog);
+        var parent = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+            var refusals = new List<Exception?>();
+
+            // Act
+            using (BlockingCallGuard.GuardCurrentThread())
+            {
+                refusals.Add(Record.Exception(() => client.GetBranches(parent, TestContext.Current.CancellationToken)));
+                refusals.Add(Record.Exception(() => client.SwitchBranch(parent, "x", createTrackingFromRemote: false, TestContext.Current.CancellationToken)));
+                refusals.Add(Record.Exception(() => client.Clone("https://example.com/r.git", Path.Combine(parent, "repo"), TestContext.Current.CancellationToken)));
+                refusals.Add(Record.Exception(() => GitClient.CheckCloneDestination(Path.Combine(parent, "repo"))));
+            }
+
+            var recorded = BlockingCallGuard.TakeViolations();
+
+            // Assert
+            Assert.All(refusals, refusal => Assert.IsType<BlockingCallOnGuardedThreadException>(refusal));
+            Assert.Equal(4, recorded.Count);
+            Assert.False(File.Exists(invocationLog));
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+            File.Delete(invocationLog);
+        }
+    }
+
+    /// <summary>
+    ///     Gets a path for a temporary file that does not exist yet.
+    /// </summary>
+    /// <returns>The path.</returns>
+    private static string TempFilePath() =>
+        Path.Combine(Path.GetTempPath(), "agentcontrol_git_client_file_" + Guid.NewGuid().ToString("N"));
+
+    /// <summary>
+    ///     Reads the non-blank lines of a stub log file; none when the file does not exist.
+    /// </summary>
+    /// <param name="path">The log file.</param>
+    /// <returns>The trimmed lines.</returns>
+    private static string[] ReadLines(string path) =>
+        File.Exists(path)
+            ? [.. File.ReadAllLines(path).Select(line => line.Trim()).Where(line => line.Length > 0)]
+            : [];
+
+    /// <summary>
+    ///     Waits until a stub clone has created its destination with the read-only pack file in it.
+    /// </summary>
+    /// <param name="destination">The clone destination.</param>
+    /// <returns><see langword="true"/> when the file appeared and is read-only within the wait.</returns>
+    private static bool WaitForReadOnlyPackFile(string destination)
+    {
+        var pack = Path.Combine(destination, ".git", "objects", "pack", "pack-1.pack");
+        return SpinWait.SpinUntil(
+            () => File.Exists(pack) && (File.GetAttributes(pack) & FileAttributes.ReadOnly) != 0,
+            TimeSpan.FromSeconds(3));
     }
 }

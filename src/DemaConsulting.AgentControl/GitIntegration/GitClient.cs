@@ -21,6 +21,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using DemaConsulting.AgentControl.Logging;
+using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.Utilities;
 using Microsoft.Extensions.Logging;
 
@@ -41,16 +42,61 @@ namespace DemaConsulting.AgentControl.GitIntegration;
 /// <param name="Pull">The limit for <c>git pull</c>, which talks to a remote and may wait for the
 ///     credential helper's own sign-in window. Must be positive.</param>
 /// <param name="Stop">How long to wait for a stopped command to end. Must be positive.</param>
+/// <remarks>
+///     <see cref="SwitchBranch"/> and <see cref="CloneRepository"/> are init-only properties with
+///     defaults (rather than positional parameters) so that the three-argument form callers and tests
+///     already use keeps compiling.
+/// </remarks>
 internal sealed record GitClientTimeouts(TimeSpan LocalCommand, TimeSpan Pull, TimeSpan Stop)
 {
     /// <summary>
     ///     Gets the limits the application uses: a minute for a local command (enough for a cold
     ///     <c>git status</c> of a large tree on a network share), ten minutes for a pull (network work
-    ///     that may include signing in), and ten seconds for a stopped command to end.
+    ///     that may include signing in), and ten seconds for a stopped command to end. A branch switch
+    ///     defaults to ten minutes and a clone to an hour.
     /// </summary>
     public static GitClientTimeouts Default { get; } =
         new(TimeSpan.FromSeconds(60), TimeSpan.FromMinutes(10), TimeSpan.FromSeconds(10));
+
+    /// <summary>
+    ///     Gets the limit for <c>git switch</c>, which rewrites the working tree: checking out a large
+    ///     tree can take far longer than the local-command limit. Must be positive; defaults to ten
+    ///     minutes.
+    /// </summary>
+    public TimeSpan SwitchBranch { get; init; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    ///     Gets the limit for <c>git clone</c>, which downloads a whole repository and may wait for
+    ///     the credential helper's own sign-in window. Cancel is the normal way out of a slow clone, so
+    ///     the limit is only a backstop. Must be positive; defaults to sixty minutes.
+    /// </summary>
+    public TimeSpan CloneRepository { get; init; } = TimeSpan.FromMinutes(60);
 }
+
+/// <summary>
+///     A branch of a remote that the local repository already knows (a remote-tracking ref).
+/// </summary>
+/// <param name="Remote">The remote's name, for example <c>origin</c>.</param>
+/// <param name="Name">The branch's name on the remote, for example <c>feature/x</c>.</param>
+/// <param name="FullName">The name git uses for the remote-tracking ref, <c>&lt;remote&gt;/&lt;name&gt;</c>,
+///     for example <c>origin/feature/x</c>.</param>
+internal sealed record GitRemoteBranch(string Remote, string Name, string FullName);
+
+/// <summary>
+///     The branches of a repository as <see cref="GitClient.GetBranches"/> reports them.
+/// </summary>
+/// <param name="CurrentBranch">The checked-out local branch, or <see langword="null"/> when
+///     <c>HEAD</c> is detached.</param>
+/// <param name="DetachedAt">The short commit id <c>HEAD</c> points at while it is detached;
+///     <see langword="null"/> when a branch is checked out (or when no commit can be named).</param>
+/// <param name="Local">The local branch names, sorted.</param>
+/// <param name="Remote">The remote-tracking branches that have no local branch of the same name
+///     (the local one is the one to switch to), sorted; <c>&lt;remote&gt;/HEAD</c> is never listed.</param>
+internal sealed record GitBranchList(
+    string? CurrentBranch,
+    string? DetachedAt,
+    IReadOnlyList<string> Local,
+    IReadOnlyList<GitRemoteBranch> Remote);
 
 /// <summary>
 ///     Thrown by <see cref="GitClient"/> when a git command did not finish within its time limit and
@@ -166,6 +212,13 @@ internal sealed class GitClient
     private readonly GitClientTimeouts _timeouts;
 
     /// <summary>
+    ///     Environment variables applied to every git process this client starts (a
+    ///     <see langword="null"/> value removes the variable), or <see langword="null"/> for none; see
+    ///     the constructor.
+    /// </summary>
+    private readonly IReadOnlyDictionary<string, string?>? _extraEnvironment;
+
+    /// <summary>
     ///     Initializes a new <see cref="GitClient"/>.
     /// </summary>
     /// <param name="gitExecutablePath">
@@ -184,18 +237,30 @@ internal sealed class GitClient
     /// <param name="timeouts">The time limits of the commands, or <see langword="null"/> for
     ///     <see cref="GitClientTimeouts.Default"/>. Supplied so tests can use a short limit against a
     ///     stub that hangs.</param>
+    /// <param name="extraEnvironment">Environment variables to apply to every git process (a
+    ///     <see langword="null"/> value removes the variable), or <see langword="null"/> for none.
+    ///     Exists so tests that run a real git can replace the user's global configuration (a
+    ///     credential helper, <c>insteadOf</c> rewrites) with an empty one; the application passes
+    ///     none.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="gitExecutablePath"/> is
     ///     null, empty, or whitespace.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when a limit in
     ///     <paramref name="timeouts"/> is zero or negative.</exception>
-    public GitClient(string gitExecutablePath = "git", ILogger<GitClient>? logger = null, GitClientTimeouts? timeouts = null)
+    public GitClient(
+        string gitExecutablePath = "git",
+        ILogger<GitClient>? logger = null,
+        GitClientTimeouts? timeouts = null,
+        IReadOnlyDictionary<string, string?>? extraEnvironment = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(gitExecutablePath);
         _timeouts = timeouts ?? GitClientTimeouts.Default;
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_timeouts.LocalCommand, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_timeouts.Pull, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_timeouts.Stop, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_timeouts.SwitchBranch, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_timeouts.CloneRepository, TimeSpan.Zero);
         _gitExecutablePath = gitExecutablePath;
+        _extraEnvironment = extraEnvironment;
         _logger = logger ?? AppLogging.Factory.CreateLogger<GitClient>();
     }
 
@@ -609,6 +674,533 @@ internal sealed class GitClient
         value.Length is >= 4 and <= 64 && value.All(Uri.IsHexDigit);
 
     /// <summary>
+    ///     Lists the branches the repository already knows about: its local branches and the
+    ///     remote-tracking branches of its remotes, and which local branch (if any) is checked out.
+    /// </summary>
+    /// <param name="repositoryPath">Absolute path to the repository working directory.</param>
+    /// <param name="cancellationToken">Stops git and abandons the call when signaled.</param>
+    /// <returns>The branch list; see <see cref="GitBranchList"/>.</returns>
+    /// <remarks>
+    ///     Runs <c>git for-each-ref</c> over <c>refs/heads</c> and <c>refs/remotes</c> and
+    ///     <c>git remote</c> (so <c>&lt;remote&gt;/&lt;branch&gt;</c> can be split without guessing
+    ///     where a remote name ends), plus <c>git rev-parse --short HEAD</c> when <c>HEAD</c> is
+    ///     detached. It never fetches: the answer is what git already has locally, which keeps the call
+    ///     fast and free of network and sign-in prompts; the user updates the remote-tracking branches
+    ///     with a pull or fetch. The symbolic <c>&lt;remote&gt;/HEAD</c> ref is dropped (it names
+    ///     another branch, not a branch of its own), and a remote branch that has a local branch of the
+    ///     same name is dropped too, because the local branch is the one to switch to. The ref listing
+    ///     is requested tab-separated (<c>%09</c>) because a tab can never occur in a ref name.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="repositoryPath"/> is null,
+    ///     empty, or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the git executable cannot be started,
+    ///     or when <c>git for-each-ref</c> or <c>git remote</c> exits with a non-zero code (for example
+    ///     the path is not a git repository).</exception>
+    /// <exception cref="GitCommandTimeoutException">Thrown when git did not answer within the local
+    ///     command limit and was stopped.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled; git was stopped.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread guarded
+    ///     by <see cref="BlockingCallGuard"/>; git was not started.</exception>
+    public GitBranchList GetBranches(string repositoryPath, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
+
+        // The refs, then the remote names that let a remote-tracking ref be split into remote and branch
+        var refs = RunGit(
+            repositoryPath, _timeouts.LocalCommand, cancellationToken,
+            "for-each-ref", "--format=%(HEAD)%09%(refname)", "refs/heads", "refs/remotes");
+        if (!refs.Succeeded)
+        {
+            throw new InvalidOperationException(
+                $"'git for-each-ref' failed with exit code {refs.ExitCode}: {refs.StandardError.Trim()}");
+        }
+
+        var remoteResult = RunGit(repositoryPath, _timeouts.LocalCommand, cancellationToken, "remote");
+        if (!remoteResult.Succeeded)
+        {
+            throw new InvalidOperationException(
+                $"'git remote' failed with exit code {remoteResult.ExitCode}: {remoteResult.StandardError.Trim()}");
+        }
+
+        // Longest first, so a remote named "up" never swallows the start of one named "up/stream"
+        var remoteNames = SplitLines(remoteResult.StandardOutput)
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0)
+            .OrderByDescending(name => name.Length)
+            .ToList();
+
+        const string localPrefix = "refs/heads/";
+        const string remotePrefix = "refs/remotes/";
+        string? currentBranch = null;
+        var local = new List<string>();
+        var remote = new List<GitRemoteBranch>();
+        foreach (var line in SplitLines(refs.StandardOutput))
+        {
+            // "<HEAD marker>\t<full ref name>": the marker is "*" for the checked-out branch
+            var tab = line.IndexOf('\t');
+            if (tab < 0)
+            {
+                continue;
+            }
+
+            var isCurrent = line[..tab].Trim() == "*";
+            var refName = line[(tab + 1)..].Trim();
+            if (refName.StartsWith(localPrefix, StringComparison.Ordinal))
+            {
+                var name = refName[localPrefix.Length..];
+                local.Add(name);
+                if (isCurrent)
+                {
+                    currentBranch = name;
+                }
+            }
+            else if (refName.StartsWith(remotePrefix, StringComparison.Ordinal))
+            {
+                var tracking = refName[remotePrefix.Length..];
+                var remoteName = remoteNames.FirstOrDefault(name => tracking.StartsWith(name + "/", StringComparison.Ordinal))
+                                 ?? tracking[..Math.Max(tracking.IndexOf('/'), 0)];
+                var branchName = tracking[Math.Min(remoteName.Length + 1, tracking.Length)..];
+
+                // "<remote>/HEAD" only says which branch the remote's default is; it is not a branch
+                if (remoteName.Length > 0 && branchName.Length > 0 && branchName != "HEAD")
+                {
+                    remote.Add(new GitRemoteBranch(remoteName, branchName, tracking));
+                }
+            }
+        }
+
+        // A detached HEAD has no branch; the short commit id is what the user can recognize it by
+        string? detachedAt = null;
+        if (currentBranch is null)
+        {
+            var head = RunGit(repositoryPath, _timeouts.LocalCommand, cancellationToken, "rev-parse", "--short", "HEAD");
+            if (head.Succeeded && head.StandardOutput.Trim().Length > 0)
+            {
+                detachedAt = head.StandardOutput.Trim();
+            }
+        }
+
+        // The local branch of the same name is the one to switch to, so its remote twin is not listed
+        var localNames = local.ToHashSet(StringComparer.Ordinal);
+        return new GitBranchList(
+            currentBranch,
+            detachedAt,
+            [.. local.Order(StringComparer.OrdinalIgnoreCase)],
+            [
+                .. remote
+                    .Where(branch => !localNames.Contains(branch.Name))
+                    .OrderBy(branch => branch.FullName, StringComparer.OrdinalIgnoreCase)
+            ]);
+    }
+
+    /// <summary>
+    ///     Switches the repository to another branch with <c>git switch</c>, never forcing it and never
+    ///     discarding or stashing anything.
+    /// </summary>
+    /// <param name="repositoryPath">Absolute path to the repository working directory.</param>
+    /// <param name="branchName">For a local branch its name; for a remote-tracking branch its
+    ///     <see cref="GitRemoteBranch.FullName"/> (<c>&lt;remote&gt;/&lt;name&gt;</c>). Must not be
+    ///     blank, contain control characters or start with <c>-</c>.</param>
+    /// <param name="createTrackingFromRemote"><see langword="true"/> when
+    ///     <paramref name="branchName"/> names a remote-tracking branch: a local branch of the same
+    ///     name is created from it and set up to track it (<c>git switch --track</c>).</param>
+    /// <param name="cancellationToken">Stops git and abandons the call when signaled.</param>
+    /// <returns>The command result. A checkout git refuses (local changes that would be overwritten,
+    ///     an unknown branch) is a normal outcome, reported as a result that has not
+    ///     <see cref="GitCommandResult.Succeeded"/> with git's own explanation in
+    ///     <see cref="GitCommandResult.StandardError"/>, exactly as <see cref="Pull"/> reports a failed
+    ///     pull; nothing has been changed then.</returns>
+    /// <remarks>
+    ///     Runs <c>git switch -- &lt;name&gt;</c> or <c>git switch --track -- &lt;remote&gt;/&lt;name&gt;</c>.
+    ///     None of <c>--force</c>, <c>--discard-changes</c>, <c>-C</c> or <c>--merge</c> is ever passed,
+    ///     so git's own protection applies: uncommitted changes that do not conflict travel with the
+    ///     switch, and changes that would be overwritten stop it. The name follows <c>--</c> and may not
+    ///     start with <c>-</c>, so it can never be read as an option. Runs under the switch limit
+    ///     (<see cref="GitClientTimeouts.SwitchBranch"/>) because a checkout of a large tree can take
+    ///     longer than a local command; git writes its success text to standard error.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="repositoryPath"/> is null,
+    ///     empty, or whitespace, or when <paramref name="branchName"/> is blank, contains control
+    ///     characters or starts with <c>-</c>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the git executable cannot be
+    ///     started.</exception>
+    /// <exception cref="GitCommandTimeoutException">Thrown when git did not finish within the switch
+    ///     limit and was stopped.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled; git was stopped.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread guarded
+    ///     by <see cref="BlockingCallGuard"/>; git was not started.</exception>
+    public GitCommandResult SwitchBranch(
+        string repositoryPath,
+        string branchName,
+        bool createTrackingFromRemote,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(branchName);
+
+        // The name is data, never an option: refuse a leading '-' and control characters, and put it
+        // after "--" as well
+        if (branchName.StartsWith('-') || branchName.Any(char.IsControl))
+        {
+            throw new ArgumentException("The branch name is not valid.", nameof(branchName));
+        }
+
+        return createTrackingFromRemote
+            ? RunGit(repositoryPath, _timeouts.SwitchBranch, cancellationToken, "switch", "--track", "--", branchName)
+            : RunGit(repositoryPath, _timeouts.SwitchBranch, cancellationToken, "switch", "--", branchName);
+    }
+
+    /// <summary>
+    ///     Clones a repository into a new folder with <c>git clone</c>.
+    /// </summary>
+    /// <param name="url">The repository to clone: a URL, an scp-like address or a local path. Checked
+    ///     by <see cref="CheckCloneUrl"/>.</param>
+    /// <param name="destinationPath">The absolute path of the folder to clone into: it must not exist,
+    ///     or must be an empty folder, and its parent folder must exist. Checked by
+    ///     <see cref="CheckCloneDestination"/>.</param>
+    /// <param name="cancellationToken">Stops git and abandons the call when signaled; the normal way
+    ///     to leave a clone that takes too long.</param>
+    /// <returns>The command result, with credentials removed from both output streams. A clone git
+    ///     refuses or cannot finish (unknown repository, sign-in needed) is a normal outcome, reported as
+    ///     a result that has not <see cref="GitCommandResult.Succeeded"/>; git has cleaned up after
+    ///     itself then and nothing is deleted here.</returns>
+    /// <remarks>
+    ///     <para>
+    ///     Runs <c>git clone -- &lt;url&gt; &lt;destination&gt;</c> in the destination's parent folder
+    ///     (a clone needs an existing working directory) through an argument list, never a shell, with
+    ///     <c>GIT_TERMINAL_PROMPT=0</c> because there is no terminal to ask in (a credential helper such
+    ///     as Git Credential Manager still shows its own sign-in window). The URL is data: one that
+    ///     starts with <c>-</c> or names a remote helper (<c>ext::</c>, <c>fd::</c>) is refused before
+    ///     git starts, and <c>--</c> separates it from the options. The URL may contain credentials, so
+    ///     it is redacted in every log message and exception text (see <see cref="RunGit"/>).
+    ///     </para>
+    ///     <para>
+    ///     When the clone is <b>canceled or times out</b>, git is killed in the middle of writing, so the
+    ///     partial result is removed - but only what this call created: a destination that did not exist
+    ///     is removed whole; an existing empty folder is kept and only its contents are removed.
+    ///     Read-only attributes (git writes read-only object files) are cleared first and links are
+    ///     never followed. A leftover that cannot be removed is logged, and named in the text of the
+    ///     timeout exception. After a <b>failed</b> clone nothing is deleted, because git cleans up
+    ///     after itself and a deletion could only remove somebody else's folder.
+    ///     </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when the URL or the destination is refused; the
+    ///     message is a reason the user can read.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the git executable cannot be
+    ///     started.</exception>
+    /// <exception cref="GitCommandTimeoutException">Thrown when the clone did not finish within the
+    ///     clone limit and was stopped; the partial folder was removed.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled; git was stopped and the partial folder
+    ///     removed.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread guarded
+    ///     by <see cref="BlockingCallGuard"/>; nothing was checked or started.</exception>
+    public GitCommandResult Clone(string url, string destinationPath, CancellationToken cancellationToken = default)
+    {
+        // Disk checks and git both block: refuse on a guarded thread before either
+        BlockingCallGuard.ThrowIfGuarded("git clone");
+
+        var urlProblem = CheckCloneUrl(url);
+        if (urlProblem is not null)
+        {
+            throw new ArgumentException(urlProblem, nameof(url));
+        }
+
+        var destinationProblem = CheckCloneDestination(destinationPath);
+        if (destinationProblem is not null)
+        {
+            throw new ArgumentException(destinationProblem, nameof(destinationPath));
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Only what this call creates may be removed after a kill: remember whether the folder existed
+        var destination = NormalizeFolder(destinationPath);
+        var parent = Path.GetDirectoryName(destination)!;
+        var createdByThisCall = !Directory.Exists(destination);
+
+        GitCommandResult result;
+        try
+        {
+            result = RunGitCore(
+                parent,
+                _timeouts.CloneRepository,
+                cancellationToken,
+                new Dictionary<string, string?> { ["GIT_TERMINAL_PROMPT"] = "0" },
+                ["clone", "--", url.Trim(), destination]);
+        }
+        catch (OperationCanceledException)
+        {
+            // Killed while writing: the partial clone is not worth keeping
+            RemovePartialClone(destination, removeFolder: createdByThisCall);
+            throw;
+        }
+        catch (GitCommandTimeoutException ex)
+        {
+            var leftover = RemovePartialClone(destination, removeFolder: createdByThisCall);
+            if (leftover is null)
+            {
+                throw;
+            }
+
+            throw new GitCommandTimeoutException($"{ex.Message} {leftover}", ex.Timeout);
+        }
+
+        // The URL may carry credentials, and git can echo it back in its messages
+        return new GitCommandResult(
+            result.ExitCode,
+            SecretRedactor.Redact(result.StandardOutput),
+            SecretRedactor.Redact(result.StandardError));
+    }
+
+    /// <summary>
+    ///     Tells why a repository address cannot be cloned, or that it can.
+    /// </summary>
+    /// <param name="url">The address as typed.</param>
+    /// <returns>The reason, in words the user can read, or <see langword="null"/> when the address is
+    ///     acceptable.</returns>
+    /// <remarks>
+    ///     Only rules that keep the address from being read as something other than a repository: it
+    ///     must not be blank, must be a single line without control characters, must not start with
+    ///     <c>-</c> (git would read it as an option) and must not use the remote-helper syntax
+    ///     <c>&lt;name&gt;::&lt;address&gt;</c> (<c>ext::</c> runs a command, <c>fd::</c> reads an open
+    ///     file; neither is a repository location). Whether the repository exists is for git to say.
+    ///     Static, pure and thread-safe; no disk or process access.
+    /// </remarks>
+    public static string? CheckCloneUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return "Enter the address of the repository to clone.";
+        }
+
+        var trimmed = url.Trim();
+        if (trimmed.Any(char.IsControl))
+        {
+            return "The repository address must be a single line of text.";
+        }
+
+        if (trimmed.StartsWith('-'))
+        {
+            return "The repository address must not start with a dash.";
+        }
+
+        // "<name>::<address>" is git's remote-helper syntax; the helper may run arbitrary commands
+        var helperEnd = trimmed.IndexOf("::", StringComparison.Ordinal);
+        if (helperEnd > 0 && trimmed[..helperEnd].All(c => char.IsAsciiLetterOrDigit(c) || c is '+' or '.' or '-'))
+        {
+            return "Addresses that use a remote helper (such as ext:: or fd::) are not supported.";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    ///     Tells why a folder cannot be the destination of a clone, or that it can.
+    /// </summary>
+    /// <param name="destinationPath">The folder to clone into, as typed.</param>
+    /// <returns>The reason, in words the user can read, or <see langword="null"/> when the folder can
+    ///     be used: an absolute path whose parent folder exists and that does not exist yet or is an
+    ///     empty folder.</returns>
+    /// <remarks>
+    ///     Reads the disk, so it must be called off the UI thread; the clone dialog runs it through the
+    ///     background work runner, and <see cref="Clone"/> repeats it right before git starts because
+    ///     the folder may have changed in between. Static and thread-safe.
+    /// </remarks>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread guarded
+    ///     by <see cref="BlockingCallGuard"/>; nothing was read.</exception>
+    public static string? CheckCloneDestination(string? destinationPath)
+    {
+        BlockingCallGuard.ThrowIfGuarded("git clone destination check");
+
+        if (string.IsNullOrWhiteSpace(destinationPath))
+        {
+            return "Enter the folder to clone into.";
+        }
+
+        if (!Path.IsPathFullyQualified(destinationPath))
+        {
+            return "The folder to clone into must be an absolute path.";
+        }
+
+        try
+        {
+            var destination = NormalizeFolder(destinationPath);
+            var parent = Path.GetDirectoryName(destination);
+            if (parent is null)
+            {
+                return "A repository cannot be cloned into the root of a drive; choose a folder in it.";
+            }
+
+            if (!Directory.Exists(parent))
+            {
+                return $"The folder '{parent}' does not exist.";
+            }
+
+            if (File.Exists(destination))
+            {
+                return $"'{destination}' already exists and is a file.";
+            }
+
+            // An empty folder is fine (git clones into it); anything inside it is not ours to mix with
+            if (Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any())
+            {
+                return $"The folder '{destination}' already exists and is not empty.";
+            }
+
+            return null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return "The folder to clone into is not a valid path.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return $"The folder '{destinationPath}' cannot be read.";
+        }
+    }
+
+    /// <summary>
+    ///     Gets the full path of a folder without a trailing separator (except for a drive root).
+    /// </summary>
+    /// <param name="path">The path.</param>
+    /// <returns>The normalized full path.</returns>
+    private static string NormalizeFolder(string path)
+    {
+        var full = Path.GetFullPath(path.Trim());
+        var root = Path.GetPathRoot(full);
+        return full.Length > (root?.Length ?? 0) ? full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) : full;
+    }
+
+    /// <summary>
+    ///     Splits command output into lines, accepting both <c>\n</c> and <c>\r\n</c>.
+    /// </summary>
+    /// <param name="text">The output.</param>
+    /// <returns>The non-empty lines.</returns>
+    private static string[] SplitLines(string text) =>
+        text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>
+    ///     How many times a partial clone's removal is tried: git's helper processes and anti-virus
+    ///     scanners may hold a file for a moment after git was killed.
+    /// </summary>
+    private const int RemovalAttempts = 5;
+
+    /// <summary>
+    ///     How long to wait between two attempts to remove a partial clone.
+    /// </summary>
+    private static readonly TimeSpan RemovalRetryDelay = TimeSpan.FromMilliseconds(200);
+
+    /// <summary>
+    ///     Removes what a killed <c>git clone</c> left behind.
+    /// </summary>
+    /// <param name="destination">The clone destination.</param>
+    /// <param name="removeFolder"><see langword="true"/> to remove the folder itself (this call created
+    ///     it); <see langword="false"/> to keep the folder and remove only what is in it (it existed,
+    ///     empty, before).</param>
+    /// <returns><see langword="null"/> when nothing is left; otherwise a sentence naming what could not
+    ///     be removed, which is also logged.</returns>
+    /// <remarks>
+    ///     Never throws and never follows a link: read-only attributes (git writes read-only object
+    ///     files) are cleared on everything below the destination except through links, and a link is
+    ///     removed as a link by the recursive delete. Retries a few times because a process git started
+    ///     may still hold a file for a moment after it was killed.
+    /// </remarks>
+    private string? RemovePartialClone(string destination, bool removeFolder)
+    {
+        Exception? failure = null;
+        for (var attempt = 1; attempt <= RemovalAttempts; attempt++)
+        {
+            try
+            {
+                DeleteCloneContent(destination, removeFolder);
+                return null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                failure = ex;
+                if (attempt < RemovalAttempts)
+                {
+                    Thread.Sleep(RemovalRetryDelay);
+                }
+            }
+        }
+
+        if (_logger.IsEnabled(LogLevel.Warning))
+        {
+            _logger.LogWarning(
+                failure, "The partly cloned folder '{Destination}' could not be removed", destination);
+        }
+
+        return removeFolder
+            ? $"The partly cloned folder '{destination}' could not be removed; delete it yourself."
+            : $"The partly cloned content of the folder '{destination}' could not be removed; delete it yourself.";
+    }
+
+    /// <summary>
+    ///     Deletes a clone destination (or its content) once, clearing read-only attributes first.
+    /// </summary>
+    /// <param name="destination">The clone destination.</param>
+    /// <param name="removeFolder">See <see cref="RemovePartialClone"/>.</param>
+    /// <exception cref="IOException">Thrown when something cannot be deleted.</exception>
+    /// <exception cref="UnauthorizedAccessException">Thrown when access is denied.</exception>
+    private static void DeleteCloneContent(string destination, bool removeFolder)
+    {
+        if (!Directory.Exists(destination))
+        {
+            return;
+        }
+
+        // Links are skipped (never entered, never changed); hidden and system entries are not
+        var options = new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            IgnoreInaccessible = true,
+            AttributesToSkip = FileAttributes.ReparsePoint
+        };
+        var root = new DirectoryInfo(destination);
+        foreach (var entry in root.EnumerateFileSystemInfos("*", options))
+        {
+            ClearReadOnly(entry);
+        }
+
+        ClearReadOnly(root);
+
+        if (removeFolder)
+        {
+            root.Delete(recursive: true);
+            return;
+        }
+
+        // The folder was there before: keep it, empty it
+        foreach (var entry in root.EnumerateFileSystemInfos())
+        {
+            if (entry is DirectoryInfo directory)
+            {
+                directory.Delete(recursive: true);
+            }
+            else
+            {
+                entry.Delete();
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Clears the read-only attribute of a file or folder.
+    /// </summary>
+    /// <param name="entry">The file or folder.</param>
+    private static void ClearReadOnly(FileSystemInfo entry)
+    {
+        if ((entry.Attributes & FileAttributes.ReadOnly) != 0)
+        {
+            entry.Attributes &= ~FileAttributes.ReadOnly;
+        }
+    }
+
+    /// <summary>
     ///     Determines whether a folder is the top folder of a Git repository: it has a <c>.git</c>
     ///     folder, or a <c>.git</c> file, directly in it.
     /// </summary>
@@ -683,7 +1275,42 @@ internal sealed class GitClient
     /// <exception cref="BlockingCallOnGuardedThreadException">Thrown on a thread guarded by
     ///     <see cref="BlockingCallGuard"/>; nothing was started.</exception>
     private GitCommandResult RunGit(
-        string repositoryPath, TimeSpan timeout, CancellationToken cancellationToken, params string[] arguments)
+        string repositoryPath, TimeSpan timeout, CancellationToken cancellationToken, params string[] arguments) =>
+        RunGitCore(repositoryPath, timeout, cancellationToken, null, arguments);
+
+    /// <summary>
+    ///     Runs git like <see cref="RunGit"/>, with environment variables for this one command added on
+    ///     top of the client's own.
+    /// </summary>
+    /// <remarks>
+    ///     Everything that can reach a log or an exception message is redacted with
+    ///     <see cref="SecretRedactor"/> first: the argument text (a clone URL may carry
+    ///     <c>user:password@</c>), git's standard error and the operating system's error text. The value
+    ///     handed back to the caller is the raw output; a caller that shows it redacts it.
+    /// </remarks>
+    /// <param name="repositoryPath">Working directory the git process runs in.</param>
+    /// <param name="timeout">How long the command may run before it is stopped.</param>
+    /// <param name="cancellationToken">Stops the command when signaled.</param>
+    /// <param name="environment">Environment variables for this command (a <see langword="null"/>
+    ///     value removes the variable), or <see langword="null"/> for none.</param>
+    /// <param name="arguments">Command-line arguments to pass to git; the first is the
+    ///     subcommand.</param>
+    /// <returns>The captured exit code and output streams.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="repositoryPath"/> is null,
+    ///     empty, or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the process fails to start.</exception>
+    /// <exception cref="GitCommandTimeoutException">Thrown when the command did not finish in time; it
+    ///     was stopped.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when
+    ///     <paramref name="cancellationToken"/> was signaled; a running command was stopped.</exception>
+    /// <exception cref="BlockingCallOnGuardedThreadException">Thrown on a thread guarded by
+    ///     <see cref="BlockingCallGuard"/>; nothing was started.</exception>
+    private GitCommandResult RunGitCore(
+        string repositoryPath,
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string?>? environment,
+        string[] arguments)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryPath);
 
@@ -705,11 +1332,15 @@ internal sealed class GitClient
             startInfo.ArgumentList.Add(argument);
         }
 
+        ApplyEnvironment(startInfo, _extraEnvironment);
+        ApplyEnvironment(startInfo, environment);
+
         // Logged before the process starts so a crash/hang mid-invocation still leaves a record
         // of exactly what was about to run and where - the key data point missing from prior
         // occurrences of the intermittent exit-code -1 failure. Lazily computed so the join is
         // only ever performed once, and only if some enabled log statement actually needs it.
-        var argumentsText = new Lazy<string>(() => string.Join(' ', arguments));
+        // Redacted: a clone URL may carry credentials (user:password@host) that must never be logged.
+        var argumentsText = new Lazy<string>(() => SecretRedactor.Redact(string.Join(' ', arguments)));
         if (_logger.IsEnabled(LogLevel.Debug))
         {
             _logger.LogDebug(
@@ -771,7 +1402,7 @@ internal sealed class GitClient
             {
                 _logger.LogWarning(
                     "git process '{GitExecutable} {Arguments}' failed with exit code {ExitCode}; stderr: {StandardError}",
-                    _gitExecutablePath, argumentsText.Value, process.ExitCode, stderr);
+                    _gitExecutablePath, argumentsText.Value, process.ExitCode, SecretRedactor.Redact(stderr));
             }
 
             return new GitCommandResult(process.ExitCode, stdout, stderr);
@@ -796,7 +1427,33 @@ internal sealed class GitClient
             }
 
             throw new InvalidOperationException(
-                $"Failed to run '{_gitExecutablePath} {argumentsText.Value}': {ex.Message}", ex);
+                $"Failed to run '{_gitExecutablePath} {argumentsText.Value}': {SecretRedactor.Redact(ex.Message)}", ex);
+        }
+    }
+
+    /// <summary>
+    ///     Applies environment variables to a process about to start.
+    /// </summary>
+    /// <param name="startInfo">The process start information.</param>
+    /// <param name="environment">The variables (a <see langword="null"/> value removes the variable),
+    ///     or <see langword="null"/> for none.</param>
+    private static void ApplyEnvironment(ProcessStartInfo startInfo, IReadOnlyDictionary<string, string?>? environment)
+    {
+        if (environment is null)
+        {
+            return;
+        }
+
+        foreach (var (name, value) in environment)
+        {
+            if (value is null)
+            {
+                startInfo.Environment.Remove(name);
+            }
+            else
+            {
+                startInfo.Environment[name] = value;
+            }
         }
     }
 

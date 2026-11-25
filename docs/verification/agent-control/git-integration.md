@@ -3,7 +3,7 @@
 ### Verification Approach
 
 The `GitIntegration` subsystem is verified indirectly through its constituent units' test
-suites (`GitClientTests.cs`, `CommittedAgentFilesCacheTests.cs`, `GitCredentialClientTests.cs` /
+suites (`GitClientTests.cs`, `GitClientRealRepositoryTests.cs`, `CommittedAgentFilesCacheTests.cs`, `GitCredentialClientTests.cs` /
 `GitCredentialClientIntegrationTests.cs` and `GitRemoteClientTests.cs` /
 `GitRemoteClientIntegrationTests.cs`), each documented in its
 own unit-level verification design, plus `GitIntegrationSubsystemTests.cs`, which drives the saved-sign-in capability
@@ -58,6 +58,9 @@ the test's isolated git configuration.
   stopped at the time limit.
 - A local git command that hangs past its time limit, or whose caller gives up, is stopped before it finishes and
   reported as timed out or canceled.
+- A repository is cloned from a local bare repository, its branches are listed, and a remote-tracking branch is
+  switched to with the working tree and the branch list following; the password of a clone address is in no log message
+  or result.
 - The git of package sources and of credential helpers is started off the thread that asks: a tag listing and a
   credential-helper question asked from a thread guarded against blocking calls are answered with nothing refused.
 
@@ -197,3 +200,28 @@ the helper is reported available. This scenario is tested by
 `GitIntegrationSubsystem_RemoteAndCredentialGit_FromGuardedThread_StartOffThatThread`, covering
 `AgentControl-GitIntegration-NoBlockingStart` (children: `AgentControl-GitRemoteClient-StartsOffCallerThread`,
 `AgentControl-GitCredentialClient-StartsOffCallerThread`).
+
+**GitIntegration_BranchesAndClone_SubsystemTestUsesTheRealGitAndALocalBareRepository**: Against a real working
+repository whose branches `main` and `feature` hold different files and a local bare repository that plays the remote
+(`GitRepositoryFixture`; never the network), a repository is cloned, its branches are listed (current `main`, remote
+`origin/feature`), the remote branch is switched to with a tracking branch created, and the current branch, the file
+content and the branch list (no remote branch is left once a local one of the same name exists) follow. This scenario
+is tested by `GitIntegrationSubsystem_CloneThenListAndSwitchBranches_OnRealRepository_FollowsTheBranch`, covering
+`AgentControl-GitIntegration-ListBranches`, `AgentControl-GitIntegration-SwitchBranch` and
+`AgentControl-GitIntegration-CloneRepository`; a switch git refuses is verified with
+`GitClient_SwitchBranch_RealRepo_DirtyConflictingFile_IsRefusedWithGitsReasonAndChangesNothing` and a canceled clone
+with `GitClient_Clone_Canceled_RemovesDestinationItCreated`, cited at the subsystem level (children:
+`AgentControl-GitClient-ListBranches`, `-ListBranchesRemoteDistinct`, `-ListBranchesDetached`, `-SwitchBranch`,
+`-SwitchNeverForces`, `-SwitchRefusalReported`, `-Clone`, `-CloneDestinationRules` and `-CloneCancelStopsGit`).
+
+**GitIntegration_CloneSafety_UnitTestsCoverAddressDataCleanupAndRedaction**: An address that git could read as an
+option or a remote helper is refused before git starts (`GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit`,
+covering `AgentControl-GitIntegration-CloneUrlIsData`, child `AgentControl-GitClient-CloneRefusesOptionLikeUrl`); a
+canceled clone into an existing empty folder keeps the folder and a failed clone deletes nothing
+(`GitClient_Clone_CanceledIntoExistingEmptyFolder_RemovesContentsKeepsFolder` and `GitClient_Clone_Fails_LeavesFolderAlone`,
+covering `AgentControl-GitIntegration-CloneRemovesOnlyWhatItCreated`, child
+`AgentControl-GitClient-CloneRemovesOnlyWhatItCreated`); and an address with a password never puts the password into a
+log message or a result: with a stub whose clone fails and echoes the address, the subsystem test searches the log and
+the result for the password. That scenario is tested by
+`GitIntegrationSubsystem_CloneWithCredentialsInUrl_NeverLogsThePassword`, covering
+`AgentControl-GitIntegration-CloneNeverLogsCredentials` (child `AgentControl-GitClient-CloneRedactsCredentials`).

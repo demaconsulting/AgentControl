@@ -5,7 +5,8 @@
 ### Overview
 
 The `GitIntegration` subsystem spans `GitClient.cs` (invokes the configured git executable
-for status, pull, branch, and committed-files queries and for stopping git tracking managed agent
+for status, pull, branch, and committed-files queries, for listing and switching branches, for cloning a repository
+and for stopping git tracking managed agent
 folders), `CommittedAgentFilesCache.cs`
 (caches the committed-agent-files-changed check keyed by HEAD commit hash),
 `GitCredentialClient.cs` (keeps, finds and removes a package feed's sign-in in the user's own Git
@@ -21,7 +22,11 @@ support `AgentControl-System-GitSourceSafety`, `AgentControl-System-GitSourceTra
 folder is the top folder of a Git repository (`AgentControl-GitIntegration-RepositoryRoot`, which supports
 `AgentControl-System-AddGitReposOnly`), and stops a local git command that does not answer within its time limit or
 whose caller gives up (`AgentControl-GitIntegration-LocalGitTimeout`, which supports
-`AgentControl-System-ResponsiveRepoListWork`). The subsystem contains four
+`AgentControl-System-ResponsiveRepoListWork`). It lists and switches branches (`-ListBranches` and `-SwitchBranch`,
+which support `AgentControl-System-SwitchBranch`) and clones a repository (`-CloneRepository`, which supports
+`AgentControl-System-CloneRepository`; and `-CloneUrlIsData`, `-CloneNeverLogsCredentials` and
+`-CloneRemovesOnlyWhatItCreated`, which support `AgentControl-System-CloneSafety`, the credentials one also
+`AgentControl-System-CredentialSafety`). The subsystem contains four
 units: `GitClient`, `CommittedAgentFilesCache`, `GitCredentialClient` and `GitRemoteClient`.
 
 ### Interfaces
@@ -126,16 +131,49 @@ folders git tracks and stops git tracking chosen ones.
 - *Constraints*: Throws `InvalidOperationException` if both the fast path and the subprocess
   fallback fail.
 
-**GitClient time limits and cancellation**: Every `GitClient` query and `Pull` runs under a time limit and accepts a
-cancellation token.
+**GitClient.GetBranches / SwitchBranch**: Lists the branches a repo already knows about and switches the repo to one of
+them.
+
+- *Type*: In-process .NET instance methods.
+- *Role*: Provider. Its consumer is the card's "Switch branch..." action in `LauncherUI`.
+- *Contract*: `GetBranches` returns the local and remote-tracking branches git already has (no fetch), the current
+  branch or, for a detached HEAD, the short commit id; `SwitchBranch` runs `git switch -- <name>` (local) or
+  `git switch --track -- <remote>/<name>` (remote) and returns the outcome, a refusal by git being a result with git's
+  explanation, not an exception (`AgentControl-GitIntegration-ListBranches`, `AgentControl-GitIntegration-SwitchBranch`,
+  `AgentControl-GitClient-ListBranches`, `AgentControl-GitClient-ListBranchesRemoteDistinct`,
+  `AgentControl-GitClient-ListBranchesDetached`, `AgentControl-GitClient-SwitchBranch`,
+  `AgentControl-GitClient-SwitchRefusalReported`).
+- *Constraints*: A switch never forces, discards, merges or stashes (`AgentControl-GitClient-SwitchNeverForces`); a blank
+  or option-like name is refused with `ArgumentException` before git runs; `GetBranches` throws
+  `InvalidOperationException` when git cannot list the refs.
+
+**GitClient.Clone / CheckCloneUrl / CheckCloneDestination**: Clones a repository into a new or empty folder, and
+tells beforehand why an address or a folder cannot be used.
+
+- *Type*: In-process .NET instance method (`Clone`) and static methods (`CheckCloneUrl`, pure; `CheckCloneDestination`,
+  reads the disk).
+- *Role*: Provider. Its consumers are the clone dialog and the main window's clone operation in `LauncherUI`.
+- *Contract*: `Clone` runs `git clone -- <address> <destination>` in the destination's parent folder under the clone
+  limit and returns the outcome with credentials removed; a clone git refuses is a result, not an exception; on cancel
+  or timeout the partial result is removed - only what the call created - and after a failed clone nothing is deleted
+  (`AgentControl-GitIntegration-CloneRepository`, `-CloneUrlIsData`, `-CloneNeverLogsCredentials`,
+  `-CloneRemovesOnlyWhatItCreated`).
+- *Constraints*: An address that is blank, multi-line, starts with `-` or uses a remote-helper syntax such as `ext::`,
+  and a destination that is relative, has no parent folder, is a file or is a non-empty folder, are refused with
+  `ArgumentException` (reason in the message) before git starts; a `GitCommandTimeoutException` or
+  `OperationCanceledException` reports a stopped clone; on a guarded thread nothing is read or started.
+
+**GitClient time limits and cancellation**: Every `GitClient` query, `Pull`, `SwitchBranch` and `Clone` runs under a
+time limit and accepts a cancellation token.
 
 - *Type*: In-process .NET: the optional `GitClientTimeouts` constructor argument and the optional
-  `CancellationToken` parameter of `IsWorkingTreeClean`, `Pull`, `GetHeadCommitHash`, `HasCommittedAgentFiles` and
-  `GetCurrentBranch`.
+  `CancellationToken` parameter of `IsWorkingTreeClean`, `Pull`, `GetHeadCommitHash`, `HasCommittedAgentFiles`,
+  `GetCurrentBranch`, `GetBranches`, `SwitchBranch` and `Clone`.
 - *Role*: Provider. Its consumers are the cards' reads in the `LauncherUI` shared refresh queue, which pass the queue's
   shutdown token, and the add's folder checks.
 - *Contract*: A command that has not finished within its limit (60 seconds on the local repository, 10 minutes for a
-  pull) is stopped with every process it started and reported as `GitCommandTimeoutException` (an
+  pull or a branch switch, 60 minutes for a clone) is stopped with every process it started and reported as
+  `GitCommandTimeoutException` (an
   `InvalidOperationException` that names the limit); a canceled command is stopped the same way and reported as
   `OperationCanceledException` (`AgentControl-GitIntegration-LocalGitTimeout`, `AgentControl-GitClient-TimeoutStopsGit`,
   `AgentControl-GitClient-CancelStopsGit`).
@@ -173,6 +211,17 @@ and working-tree state - must give the same answer when made from several thread
 mutable state (it starts a new git process for every call, and `IsRepositoryRoot` is a static file-system check), so
 concurrent calls are independent; `CommittedAgentFilesCache`, the one shared mutable object, takes a private lock
 around its dictionary in every member.
+
+**Branches and clones** (`AgentControl-GitIntegration-ListBranches`, `-SwitchBranch`, `-CloneRepository`,
+`-CloneUrlIsData`, `-CloneNeverLogsCredentials`, `-CloneRemovesOnlyWhatItCreated`). Switching and cloning are the two
+places where the launcher acts on a developer's files at the developer's request, so both keep git as the arbiter and
+the user's data intact. The branch list is what git already has locally: no implicit fetch, so it is quick and never
+prompts for a sign-in (a pull updates the remote-tracking branches). A switch is `git switch` with no force, discard,
+merge or stash: git refuses what would lose work and the launcher passes its explanation on. A clone treats the address
+as data (a leading `-` or a remote-helper address is refused, `--` separates it from the options), asks nothing on a
+terminal, shows no credential in a log (the one place a command line is logged, `RunGit`, redacts it) and, when it is
+killed, removes only what it created - an existing empty folder is kept - never following links and never after a
+failure git reported itself.
 
 `GitClient` invokes the configured git executable (default `git`, overridable via Settings)
 as an external process for every query. Status/pull/committed-files queries surface failures

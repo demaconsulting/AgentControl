@@ -701,6 +701,50 @@ sections:
         tests:
           - windows@PullMenuItem_Click_InvokesConfiguredGitExecutableWithPullArgument
 
+      - id: AgentControl-System-SwitchBranch
+        title: >-
+          The tool shall let the user switch a repo to another of its local or remote-tracking
+          branches from the repo's card, show the new branch and package state on the card, and tell
+          the user git's reason when git refuses the switch, without ever forcing the switch or
+          discarding the user's changes.
+        tags: [system]
+        justification: |
+          Developers move between branches in the repos they launch agents in; doing it from the
+          card keeps them in the tool, and the branch decides which agent package the repo is pinned
+          to, so the card must follow. Uncommitted work is the developer's: only git may refuse a
+          switch, and a refusal must be explained in git's words.
+        children:
+          - AgentControl-GitIntegration-ListBranches
+          - AgentControl-GitIntegration-SwitchBranch
+
+      - id: AgentControl-System-CloneRepository
+        title: >-
+          The tool shall let the user clone a repository by its address into a new folder, with an
+          optional group, showing progress that can be canceled, and then add the cloned repository
+          to the list.
+        tags: [system]
+        justification: |
+          A developer who does not have a repository yet has to leave the tool to clone it before
+          the tool can help; cloning from the tool removes that detour, and a clone can take long
+          enough to need progress and a way out.
+        children:
+          - AgentControl-GitIntegration-CloneRepository
+
+      - id: AgentControl-System-CloneSafety
+        title: >-
+          The tool shall treat the address to clone as data (refusing one that git would read as an
+          option or a remote helper), never write the credentials in an address to its log, and
+          remove after a canceled clone only a folder it created itself.
+        tags: [system, security]
+        justification: |
+          Addresses are pasted from chats and web pages and may be hostile or carry a password; and
+          cleaning up after a canceled clone must never delete work the user already had in the
+          destination folder.
+        children:
+          - AgentControl-GitIntegration-CloneUrlIsData
+          - AgentControl-GitIntegration-CloneNeverLogsCredentials
+          - AgentControl-GitIntegration-CloneRemovesOnlyWhatItCreated
+
       - id: AgentControl-System-SelectPackage
         title: >-
           The tool shall let the user select an initial agent package, from a chosen configured
@@ -1527,6 +1571,7 @@ sections:
           - AgentControl-PackageCredentials-ExceptionsLoggedSanitized
           - AgentControl-Logging-UnhandledExceptionsRedacted
           - AgentControl-Program-StartupFailureRedacted
+          - AgentControl-GitIntegration-CloneNeverLogsCredentials
         tests:
           # System level, end to end: the sentinel password is searched for in every file the
           # application wrote and in the target repo. What no log line may contain, in every form
