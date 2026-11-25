@@ -217,9 +217,10 @@ Each repo card shows:
 ![A card with the repo's own picture and an up-to-date package, a group header with its teal color bar, and a card
 with a teal tile from its group, an upgrade chip and an uncommitted-changes warning](images/repo-card-anatomy.png)
 
-![The open "..." menu of a card: Git Pull and Refresh under Repository, Change package... under Agent files, Move to
-group, Reorder (its submenu open, with Move to top, Move up, Move down and Move to bottom) and Card color under
-Organize, and Remove from list](images/card-menu.png)
+![The open "..." menu of a card: Git Pull (disabled, as the working tree has uncommitted changes) and Refresh under
+Repository, Change package... and Upgrade to 1.1.0 under Agent files, Move to group, Reorder (its submenu open, with
+Move to top and Move up disabled, as the card is the first of its group, and Move down and Move to bottom) and Card
+color... under Organize, and Remove from list](images/card-menu.png)
 
 Removing a repo from the list prompts for confirmation first, since it is a destructive
 action against AgentControl's own repo list state (it does not touch the repository
@@ -274,12 +275,10 @@ separator **Rename group...** (the same prompt; another group's name is refused)
 **Delete group, keep contents** and **Delete group and its contents** (see *Deleting a Group*). Nothing on disk
 changes. The built-in **Favorites** and **Ungrouped** headers have no menu.
 
-![The open "..." menu of the Client Work group header, which has a teal color bar: Add repository..., then Move up,
-Move down (disabled, as Client Work is the last group) and Group color..., then Rename group... and Remove
-group](images/group-menu.png)
-
-The picture shows the menu as it was before **New subgroup...**, **Move into group**, **Sort by name** and **Delete
-group and its contents** were added, and with the delete item named **Remove group**.
+![The open "..." menu of the Client Work group header, which has a teal color bar: Add repository... and New
+subgroup..., then Move up, Move down (disabled, as Client Work is the last group), Move into group (with a submenu),
+Sort by name and Group color..., then Rename group..., Delete group, keep contents and Delete group and its
+contents](images/group-menu.png)
 
 The **filter box** always searches all repos: while it has text, every section is shown expanded and a section
 without a match disappears, so a repo is never hidden inside a collapsed group; clear the filter and your collapsed
@@ -295,6 +294,10 @@ group it is inside. A header's count is the number of repos in the whole group, 
 accessible name says which group it is inside (for example "Phase 1, 2 repos, expanded, inside Work"). Collapsing a
 group hides everything inside it. Headers and cards are drawn further in for each level only down to the eighth level:
 a group nested deeper looks as deep as level 8, and its accessible name still says which group it is inside.
+
+![Nested groups: the top-level group Client Work, with a teal color bar and a count of 4 repos, is followed by its
+subgroups Phase 1 (web-portal and mobile-app) and Phase 2 (search-service), whose headers and cards are drawn further
+in, and then by its own repo payments-api](images/nested-groups.png)
 
 - **Create a subgroup.** Choose **New subgroup...** in the "..." menu of the group that is to contain it and type a
   name. The prompt checks the name as you type like the **New group...** prompt does, and also refuses the name of
@@ -367,6 +370,10 @@ in the tree go with the group. **Favorites** and **Ungrouped** cannot be deleted
 You can select more than one repo card, to move them together or to remove them in one step. The selected cards are
 drawn with a tinted background and a stronger border, so the selection does not depend on color alone, and screen
 readers report each card as selected (and that the list allows several selected items).
+
+![The main window in the light theme with the three cards of the Client Work group selected - each is drawn with a
+tinted background and a stronger border - and the "..." menu of web-portal open, whose items read "Move 3
+selected repos to group" and "Remove 3 selected repos from list"](images/multi-select.png)
 
 - **Ctrl+click** a card adds it to the selection or, when it is selected, takes it out. A plain **click** selects
   just that card.
