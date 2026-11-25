@@ -12,40 +12,41 @@ the card) and `PackageSourceGitPresentationTests.cs` (the Git icon and names, an
 Git source), `PackageSourceStatusPresentationTests.cs` (the "Online source" status, the folder statuses and the "Signed
 only" badge of a source row, with the Settings window showing it), `CredentialPromptViewModelTests.cs`,
 `RepoImageLocatorTests.cs`, `RepoGroupHeaderViewModelTests.cs`, `GroupNameViewModelTests.cs`,
-`SwitchBranchViewModelTests.cs`, `DialogBehaviorTests.cs` and `GlobalProgressViewModelTests.cs`, the last six units each
-with its own verification document), plus `AsyncRelayCommandTests.cs` for the shared asynchronous command, which
-together exercise the full recent-repos/card/select-package/settings/sign-in interaction surface without ever
-constructing an Avalonia `Window` (apart from the picture decoder and `DialogBehavior`, which need Avalonia's headless
-session). The windows themselves are exercised by headless Avalonia tests (`DialogWindowTests.cs` - including the
-confirmation window's custom button labels -, `MainWindowTests.cs`, `SwitchBranchWindowTests.cs` (the branch dialog),
-`UsabilityWindowTests.cs` for the favorite star with real pointer and key input, the "Check again" menu item, the
-up-to-date check mark, the narrow card, the Settings sections, the keyboard behavior of the dialogs, the About version
-row, the order of the AGENTS.md question and the release notes and the keep-or-update and launch-anyway questions about
-a repo's agent files, `RepoGroupWindowTests.cs` for the group headers (including that a window whose data context is
-cleared and assigned again handles each header request once, and stops handling a view model that another one replaced:
-`MainWindow_DataContextAssignedAgain_HandlesEachRequestOnceAndOnlyForTheCurrentViewModel`), the card menu's "Move to
-group" submenu, the group-name prompt, the card and group color palette pop-ups (and the shared `ColorPalettePanel`),
-and adding several folders from the picker, `RepoReorderWindowTests.cs` for the user's own repo order (cards that stay
-put, the card menu's Reorder submenu, drag and drop through the window's drag-source seam and the platform's drop
-events, the insertion line and header tint, reordering turned off by the filter, the order after a restart; the real
-operating-system drag is covered only by the FlaUI tests), the user's order of the groups (the header menu's Move items
-and header drags through the same `DragStarter` seam, pressing the header's toggle) and that a group's color and place
-follow a rename (through the name prompt), are forgotten when the group is removed or its last repo leaves it, and are
-kept when the Settings window is saved, that the user's organizing choices made through the window (a group, a card
-color, a group color, the group order and a collapsed section) are written to the settings file only, never into a repo
-folder, and folders dropped from the file manager (a `DataTransfer` of `DataTransferItem.CreateFile` items for storage
-items obtained from the window's `StorageProvider` - `TryGetFolderFromPathAsync` / `TryGetFileFromPathAsync`, since user
-code cannot implement `IStorageItem` - raised with `window.DragDrop` offering Copy, Move and Link),
-`RepoOrderingTests.cs` for the view model's rules behind them, `SettingsWindowServerSourceTests.cs` for the Settings
-window, the source editor window and its connection test, `SourceEditorSignatureWindowTests.cs` for the signature
-section and "Forget saved sign-in" of the source editor, `SourceEditorGitWindowTests.cs` for the Git editor's sections,
-tag pattern error, tag preview and Save (against a `FakeGitSourceProvider`, so no git or network is needed),
-`RepoCardSignatureTests.cs` for the signature shield in the main window's package chip, and
-`CredentialPromptWindowTests.cs` for the sign-in dialog, its "Remember on this computer" option and
-`AvaloniaCredentialPrompt`), and the end-to-end flows - adding a zip and a NuGet folder source through the dialogs,
-adding a NuGet server and testing its connection with a typed sign-in, selecting a package from the NuGet sources, a
-source that requires signed packages refusing an unsigned upgrade, and the chips on a repo card - by the FlaUI
-`DemaConsulting.AgentControl.UiTests` project. At the subsystem boundary, collaborating subsystems
+`SwitchBranchViewModelTests.cs`, `CloneRepositoryViewModelTests.cs`, `DialogBehaviorTests.cs` and
+`GlobalProgressViewModelTests.cs`, the last seven units each with its own verification document), plus
+`AsyncRelayCommandTests.cs` for the shared asynchronous command, which together exercise the full
+recent-repos/card/select-package/settings/sign-in interaction surface without ever constructing an Avalonia `Window`
+(apart from the picture decoder and `DialogBehavior`, which need Avalonia's headless session). The windows themselves
+are exercised by headless Avalonia tests (`DialogWindowTests.cs` - including the confirmation window's custom button
+labels -, `MainWindowTests.cs`, `SwitchBranchWindowTests.cs` (the branch dialog), `CloneRepositoryWindowTests.cs` (the
+clone dialog), `UsabilityWindowTests.cs` for the favorite star with real pointer and key input, the "Check again" menu
+item, the up-to-date check mark, the narrow card, the Settings sections, the keyboard behavior of the dialogs, the About
+version row, the order of the AGENTS.md question and the release notes and the keep-or-update and launch-anyway
+questions about a repo's agent files, `RepoGroupWindowTests.cs` for the group headers (including that a window whose
+data context is cleared and assigned again handles each header request once, and stops handling a view model that
+another one replaced: `MainWindow_DataContextAssignedAgain_HandlesEachRequestOnceAndOnlyForTheCurrentViewModel`), the
+card menu's "Move to group" submenu, the group-name prompt, the card and group color palette pop-ups (and the shared
+`ColorPalettePanel`), and adding several folders from the picker, `RepoReorderWindowTests.cs` for the user's own repo
+order (cards that stay put, the card menu's Reorder submenu, drag and drop through the window's drag-source seam and the
+platform's drop events, the insertion line and header tint, reordering turned off by the filter, the order after a
+restart; the real operating-system drag is covered only by the FlaUI tests), the user's order of the groups (the header
+menu's Move items and header drags through the same `DragStarter` seam, pressing the header's toggle) and that a group's
+color and place follow a rename (through the name prompt), are forgotten when the group is removed or its last repo
+leaves it, and are kept when the Settings window is saved, that the user's organizing choices made through the window (a
+group, a card color, a group color, the group order and a collapsed section) are written to the settings file only,
+never into a repo folder, and folders dropped from the file manager (a `DataTransfer` of `DataTransferItem.CreateFile`
+items for storage items obtained from the window's `StorageProvider` - `TryGetFolderFromPathAsync` /
+`TryGetFileFromPathAsync`, since user code cannot implement `IStorageItem` - raised with `window.DragDrop` offering
+Copy, Move and Link), `RepoOrderingTests.cs` for the view model's rules behind them,
+`SettingsWindowServerSourceTests.cs` for the Settings window, the source editor window and its connection test,
+`SourceEditorSignatureWindowTests.cs` for the signature section and "Forget saved sign-in" of the source editor,
+`SourceEditorGitWindowTests.cs` for the Git editor's sections, tag pattern error, tag preview and Save (against a
+`FakeGitSourceProvider`, so no git or network is needed), `RepoCardSignatureTests.cs` for the signature shield in the
+main window's package chip, and `CredentialPromptWindowTests.cs` for the sign-in dialog, its "Remember on this computer"
+option and `AvaloniaCredentialPrompt`), and the end-to-end flows - adding a zip and a NuGet folder source through the
+dialogs, adding a NuGet server and testing its connection with a typed sign-in, selecting a package from the NuGet
+sources, a source that requires signed packages refusing an unsigned upgrade, and the chips on a repo card - by the
+FlaUI `DemaConsulting.AgentControl.UiTests` project. At the subsystem boundary, collaborating subsystems
 (`AgentPackageManagement`, `RepoSync`, `RepoConfig`, `GitIntegration`, `AgentToolLauncher`, `Settings`) are exercised
 through their real implementations against real temporary directories and package-zip fixtures, and git is substituted
 with a stub script (`GitStub`, shared with `GitClientTests`) so no test depends on a real git installation. The About
@@ -1051,12 +1052,12 @@ by `AppStyles_TextAndGraphicColors_MeetContrastInBothThemes`, covering
 `AgentControl-LauncherUI-ThemeGraphicsLegible`.
 
 **LauncherUI_AppBar_LogoFilterAndButtonsInOrderAndNothingClipsAtMinimumWidth**: In the headless main window at its
-narrowest width the app bar holds the logo (accessible name and tooltip "AgentControl", no text or tagline in
-the bar), the filter box and the Add, Settings and About buttons from left to right; the first four keyboard stops
-are the filter box and then those three buttons; the About button ends inside the window, no button is narrower
-than it needs, and the filter box has shrunk but is still wide enough to use. The bar is a view without a unit of its
-own, so this headless test is its evidence. This scenario is tested by
-`MainWindow_AppBar_LogoFilterAndButtonsInOrderAndNothingClipsAtMinimumWidth`, covering
+narrowest width the app bar holds the logo (accessible name and tooltip "AgentControl", no text or tagline in the bar),
+the filter box and the Add, Clone, Settings and About buttons from left to right; the first five keyboard stops are the
+filter box and then those four buttons (the Clone button having the accessible name and tooltip "Clone a repository");
+the About button ends inside the window, no button is narrower than it needs, and the filter box has shrunk but is still
+wide enough to use. The bar is a view without a unit of its own, so this headless test is its evidence. This scenario is
+tested by `MainWindow_AppBar_LogoFilterAndButtonsInOrderAndNothingClipsAtMinimumWidth`, covering
 `AgentControl-LauncherUI-AppBar` (content, accessible name and keyboard order) and
 `AgentControl-LauncherUI-AppBarNarrow` (the shrinking of the filter box and the buttons that are not clipped).
 
@@ -1217,6 +1218,34 @@ name. The requirements are split by behavior; each is covered by the tests that 
   branches): the list, the current branch and the hint, the focus in the filter box, Switch disabled for the current
   branch, the filter, choosing by button, Enter and double-click, Escape and Cancel, the read stopped when the window
   closes and a failed read shown as text. The rules behind them are verified by the `SwitchBranchViewModel` unit tests.
+- `AgentControl-LauncherUI-CloneButton` (the app bar's Clone button): the app bar test above (the button, its name,
+  tooltip and place in the focus order), `MainWindow_CloneRepoButton_OpensDialogAndCloneAddsCardIntoChosenGroup`
+  (pressing it opens the dialog owned by the main window) and `MainWindow_NoViewModel_ButtonHandlersAreNoOps` (without a
+  view model the button opens nothing).
+- `AgentControl-LauncherUI-CloneRepositoryDialog` (the dialog that asks what to clone):
+  `CloneRepositoryWindow_Opened_FocusesAddressAndTypingAnAddressFillsFolderNameAndEnablesClone`,
+  `CloneRepositoryWindow_UrlLooksLikeAnOption_ShowsErrorAndDisablesClone`,
+  `CloneRepositoryWindow_BrowseClicked_PutsChosenFolderInParentBoxAndCancelChangesNothing`,
+  `CloneRepositoryWindow_CloneClicked_ReturnsTheRequest`,
+  `CloneRepositoryWindow_EnterInAddressBox_ClonesAndExistingFolderShowsReason` and
+  `CloneRepositoryWindow_EscapeAndCancel_ReturnNull` (`CloneRepositoryWindowTests.cs`, with a real temporary folder as
+  the parent): the focus in the address box, the folder name following the address, the destination line, the group box
+  with Ungrouped selected, the error text for an address that looks like an option, Browse answered through the
+  picker seam, Clone by button and by Enter, an existing non-empty folder refused with its reason while the dialog stays
+  open, and Escape and Cancel. The rules behind them are verified by the `CloneRepositoryViewModel` unit tests.
+- `AgentControl-LauncherUI-CloneRepository` (the clone and the card it adds):
+  `MainWindow_CloneRepoButton_OpensDialogAndCloneAddsCardIntoChosenGroup` (a local bare repository, never the network:
+  the dialog lists Ungrouped and the group of the list, Browse is answered by the seam, Clone closes the dialog, the
+  folder becomes a working clone with its files, its card is listed in the chosen group and saved, the strip is idle and
+  nothing is left open) and `MainWindow_CloneRepoButton_CloneFails_ShowsGitsReasonInMessageBox` (an address that is no
+  repository: a message box starting `Cloning failed: fatal:` without git's `Cloning into` line, no card). The behavior
+  behind them - off the UI thread, one clone per destination, the card added through the add path, the save failure
+  question, failures reported - is verified by the `MainWindowViewModel` unit tests
+  (`MainWindowViewModelCloneTests.cs`), whose requirements are its children.
+- `AgentControl-LauncherUI-CloneProgressCancel` (the strip while a clone runs):
+  `MainWindow_GlobalProgressCancel_WhileCloning_StopsTheCloneAndAddsNothing` (a git whose clone creates the destination
+  and then hangs: the strip shows `Cloning slow...` with a Cancel button named `Cancel cloning repository`; pressing it
+  stops the clone, removes the partly cloned folder, adds no card and shows no message).
 - `AgentControl-LauncherUI-RepoGroupManagement` (rename from the header):
   `MainWindow_HeaderMenu_RenameGroup_AsksForTheNameAndRenames` (the prompt starts with the group's name, canceling it
   changes nothing, accepting renames the group and its repos).

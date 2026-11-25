@@ -442,8 +442,8 @@ public sealed class UsabilityWindowTests : IDisposable
 
     /// <summary>
     ///     Test that the main window has one compact app bar (the logo with an accessible name and a tooltip
-    ///     but no name text or tagline, the filter box, then the Add, Settings and About buttons), that the
-    ///     filter is the first stop of the keyboard focus order, followed by the three buttons in order, and
+    ///     but no name text or tagline, the filter box, then the Add, Clone, Settings and About buttons), that
+    ///     the filter is the first stop of the keyboard focus order, followed by the four buttons in order, and
     ///     that at the narrowest width the filter has shrunk while the buttons stay inside the window.
     /// </summary>
     [Fact]
@@ -457,7 +457,7 @@ public sealed class UsabilityWindowTests : IDisposable
             var appBar = window.GetVisualDescendantsOf<Border>("AppBar").Single();
             var logo = window.GetVisualDescendantsOf<Border>("AppLogo").Single();
             var filter = window.GetVisualDescendantsOf<TextBox>("FilterTextBox").Single();
-            var buttons = new[] { "AddRepoButton", "OpenSettingsButton", "OpenAboutButton" }
+            var buttons = new[] { "AddRepoButton", "CloneRepoButton", "OpenSettingsButton", "OpenAboutButton" }
                 .Select(id => window.GetVisualDescendantsOf<Button>(id).Single())
                 .ToList();
 
@@ -470,20 +470,22 @@ public sealed class UsabilityWindowTests : IDisposable
                 text => !string.IsNullOrEmpty(text.Text));
 
             // Assert: the keyboard stops (no tab index is set, so the visual order is the focus order) start with
-            // the filter, then Add, Settings and About
+            // the filter, then Add, Clone, Settings and About
             var stops = window.GetVisualDescendants()
                 .OfType<InputElement>()
                 .Where(element => element.Focusable && element.IsTabStop && element.IsEffectivelyVisible)
-                .Take(4)
+                .Take(5)
                 .ToList();
-            Assert.Equal<InputElement>([filter, buttons[0], buttons[1], buttons[2]], stops);
+            Assert.Equal<InputElement>([filter, buttons[0], buttons[1], buttons[2], buttons[3]], stops);
+            Assert.Equal("Clone a repository", AutomationProperties.GetName(buttons[1]));
+            Assert.Equal("Clone a repository", ToolTip.GetTip(buttons[1]));
 
             // Assert: left to right, logo, filter, buttons; all inside the window, the filter taking what is left
-            var lefts = new Control[] { logo, filter, buttons[0], buttons[1], buttons[2] }
+            var lefts = new Control[] { logo, filter, buttons[0], buttons[1], buttons[2], buttons[3] }
                 .Select(element => element.TranslatePoint(new Point(0, 0), window)!.Value.X)
                 .ToList();
             Assert.Equal(lefts.Order(), lefts);
-            var aboutRight = lefts[4] + buttons[2].Bounds.Width;
+            var aboutRight = lefts[5] + buttons[3].Bounds.Width;
             Assert.True(aboutRight <= window.Bounds.Width, $"About ends at {aboutRight} in a {window.Bounds.Width} wide window");
             Assert.All(
                 buttons,

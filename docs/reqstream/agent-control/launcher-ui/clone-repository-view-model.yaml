@@ -1,0 +1,103 @@
+---
+# Software Unit Requirements for the CloneRepositoryViewModel Class
+#
+# CloneRepositoryViewModel backs the "Clone repository" dialog opened from the app bar: it collects
+# the repository address, the folder to clone into (a parent folder and a folder name that follows the
+# address) and the group of the new card, checks them as the user types, checks the destination on disk
+# off the UI thread when Clone is pressed, and completes with a request. Each requirement states one
+# observable behavior of the dialog. Cloning itself is the MainWindowViewModel unit's.
+
+sections:
+  - title: CloneRepositoryViewModel Unit Requirements
+    requirements:
+      - id: AgentControl-CloneRepositoryViewModel-UrlRequired
+        title: >-
+          The CloneRepositoryViewModel class shall not allow Clone until the repository address, the
+          parent folder and the folder name are all filled in, without showing an error for a field
+          that is merely empty.
+        justification: |
+          Clone with a missing piece can only fail; a button that stays disabled says "not yet" without
+          scolding the user who has just opened the dialog.
+        tests:
+          - CloneRepositoryViewModel_EmptyUrl_CannotAccept
+          - CloneRepositoryWindow_Opened_FocusesAddressAndTypingAnAddressFillsFolderNameAndEnablesClone
+
+      - id: AgentControl-CloneRepositoryViewModel-UrlOptionRefused
+        title: >-
+          The CloneRepositoryViewModel class shall refuse, with a message and without allowing Clone,
+          a repository address that git would read as an option (it starts with a dash), that uses
+          the remote-helper syntax (ext::, fd::) or that is not a single line of text, and a parent
+          folder that is not an absolute path.
+        justification: |
+          Addresses are pasted from chats and web pages; one that starts with a dash or names a remote
+          helper can make git run a command of the attacker's choosing, so it is refused before git is
+          ever started.
+        tests:
+          - CloneRepositoryViewModel_UrlStartingWithDashOrHelperOrMultiline_IsRefused
+          - CloneRepositoryViewModel_RelativeParentFolder_IsRefused
+          - CloneRepositoryWindow_UrlLooksLikeAnOption_ShowsErrorAndDisablesClone
+
+      - id: AgentControl-CloneRepositoryViewModel-FolderNameFromUrl
+        title: >-
+          The CloneRepositoryViewModel class shall suggest the folder name from the repository address
+          - its last segment without a .git ending, for URLs, scp-like addresses and local paths - and
+          keep the suggestion following the address until the user types a folder name of their own.
+        justification: |
+          The folder is nearly always named after the repository, as git itself would name it; typing
+          it again would be a chore, but a name the user chose must not be overwritten.
+        tests:
+          - CloneRepositoryViewModel_DeriveFolderName_FollowsTheLastSegment
+          - CloneRepositoryViewModel_FolderName_FollowsUrlUntilEdited
+
+      - id: AgentControl-CloneRepositoryViewModel-FolderNameRules
+        title: >-
+          The CloneRepositoryViewModel class shall refuse, with a message and without allowing Clone,
+          a folder name that is not one valid Windows file name: one with path separators or other
+          characters a file name cannot have, "." or "..", a trailing dot or space, or a reserved
+          device name.
+        justification: |
+          The folder name becomes one segment of the destination path; a name with a separator would
+          clone somewhere else than the dialog shows, and reserved names cannot be created at all.
+        tests:
+          - CloneRepositoryViewModel_FolderName_InvalidNames_AreRefused
+
+      - id: AgentControl-CloneRepositoryViewModel-DestinationCheckedInBackground
+        title: >-
+          The CloneRepositoryViewModel class shall, when Clone is pressed, check the destination on
+          disk through the background work runner rather than on the calling (UI) thread, show that it
+          is checking, keep the dialog open with the reason when the folder exists and is not empty or
+          its parent folder does not exist, and accept a folder that does not exist or is empty.
+        justification: |
+          The check reads the disk, which can be slow (a network drive, a sleeping disk), and must never
+          freeze the dialog; a clone into somebody's existing folder must be refused before git starts.
+        tests:
+          - CloneRepositoryViewModel_Accept_ChecksDestinationInBackground_ShowsExistingFolderMessage
+          - CloneRepositoryViewModel_Accept_NewOrEmptyFolderIsAcceptedMissingParentRefused
+          - CloneRepositoryWindow_EnterInAddressBox_ClonesAndExistingFolderShowsReason
+
+      - id: AgentControl-CloneRepositoryViewModel-GroupChoiceDefaultsUngrouped
+        title: >-
+          The CloneRepositoryViewModel class shall offer Ungrouped first, followed by the groups it
+          is given, select Ungrouped by default, and fall back to it when no choice is selected.
+        justification: |
+          Most clones need no group; the default must be the one that puts the card where a plain add
+          would, and the dialog must never be in a state with no group.
+        tests:
+          - CloneRepositoryViewModel_Groups_UngroupedIsDefaultAndTreePathsListed
+          - CloneRepositoryWindow_Opened_FocusesAddressAndTypingAnAddressFillsFolderNameAndEnablesClone
+
+      - id: AgentControl-CloneRepositoryViewModel-CompletesWithRequest
+        title: >-
+          The CloneRepositoryViewModel class shall complete exactly once - with the trimmed address,
+          the destination (the parent folder and the folder name) and the chosen group when the
+          destination is usable, or with no request when the dialog is canceled or closed - and not
+          complete again afterwards.
+        justification: |
+          The window clones exactly what the dialog showed, and the dialog closes by several routes
+          (Cancel, Escape, the title bar) that must not each report an answer.
+        tests:
+          - CloneRepositoryViewModel_Accept_CompletesWithRequest
+          - CloneRepositoryViewModel_Cancel_CompletesWithNone
+          - CloneRepositoryWindow_CloneClicked_ReturnsTheRequest
+          - CloneRepositoryWindow_EscapeAndCancel_ReturnNull
+          - CloneRepositoryWindow_BrowseClicked_PutsChosenFolderInParentBoxAndCancelChangesNothing

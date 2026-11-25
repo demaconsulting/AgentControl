@@ -406,11 +406,170 @@ public sealed class MainWindowTests : IDisposable
 
         // Act
         DialogWindowTests.Click(window, "AddRepoButton");
+        DialogWindowTests.Click(window, "CloneRepoButton");
         DialogWindowTests.Click(window, "OpenSettingsButton");
 
         // Assert
         Assert.Null(window.DataContext);
+        Assert.Empty(window.OwnedWindows);
         window.Close();
+    });
+
+    /// <summary>
+    ///     Test that the Clone button opens the dialog owned by the main window, that Browse (answered by
+    ///     the picker seam) fills the parent folder, and that cloning a local bare repository (never the
+    ///     network) into a group shows the progress strip while git works, then adds the card into the
+    ///     group, saves it and leaves nothing open.
+    /// </summary>
+    [Fact]
+    public void MainWindow_CloneRepoButton_OpensDialogAndCloneAddsCardIntoChosenGroup() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a bare repository with a commit, a group "Work" with a repo in it, and a parent folder
+        using var fixture = Tests.AgentPackageManagement.GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(new Dictionary<string, string> { ["readme.txt"] = "hello" }, "Initial");
+        fixture.Git(fixture.WorkPath, "push", "-q", fixture.RemotePath, "main");
+        fixture.Git(fixture.RemotePath, "symbolic-ref", "HEAD", "refs/heads/main");
+        var parent = CreateTempDirectory();
+        var configDir = CreateTempDirectory();
+        var viewModel = new MainWindowViewModel(
+            new AppSettings { RecentRepos = [new RecentRepo { Path = CreateRepoDirectory(), GroupName = "Work" }] },
+            configDirectory: configDir);
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 700 };
+        window.CloneFolderPicker = () => Task.FromResult<string?>(parent);
+        window.Show();
+
+        try
+        {
+            // Act: open the dialog from the app bar
+            DialogWindowTests.Click(window, "CloneRepoButton");
+            var dialog = Assert.Single(window.OwnedWindows.OfType<CloneRepositoryWindow>());
+            var dialogViewModel = Assert.IsType<CloneRepositoryViewModel>(dialog.DataContext);
+
+            // Assert: the group choices of the list
+            Assert.Equal(["Ungrouped", "Work"], dialogViewModel.Groups.Select(choice => choice.DisplayName));
+
+            // Act: fill it in (the parent folder through Browse) and clone into "Work"
+            dialog.FindControl<TextBox>("CloneUrlTextBox")!.Text = fixture.RemotePath;
+            DialogWindowTests.Click(dialog, "CloneBrowseButton");
+            HeadlessTestApp.RunJobsUntil(() => dialogViewModel.ParentFolder == parent, "Browse did not fill the parent folder.");
+            dialog.FindControl<TextBox>("CloneFolderNameTextBox")!.Text = "cloned";
+            dialog.FindControl<ComboBox>("CloneGroupComboBox")!.SelectedIndex = 1;
+            Dispatcher.UIThread.RunJobs();
+            DialogWindowTests.Click(dialog, "CloneAcceptButton");
+            await WaitUntilAsync(() => viewModel.RepoCards.Count == 2 && !viewModel.GlobalProgress.IsActive);
+
+            // Assert: cloned, added into the group, saved, nothing left open
+            var destination = Path.Combine(parent, "cloned");
+            Assert.True(GitClient.IsRepositoryRoot(destination));
+            Assert.Equal("hello", await File.ReadAllTextAsync(Path.Combine(destination, "readme.txt"), TestContext.Current.CancellationToken));
+            var card = viewModel.RepoCards.Single(candidate => candidate.RepoPath == destination);
+            Assert.Equal("Work", card.GroupName);
+            await viewModel.FlushSettingsAsync();
+            Assert.Contains(SettingsStore.Load(configDir).RecentRepos, repo => repo.Path == destination && repo.GroupName == "Work");
+            Assert.Empty(window.OwnedWindows);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that a clone git cannot make (the address is no repository) ends with a message box that
+    ///     says why, and adds no card.
+    /// </summary>
+    [Fact]
+    public void MainWindow_CloneRepoButton_CloneFails_ShowsGitsReasonInMessageBox() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange
+        var parent = CreateTempDirectory();
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory());
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 700 };
+        window.Show();
+
+        try
+        {
+            // Act: clone from a folder that is not a repository
+            DialogWindowTests.Click(window, "CloneRepoButton");
+            var dialog = Assert.Single(window.OwnedWindows.OfType<CloneRepositoryWindow>());
+            var dialogViewModel = Assert.IsType<CloneRepositoryViewModel>(dialog.DataContext);
+            dialogViewModel.ParentFolder = parent;
+            dialogViewModel.RepositoryUrl = Path.Combine(parent, "no-such-repository.git");
+            Dispatcher.UIThread.RunJobs();
+            DialogWindowTests.Click(dialog, "CloneAcceptButton");
+            await WaitUntilAsync(() => window.OwnedWindows.OfType<MessageBoxWindow>().Any());
+
+            // Assert
+            var message = window.OwnedWindows.OfType<MessageBoxWindow>().Single();
+            var text = message.FindControl<TextBlock>("MessageText")!.Text;
+            Assert.StartsWith("Cloning failed: fatal:", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Cloning into", text, StringComparison.Ordinal);
+            Assert.Empty(viewModel.RepoCards);
+            message.Close();
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that while a clone runs the progress strip shows its Cancel button named after the clone,
+    ///     and that pressing it stops the clone, removes the partly cloned folder, adds no card and says
+    ///     nothing.
+    /// </summary>
+    [Fact]
+    public void MainWindow_GlobalProgressCancel_WhileCloning_StopsTheCloneAndAddsNothing() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a git whose clone creates the destination and then hangs
+        var stub = Tests.GitIntegration.GitStub.Create(
+            extraCommands:
+            [
+                new Tests.GitIntegration.GitStub.Command(
+                    "clone", CreatesDestination: true, SleepSeconds: Tests.GitIntegration.GitStub.HangSeconds)
+            ]);
+        _tempPaths.Add(stub.Path);
+        _tempPaths.Add(stub.FinishedMarkerPath);
+        var parent = CreateTempDirectory();
+        var viewModel = new MainWindowViewModel(
+            new AppSettings { GitExecutablePath = stub.Path }, configDirectory: CreateTempDirectory());
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 700 };
+        window.Show();
+
+        try
+        {
+            // Act: start a clone from the dialog and wait until git has begun writing
+            DialogWindowTests.Click(window, "CloneRepoButton");
+            var dialog = Assert.Single(window.OwnedWindows.OfType<CloneRepositoryWindow>());
+            var dialogViewModel = Assert.IsType<CloneRepositoryViewModel>(dialog.DataContext);
+            dialogViewModel.ParentFolder = parent;
+            dialogViewModel.RepositoryUrl = "https://example.com/team/slow.git";
+            Dispatcher.UIThread.RunJobs();
+            DialogWindowTests.Click(dialog, "CloneAcceptButton");
+            var destination = Path.Combine(parent, "slow");
+            await WaitUntilAsync(() => Directory.Exists(destination));
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the strip shows the clone with a Cancel button named for it
+            Assert.True(window.FindControl<Border>("GlobalProgressStrip")!.IsVisible);
+            var cancel = window.FindControl<Button>("GlobalProgressCancelButton")!;
+            Assert.True(cancel.IsEffectivelyVisible);
+            Assert.Equal("Cancel cloning repository", AutomationProperties.GetName(cancel));
+            Assert.Equal("Cloning slow...", viewModel.GlobalProgress.Text);
+
+            // Act: Cancel
+            DialogWindowTests.Click(window, "GlobalProgressCancelButton");
+            await WaitUntilAsync(() => !viewModel.GlobalProgress.IsActive);
+
+            // Assert: stopped, cleaned up, nothing added, nothing said
+            Assert.False(Directory.Exists(destination));
+            Assert.Empty(viewModel.RepoCards);
+            Assert.Empty(window.OwnedWindows);
+        }
+        finally
+        {
+            window.Close();
+        }
     });
 
     /// <summary>

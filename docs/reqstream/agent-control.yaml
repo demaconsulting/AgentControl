@@ -731,6 +731,10 @@ sections:
           enough to need progress and a way out.
         children:
           - AgentControl-GitIntegration-CloneRepository
+          - AgentControl-LauncherUI-CloneButton
+          - AgentControl-LauncherUI-CloneRepositoryDialog
+          - AgentControl-LauncherUI-CloneRepository
+          - AgentControl-LauncherUI-CloneProgressCancel
 
       - id: AgentControl-System-CloneSafety
         title: >-

@@ -144,6 +144,37 @@ internal readonly record struct AddReposProgress(int Completed, int Total);
 internal sealed record AddReposBatchResult(IReadOnlyList<AddRepoOutcome> Outcomes, bool Canceled);
 
 /// <summary>
+///     How a clone ended (see <see cref="MainWindowViewModel.CloneRepositoryAsync"/>).
+/// </summary>
+internal enum CloneRepositoryOutcome
+{
+    /// <summary>The repository was cloned and its card was added.</summary>
+    Added,
+
+    /// <summary>The repository was cloned but its card was not added (the add was canceled, refused
+    ///     or could not be saved); the folder is still on disk.</summary>
+    ClonedNotAdded,
+
+    /// <summary>Git could not clone the repository; nothing was added.</summary>
+    Failed,
+
+    /// <summary>The clone was canceled (or the window closed); nothing was added and the partial
+    ///     folder was removed.</summary>
+    Canceled,
+
+    /// <summary>The clone was not started because another clone into the same folder is running.</summary>
+    Refused
+}
+
+/// <summary>
+///     What became of a clone and what the user needs to be told about it.
+/// </summary>
+/// <param name="Outcome">How the clone ended.</param>
+/// <param name="Notice">The message for the user, or <see langword="null"/> when there is nothing to
+///     tell (the repository was cloned and added, or the user canceled).</param>
+internal sealed record CloneRepositoryResult(CloneRepositoryOutcome Outcome, string? Notice);
+
+/// <summary>
 ///     Carries the question the view asks when the settings could not be saved while repos were being
 ///     added - try saving again, or discard the add - and carries the answer back.
 /// </summary>
@@ -1233,6 +1264,197 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     message is shown afterwards.
     /// </summary>
     public void CancelAddRepos() => _addSession?.Cancel();
+
+    /// <summary>
+    ///     Gets the groups a cloned repository can be put in, for the "Clone repository" dialog:
+    ///     Ungrouped first (the default), then every group in the order the list shows them, each named
+    ///     by its path through the tree.
+    /// </summary>
+    /// <remarks>
+    ///     Only groups that exist are offered; the built-in Favorites is not a place a repo is put at
+    ///     add time. Reads the in-memory settings only. Must be called on the UI thread.
+    /// </remarks>
+    /// <returns>The choices.</returns>
+    public IReadOnlyList<CloneGroupChoice> GetGroupChoices()
+    {
+        var tree = BuildGroupHierarchy();
+        return
+        [
+            CloneGroupChoice.Ungrouped,
+            .. tree.GetTreeOrder().Select(node => new CloneGroupChoice(
+                node.Name, string.Join(" > ", tree.GetAncestors(node.Name).Reverse().Append(node.Name))))
+        ];
+    }
+
+    /// <summary>
+    ///     Clones a repository in the background and adds the new folder's card, showing progress with
+    ///     Cancel in <see cref="GlobalProgress"/>; the clone the "Clone repository" dialog asks for.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///     The clone runs through the <see cref="IBackgroundWorkRunner"/>, off the UI thread, while the
+    ///     strip shows an indeterminate "Cloning {folder}..." with a Cancel that stops git and removes the
+    ///     partial folder (see <see cref="GitClient.Clone"/>); the rest of the window stays usable. When
+    ///     git succeeds the folder is added through <see cref="EnqueueAddReposAsync"/>, the path every
+    ///     add takes, so the same checks, group placement and expansion and the same question when the
+    ///     settings cannot be saved apply. A cloned folder whose add is canceled, refused or not saved
+    ///     stays on disk, and the notice says so.
+    ///     </para>
+    ///     <para>
+    ///     Only one clone runs into a folder: a second request for the same destination is refused
+    ///     without starting git, which also keeps the removal after a cancel from touching a folder
+    ///     another clone is filling. A failure (git's reason, redacted of credentials; the folder was
+    ///     refused after all; git cannot be started; the time limit) is reported in the result and never
+    ///     thrown. Disposing the view model cancels the clones that run. Must be called on the UI
+    ///     thread.
+    ///     </para>
+    /// </remarks>
+    /// <param name="request">What to clone and where, as the dialog collected it.</param>
+    /// <returns>How the clone ended and what to tell the user, if anything.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="request"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when the request's group is given but is not a valid
+    ///     group name; nothing was started.</exception>
+    public async Task<CloneRepositoryResult> CloneRepositoryAsync(CloneRepositoryRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.GroupName is not null)
+        {
+            ResolveAddTargetGroup(request.GroupName);
+        }
+
+        // A closed window clones nothing
+        if (_disposed)
+        {
+            return new CloneRepositoryResult(CloneRepositoryOutcome.Canceled, null);
+        }
+
+        var destination = NormalizeRepoPath(request.DestinationPath);
+        if (!_activeCloneDestinations.Add(destination))
+        {
+            return new CloneRepositoryResult(
+                CloneRepositoryOutcome.Refused, $"A repository is already being cloned into '{destination}'.");
+        }
+
+        var clone = await RunCloneAsync(request, destination);
+        if (clone.Outcome != CloneRepositoryOutcome.Added)
+        {
+            return clone;
+        }
+
+        // The clone is on disk: add it the way every add is made
+        var add = await EnqueueAddReposAsync([destination], request.GroupName);
+        if (add.Canceled)
+        {
+            return new CloneRepositoryResult(
+                CloneRepositoryOutcome.ClonedNotAdded, $"'{destination}' was cloned but was not added to the list.");
+        }
+
+        var notice = DescribeAddOutcomes(add.Outcomes, request.GroupName);
+        return notice is null
+            ? new CloneRepositoryResult(CloneRepositoryOutcome.Added, null)
+            : new CloneRepositoryResult(CloneRepositoryOutcome.ClonedNotAdded, $"{notice} The cloned folder is still on disk.");
+    }
+
+    /// <summary>
+    ///     Runs git's clone off the UI thread under a progress operation, and releases the destination
+    ///     when it has ended however it ended.
+    /// </summary>
+    /// <param name="request">What to clone.</param>
+    /// <param name="destination">The normalized destination, already reserved in
+    ///     <see cref="_activeCloneDestinations"/>.</param>
+    /// <returns><see cref="CloneRepositoryOutcome.Added"/> when git succeeded (the caller adds the
+    ///     card), otherwise how it ended.</returns>
+    private async Task<CloneRepositoryResult> RunCloneAsync(CloneRepositoryRequest request, string destination)
+    {
+        var cancellation = new CancellationTokenSource();
+        _cloneCancellations.Add(cancellation);
+        var operation = GlobalProgress.Begin(
+            $"Cloning {GetFolderDisplayName(destination)}...",
+            () => cancellation.Cancel(),
+            CloneCancelDescription);
+        try
+        {
+            var gitPath = RepoCardViewModel.ResolveGitExecutablePath(_settings, _startupOptions);
+            var timeouts = _gitTimeouts;
+            var result = await _backgroundWork.RunAsync(
+                () => new GitClient(gitPath, timeouts: timeouts).Clone(request.Url, destination, cancellation.Token),
+                cancellation.Token);
+            if (_disposed)
+            {
+                return new CloneRepositoryResult(CloneRepositoryOutcome.Canceled, null);
+            }
+
+            return result.Succeeded
+                ? new CloneRepositoryResult(CloneRepositoryOutcome.Added, null)
+                : new CloneRepositoryResult(CloneRepositoryOutcome.Failed, $"Cloning failed: {DescribeCloneFailure(result)}");
+        }
+        catch (OperationCanceledException)
+        {
+            // The user pressed Cancel (or the window closed): git was stopped and what it had written is
+            // removed; nothing is said about a deliberate cancel
+            return new CloneRepositoryResult(CloneRepositoryOutcome.Canceled, null);
+        }
+        catch (Exception ex)
+        {
+            // Never thrown on: the caller is an async void event handler. The message is redacted
+            // because git may echo the address, which may carry credentials
+            Logger.LogWarning(ex, "Cloning into {Destination} failed", destination);
+            return new CloneRepositoryResult(
+                CloneRepositoryOutcome.Failed, $"Cloning failed: {SecretRedactor.SafeMessage(ex)}");
+        }
+        finally
+        {
+            operation.Dispose();
+            _cloneCancellations.Remove(cancellation);
+            cancellation.Dispose();
+            _activeCloneDestinations.Remove(destination);
+        }
+    }
+
+    /// <summary>
+    ///     Words why git's clone did not succeed: git's own message, with credentials removed.
+    /// </summary>
+    /// <param name="result">The failed command's result.</param>
+    /// <returns>The message.</returns>
+    private static string DescribeCloneFailure(GitCommandResult result)
+    {
+        var text = (string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError).Trim();
+
+        // Git opens its message with the progress line "Cloning into '<folder>'...", which says nothing
+        // about why it failed; the reason is what follows
+        var reason = string.Join(
+            '\n',
+            text.Split('\n').Select(line => line.TrimEnd()).Where(line => !line.StartsWith("Cloning into ", StringComparison.Ordinal)))
+            .Trim();
+        if (reason.Length > 0)
+        {
+            text = reason;
+        }
+
+        return text.Length == 0
+            ? $"git exited with code {result.ExitCode}."
+            : SecretRedactor.Redact(text);
+    }
+
+    /// <summary>
+    ///     How the strip's Cancel button is named while a clone is shown.
+    /// </summary>
+    private static readonly GlobalProgressCancelDescription CloneCancelDescription = new(
+        "Cancel cloning repository",
+        "Stop cloning; the partly cloned folder is removed");
+
+    /// <summary>
+    ///     The normalized destinations of the clones that run, so a second clone into one of them is
+    ///     refused (UI thread only).
+    /// </summary>
+    private readonly HashSet<string> _activeCloneDestinations = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    ///     The cancellations of the clones that run, which <see cref="Dispose"/> signals (UI thread
+    ///     only).
+    /// </summary>
+    private readonly List<CancellationTokenSource> _cloneCancellations = [];
 
     /// <summary>
     ///     Runs one queued add once the adds before it have ended, and ends the shared progress
@@ -2815,6 +3037,12 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         // Adds that have not saved yet stop: nothing more is added after the window closed
         CancelAddRepos();
+
+        // Clones that run stop too: git is killed and the partial folders are removed
+        foreach (var running in _cloneCancellations.ToArray())
+        {
+            running.Cancel();
+        }
 
         // The launch-time check must not keep waiting for a slow source (or publish to cards) after
         // the window closed

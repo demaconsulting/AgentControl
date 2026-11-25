@@ -2954,6 +2954,64 @@ internal sealed partial class MainWindow : Window
     internal Func<Task<IReadOnlyList<string>>>? RepoFolderPicker { get; set; }
 
     /// <summary>
+    ///     Opens the "Clone repository" dialog and, when the user confirms it, clones in the background.
+    /// </summary>
+    /// <param name="sender">The clicked "Clone" button.</param>
+    /// <param name="e">Routed event arguments (unused).</param>
+    private async void CloneRepoButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var notice = await CloneRepositoryAsync(viewModel);
+
+        // A clone can end after the window was closed (it is then canceled, and nobody is left to tell)
+        if (IsVisible)
+        {
+            await ShowNoticeAsync(notice);
+        }
+    }
+
+    /// <summary>
+    ///     Gets or sets how the user picks the parent folder of a clone when the dialog's Browse button
+    ///     is pressed; <see langword="null"/> uses the native folder-browse dialog. The function completes
+    ///     with the folder's path, or <see langword="null"/> for a cancel. A seam so tests can answer
+    ///     without a real dialog, like <see cref="RepoFolderPicker"/>.
+    /// </summary>
+    internal Func<Task<string?>>? CloneFolderPicker { get; set; }
+
+    /// <summary>
+    ///     The clone flow of the top-bar "Clone" button: asks for the repository, the folder and the
+    ///     group in a dialog, clones through the view model in the background (progress and Cancel in
+    ///     the strip under the app bar, then the card is added) and says what the user needs to know.
+    /// </summary>
+    /// <remarks>
+    ///     A canceled dialog changes nothing and says nothing, and neither does a clone the user cancels
+    ///     in the strip. The dialog starts in the user's profile folder; the destination is checked off
+    ///     the UI thread when Clone is pressed (see <see cref="CloneRepositoryViewModel"/>).
+    /// </remarks>
+    /// <param name="viewModel">The main view model that owns the repo list.</param>
+    /// <returns>A message for the user (git's reason for a failed clone, or that the cloned folder was
+    ///     not added), or <see langword="null"/> when the repository was cloned and added or the dialog or
+    ///     the clone was canceled.</returns>
+    internal async Task<string?> CloneRepositoryAsync(MainWindowViewModel viewModel)
+    {
+        var dialog = new CloneRepositoryViewModel(
+            viewModel.GetGroupChoices(),
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        var window = new CloneRepositoryWindow(dialog) { FolderPicker = CloneFolderPicker };
+        var request = await window.ShowDialog<CloneRepositoryRequest?>(this);
+        if (request is null)
+        {
+            return null;
+        }
+
+        return (await viewModel.CloneRepositoryAsync(request)).Notice;
+    }
+
+    /// <summary>
     ///     The add-repository flow shared by the top-bar "Add Repo" button and a group header's
     ///     "Add repository..." menu item: asks the user for one or more folders, adds them through the
     ///     view model, and says what the user needs to know about the outcome.

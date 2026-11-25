@@ -1,0 +1,110 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:DemaConsulting.AgentControl.LauncherUI"
+        mc:Ignorable="d"
+        d:DesignWidth="520" d:DesignHeight="420"
+        x:Class="DemaConsulting.AgentControl.LauncherUI.CloneRepositoryWindow"
+        x:DataType="vm:CloneRepositoryViewModel"
+        Name="CloneRepositoryRoot"
+        Title="{Binding Title}"
+        Width="520" SizeToContent="Height"
+        MinWidth="420"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+    <!-- Clone a repository into a new folder: the address, the folder to put it in (a parent folder
+         and a name that follows the address until edited) and the group of the new card. The rules
+         that need no disk show as text while typing; the destination is checked on disk, off the UI
+         thread, when Clone is pressed. Enter accepts and Escape cancels. The clone itself runs in the
+         main window, with progress and Cancel in the strip under the app bar. -->
+    <StackPanel Margin="16" Spacing="8">
+        <TextBlock Text="Repository address" />
+        <TextBox Name="CloneUrlTextBox"
+                  AutomationProperties.AutomationId="CloneUrlTextBox"
+                  AutomationProperties.Name="Repository address"
+                  ToolTip.Tip="The repository to clone: a URL such as https://github.com/owner/repo.git, an SSH address or a local path"
+                  PlaceholderText="https://github.com/owner/repo.git"
+                  Text="{Binding RepositoryUrl, Mode=TwoWay}">
+            <TextBox.KeyBindings>
+                <KeyBinding Gesture="Enter" Command="{Binding AcceptCommand}" />
+            </TextBox.KeyBindings>
+        </TextBox>
+
+        <TextBlock Text="Parent folder" Margin="0,4,0,0" />
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+            <TextBox Grid.Column="0"
+                      Name="CloneParentTextBox"
+                      AutomationProperties.AutomationId="CloneParentTextBox"
+                      AutomationProperties.Name="Parent folder"
+                      ToolTip.Tip="The existing folder the new repository folder is created in"
+                      PlaceholderText="C:\Source"
+                      Text="{Binding ParentFolder, Mode=TwoWay}">
+                <TextBox.KeyBindings>
+                    <KeyBinding Gesture="Enter" Command="{Binding AcceptCommand}" />
+                </TextBox.KeyBindings>
+            </TextBox>
+            <Button Grid.Column="1"
+                     Name="CloneBrowseButton"
+                     AutomationProperties.AutomationId="CloneBrowseButton"
+                     ToolTip.Tip="Choose the parent folder"
+                     Content="Browse..."
+                     Click="CloneBrowseButton_Click" />
+        </Grid>
+
+        <TextBlock Text="Folder name" Margin="0,4,0,0" />
+        <TextBox Name="CloneFolderNameTextBox"
+                  AutomationProperties.AutomationId="CloneFolderNameTextBox"
+                  AutomationProperties.Name="Folder name"
+                  ToolTip.Tip="The name of the new folder; it follows the repository address until you change it"
+                  Text="{Binding FolderName, Mode=TwoWay}">
+            <TextBox.KeyBindings>
+                <KeyBinding Gesture="Enter" Command="{Binding AcceptCommand}" />
+            </TextBox.KeyBindings>
+        </TextBox>
+        <TextBlock Name="CloneDestinationText"
+                    AutomationProperties.AutomationId="CloneDestinationText"
+                    Text="{Binding DestinationPath, StringFormat='Clones into: {0}'}"
+                    FontSize="12" Opacity="0.8"
+                    TextWrapping="Wrap" />
+
+        <TextBlock Text="Group" Margin="0,4,0,0" />
+        <ComboBox Name="CloneGroupComboBox"
+                   AutomationProperties.AutomationId="CloneGroupComboBox"
+                   AutomationProperties.Name="Group"
+                   ToolTip.Tip="The group the new repository is listed in"
+                   HorizontalAlignment="Stretch"
+                   ItemsSource="{Binding Groups}"
+                   SelectedItem="{Binding SelectedGroup, Mode=TwoWay}" />
+
+        <TextBlock Name="CloneErrorText"
+                    AutomationProperties.AutomationId="CloneErrorText"
+                    IsVisible="{Binding HasError}"
+                    Text="{Binding ErrorText}"
+                    Foreground="{DynamicResource ErrorForeground}"
+                    TextWrapping="Wrap" />
+
+        <!-- Indeterminate progress while the destination is checked on disk -->
+        <ProgressBar Name="CloneCheckProgress"
+                      AutomationProperties.AutomationId="CloneCheckProgress"
+                      AutomationProperties.Name="Checking the folder"
+                      IsIndeterminate="True"
+                      Height="4"
+                      IsVisible="{Binding IsChecking}" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
+            <Button Name="CloneCancelButton"
+                     AutomationProperties.AutomationId="CloneCancelButton"
+                     ToolTip.Tip="Close without cloning"
+                     Content="Cancel"
+                     Command="{Binding CancelCommand}" />
+            <Button Name="CloneAcceptButton"
+                     AutomationProperties.AutomationId="CloneAcceptButton"
+                     ToolTip.Tip="Clone the repository (available once the address and folder are filled in)"
+                     ToolTip.ShowOnDisabled="True"
+                     Classes="accent"
+                     Content="Clone"
+                     Command="{Binding AcceptCommand}" />
+        </StackPanel>
+    </StackPanel>
+</Window>

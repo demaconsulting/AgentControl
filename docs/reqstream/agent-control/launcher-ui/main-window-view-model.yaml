@@ -1335,6 +1335,84 @@ sections:
           - MainWindowViewModel_RecheckAfterSettingsClosed_CardCheckInFlight_OldFailureIsNotShown
           - MainWindowViewModel_RecheckAfterSettingsClosed_SignedInDuringConnectionTest_UsesTheSignInWithoutAsking
 
+      - id: AgentControl-MainWindowViewModel-GroupChoices
+        title: >-
+          The MainWindowViewModel class shall offer, as the places a cloned repository can be put,
+          Ungrouped first and then every existing group in the order the list shows them, each named
+          by its path through the group tree.
+        justification: |
+          The clone dialog lets the user file the new card into one of the groups they already have;
+          groups of the same name in different parents must be told apart, and Ungrouped must be the
+          safe default.
+        tests:
+          - MainWindowViewModel_GetGroupChoices_ListsGroupsInTreeOrder
+          - MainWindowViewModel_GetGroupChoices_NoGroups_UngroupedOnly
+
+      - id: AgentControl-MainWindowViewModel-CloneInBackground
+        title: >-
+          The MainWindowViewModel class shall run a clone through the background work runner rather
+          than on the calling (UI) thread, so the window stays usable while git clones.
+        justification: |
+          A clone downloads a whole repository and can take minutes; running it on the UI thread would
+          freeze the window for that time.
+        tests:
+          - MainWindowViewModel_CloneRepositoryAsync_RunsGitOffTheUiThread
+
+      - id: AgentControl-MainWindowViewModel-CloneProgressAndCancel
+        title: >-
+          The MainWindowViewModel class shall show a clone in the global progress strip as
+          "Cloning {folder}..." with a Cancel button named after the clone, remove the progress at the
+          end however the clone ended, and, when the clone is canceled (or the window is closed), stop
+          git, add nothing and say nothing.
+        justification: |
+          A clone that takes long or was started by mistake must be stoppable, and a deliberate cancel
+          is not an error; the strip is the one place the window shows its long operations.
+        tests:
+          - MainWindowViewModel_CloneRepositoryAsync_ShowsProgressWithCancelAndRemovesItAtTheEnd
+          - MainWindowViewModel_CloneRepositoryAsync_Cancel_RemovesPartialFolderAndAddsNothing
+          - MainWindowViewModel_CloneRepositoryAsync_Dispose_CancelsRunningClone
+
+      - id: AgentControl-MainWindowViewModel-CloneAddsCardThroughAddPath
+        title: >-
+          The MainWindowViewModel class shall, after git has cloned the repository, add the new folder
+          through the same path every add takes - the same checks, the chosen group (created when it
+          does not exist), saving the settings and the question when the save fails - and, when the
+          add is not made, say so and that the cloned folder is still on disk.
+        justification: |
+          A cloned repository is a repository like any other the user adds; sharing the add path keeps
+          one set of rules, and a folder that was cloned but not listed must not be silently lost.
+        tests:
+          - MainWindowViewModel_CloneRepositoryAsync_Success_AddsCardThroughAddPathIntoGroup
+          - MainWindowViewModel_CloneRepositoryAsync_SaveFails_KeepsFolderAndSaysSo
+          - MainWindowViewModel_CloneRepositoryAsync_RealLocalBareRepository_ClonesAndAddsCard
+
+      - id: AgentControl-MainWindowViewModel-CloneFailureReported
+        title: >-
+          The MainWindowViewModel class shall report a clone that git cannot make, that cannot be
+          started or whose destination is no longer usable as a notice that starts "Cloning failed:"
+          and gives the reason in git's own words with credentials removed, add nothing and throw
+          nothing, and refuse a request with an invalid group name before anything starts.
+        justification: |
+          A wrong address, a missing sign-in or a full disk are everyday outcomes; the user needs to
+          read why, and the address pasted into the dialog may carry a password that must not be shown.
+        tests:
+          - MainWindowViewModel_CloneRepositoryAsync_Failure_ReturnsGitMessageAndAddsNothing
+          - MainWindowViewModel_CloneRepositoryAsync_FailureWithoutMessage_NamesTheExitCode
+          - MainWindowViewModel_CloneRepositoryAsync_DestinationNotEmptyAnyMore_FailsWithReasonAndTouchesNothing
+          - MainWindowViewModel_CloneRepositoryAsync_RealGitNotARepository_FailsWithGitsMessage
+          - MainWindowViewModel_CloneRepositoryAsync_InvalidGroup_ThrowsBeforeStarting
+
+      - id: AgentControl-MainWindowViewModel-CloneOneDestinationAtATime
+        title: >-
+          The MainWindowViewModel class shall refuse a clone into a destination that another clone is
+          already filling (ignoring letter case), without starting git, and shall allow the destination
+          again once that clone has ended.
+        justification: |
+          Two clones into one folder would corrupt each other, and the removal after a canceled clone
+          must never delete a folder another clone is still writing.
+        tests:
+          - MainWindowViewModel_CloneRepositoryAsync_SameDestinationTwice_SecondRefused
+
       - id: AgentControl-MainWindowViewModel-SharedRepoReads
         title: >-
           The MainWindowViewModel class shall read the folders of an add and refresh the cards after

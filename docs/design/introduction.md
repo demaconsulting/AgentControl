@@ -65,18 +65,20 @@ of the user's repo groups, `RepoGroupHierarchy` (in `Settings`) the unit holding
 repaired), and `RepoImageLocator`, `RepoGroupHeaderViewModel`, `GroupNameViewModel` and `DialogBehavior` (in
 `LauncherUI`) belong to the repo-picture, repo-group and dialog features; `SwitchBranchViewModel` (in `LauncherUI`, with
 its `SwitchBranchWindow` view, a supporting type) is the view model of the dialog in which the user chooses the branch a
-repo card is switched to; `GlobalProgressViewModel` (in `LauncherUI`) backs the progress strip under the app bar that
-shows bulk work (adding repositories, refreshing the cards at start-up and after Settings are saved); `RepoRefreshQueue`
-(in `LauncherUI`) is the one queue every lazy read of a repo's state goes through, two at a time; `SettingsWriter` (in
-`Settings`) writes the settings in the background, so the window never waits for the settings file; `BlockingCallGuard`
-(in `Utilities`) lets the tests refuse a git or disk call made on the UI thread; `BackgroundPackageSourceProvider` is a
-documented supporting type of the `PackageSourceRegistry` unit (in `AgentPackageManagement`), not a unit: the registry
-wraps every built-in package source in it so that listing and acquiring a package, and hashing what was delivered, run
-on the thread pool; `PathEllipsisText`, `ColorPalettePanel` (the shared content of the card and group color pop-ups),
-`ThemePreferenceDisplayNameConverter`, `GroupIndentConverter` (turns a nesting depth into the indentation of a header or
-card), `RepoListBox` (the repo list control that keeps a multi-selection while a selected card is pressed to start a
-drag) and `BackgroundWorkRunner` (the seam that runs file-system and git reads off the UI thread) are documented
-supporting types of `LauncherUI`, not units.
+repo card is switched to; `CloneRepositoryViewModel` (in `LauncherUI`, with its `CloneRepositoryWindow` view, a
+supporting type) is the view model of the dialog in which the user enters the address, folder and group of a repository
+to clone; `GlobalProgressViewModel` (in `LauncherUI`) backs the progress strip under the app bar that shows bulk work
+(adding repositories, cloning a repository, refreshing the cards at start-up and after Settings are saved);
+`RepoRefreshQueue` (in `LauncherUI`) is the one queue every lazy read of a repo's state goes through, two at a time;
+`SettingsWriter` (in `Settings`) writes the settings in the background, so the window never waits for the settings file;
+`BlockingCallGuard` (in `Utilities`) lets the tests refuse a git or disk call made on the UI thread;
+`BackgroundPackageSourceProvider` is a documented supporting type of the `PackageSourceRegistry` unit (in
+`AgentPackageManagement`), not a unit: the registry wraps every built-in package source in it so that listing and
+acquiring a package, and hashing what was delivered, run on the thread pool; `PathEllipsisText`, `ColorPalettePanel`
+(the shared content of the card and group color pop-ups), `ThemePreferenceDisplayNameConverter`, `GroupIndentConverter`
+(turns a nesting depth into the indentation of a header or card), `RepoListBox` (the repo list control that keeps a
+multi-selection while a selected card is pressed to start a drag) and `BackgroundWorkRunner` (the seam that runs
+file-system and git reads off the UI thread) are documented supporting types of `LauncherUI`, not units.
 
 ![Software Structure](SoftwareStructureView.svg)
 
@@ -101,7 +103,8 @@ Settings, Logging, Startup and Utilities](architecture.svg)
       folders dropped from the file manager, checked in the background, with progress and Cancel in the global progress
       strip under the app bar, `GlobalProgressViewModel`, and a Retry/Discard question when the add cannot be saved),
       the shared repo refresh queue (`RepoRefreshQueue`), the background-work seam (`BackgroundWorkRunner`), the branch
-      dialog of a card (`SwitchBranchViewModel`, `SwitchBranchWindow`) and the
+      dialog of a card (`SwitchBranchViewModel`, `SwitchBranchWindow`), the clone dialog of the app bar
+      (`CloneRepositoryViewModel`, `CloneRepositoryWindow`) and the
       About window with its banner
     - **AgentPackageManagement/** - package source model, source providers (zip folder, NuGet
       folder and server, Git repository) and registry (which wraps each built-in provider in

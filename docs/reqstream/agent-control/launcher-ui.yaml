@@ -264,8 +264,8 @@ sections:
         title: >-
           The LauncherUI subsystem shall show the main window's controls in one compact app bar,
           below the window's normal title bar, holding the application logo (with an accessible
-          name and a tooltip), the filter box, then the Add repository, Settings and About
-          buttons, in that keyboard focus order.
+          name and a tooltip), the filter box, then the Add repository, Clone repository, Settings
+          and About buttons, in that keyboard focus order.
         justification: |
           A branded header plus a separate toolbar used two bands of vertical space before the
           first repo; one bar keeps the name in the title bar and the About box, gives the repo
@@ -1636,6 +1636,82 @@ sections:
           - SwitchBranchWindow_EscapeAndCancel_ReturnNull
           - SwitchBranchWindow_ClosedWhileLoading_ReturnsNullAndStopsTheRead
           - SwitchBranchWindow_ReadFails_ShowsErrorAndDisablesSwitch
+
+      - id: AgentControl-LauncherUI-CloneButton
+        title: >-
+          The LauncherUI subsystem shall offer a Clone repository button in the app bar, after the Add
+          repository button, with an accessible name and a tooltip, that opens the Clone repository
+          dialog as a modal dialog owned by the main window, and shall do nothing when no view model
+          is bound.
+        justification: |
+          Cloning is the other way, besides adding a folder, to get a repository into the list; the
+          button belongs next to Add so that both ways to bring a repository in are found together.
+        tests:
+          - MainWindow_AppBar_LogoFilterAndButtonsInOrderAndNothingClipsAtMinimumWidth
+          - MainWindow_CloneRepoButton_OpensDialogAndCloneAddsCardIntoChosenGroup
+          - MainWindow_NoViewModel_ButtonHandlersAreNoOps
+
+      - id: AgentControl-LauncherUI-CloneRepositoryDialog
+        title: >-
+          The LauncherUI subsystem shall show a modal dialog that asks for the repository address, the
+          parent folder (typed or chosen with Browse), the folder name (following the address until
+          edited) and the group (Ungrouped by default), shows what is wrong with the input as text and
+          keeps Clone disabled until it is usable, checks the destination folder without blocking the
+          dialog, and closes without a request on Cancel or Escape.
+        justification: |
+          Cloning needs more than one answer; a dialog that validates as the user types, shows where
+          the clone will go and refuses an address git would read as an option keeps a failed or unsafe
+          clone from ever starting.
+        children:
+          - AgentControl-CloneRepositoryViewModel-UrlRequired
+          - AgentControl-CloneRepositoryViewModel-UrlOptionRefused
+          - AgentControl-CloneRepositoryViewModel-FolderNameFromUrl
+          - AgentControl-CloneRepositoryViewModel-FolderNameRules
+          - AgentControl-CloneRepositoryViewModel-DestinationCheckedInBackground
+          - AgentControl-CloneRepositoryViewModel-GroupChoiceDefaultsUngrouped
+          - AgentControl-CloneRepositoryViewModel-CompletesWithRequest
+        tests:
+          - CloneRepositoryWindow_Opened_FocusesAddressAndTypingAnAddressFillsFolderNameAndEnablesClone
+          - CloneRepositoryWindow_UrlLooksLikeAnOption_ShowsErrorAndDisablesClone
+          - CloneRepositoryWindow_BrowseClicked_PutsChosenFolderInParentBoxAndCancelChangesNothing
+          - CloneRepositoryWindow_CloneClicked_ReturnsTheRequest
+          - CloneRepositoryWindow_EnterInAddressBox_ClonesAndExistingFolderShowsReason
+          - CloneRepositoryWindow_EscapeAndCancel_ReturnNull
+
+      - id: AgentControl-LauncherUI-CloneRepository
+        title: >-
+          The LauncherUI subsystem shall, when the user confirms the Clone repository dialog, clone the
+          repository in the background without blocking the window, one clone per destination, add the
+          cloned folder to the list in the chosen group through the same path every add takes, and, when
+          the clone fails, show git's reason (with credentials removed) in a message and add nothing.
+        justification: |
+          A developer who has no copy of a repository yet should be able to get one, and the tool's
+          help with it, in one step; a failure must be explained, and a half-made clone must not leave
+          a card behind.
+        children:
+          - AgentControl-MainWindowViewModel-GroupChoices
+          - AgentControl-MainWindowViewModel-CloneInBackground
+          - AgentControl-MainWindowViewModel-CloneAddsCardThroughAddPath
+          - AgentControl-MainWindowViewModel-CloneFailureReported
+          - AgentControl-MainWindowViewModel-CloneOneDestinationAtATime
+        tests:
+          - MainWindow_CloneRepoButton_OpensDialogAndCloneAddsCardIntoChosenGroup
+          - MainWindow_CloneRepoButton_CloneFails_ShowsGitsReasonInMessageBox
+
+      - id: AgentControl-LauncherUI-CloneProgressCancel
+        title: >-
+          The LauncherUI subsystem shall show a clone in the progress strip with a Cancel button named
+          after the clone, that stops the clone and removes the partly cloned folder without a message
+          afterwards.
+        justification: |
+          A clone of a large repository can take long, and a clone started by mistake must be
+          stoppable; the strip is where the window shows its long operations, and its one Cancel
+          button must say which operation it stops.
+        children:
+          - AgentControl-MainWindowViewModel-CloneProgressAndCancel
+          - AgentControl-GlobalProgressViewModel-CancelDescribesOperation
+        tests:
+          - MainWindow_GlobalProgressCancel_WhileCloning_StopsTheCloneAndAddsNothing
 
       - id: AgentControl-LauncherUI-SelectPackage
         title: >-
