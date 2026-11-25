@@ -1028,7 +1028,8 @@ sections:
 
       - id: AgentControl-MainWindowViewModel-GroupContentsCounted
         title: >-
-          The MainWindowViewModel class shall tell what is in a group - the repos directly in it, the repos
+          The MainWindowViewModel class shall tell what is in a group - the repos directly in it and how
+          many of those are favorites, the repos
           in it and in the groups inside it (favorites included, and how many are favorites) and its
           subgroups, directly and in all, and the group's name as it is stored - so a confirmation can
           state what a delete affects.

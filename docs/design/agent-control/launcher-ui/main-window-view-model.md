@@ -871,7 +871,8 @@ by themselves (`-GroupHeaderRequests`); `MainWindow` shows the name prompt or a 
 (`AgentControl-MainWindowViewModel-GroupContentsCounted`).
 
 - *Returns*: a `GroupContents` with the group's name as stored (`Name`: its own spelling, whatever letter case was asked
-  for), the repos directly in the group, the groups directly inside it, the repos in the
+  for), the repos directly in the group, how many of those are favorites (a favorite keeps its group but is listed
+  under Favorites), the groups directly inside it, the repos in the
   whole subtree (favorites included) and how many of them are favorites, and the groups in the subtree besides the group
   itself; all 0 for a group that does not exist (and the name as asked). `IsEmpty` is true when the group has neither a
   repo nor a group inside.

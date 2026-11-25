@@ -233,8 +233,16 @@ internal sealed record GroupDropTarget(string GroupName, bool InsertBefore, bool
 /// <param name="RepoCount">The repos in it and in every group inside it, favorites included.</param>
 /// <param name="SubgroupCount">The groups inside it, however deeply.</param>
 /// <param name="FavoriteCount">How many of the <paramref name="RepoCount"/> repos are favorites.</param>
+/// <param name="DirectFavoriteCount">How many of the <paramref name="DirectRepoCount"/> repos are
+///     favorites.</param>
 internal readonly record struct GroupContents(
-    string Name, int DirectRepoCount, int DirectSubgroupCount, int RepoCount, int SubgroupCount, int FavoriteCount)
+    string Name,
+    int DirectRepoCount,
+    int DirectSubgroupCount,
+    int RepoCount,
+    int SubgroupCount,
+    int FavoriteCount,
+    int DirectFavoriteCount)
 {
     /// <summary>
     ///     Gets a value indicating whether the group has no repo and no group inside it, so there is
@@ -4136,13 +4144,15 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var tree = BuildGroupHierarchy();
         var subtree = new HashSet<string>(tree.GetSubtree(groupName), RepoGroupName.Comparer);
         var inside = RepoCards.Where(card => card.HasGroup && subtree.Contains(card.GroupName!)).ToList();
+        var direct = inside.Where(card => RepoGroupName.Comparer.Equals(card.GroupName, groupName)).ToList();
         return new GroupContents(
             Name: tree.GetName(groupName) ?? groupName,
-            DirectRepoCount: inside.Count(card => RepoGroupName.Comparer.Equals(card.GroupName, groupName)),
+            DirectRepoCount: direct.Count,
             DirectSubgroupCount: tree.GetChildren(groupName).Count,
             RepoCount: inside.Count,
             SubgroupCount: Math.Max(subtree.Count - 1, 0),
-            FavoriteCount: inside.Count(card => card.IsFavorite));
+            FavoriteCount: inside.Count(card => card.IsFavorite),
+            DirectFavoriteCount: direct.Count(card => card.IsFavorite));
     }
 
     /// <summary>

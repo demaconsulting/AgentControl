@@ -436,7 +436,8 @@ cover `AgentControl-MainWindowViewModel-GroupRemoveWithContents`. Favorites, Ung
 are refused, with or without contents, and nothing changes
 (`MainWindowViewModel_RemoveGroupWithContents_BuiltInOrUnknown_IsRefused`, covering
 `AgentControl-MainWindowViewModel-GroupRemoveWithContentsRefusals`). What is in a group is counted for the
-confirmation - its repos directly and in all, how many are favorites, its subgroups directly and in all, and its name as
+confirmation - its repos directly and how many of those are favorites, its repos in all and how many of those are
+favorites, its subgroups directly and in all, and its name as
 stored whatever letter case was asked for (`MainWindowViewModel_GetGroupContents_CountsReposAndSubgroups`, covering
 `AgentControl-MainWindowViewModel-GroupContentsCounted`). The header's delete commands follow whether the group has
 contents and raise the requests of the view model with the group's name

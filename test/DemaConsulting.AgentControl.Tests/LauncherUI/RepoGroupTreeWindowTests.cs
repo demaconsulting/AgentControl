@@ -613,6 +613,48 @@ public sealed class RepoGroupTreeWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that the confirmation of "Delete group, keep contents" calls out the favorites among the
+    ///     group's own repos - they stay in Favorites while the others go to the parent group or become
+    ///     ungrouped - and says so for a group whose repos are all favorites, without a "0 favorite(s)" part
+    ///     when it has none.
+    /// </summary>
+    [Fact]
+    public void MainWindow_HeaderMenu_DeleteGroupKeepContents_ConfirmationCallsOutFavorites() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: Client (top level) holds c1 and c2, Project (inside Client) holds p1 and p2, Alpha
+        // (inside Client) holds a1; c2, p2 and a1 are favorites
+        var (window, viewModel, _) = CreateWindow(
+            new Dictionary<string, string> { ["Client"] = string.Empty, ["Project"] = "Client", ["Alpha"] = "Client" },
+            ("c1", "Client"), ("c2", "Client"), ("p1", "Project"), ("p2", "Project"), ("a1", "Alpha"));
+        foreach (var name in new[] { "c2", "p2", "a1" })
+        {
+            viewModel.RepoCards.Single(card => card.RepoName == name).IsFavorite = true;
+        }
+
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            // Act
+            var topLevel = AskKeepContents(window, "Client");
+            var nested = AskKeepContents(window, "Project");
+            var allFavorites = AskKeepContents(window, "Alpha");
+
+            // Assert
+            Assert.Contains("Its 2 repo(s) stay in AgentControl's list: 1 ungrouped, and 1 favorite(s) stay in Favorites.", topLevel);
+            Assert.Contains(
+                "Its 2 repo(s) stay in AgentControl's list: 1 in the group \"Client\", and 1 favorite(s) stay in Favorites.", nested);
+            Assert.Contains(
+                "Its 1 repo(s) stay in AgentControl's list, all of them favorites that stay in Favorites.", allFavorites);
+            Assert.DoesNotContain("0 ", topLevel + nested + allFavorites);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that the confirmation of "Delete group and its contents" leaves out the part about repos for a
     ///     group that has only subgroups and the part about subgroups for a group that has only repos.
     /// </summary>

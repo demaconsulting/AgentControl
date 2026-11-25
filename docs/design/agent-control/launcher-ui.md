@@ -877,7 +877,8 @@ existing group, with a note, when creating); the header menu deletes a group in 
 `ConfirmationWindow` (`AgentControl-System-GroupDelete`): **Delete group, keep contents** (`RemoveGroupMenuItem`, text
 and tooltip from the header's `RemoveGroupText` and `RemoveGroupTooltip`; plain **Delete group** for a group with
 nothing in it) says that nothing on disk or in any repository changes and where the group's repos and subgroups go (the
-group it is inside; at the top level the repos become ungrouped and the subgroups become top-level groups; the group is
+group it is inside; at the top level the repos become ungrouped and the subgroups become top-level groups, while a
+favorite among the repos is called out separately as staying in Favorites; the group is
 named as it is stored and the part about repos or subgroups is left out when there are none, `ConfirmAndRemoveGroup`,
 `AgentControl-LauncherUI-GroupDeleteKeepContents`), and **Delete group and its contents**
 (`RemoveGroupWithContentsMenuItem`, shown only while the header's `HasContents` is true) names the group and says how

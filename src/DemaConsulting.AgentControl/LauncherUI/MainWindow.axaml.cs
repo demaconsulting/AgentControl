@@ -2765,7 +2765,8 @@ internal sealed partial class MainWindow : Window
     /// <remarks>
     ///     The message names the group as it is stored, counts what is directly in the group and leaves
     ///     out the part of the sentence about repos or subgroups when the group has none, so it never
-    ///     reads "0 repo(s)".
+    ///     reads "0 repo(s)". Favorites among its own repos are called out separately: they stay in
+    ///     Favorites, while the other repos go to the group it was inside or become ungrouped.
     /// </remarks>
     /// <param name="viewModel">The main view model that owns the groups.</param>
     /// <param name="groupName">The group to delete.</param>
@@ -2784,7 +2785,21 @@ internal sealed partial class MainWindow : Window
             if (contents.DirectRepoCount > 0)
             {
                 var where = parent is null ? "ungrouped" : $"in the group \"{parent}\"";
-                sentences.Add($"Its {contents.DirectRepoCount} repo(s) stay in AgentControl's list, {where}.");
+                var favorites = contents.DirectFavoriteCount;
+                var others = contents.DirectRepoCount - favorites;
+                var repos = $"Its {contents.DirectRepoCount} repo(s) stay in AgentControl's list";
+                if (favorites == 0)
+                {
+                    sentences.Add($"{repos}, {where}.");
+                }
+                else if (others == 0)
+                {
+                    sentences.Add($"{repos}, all of them favorites that stay in Favorites.");
+                }
+                else
+                {
+                    sentences.Add($"{repos}: {others} {where}, and {favorites} favorite(s) stay in Favorites.");
+                }
             }
 
             if (contents.DirectSubgroupCount > 0)

@@ -1226,8 +1226,11 @@ name. The requirements are split by behavior; each is covered by the tests that 
   nothing on disk changes, and answering Yes moves the repos into the parent.
   `MainWindow_HeaderMenu_DeleteGroupKeepContents_ConfirmationOmitsZeroParts`: the question for a group with only a
   subgroup says where the subgroup goes and never "0 repo(s)", and the question for a group with only a repo never says
-  "0 subgroup(s)". `MainWindow_HeaderMenu_DeleteEmptyGroup_OffersOnlyPlainDelete`: a group with nothing in it offers
-  only **Delete group**, whose question says it has no repos or subgroups.
+  "0 subgroup(s)". `MainWindow_HeaderMenu_DeleteGroupKeepContents_ConfirmationCallsOutFavorites`: for a top-level group,
+  a nested group and a group whose repos are all favorites, the question says how many repos stay ungrouped or in the
+  parent group and that the favorites stay in Favorites, and never reads "0 ".
+  `MainWindow_HeaderMenu_DeleteEmptyGroup_OffersOnlyPlainDelete`: a group with nothing in it offers only **Delete
+  group**, whose question says it has no repos or subgroups.
 - `AgentControl-LauncherUI-GroupDeleteWithContents` (deleting a group together with its repos and subgroups):
   `MainWindow_HeaderMenu_DeleteGroupWithContents_ConfirmationSaysCountsAndYesDeletesNoKeeps`: the question names the
   group and says how many repos and subgroups go and that nothing on disk is deleted; answering No leaves the list and

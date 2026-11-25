@@ -377,8 +377,8 @@ public sealed class RepoGroupDeleteTests : IDisposable
 
     /// <summary>
     ///     Test that the contents of a group are counted for the confirmation: its own repos, the repos in
-    ///     the whole subtree (favorites included, and how many are favorites), and its subgroups directly and
-    ///     in all.
+    ///     the whole subtree (favorites included, and how many are favorites, in its own repos and in all),
+    ///     and its subgroups directly and in all.
     /// </summary>
     [Fact]
     public void MainWindowViewModel_GetGroupContents_CountsReposAndSubgroups()
@@ -403,9 +403,9 @@ public sealed class RepoGroupDeleteTests : IDisposable
         var unknown = viewModel.GetGroupContents("No such group");
 
         // Assert
-        Assert.Equal(new GroupContents("Client", 2, 1, 5, 2, 2), client);
-        Assert.Equal(new GroupContents("Deep", 2, 0, 2, 0, 1), deep);
-        Assert.Equal(new GroupContents("No such group", 0, 0, 0, 0, 0), unknown);
+        Assert.Equal(new GroupContents("Client", 2, 1, 5, 2, 2, 1), client);
+        Assert.Equal(new GroupContents("Deep", 2, 0, 2, 0, 1, 1), deep);
+        Assert.Equal(new GroupContents("No such group", 0, 0, 0, 0, 0, 0), unknown);
     }
 
     /// <summary>

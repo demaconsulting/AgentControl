@@ -353,7 +353,8 @@ disk: AgentControl only changes its own list.
   group's other subgroups, in their own order, so they appear exactly where the group was. Its repos stay in the group
   it was inside, or become ungrouped for a top-level group: they are listed together, in the order they had, after the
   repos that group already listed itself (after the other ungrouped repos for a top-level group). A repo of the group
-  that is also a favorite stays where it is in **Favorites**. The question says where the repos and subgroups go. For
+  that is also a favorite stays where it is in **Favorites**. The question says where the repos and subgroups go, and
+  which of the repos are favorites staying in **Favorites**. For
   a group with nothing in it the item reads **Delete group**.
 - **Delete group and its contents** removes the group, every group inside it and **all their repos** from your list
   of repos, so it is the quick way to retire a whole area. It is offered only for a group that has a repo or a
