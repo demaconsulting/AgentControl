@@ -25,7 +25,8 @@ This user guide covers:
 - Installing AgentControl
 - The main window: the app bar, the repo cards, and the light and dark themes
 - Adding a repository to the repo list
-- Keeping the repo list in your own order: groups, the Reorder submenu and drag and drop
+- Keeping the repo list in your own order: groups (nested, sorted by name, deleted with or without their repos),
+  selecting several repos to move or remove together, the Reorder submenu and drag and drop
 - Reading a repo card's chips: pinned package, upgrade, branch, and status warnings
 - Configuring package sources (zip-package folders, NuGet-package folders, NuGet-package
   servers and Git repositories), including testing a connection and signing in
@@ -209,7 +210,8 @@ Each repo card shows:
   repo that already has one) and **Upgrade to x.y.z** (when a newer version exists); the group is hidden when none
   of them applies - see below. **Organize**: **Move to group**, **Reorder** (a submenu with **Move to top**,
   **Move up**, **Move down** and **Move to bottom**) and **Card color...** (see *Organizing Repos with Groups*,
-  *Ordering Your Repos* and *Choosing a Card Color*). Then **Remove from list**.
+  *Ordering Your Repos* and *Choosing a Card Color*). Then **Remove from list**; when several cards are selected
+  and you open the menu of one of them, this item removes all of them (see *Selecting Several Repos*).
 
 ![A card with the repo's own picture and an up-to-date package, a group header with its teal color bar, and a card
 with a teal tile from its group, an upgrade chip and an uncommitted-changes warning](images/repo-card-anatomy.png)
@@ -237,7 +239,7 @@ reasonable size; anything else is ignored and the colored tile stays. Pictures i
 When you track many repos, put related ones into **groups** of your own. Groups (with their colors and order, and
 the card colors below) are personal: they are stored only in your own AgentControl settings file and are never
 written to a repository or to its `.agentcontrol.json`, so they are not shared with anyone through git, and a repo
-is in at most one group.
+is in at most one group. A group can also be inside another group (see *Nested Groups*).
 
 1. Open the repo card's "..." menu and choose **Organize > Move to group**.
 2. Pick one of your existing groups (the repo's current group has a check mark), or choose **New group...**. The
@@ -254,27 +256,125 @@ name and how many repos it holds:
   remove the star.
 - Then come **your groups**, in your own order (see *Ordering Your Repos*); a group you have not ordered yet, such as
   a new one, follows the ordered ones, alphabetically (letter case ignored). Finally comes **Ungrouped**, the repos
-  in no group. A section with no repo has no header. Within a section the repos are in your own order, and a repo
+  in no group. A section with no repo has no header, except a group inside another group (see *Nested Groups*), which
+  keeps its header while it is empty. Within a section the repos are in your own order, and a repo
   you add goes to the bottom of its section (see *Ordering Your Repos*).
 
 Click a header (its chevron, name or count) to **collapse** or **expand** the section; AgentControl remembers which
 sections you collapsed. A group's header also has a "..." menu. Its first item, **Add repository...**, opens the same
 folder picker as the **Add repository** button in the app bar, where you can choose one or more folders, and puts
 the repos you choose straight into that group (a repo that is already in the list is moved into the group and a
-message tells you so; if you cancel the picker, nothing changes). After a separator come **Move up** and
-**Move down** (see *Ordering Your Repos*) and **Group color...** (see *Choosing a Group Color*), and after another
-separator **Rename group...** (the same prompt; another group's name is refused) and **Remove group**, which asks for
-confirmation and leaves the group's repos in the list, ungrouped. Nothing on disk changes. The built-in **Favorites**
-and **Ungrouped** headers have no menu.
+message tells you so; if you cancel the picker, nothing changes). **New subgroup...** creates a group inside this one
+(see *Nested Groups*). After a separator come **Move up** and **Move down** (see *Ordering Your Repos*),
+**Sort by name** (see *Sorting a Group*) and **Group color...** (see *Choosing a Group Color*), and after another
+separator **Rename group...** (the same prompt; another group's name is refused) and the two ways to delete a group,
+**Delete group, keep contents** and **Delete group and its contents** (see *Deleting a Group*). Nothing on disk
+changes. The built-in **Favorites** and **Ungrouped** headers have no menu.
 
 ![The open "..." menu of the Client Work group header, which has a teal color bar: Add repository..., then Move up,
 Move down (disabled, as Client Work is the last group) and Group color..., then Rename group... and Remove
 group](images/group-menu.png)
 
+The picture shows the menu as it was before **New subgroup...**, **Sort by name** and **Delete group and its
+contents** were added, and with the delete item named **Remove group**.
+
 The **filter box** always searches all repos: while it has text, every section is shown expanded and a section
 without a match disappears, so a repo is never hidden inside a collapsed group; clear the filter and your collapsed
-sections are back as you left them (the headers' toggles are disabled while filtering). While no repo is in a group
+sections are back as you left them (the headers' toggles are disabled while filtering). While there is no group
 there are no headers at all, and favorites simply come first.
+
+## Nested Groups
+
+A group can be inside another group, for example one group for each customer and inside it one group for each
+project. The groups are then listed as a **tree**: a group's header is followed first by the headers of its subgroups
+(each with its own repos) and then by the group's own repos, and every header and card is drawn further in for each
+group it is inside. A header's count is the number of repos in the whole group, subgroups included, and its
+accessible name says which group it is inside (for example "Phase 1, 2 repos, expanded, inside Work"). Collapsing a
+group hides everything inside it.
+
+- **Create a subgroup.** Choose **New subgroup...** in the "..." menu of the group that is to contain it and type a
+  name. The prompt checks the name as you type like the **New group...** prompt does, and also refuses the name of
+  **any** existing group: a group is known by its name alone, so two groups, even in different places of the tree,
+  cannot have the same name (letter case ignored). The new group is listed inside its parent, with no repos in it
+  yet, and the parent is expanded. Cancel changes nothing.
+- **Put repos in a nested group.** **Move to group** in a card's menu lists every group, also the ones with no repo
+  yet and the nested ones (hover over a nested group to see its path, for example "Client > Project"), and
+  **Add repository...** on its header works as for any group.
+- **Move a group by dragging its header.** Press anywhere on a header except its "..." button and drop it on another
+  group's header. The header is split in three parts: dropped on the **upper third** the group goes **before** that
+  group (a line shows where), dropped on the **middle third** it goes **inside** that group, as its last subgroup (the
+  header is tinted), and dropped on the **lower third** it goes **after** that group - in each case at the level of the
+  group you dropped it on, so dropping next to a nested group takes the dragged group out of the group it was in.
+  A group cannot be dropped on itself or on a group inside it (nothing is shown there, and nothing changes), and
+  **Favorites** and **Ungrouped** can neither be moved nor contain a group.
+- **Move up and Move down** move a group one place among the groups of its own level. They are disabled at the ends
+  of the level, and while the filter has text.
+- **Rename** keeps a group's place in the tree, its color, and everything inside it.
+
+A group you create inside another group stays in the list even while it has no repo; you remove it with **Delete
+group**. A top-level group that has no subgroup and that you never put anything in still disappears when its last
+repo leaves it, as it always did. A settings file written before groups could be nested loads as it was - every group
+at the top level - and the tree is stored in your own settings file, never in a repository, and is there after you
+restart AgentControl.
+
+## Sorting a Group
+
+**Sort by name** in a group header's "..." menu puts the repos of that group in alphabetical order of their names,
+ignoring letter case and following your language's rules. Only the repos listed directly under this group are sorted:
+the repos of its subgroups, the favorites (listed under **Favorites**) and every other section keep their order. The
+sorted order is then simply your own order of that group - drag, **Reorder** and new repos work as before - and it is
+kept when you restart. AgentControl does not sort the group again by itself when you add or move repos; choose **Sort
+by name** again when you want to.
+
+The item is disabled, and its tooltip says why, when the group has fewer than two repos of its own, when they are
+already in name order, and while the filter has text (only some repos are shown then).
+
+## Deleting a Group
+
+A group's "..." menu has two ways to delete it. Both ask for confirmation first, and neither deletes anything on
+disk: AgentControl only changes its own list.
+
+- **Delete group, keep contents** removes the group but keeps what is in it. Its repos and its subgroups move to the
+  group it was inside, or become ungrouped (and subgroups top-level groups) when it was a top-level group, in their
+  own order. The question says where the repos and subgroups go. For a group with nothing in it the item reads
+  **Delete group**.
+- **Delete group and its contents** removes the group, every group inside it and **all their repos** from your list
+  of repos, so it is the quick way to retire a whole area. It is offered only for a group that has a repo or a
+  subgroup. The question names the group and says how many repos go - also how many of them are favorites, because a
+  favorite in the group goes too - and how many subgroups, and that nothing on disk or in any repository is deleted.
+  The repos are only removed from AgentControl: their folders and their `.agentcontrol.json` files stay where they
+  are, and you can add them again later.
+
+Answering **No** (or closing the question) changes nothing. The group's color, its place in the order and its entry
+in the tree go with the group. **Favorites** and **Ungrouped** cannot be deleted.
+
+## Selecting Several Repos
+
+You can select more than one repo card, to move them together or to remove them in one step. The selected cards are
+drawn with a tinted background and a stronger border, so the selection does not depend on color alone, and screen
+readers report each card as selected (and that the list allows several selected items).
+
+- **Ctrl+click** a card adds it to the selection or, when it is selected, takes it out. A plain **click** selects
+  just that card.
+- **Shift+click** selects every card from the one you clicked last to the one you click now. The range follows the
+  **visual order of the list** - the order you see the cards in from top to bottom: **Favorites**, then your groups
+  as the tree is listed (a group's subgroups before its own repos), then **Ungrouped** - not the order the repos
+  are stored in, so a range can run across group boundaries. Cards that are not shown, because their group is
+  collapsed or the filter hides them, are not in the range.
+- **Ctrl+A** selects every card that is shown. A section header is never selected, only cards are.
+- **Drag** any selected card to move **all** the selected cards together to the place where you drop it - into another
+  group, into **Favorites**, **Ungrouped** or next to a card - the same places and rules as for one card (see *Ordering
+  Your Repos*). The cards keep their order of the list and stay selected afterwards, and the move is one change. Drag a
+  card that is **not** selected and only that card moves. A drop next to one of the dragged cards themselves is
+  refused, with no line shown.
+- **Delete** (the key) removes all the selected cards from the list after **one** confirmation that says how many
+  repos will be removed and that nothing on disk is deleted or modified; **No** changes nothing. The **Remove from
+  list** item in the menu of a selected card does the same (it then reads "Remove 3 selected repos from list" when
+  three are selected), while the item of a card that is not selected removes only that card. The keys do nothing
+  while you are typing in a text box.
+
+Pressing on a card that is already part of a selection keeps the selection, so you can start dragging it; a click
+that is not a drag then selects just that card when you release the button.
 
 ## Ordering Your Repos
 
@@ -319,22 +419,26 @@ leave the cards where they are, so a repo is always where you last put it.
 
 **Ordering groups.** Your groups are listed in your own order too: **Favorites** first, then your groups, then
 **Ungrouped** last. A group you have not ordered yet, such as a new one, follows the ordered groups, alphabetically.
+Inside a group, its subgroups are ordered the same way among themselves.
 
 - **Move up and Move down.** In a group header's "..." menu, **Move up** and **Move down** move the group one place.
   They are disabled for the first and the last group, and the tooltip says why.
-- **Drag a header.** Press anywhere on a group's header except its "..." button and drag it above or below another
-  group's header; a line shows where it will land. **Favorites** and **Ungrouped** cannot be moved, and a group
+- **Drag a header.** Press anywhere on a group's header except its "..." button and drag it onto another group's
+  header: the upper third puts it before that group, the lower third after it (a line shows where it will land) and
+  the middle third inside it (see *Nested Groups*). **Favorites** and **Ungrouped** cannot be moved, and a group
   cannot be dropped on them. A collapsed group stays collapsed.
 - **While the filter has text**, groups cannot be reordered either: clear the filter first.
 
-Like groups and card colors, the order of your repos and of your groups is stored only in your own AgentControl
-settings file (`%APPDATA%\AgentControl\settings.json`), never in the repository or its `.agentcontrol.json`, and it
-is kept when you restart AgentControl. Removing a repo from the list also removes it from the order.
+Like groups and card colors, the order of your repos and of your groups, and the tree of nested groups, is stored only
+in your own AgentControl settings file (`%APPDATA%\AgentControl\settings.json`), never in the repository or its
+`.agentcontrol.json`, and it is kept when you restart AgentControl. Removing a repo from the list also removes it from
+the order.
 
 ## How Your Changes Are Saved
 
-Everything you change in the main window - a favorite, a group, a card or group color, the order of your repos or
-groups, collapsing a section, renaming or removing a group, removing a repo, and the time of a launch - takes effect
+Everything you change in the main window - a favorite, a group (creating, nesting, sorting, renaming or deleting it),
+a card or group color, the order of your repos or groups, collapsing a section, removing one or several repos, and
+the time of a launch - takes effect
 at once and is saved to your settings file in the background a moment later, so the window never waits for the
 disk (another program, such as a virus scanner or a sync client, can hold the file for a while). Several quick changes
 are saved together. Repositories you add, and the values you save in **Settings**, are the exception: they are
@@ -375,7 +479,8 @@ listed under **Favorites**. The built-in **Favorites** and **Ungrouped** section
 window picture, Client Work is a teal group.
 
 Like the group itself, its color is stored only in your own AgentControl settings file. It follows the group when you
-rename it, and it is forgotten when the group is removed or its last repo leaves it.
+rename it, and it is forgotten when the group is deleted or - for a group that is not part of a tree of nested groups -
+its last repo leaves it.
 
 ## Reading the Chips
 

@@ -36,7 +36,9 @@ places them in the .github folders (normally git-ignored), and launches the agen
 - 🐚 **Shell Choice**: Picks the launch shell and can keep it open after the tool exits
 - 🌿 **Git Integration**: Shows the branch, runs Git Pull, and warns about committed agent files
 - 🏷️ **Repo Cards**: Show a status bar and chips for package, upgrade, and branch
-- ⭐ **Groups and Favorites**: Organizes repos with favorites, colored groups, and card colors, all in your own order
+- ⭐ **Groups and Favorites**: Organizes repos with favorites, colored groups that can nest inside each other, card
+  colors and a sort by name, all in your own order; select several repos to move or remove them together, and delete a
+  group with or without its repos
 - 🌗 **Light and Dark Themes**: Follows the system theme or uses a fixed choice
 - ⚡ **Responsive**: Opens at once; repo, source and settings work runs in the background, with progress and Cancel
 - 📦 **Easy Install**: Ships as an MSI installer with a self-contained .NET runtime
