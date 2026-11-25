@@ -103,11 +103,11 @@ public class RepoGroupHierarchyTests
     }
 
     /// <summary>
-    ///     Test the questions about where a group is in the tree: parent, children, descendants,
-    ///     subtree, ancestors, depth and whether one group is inside another, ignoring letter case.
+    ///     Test that the parent of a group is answered ignoring letter case, and is <see langword="null"/>
+    ///     for a top-level group.
     /// </summary>
     [Fact]
-    public void RepoGroupHierarchy_Navigation_AnswersParentChildrenAncestorsAndDepth()
+    public void RepoGroupHierarchy_Navigation_Parent_IgnoresLetterCaseAndIsNullAtTopLevel()
     {
         // Arrange
         var hierarchy = CreateChain();
@@ -115,34 +115,185 @@ public class RepoGroupHierarchyTests
         // Act / Assert
         Assert.Multiple(
             () => Assert.Null(hierarchy.GetParent("Top")),
+            () => Assert.Null(hierarchy.GetParent("elsewhere")),
             () => Assert.Equal("Middle", hierarchy.GetParent("bottom")),
+            () => Assert.Equal("Top", hierarchy.GetParent("MIDDLE")));
+    }
+
+    /// <summary>
+    ///     Test that the children of a group, or of the top level, are the groups directly inside it in
+    ///     their listing order, and none for a group with no subgroup.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Navigation_Children_ListsTheGroupsDirectlyInside()
+    {
+        // Arrange
+        var hierarchy = CreateChain();
+
+        // Act / Assert
+        Assert.Multiple(
             () => Assert.Equal(["Middle"], hierarchy.GetChildren("TOP")),
             () => Assert.Equal(["Elsewhere", "Top"], hierarchy.GetChildren(null)),
-            () => Assert.Empty(hierarchy.GetChildren("Bottom")),
+            () => Assert.Empty(hierarchy.GetChildren("Bottom")));
+    }
+
+    /// <summary>
+    ///     Test that the descendants of a group are every group anywhere inside it, depth first, and none
+    ///     for a group with no subgroup.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Navigation_Descendants_ListsEveryGroupInsideDepthFirst()
+    {
+        // Arrange
+        var hierarchy = CreateChain();
+
+        // Act / Assert
+        Assert.Multiple(
             () => Assert.Equal(["Middle", "Bottom"], hierarchy.GetDescendants("top")),
+            () => Assert.Empty(hierarchy.GetDescendants("Bottom")));
+    }
+
+    /// <summary>
+    ///     Test that the subtree of a group is the group itself followed by its descendants.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Navigation_Subtree_ListsTheGroupThenItsDescendants()
+    {
+        // Arrange
+        var hierarchy = CreateChain();
+
+        // Act / Assert
+        Assert.Multiple(
             () => Assert.Equal(["Top", "Middle", "Bottom"], hierarchy.GetSubtree("TOP")),
+            () => Assert.Equal(["Bottom"], hierarchy.GetSubtree("bottom")));
+    }
+
+    /// <summary>
+    ///     Test that the ancestors of a group are the groups it is inside, nearest first, and none for a
+    ///     top-level group.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Navigation_Ancestors_ListsTheGroupsItIsInsideNearestFirst()
+    {
+        // Arrange
+        var hierarchy = CreateChain();
+
+        // Act / Assert
+        Assert.Multiple(
             () => Assert.Equal(["Middle", "Top"], hierarchy.GetAncestors("Bottom")),
+            () => Assert.Equal(["Top"], hierarchy.GetAncestors("middle")),
+            () => Assert.Empty(hierarchy.GetAncestors("Top")));
+    }
+
+    /// <summary>
+    ///     Test that the depth of a group is how many groups it is inside.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Navigation_Depth_CountsTheGroupsItIsInside()
+    {
+        // Arrange
+        var hierarchy = CreateChain();
+
+        // Act / Assert
+        Assert.Multiple(
             () => Assert.Equal(2, hierarchy.GetDepth("Bottom")),
+            () => Assert.Equal(1, hierarchy.GetDepth("MIDDLE")),
             () => Assert.Equal(0, hierarchy.GetDepth("Top")),
+            () => Assert.Equal(0, hierarchy.GetDepth("Elsewhere")));
+    }
+
+    /// <summary>
+    ///     Test that whether a group is registered, and whether it exists, are answered ignoring letter
+    ///     case; the chain's groups are registered, an unrelated group is not.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Navigation_Registered_TellsGroupsInTheHierarchyFromOthers()
+    {
+        // Arrange
+        var hierarchy = CreateChain();
+
+        // Act / Assert
+        Assert.Multiple(
+            () => Assert.True(hierarchy.IsRegistered("middle")),
+            () => Assert.True(hierarchy.IsRegistered("TOP")),
+            () => Assert.False(hierarchy.IsRegistered("Elsewhere")),
+            () => Assert.False(hierarchy.IsRegistered("Unknown")),
+            () => Assert.True(hierarchy.Contains("elsewhere")),
+            () => Assert.False(hierarchy.Contains("Unknown")));
+    }
+
+    /// <summary>
+    ///     Test that whether a group is another group or anywhere inside it is answered ignoring letter
+    ///     case, a group counting as inside itself.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Navigation_IsSameOrDescendant_TellsSelfDescendantsAndOthersApart()
+    {
+        // Arrange
+        var hierarchy = CreateChain();
+
+        // Act / Assert
+        Assert.Multiple(
             () => Assert.True(hierarchy.IsSameOrDescendant("bottom", "TOP")),
             () => Assert.True(hierarchy.IsSameOrDescendant("Top", "top")),
             () => Assert.False(hierarchy.IsSameOrDescendant("Top", "Bottom")),
+            () => Assert.False(hierarchy.IsSameOrDescendant("Elsewhere", "Top")),
             () => Assert.False(hierarchy.IsSameOrDescendant(null, "Top")),
-            () => Assert.Empty(hierarchy.GetSubtree("Unknown")),
-            () => Assert.Empty(hierarchy.GetDescendants("Unknown")),
-            () => Assert.Null(hierarchy.GetParent(null)),
+            () => Assert.False(hierarchy.IsSameOrDescendant("Top", null)));
+    }
+
+    /// <summary>
+    ///     Test that the spelling a group has in the tree is answered for a name in any letter case.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Navigation_Name_GivesTheGroupsOwnSpelling()
+    {
+        // Arrange
+        var hierarchy = CreateChain();
+
+        // Act / Assert
+        Assert.Multiple(
             () => Assert.Equal("Top", hierarchy.GetName("tOP")),
-            () => Assert.True(hierarchy.IsRegistered("middle")),
-            () => Assert.False(hierarchy.IsRegistered("Unknown")));
+            () => Assert.Equal("Elsewhere", hierarchy.GetName("ELSEWHERE")),
+            () => Assert.Null(hierarchy.GetName("Unknown")),
+            () => Assert.Null(hierarchy.GetName(null)));
+    }
+
+    /// <summary>
+    ///     Test that every question about a name that is no group - or about <see langword="null"/> - is
+    ///     answered with nothing (null, an empty list, depth 0, false) and never fails; the group list holds
+    ///     every group once.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Navigation_UnknownName_AnswersNothingAndNeverFails()
+    {
+        // Arrange
+        var hierarchy = CreateChain();
+
+        // Act / Assert
+        Assert.Multiple(
+            () => Assert.Null(hierarchy.GetParent("Unknown")),
+            () => Assert.Null(hierarchy.GetParent(null)),
+            () => Assert.Empty(hierarchy.GetChildren("Unknown")),
+            () => Assert.Empty(hierarchy.GetDescendants("Unknown")),
+            () => Assert.Empty(hierarchy.GetDescendants(null)),
+            () => Assert.Empty(hierarchy.GetSubtree("Unknown")),
+            () => Assert.Empty(hierarchy.GetAncestors("Unknown")),
+            () => Assert.Empty(hierarchy.GetAncestors(null)),
+            () => Assert.Equal(0, hierarchy.GetDepth("Unknown")),
+            () => Assert.Equal(0, hierarchy.GetDepth(null)),
+            () => Assert.False(hierarchy.IsSameOrDescendant("Unknown", "Top")),
+            () => Assert.False(hierarchy.IsRegistered(null)),
+            () => Assert.False(hierarchy.Contains(null)),
+            () => Assert.Equal(["Bottom", "Elsewhere", "Middle", "Top"], hierarchy.Groups.Order().ToArray()));
     }
 
     /// <summary>
     ///     Test that a group may be put at the top level or inside any group that is not itself or one
-    ///     of its descendants, and that nothing can be moved into or out of a name that is no group
-    ///     (the built-in sections never are).
+    ///     of its descendants.
     /// </summary>
     [Fact]
-    public void RepoGroupHierarchy_CanMove_RefusesLoopsAndUnknownGroups()
+    public void RepoGroupHierarchy_CanMove_AllowsTopLevelAndOtherGroups()
     {
         // Arrange
         var hierarchy = CreateChain();
@@ -152,14 +303,48 @@ public class RepoGroupHierarchyTests
             () => Assert.True(hierarchy.CanMove("Bottom", null)),
             () => Assert.True(hierarchy.CanMove("Bottom", "Top")),
             () => Assert.True(hierarchy.CanMove("Top", "Elsewhere")),
+            () => Assert.True(hierarchy.CanMove("top", "ELSEWHERE")));
+    }
+
+    /// <summary>
+    ///     Test that a group may not be put inside itself or inside one of its descendants, and that
+    ///     <see cref="RepoGroupHierarchy.PutInside"/> throws for such a move instead of making a loop.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_CanMove_RefusesSelfAndDescendants()
+    {
+        // Arrange
+        var hierarchy = CreateChain();
+
+        // Act / Assert
+        Assert.Multiple(
             () => Assert.False(hierarchy.CanMove("Top", "Top")),
             () => Assert.False(hierarchy.CanMove("Top", "middle")),
             () => Assert.False(hierarchy.CanMove("Top", "Bottom")),
+            () => Assert.False(hierarchy.CanMove("Middle", "Bottom")));
+        Assert.Throws<InvalidOperationException>(() => hierarchy.PutInside("Top", "Bottom"));
+        Assert.Throws<InvalidOperationException>(() => hierarchy.PutInside("Top", "Top"));
+    }
+
+    /// <summary>
+    ///     Test that a group that does not exist (the built-in sections never are groups) cannot be moved
+    ///     or be a parent, and that <see cref="RepoGroupHierarchy.PutInside"/> throws for such a move.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_CanMove_RefusesUnknownGroupsAndBuiltInSections()
+    {
+        // Arrange
+        var hierarchy = CreateChain();
+
+        // Act / Assert
+        Assert.Multiple(
             () => Assert.False(hierarchy.CanMove("Unknown", null)),
             () => Assert.False(hierarchy.CanMove("Top", "Unknown")),
             () => Assert.False(hierarchy.CanMove("Favorites", null)),
             () => Assert.False(hierarchy.CanMove("Top", "Ungrouped")),
             () => Assert.False(hierarchy.CanMove(null, null)));
+        Assert.Throws<InvalidOperationException>(() => hierarchy.PutInside("Unknown", null));
+        Assert.Throws<InvalidOperationException>(() => hierarchy.PutInside("Top", "Favorites"));
     }
 
     /// <summary>
@@ -237,19 +422,27 @@ public class RepoGroupHierarchyTests
     }
 
     /// <summary>
-    ///     Test that moving a group into itself or one of its descendants, or a group that does not
-    ///     exist, is refused instead of making a loop.
+    ///     Test that putting a registered group at the top level keeps it registered, with the empty
+    ///     string as its parent, and keeps the groups below it registered.
     /// </summary>
     [Fact]
-    public void RepoGroupHierarchy_PutInside_NotAllowed_Throws()
+    public void RepoGroupHierarchy_PutInside_TopLevelRegisteredGroup_StaysRegistered()
     {
         // Arrange
         var hierarchy = CreateChain();
 
-        // Act / Assert
-        Assert.Throws<InvalidOperationException>(() => hierarchy.PutInside("Top", "Bottom"));
-        Assert.Throws<InvalidOperationException>(() => hierarchy.PutInside("Top", "Top"));
-        Assert.Throws<InvalidOperationException>(() => hierarchy.PutInside("Unknown", null));
+        // Act
+        var parents = hierarchy.PutInside("Middle", null);
+
+        // Assert
+        Assert.Equal(
+            new Dictionary<string, string>
+            {
+                ["Top"] = string.Empty,
+                ["Middle"] = string.Empty,
+                ["Bottom"] = "Middle"
+            },
+            parents);
     }
 
     /// <summary>
@@ -468,40 +661,101 @@ public class RepoGroupHierarchyTests
     }
 
     /// <summary>
-    ///     Test that repair keeps usable entries, spells a group as its repos spell it, makes a missing,
-    ///     blank, reserved, unknown or self parent top level, and drops entries with no usable name,
-    ///     the first of names that differ only in letter case winning.
+    ///     Test that repair drops an entry whose group name is blank or one of the built-in section names.
     /// </summary>
     [Fact]
-    public void RepoGroupHierarchy_RepairParents_DropsUnusableEntriesAndTopLevelsBadParents()
+    public void RepoGroupHierarchy_RepairParents_DropsBlankAndReservedKeys()
+    {
+        // Arrange
+        var stored = new List<KeyValuePair<string, string>>
+        {
+            new("Favorites", "Client"),
+            new("ungrouped", "Client"),
+            new("   ", "Client"),
+            new(string.Empty, "Client"),
+            new("Client", string.Empty)
+        };
+
+        // Act
+        var repaired = RepoGroupHierarchy.RepairParents(stored, []);
+        var fromNothing = RepoGroupHierarchy.RepairParents(null, ["Work"]);
+
+        // Assert
+        Assert.Equal(new Dictionary<string, string> { ["Client"] = string.Empty }, repaired);
+        Assert.Empty(fromNothing);
+    }
+
+    /// <summary>
+    ///     Test that of entries whose names differ only in letter case, and of the padded form of a
+    ///     name, the first one wins.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_RepairParents_KeepsTheFirstOfNamesDifferingInLetterCase()
     {
         // Arrange
         var stored = new List<KeyValuePair<string, string>>
         {
             new("  work  ", "Client"),
             new("WORK", "Other"),
-            new("Favorites", "Client"),
-            new("   ", "Client"),
+            new("Client", string.Empty),
+            new("Other", string.Empty)
+        };
+
+        // Act
+        var repaired = RepoGroupHierarchy.RepairParents(stored, []);
+
+        // Assert: the first entry won (so Work is inside Client), under its cleaned spelling
+        Assert.Equal(
+            new Dictionary<string, string> { ["work"] = "Client", ["Client"] = string.Empty, ["Other"] = string.Empty },
+            repaired);
+    }
+
+    /// <summary>
+    ///     Test that repair spells a group the way its repos spell it, whatever spelling the key has.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_RepairParents_SpellsAGroupLikeItsRepos()
+    {
+        // Arrange
+        var stored = new List<KeyValuePair<string, string>> { new("work", "CLIENT") };
+
+        // Act
+        var repaired = RepoGroupHierarchy.RepairParents(stored, ["Work", "work", "Client"]);
+
+        // Assert: Work and Client as the repos spell them
+        Assert.Equal(
+            new Dictionary<string, string> { ["Work"] = "Client", ["Client"] = string.Empty },
+            repaired);
+    }
+
+    /// <summary>
+    ///     Test that repair reads a missing, blank, reserved, unknown or self parent as the top level.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_RepairParents_ReadsABadParentAsTopLevel()
+    {
+        // Arrange
+        var stored = new List<KeyValuePair<string, string>>
+        {
             new("Self", "self"),
             new("Orphan", "Gone"),
             new("Reserved", "Ungrouped"),
             new("Blank", "  "),
-            new("Client", string.Empty)
+            new("Empty", string.Empty)
         };
 
         // Act
-        var repaired = RepoGroupHierarchy.RepairParents(stored, ["Work", "work"]);
+        var repaired = RepoGroupHierarchy.RepairParents(stored, []);
 
         // Assert
         Assert.Equal(
             new Dictionary<string, string>
             {
-                ["Work"] = "Client",
                 ["Self"] = string.Empty,
                 ["Orphan"] = string.Empty,
                 ["Reserved"] = string.Empty,
                 ["Blank"] = string.Empty,
-                ["Client"] = string.Empty
+                ["Empty"] = string.Empty
             },
             repaired);
     }
@@ -524,11 +778,11 @@ public class RepoGroupHierarchyTests
     }
 
     /// <summary>
-    ///     Test that a cycle is cut at the member that sorts first, ignoring letter case, whatever order
-    ///     the entries are stored in, and that repairing again changes nothing.
+    ///     Test that a cycle is cut at the member that sorts first, ignoring letter case, whatever the
+    ///     entries' order, the other members still chaining up to it.
     /// </summary>
     [Fact]
-    public void RepoGroupHierarchy_RepairParents_Cycle_CutAtFirstMemberDeterministicallyAndIdempotently()
+    public void RepoGroupHierarchy_RepairParents_Cycle_CutAtFirstMemberOfTheCycle()
     {
         // Arrange: the entries put b inside A, C inside B and A inside C, which is a cycle of three
         // (A inside C inside B inside A); D is inside C and hangs off the cycle
@@ -536,25 +790,106 @@ public class RepoGroupHierarchyTests
         [
             new("b", "A"), new("C", "B"), new("A", "C"), new("D", "C")
         ];
+
+        // Act
+        var repaired = RepoGroupHierarchy.RepairParents(forward, []);
+
+        // Assert: A (first in order) became top level; the others still chain up to it
+        Assert.Equal(
+            new Dictionary<string, string> { ["b"] = "A", ["C"] = "b", ["A"] = string.Empty, ["D"] = "C" },
+            repaired);
+    }
+
+    /// <summary>
+    ///     Test that disjoint cycles are each cut at their own first member, a two-cycle and a five-cycle
+    ///     alike, and that a cycle deep in a chain is cut while the chain leading to it is kept.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_RepairParents_DisjointLongAndDeepCycles_EachCutAtItsFirstMember()
+    {
+        // Arrange: P and Q inside each other; E1 > E2 > E3 > E4 > E5 > E1 (inside); T1 > T2 > P is a tail, and
+        // Z hangs off the five-cycle
+        List<KeyValuePair<string, string>> stored =
+        [
+            new("Q", "P"), new("P", "Q"),
+            new("E1", "E5"), new("E2", "E1"), new("E3", "E2"), new("E4", "E3"), new("E5", "E4"),
+            new("T2", "T1"), new("T1", "P"),
+            new("Z", "E3")
+        ];
+
+        // Act
+        var repaired = RepoGroupHierarchy.RepairParents(stored, []);
+
+        // Assert: E1 and P (the first of their cycles) are the only new top-level groups
+        Assert.Equal(
+            new Dictionary<string, string>
+            {
+                ["Q"] = "P",
+                ["P"] = string.Empty,
+                ["E1"] = string.Empty,
+                ["E2"] = "E1",
+                ["E3"] = "E2",
+                ["E4"] = "E3",
+                ["E5"] = "E4",
+                ["T2"] = "T1",
+                ["T1"] = "P",
+                ["Z"] = "E3"
+            },
+            repaired);
+    }
+
+    /// <summary>
+    ///     Test that a cycle is cut the same way whatever order the entries are stored in, whatever letter
+    ///     case the names have, and when the repaired result is repaired again.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_RepairParents_Cycle_IsDeterministicAndIdempotent()
+    {
+        // Arrange
+        List<KeyValuePair<string, string>> forward =
+        [
+            new("b", "A"), new("C", "B"), new("A", "C"), new("D", "C")
+        ];
         List<KeyValuePair<string, string>> backward = [.. forward.AsEnumerable().Reverse()];
+        List<KeyValuePair<string, string>> shouted = [new("B", "a"), new("c", "b"), new("a", "c"), new("d", "C")];
 
         // Act
         var first = RepoGroupHierarchy.RepairParents(forward, []);
         var second = RepoGroupHierarchy.RepairParents(backward, []);
         var again = RepoGroupHierarchy.RepairParents(first, []);
+        var viaOtherCase = RepoGroupHierarchy.RepairParents(shouted, []);
 
-        // Assert: A (first in order) became top level; the others still chain up to it
-        var expected = new Dictionary<string, string>
-        {
-            ["b"] = "A",
-            ["C"] = "b",
-            ["A"] = string.Empty,
-            ["D"] = "C"
-        };
+        // Assert
         Assert.Multiple(
-            () => Assert.Equal(expected, first),
-            () => Assert.Equal(expected, second),
-            () => Assert.Equal(expected, again));
+            () => Assert.Equal(first, second),
+            () => Assert.Equal(first, again),
+            () => Assert.Equal(string.Empty, viaOtherCase["a"]),
+            () => Assert.Equal("a", viaOtherCase["B"]),
+            () => Assert.Equal(first.Count, viaOtherCase.Count));
+    }
+
+    /// <summary>
+    ///     Test that a cycle among the groups given to the constructor is cut at the member that sorts first
+    ///     whatever the letter case of the stored names, and that the result is the same when the repaired
+    ///     parents are given back.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Constructor_CycleWithMixedLetterCase_CutAtFirstMember()
+    {
+        // Arrange
+        string[] groups = ["Alpha", "bravo", "Charlie"];
+        var damaged = new Dictionary<string, string> { ["ALPHA"] = "charlie", ["Bravo"] = "alpha", ["CHARLIE"] = "BRAVO" };
+
+        // Act
+        var first = new RepoGroupHierarchy(groups, damaged, null);
+        var second = new RepoGroupHierarchy(groups, first.GetStoredParents(), null);
+
+        // Assert: Alpha is the first, so it is the top; Bravo is inside it, Charlie inside Bravo
+        Assert.Multiple(
+            () => Assert.Null(first.GetParent("alpha")),
+            () => Assert.Equal("Alpha", first.GetParent("bravo")),
+            () => Assert.Equal("bravo", first.GetParent("charlie")),
+            () => Assert.Equal(first.GetStoredParents(), second.GetStoredParents()));
     }
 
     /// <summary>
@@ -597,6 +932,55 @@ public class RepoGroupHierarchyTests
     }
 
     /// <summary>
+    ///     Test that the group names the constructor is given are cleaned of surrounding white space, that a
+    ///     blank name, a built-in section name and a duplicate in another letter case are ignored, and that
+    ///     <see langword="null"/> stored parents and a <see langword="null"/> order give a flat alphabetical
+    ///     list.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Constructor_GroupNamesSanitizedAndNullParentsAndOrderAreFlat()
+    {
+        // Arrange
+        string?[] names = ["  Work  ", "work", "Favorites", "UNGROUPED", "   ", null, "Admin"];
+
+        // Act
+        var hierarchy = new RepoGroupHierarchy(names, null, null);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal(["Admin", "Work"], hierarchy.GetChildren(null)),
+            () => Assert.Equal(["Admin", "Work"], hierarchy.Groups.Order().ToArray()),
+            () => Assert.False(hierarchy.Contains("Favorites")),
+            () => Assert.Empty(hierarchy.GetStoredParents()));
+    }
+
+    /// <summary>
+    ///     Test that a <see langword="null"/> list of group names given to the constructor, or of repo group
+    ///     names given to <see cref="RepoGroupHierarchy.RepairParents"/>, is refused.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_NullGroupNames_AreRefused()
+    {
+        // Act / Assert
+        Assert.Throws<ArgumentNullException>(() => new RepoGroupHierarchy(null!, null, null));
+        Assert.Throws<ArgumentNullException>(() => RepoGroupHierarchy.RepairParents([], null!));
+    }
+
+    /// <summary>
+    ///     Test that deleting a group that does not exist (a built-in section included) is refused.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Pop_UnknownGroup_IsRefused()
+    {
+        // Arrange
+        var hierarchy = CreateChain();
+
+        // Act / Assert
+        Assert.Throws<ArgumentException>(() => hierarchy.Pop("Unknown"));
+        Assert.Throws<ArgumentException>(() => hierarchy.Pop("Favorites"));
+    }
+
+    /// <summary>
     ///     Test that a tree thousands of levels deep is walked without recursion (no stack overflow).
     /// </summary>
     [Fact]
@@ -604,12 +988,7 @@ public class RepoGroupHierarchyTests
     {
         // Arrange: G0 > G1 > ... > G4999
         const int depth = 5000;
-        var names = Enumerable.Range(0, depth).Select(index => $"G{index}").ToList();
-        var parents = new Dictionary<string, string> { [names[0]] = string.Empty };
-        for (var index = 1; index < depth; index++)
-        {
-            parents[names[index]] = names[index - 1];
-        }
+        var (names, parents) = CreateDeepChain(depth);
 
         // Act
         var hierarchy = new RepoGroupHierarchy(names, parents, null);
@@ -621,6 +1000,57 @@ public class RepoGroupHierarchyTests
             () => Assert.Equal(depth - 1, nodes[^1].Depth),
             () => Assert.Equal(depth - 1, hierarchy.GetDescendants("G0").Count),
             () => Assert.Equal(depth - 1, hierarchy.GetDepth($"G{depth - 1}")));
+    }
+
+    /// <summary>
+    ///     Test that repairing, moving into and deleting groups work in a tree thousands of levels deep:
+    ///     a cycle closing the chain is cut at its first member, a group is put inside the deepest one with
+    ///     every group above it registered, and a group in the middle is popped.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_DeepTree_RepairPutInsideAndPopWork()
+    {
+        // Arrange: G0 > G1 > ... > G4999, with G0 stored as inside the deepest group (a cycle)
+        const int depth = 5000;
+        var (names, parents) = CreateDeepChain(depth);
+        var damaged = new Dictionary<string, string>(parents) { ["G0"] = $"G{depth - 1}" };
+
+        // Act
+        var repaired = RepoGroupHierarchy.RepairParents(damaged, []);
+        var hierarchy = new RepoGroupHierarchy([.. names, "Extra"], parents, null);
+        var put = hierarchy.PutInside("Extra", $"G{depth - 1}");
+        var (popParents, popOrder) = hierarchy.Pop("G2500");
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal(depth, repaired.Count),
+            () => Assert.Equal(string.Empty, repaired["G0"]),
+            () => Assert.Equal("G2499", repaired["G2500"]),
+            () => Assert.Equal($"G{depth - 1}", put["Extra"]),
+            () => Assert.Equal(depth + 1, put.Count),
+            () => Assert.False(popParents.ContainsKey("G2500")),
+            () => Assert.Equal("G2499", popParents["G2501"]),
+            () => Assert.DoesNotContain("G2500", popOrder),
+            () => Assert.False(hierarchy.CanMove("G0", $"G{depth - 1}")),
+            () => Assert.True(hierarchy.CanMove("Extra", null)));
+    }
+
+    /// <summary>
+    ///     Creates the names and stored parents of a chain of groups nested <paramref name="depth"/> levels
+    ///     deep: G0 &gt; G1 &gt; ... .
+    /// </summary>
+    /// <param name="depth">The number of groups.</param>
+    /// <returns>The names and the stored parents (G0 registered at the top level).</returns>
+    private static (List<string> Names, Dictionary<string, string> Parents) CreateDeepChain(int depth)
+    {
+        var names = Enumerable.Range(0, depth).Select(index => $"G{index}").ToList();
+        var parents = new Dictionary<string, string> { [names[0]] = string.Empty };
+        for (var index = 1; index < depth; index++)
+        {
+            parents[names[index]] = names[index - 1];
+        }
+
+        return (names, parents);
     }
 
     /// <summary>

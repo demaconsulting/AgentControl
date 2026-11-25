@@ -4727,6 +4727,79 @@ public sealed class RepoCardViewModelTests : IDisposable
             processStarter: starter ?? new FakeAgentToolProcessStarter(),
             shellDetector: FakeAgentToolProcessStarter.CreateShellDetector(),
             refreshQueue: queue);
+
+    /// <summary>
+    ///     Test that the number of cards selected together with a card changes the text and the tooltip of
+    ///     both its "Remove from list" and its "Move to group" items, each change is announced, and the plain
+    ///     wording is back for a single selected card and for a card that is not selected.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_SelectionSize_ChangesRemoveAndMoveMenuTextAndNotifies()
+    {
+        // Arrange
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = CreateTempDirectory() }, () => new AppSettings(), new PackageVersionCache());
+        var changed = new List<string?>();
+        card.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        // Assert: not selected
+        Assert.Equal("Remove from list", card.RemoveMenuText);
+        Assert.Equal("Move to group", card.MoveToGroupMenuText);
+
+        // Act: one of three selected cards
+        card.UpdateSelection(3);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal(3, card.SelectionSize),
+            () => Assert.Equal("Remove 3 selected repos from list", card.RemoveMenuText),
+            () => Assert.Contains("3 selected repos", card.RemoveMenuTooltip, StringComparison.Ordinal),
+            () => Assert.Equal("Move 3 selected repos to group", card.MoveToGroupMenuText),
+            () => Assert.Contains("3 selected repos", card.MoveToGroupMenuTooltip, StringComparison.Ordinal),
+            () => Assert.Contains(nameof(RepoCardViewModel.RemoveMenuText), changed),
+            () => Assert.Contains(nameof(RepoCardViewModel.RemoveMenuTooltip), changed),
+            () => Assert.Contains(nameof(RepoCardViewModel.MoveToGroupMenuText), changed),
+            () => Assert.Contains(nameof(RepoCardViewModel.MoveToGroupMenuTooltip), changed));
+
+        // Act: the only selected card, then none
+        card.UpdateSelection(1);
+        var onlyOne = (card.RemoveMenuText, card.MoveToGroupMenuText);
+        card.UpdateSelection(0);
+
+        // Assert
+        Assert.Equal(("Remove from list", "Move to group"), onlyOne);
+        Assert.Equal(("Remove from list", "Move to group"), (card.RemoveMenuText, card.MoveToGroupMenuText));
+    }
+
+    /// <summary>
+    ///     Test that a negative depth is indented no further than a card in no group, that the indent follows
+    ///     a later positive depth, and that setting the depth it already has announces nothing.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_Depth_NegativeIsNotIndentedAndSameValueIsSilent()
+    {
+        // Arrange
+        var card = new RepoCardViewModel(
+            new RecentRepo { Path = CreateTempDirectory() }, () => new AppSettings(), new PackageVersionCache());
+        var changed = new List<string?>();
+        card.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        // Act
+        card.Depth = -3;
+        var negative = card.IndentWidth;
+        var afterFirst = changed.Count;
+        card.Depth = -3;
+        var afterSame = changed.Count;
+        card.Depth = 1;
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal(0, negative),
+            () => Assert.Equal(afterFirst, afterSame),
+            () => Assert.Equal(RepoGroupHeaderViewModel.IndentPerLevel, card.IndentWidth),
+            () => Assert.Contains(nameof(RepoCardViewModel.IndentWidth), changed));
+    }
+
     /// <summary>
     ///     Creates a unique temporary directory tracked for cleanup in <see cref="Dispose"/>.
     /// </summary>

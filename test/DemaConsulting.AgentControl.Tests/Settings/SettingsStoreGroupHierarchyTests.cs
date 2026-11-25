@@ -103,7 +103,7 @@ public class SettingsStoreGroupHierarchyTests
     ///     that the repair is what a later save writes back, and that no group is lost.
     /// </summary>
     [Fact]
-    public void SettingsStore_Load_UnknownSelfAndCyclicParents_AreRepairedAndNotSavedBack()
+    public void SettingsStore_Load_UnknownSelfAndCyclicParents_AreRepairedOnLoad()
     {
         // Arrange
         var configDir = CreateTempDirectory();
@@ -132,6 +132,97 @@ public class SettingsStoreGroupHierarchyTests
                 () => Assert.Equal(
                     loaded.GroupParents.OrderBy(pair => pair.Key, StringComparer.Ordinal),
                     reloaded.GroupParents.OrderBy(pair => pair.Key, StringComparer.Ordinal)));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that loading a damaged hierarchy does not rewrite the settings file (apart from the one-time
+    ///     seeding of the repo order, which a file that already marks its order does not get): the repair
+    ///     lives in the loaded settings and is written by the next save, not by the load itself.
+    /// </summary>
+    [Fact]
+    public void SettingsStore_Load_DamagedHierarchy_DoesNotRewriteTheFile()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(configDir, "settings.json");
+            File.WriteAllText(
+                path,
+                "{ \"HasUserRepoOrder\": true, \"RecentRepos\": [ { \"Path\": \"a\", \"GroupName\": \"Alpha\" }," +
+                " { \"Path\": \"b\", \"GroupName\": \"Beta\" } ]," +
+                " \"GroupOrder\": [ \"Alpha\", \"Beta\" ], \"GroupParents\": { \"Alpha\": \"Beta\", \"Beta\": \"Alpha\" } }");
+            var before = File.ReadAllText(path);
+            var writtenBefore = File.GetLastWriteTimeUtc(path);
+
+            // Act
+            var loaded = SettingsStore.Load(configDir);
+
+            // Assert: the loaded settings are repaired, the file is as it was
+            Assert.Multiple(
+                () => Assert.Equal(string.Empty, loaded.GroupParents["Alpha"]),
+                () => Assert.Equal(before, File.ReadAllText(path)),
+                () => Assert.Equal(writtenBefore, File.GetLastWriteTimeUtc(path)));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that every damaged shape of the stored hierarchy - a cycle of two, a cycle with a tail, a cycle
+    ///     whose names differ in letter case, duplicate keys in different letter case with different parents, a
+    ///     parent that names a group no repo is in any longer and one that a repo spells in another letter case
+    ///     - is repaired on load and that a further save, load and save changes nothing (a fixed point).
+    /// </summary>
+    /// <param name="repoGroups">The groups of the repos, separated by commas.</param>
+    /// <param name="parentsJson">The stored hierarchy as JSON.</param>
+    [Theory]
+    [InlineData("A,B", "{ \"A\": \"B\", \"B\": \"A\" }")]
+    [InlineData("A,B,C,D", "{ \"A\": \"B\", \"B\": \"C\", \"C\": \"A\", \"D\": \"C\" }")]
+    [InlineData("A,B", "{ \"a\": \"B\", \"b\": \"A\" }")]
+    [InlineData("Work,Client,Other", "{ \"Work\": \"Client\", \"work\": \"Other\" }")]
+    [InlineData("Work", "{ \"Work\": \"Gone\", \"Ghost\": \"Work\" }")]
+    [InlineData("Work,Client", "{ \"Work\": \"client\", \"CLIENT\": \"work\" }")]
+    public void SettingsStore_Load_DamagedHierarchyShapes_AreRepairedAndAFurtherLoadSaveIsAFixedPoint(
+        string repoGroups, string parentsJson)
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(configDir, "settings.json");
+            var repos = string.Join(
+                ", ",
+                repoGroups.Split(',').Select((name, index) => $"{{ \"Path\": \"repo{index}\", \"GroupName\": \"{name}\" }}"));
+            File.WriteAllText(path, $"{{ \"RecentRepos\": [ {repos} ], \"GroupParents\": {parentsJson} }}");
+
+            // Act
+            var first = SettingsStore.Load(configDir);
+            SettingsStore.Save(first, configDir);
+            var firstText = File.ReadAllText(path);
+            var second = SettingsStore.Load(configDir);
+            SettingsStore.Save(second, configDir);
+            var secondText = File.ReadAllText(path);
+
+            // Assert: no cycle is left, every group of the repos is still there, and the save is stable
+            var hierarchy = new RepoGroupHierarchy(first.GetGroupNames(), first.GroupParents, first.GroupOrder);
+            Assert.Multiple(
+                () => Assert.Equal(firstText, secondText),
+                () => Assert.Equal(
+                    first.GroupParents.OrderBy(pair => pair.Key, StringComparer.Ordinal),
+                    second.GroupParents.OrderBy(pair => pair.Key, StringComparer.Ordinal)),
+                () => Assert.Equal(first.GetGroupNames().Count, hierarchy.GetTreeOrder().Count),
+                () => Assert.All(
+                    repoGroups.Split(','),
+                    name => Assert.Contains(name, first.GetGroupNames(), RepoGroupName.Comparer)),
+                () => Assert.All(first.GroupParents.Keys, name => Assert.True(hierarchy.Contains(name))));
         }
         finally
         {

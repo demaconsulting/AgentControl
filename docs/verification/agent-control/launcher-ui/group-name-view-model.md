@@ -31,25 +31,33 @@ N/A - standard test environment (no window, no files and no processes are involv
 #### Test Scenarios
 
 **GroupNameViewModel_ValidatesAsTyped**: A new-group prompt has a name one over the limit typed and then exactly at
-the limit, and a valid name typed; the message and `CanAccept` follow the current text each time. This scenario is
-tested by `GroupNameViewModel_TooLongName_ShowsLengthMessage` and
-`GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName`, covering `AgentControl-GroupNameViewModel-ValidatesAsTyped`.
+the limit, and a valid name typed; the message and `CanAccept` follow the current text each time. Changing the text
+announces a change of the text, the message, the hint and whether the name can be accepted, once per real change. This
+scenario is tested by `GroupNameViewModel_TooLongName_ShowsLengthMessage`,
+`GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName` and
+`GroupNameViewModel_Text_RaisesChangeNotificationsForTheDerivedState`, covering
+`AgentControl-GroupNameViewModel-ValidatesAsTyped`.
 
 **GroupNameViewModel_NeutralUntilTyped**: A new-group prompt with nothing typed has no error and cannot be accepted (the
 accept command cannot execute). This scenario is tested by `GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName`,
 covering `AgentControl-GroupNameViewModel-NeutralUntilTyped`.
 
 **GroupNameViewModel_RefusesBlankName**: A blank name is typed; the message says it cannot be blank, the name cannot be
-accepted and nothing completes. This scenario is tested by `GroupNameViewModel_InvalidName_ShowsMessageAndCannotAccept`,
-covering `AgentControl-GroupNameViewModel-RefusesBlankName`.
+accepted and nothing completes - in the new-group prompt, in the rename prompt and in the new-subgroup prompt. This
+scenario is tested by `GroupNameViewModel_InvalidName_ShowsMessageAndCannotAccept` and
+`GroupNameViewModel_BlankBuiltInAndTooLongNames_AreRefusedInEveryMode`, covering
+`AgentControl-GroupNameViewModel-RefusesBlankName`.
 
 **GroupNameViewModel_RefusesTooLongName**: A name one over the limit shows the message that names the limit and cannot
-be accepted; a name of exactly the limit has no error and can be accepted. This scenario is tested by
-`GroupNameViewModel_TooLongName_ShowsLengthMessage`, covering `AgentControl-GroupNameViewModel-RefusesTooLongName`.
+be accepted, in the new-group, rename and new-subgroup prompts; a name of exactly the limit has no error and can be
+accepted. This scenario is tested by `GroupNameViewModel_TooLongName_ShowsLengthMessage` and
+`GroupNameViewModel_BlankBuiltInAndTooLongNames_AreRefusedInEveryMode`, covering
+`AgentControl-GroupNameViewModel-RefusesTooLongName`.
 
 **GroupNameViewModel_RefusesBuiltInNames**: The reserved names `favorites` and `Ungrouped` are typed; the message
-says they are built in, they cannot be accepted and nothing completes. This scenario is tested by
-`GroupNameViewModel_InvalidName_ShowsMessageAndCannotAccept`, covering
+says they are built in, they cannot be accepted and nothing completes - also in the rename and the new-subgroup prompt,
+where no hint is shown either. This scenario is tested by `GroupNameViewModel_InvalidName_ShowsMessageAndCannotAccept`
+and `GroupNameViewModel_BlankBuiltInAndTooLongNames_AreRefusedInEveryMode`, covering
 `AgentControl-GroupNameViewModel-RefusesBuiltInNames`.
 
 **GroupNameViewModel_AcceptsUsableName**: A valid name padded with spaces and with repeated inner spaces has no error

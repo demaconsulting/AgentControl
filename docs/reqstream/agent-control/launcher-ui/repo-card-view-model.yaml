@@ -988,6 +988,7 @@ sections:
           chooses it.
         tests:
           - RepoCardViewModel_RemoveMenuText_FollowsTheSelectionSize
+          - RepoCardViewModel_SelectionSize_ChangesRemoveAndMoveMenuTextAndNotifies
 
       - id: AgentControl-RepoCardViewModel-MoveToGroupMenuText
         title: >-
@@ -999,6 +1000,7 @@ sections:
           selection when its card is selected, so the item must say so before the user chooses it.
         tests:
           - RepoCardViewModel_MoveToGroupMenuText_FollowsTheSelectionSize
+          - RepoCardViewModel_SelectionSize_ChangesRemoveAndMoveMenuTextAndNotifies
 
       - id: AgentControl-RepoCardViewModel-GroupDepthIndent
         title: >-
@@ -1009,6 +1011,7 @@ sections:
           A repo listed in a nested group must line up with the header of the group that lists it.
         tests:
           - RepoCardViewModel_Depth_SetsIndentAndNotifies
+          - RepoCardViewModel_Depth_NegativeIsNotIndentedAndSameValueIsSilent
 
       - id: AgentControl-RepoCardViewModel-CardColor
         title: >-

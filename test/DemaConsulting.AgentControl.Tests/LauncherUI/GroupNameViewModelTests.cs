@@ -85,6 +85,77 @@ public class GroupNameViewModelTests
     }
 
     /// <summary>
+    ///     Test that a blank name, a built-in section's name and a name over the limit are refused, with the
+    ///     same message and without completing, whether a group is created, renamed or created inside
+    ///     another group.
+    /// </summary>
+    /// <param name="mode">How the prompt is opened: <c>new</c>, <c>rename</c> or <c>subgroup</c>.</param>
+    /// <param name="text">The typed text.</param>
+    /// <param name="expectedMessagePart">A part of the expected message.</param>
+    [Theory]
+    [InlineData("new", "   ", "cannot be blank")]
+    [InlineData("rename", "   ", "cannot be blank")]
+    [InlineData("subgroup", "   ", "cannot be blank")]
+    [InlineData("new", "FAVORITES", "built-in")]
+    [InlineData("rename", "Ungrouped", "built-in")]
+    [InlineData("subgroup", "favorites", "built-in")]
+    [InlineData("new", "TooLong", "at most 40")]
+    [InlineData("rename", "TooLong", "at most 40")]
+    [InlineData("subgroup", "TooLong", "at most 40")]
+    public void GroupNameViewModel_BlankBuiltInAndTooLongNames_AreRefusedInEveryMode(
+        string mode, string text, string expectedMessagePart)
+    {
+        // Arrange
+        var viewModel = mode switch
+        {
+            "rename" => new GroupNameViewModel("Rename group", "New name:", "Rename", ["Home", "Work"], renaming: "Work"),
+            "subgroup" => new GroupNameViewModel("New subgroup", "Name:", "Create", ["Home", "Work"], requireNewName: true),
+            _ => CreateNew("Home", "Work")
+        };
+        var completed = false;
+        viewModel.Completed += (_, _) => completed = true;
+
+        // Act
+        viewModel.Text = text == "TooLong" ? new string('x', RepoGroupName.MaxLength + 1) : text;
+        viewModel.AcceptCommand.Execute(null);
+
+        // Assert
+        Assert.True(viewModel.HasError);
+        Assert.Contains(expectedMessagePart, viewModel.ErrorText, StringComparison.Ordinal);
+        Assert.False(viewModel.CanAccept);
+        Assert.False(viewModel.HasHint);
+        Assert.False(completed);
+    }
+
+    /// <summary>
+    ///     Test that changing the typed text announces a change of the message, the hint and whether the name
+    ///     can be accepted - once per real change - so the window follows the current text.
+    /// </summary>
+    [Fact]
+    public void GroupNameViewModel_Text_RaisesChangeNotificationsForTheDerivedState()
+    {
+        // Arrange
+        var viewModel = CreateNew("Work");
+        var changed = new List<string?>();
+        viewModel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        // Act
+        viewModel.Text = "work";
+        var afterChange = changed.ToList();
+        viewModel.Text = "work";
+
+        // Assert: every derived property was announced, and a second identical text announced nothing more
+        Assert.Contains(nameof(GroupNameViewModel.Text), afterChange);
+        Assert.Contains(nameof(GroupNameViewModel.ErrorText), afterChange);
+        Assert.Contains(nameof(GroupNameViewModel.HasError), afterChange);
+        Assert.Contains(nameof(GroupNameViewModel.HintText), afterChange);
+        Assert.Contains(nameof(GroupNameViewModel.HasHint), afterChange);
+        Assert.Contains(nameof(GroupNameViewModel.CanAccept), afterChange);
+        Assert.Equal(afterChange.Count, changed.Count);
+        Assert.True(viewModel.AcceptCommand.CanExecute(null));
+    }
+
+    /// <summary>
     ///     Test that a name over the limit is refused with its length and that exactly the limit is fine.
     /// </summary>
     [Fact]

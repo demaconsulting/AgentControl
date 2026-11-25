@@ -508,4 +508,89 @@ public class RepoGroupHeaderViewModelTests
         Assert.DoesNotContain("ungrouped", header.RemoveGroupTooltip);
         Assert.Contains(nameof(RepoGroupHeaderViewModel.RemoveGroupTooltip), changed);
     }
+
+    /// <summary>
+    ///     Test that the owner saying a group has no contents any more takes the delete-with-contents item
+    ///     away again, brings back the plain wording and announces the change.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHeaderViewModel_UpdateContents_FalseAfterTrue_RevertsTextAndCommand()
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Work");
+        header.UpdateContents(true);
+        var changed = new List<string?>();
+        header.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        // Act
+        header.UpdateContents(false);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.False(header.HasContents),
+            () => Assert.False(header.RemoveGroupWithContentsCommand.CanExecute(null)),
+            () => Assert.Equal("Delete group", header.RemoveGroupText),
+            () => Assert.Contains(nameof(RepoGroupHeaderViewModel.HasContents), changed),
+            () => Assert.Contains(nameof(RepoGroupHeaderViewModel.RemoveGroupText), changed));
+    }
+
+    /// <summary>
+    ///     Test that a nested group is returned to the top level by giving it no parent: its depth, parent and
+    ///     indent are cleared and its accessible name no longer says it is inside a group; and that a negative
+    ///     depth reads as 0, so it is not indented.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHeaderViewModel_UpdatePlace_BackToTopLevelAndNegativeDepth_AreNotIndented()
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Project");
+        header.Update(count: 2, isCollapsed: false, isToggleEnabled: true);
+        header.UpdatePlace(depth: 2, parentName: "Client");
+
+        // Act
+        header.UpdatePlace(depth: 0, parentName: null);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal(0, header.Depth),
+            () => Assert.Null(header.ParentName),
+            () => Assert.False(header.HasParent),
+            () => Assert.Equal(0, header.IndentWidth),
+            () => Assert.Equal("Project, 2 repos, expanded", header.AccessibleName));
+
+        // Act: a negative depth
+        header.UpdatePlace(depth: -4, parentName: "Client");
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal(0, header.Depth),
+            () => Assert.Equal(0, header.IndentWidth));
+    }
+
+    /// <summary>
+    ///     Test that Favorites and Ungrouped, whichever of them it is, never offer Move up, Move down or Sort by
+    ///     name, whatever the owner says, each with an explanation as its tooltip.
+    /// </summary>
+    /// <param name="kindName">The name of the kind of built-in section.</param>
+    [Theory]
+    [InlineData(nameof(RepoGroupKind.Favorites))]
+    [InlineData(nameof(RepoGroupKind.Ungrouped))]
+    public void RepoGroupHeaderViewModel_UpdateOrderAndSort_BuiltInSection_NeverOffersMoveOrSort(string kindName)
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(Enum.Parse<RepoGroupKind>(kindName), "Section");
+
+        // Act
+        header.UpdateOrder(null, null);
+        header.UpdateSort(null);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.False(header.MoveUpCommand.CanExecute(null)),
+            () => Assert.False(header.MoveDownCommand.CanExecute(null)),
+            () => Assert.False(header.SortByNameCommand.CanExecute(null)),
+            () => Assert.False(string.IsNullOrWhiteSpace(header.MoveUpTooltip)),
+            () => Assert.False(string.IsNullOrWhiteSpace(header.MoveDownTooltip)),
+            () => Assert.False(string.IsNullOrWhiteSpace(header.SortByNameTooltip)));
+    }
 }

@@ -93,10 +93,13 @@ This scenario is tested by `RepoGroupHeaderViewModel_NewSubgroupCommand_RaisesRe
 given depth 40 its indent stops at the deepest indented level while its depth stays 40. A blank, empty or missing parent
 name (also after a real one) leaves the group not inside any group, with an accessible name that does not end in
 `inside`. *Favorites* and *Ungrouped*
-headers given a depth and a parent stay top level. This scenario is tested by
+headers given a depth and a parent stay top level. A nested group given depth 0 and no parent is a top-level group
+again (no depth, parent or indent, and an accessible name without `inside`), and a negative depth reads as 0, with no
+indent. This scenario is tested by
 `RepoGroupHeaderViewModel_UpdatePlace_DescribesDepthParentIndentAndDirectCount`, the theory
-`RepoGroupHeaderViewModel_BlankParentName_IsNotNested` and the theory
-`RepoGroupHeaderViewModel_UpdatePlace_BuiltInSection_StaysTopLevel`, covering
+`RepoGroupHeaderViewModel_BlankParentName_IsNotNested`, the theory
+`RepoGroupHeaderViewModel_UpdatePlace_BuiltInSection_StaysTopLevel` and
+`RepoGroupHeaderViewModel_UpdatePlace_BackToTopLevelAndNegativeDepth_AreNotIndented`, covering
 `AgentControl-RepoGroupHeaderViewModel-NestedPlace`.
 
 **RepoGroupHeaderViewModel_ShowsGroupColor**: A user group's header starts without a color (`Group color: None`); given
@@ -112,16 +115,20 @@ owner makes both available, executing them raises an up and then a down request 
 after the owner gives a reason for up only, up cannot execute and down can. A move made unavailable with a reason shows
 that reason as its tooltip (with the tooltip's change notification) while the available one says what it does (it moves
 the group one place among its sibling groups), and a
-*Favorites* header told that both moves are available still offers neither and still has a non-empty tooltip. This
-scenario is tested by `RepoGroupHeaderViewModel_MoveCommands_RaiseRequestsAndFollowAvailability` and
-`RepoGroupHeaderViewModel_UpdateOrder_DisabledMoveExplainsWhy`, covering
+*Favorites* header told that both moves are available still offers neither and still has a non-empty tooltip, as an
+*Ungrouped* header does. This
+scenario is tested by `RepoGroupHeaderViewModel_MoveCommands_RaiseRequestsAndFollowAvailability`,
+`RepoGroupHeaderViewModel_UpdateOrder_DisabledMoveExplainsWhy` and
+`RepoGroupHeaderViewModel_UpdateOrderAndSort_BuiltInSection_NeverOffersMoveOrSort`, covering
 `AgentControl-RepoGroupHeaderViewModel-MoveRequests`.
 
 **RepoGroupHeaderViewModel_SortByNameRequest**: A new user group's Sort by name command cannot execute; after the owner
 makes sorting available, executing it raises a sort request and the tooltip says what the item does; after the owner
 gives a reason the command cannot execute and the reason is the tooltip (with its change notification). An *Ungrouped*
-header told that sorting is available still offers none and still has a non-empty tooltip. This scenario is tested by
-`RepoGroupHeaderViewModel_UpdateSort_AvailabilityTooltipAndRequest`, covering
+header told that sorting is available still offers none and still has a non-empty tooltip, as does a *Favorites* header.
+This scenario is tested by
+`RepoGroupHeaderViewModel_UpdateSort_AvailabilityTooltipAndRequest` and
+`RepoGroupHeaderViewModel_UpdateOrderAndSort_BuiltInSection_NeverOffersMoveOrSort`, covering
 `AgentControl-RepoGroupHeaderViewModel-SortByNameRequest`.
 
 **RepoGroupHeaderViewModel_RemoveGroupWithContentsRequest**: A new user group has no contents, so its
@@ -129,10 +136,13 @@ delete-with-contents command cannot execute and its plain delete item is named "
 has contents the command can execute, executing it raises a delete-with-contents request (and not the plain delete's),
 executing the plain delete raises its own request, and the plain item is named "Delete group, keep contents" with a
 tooltip that says the repos and subgroups are kept, and, for a top-level group, that the repos become ungrouped and the
-subgroups top-level groups; once the group is inside another group the tooltip says they stay in the group it is
-inside, and says so through a change notification. A *Favorites* header told that it has contents has none. This
-scenario is tested by `RepoGroupHeaderViewModel_UpdateContents_OffersDeleteWithContentsOnlyForGroupsWithContents`,
-covering `AgentControl-RepoGroupHeaderViewModel-RemoveGroupWithContentsRequest` and the tooltip of
+subgroups top-level groups; once the group is inside another group the tooltip says they stay in the group it is inside,
+and says so through a change notification. A *Favorites* header told that it has contents has none, and a group told
+again that it has none goes back to the plain delete item and loses the delete-with-contents command, announcing the
+change (`RepoGroupHeaderViewModel_UpdateContents_FalseAfterTrue_RevertsTextAndCommand`). This scenario is tested by
+`RepoGroupHeaderViewModel_UpdateContents_OffersDeleteWithContentsOnlyForGroupsWithContents` and
+`RepoGroupHeaderViewModel_UpdateContents_FalseAfterTrue_RevertsTextAndCommand`, covering
+`AgentControl-RepoGroupHeaderViewModel-RemoveGroupWithContentsRequest` and the tooltip of
 `AgentControl-RepoGroupHeaderViewModel-RemoveGroupRequest`.
 
 **RepoGroupHeaderViewModel_RequiresName**: A blank name and a `null` name are refused. This scenario is tested by

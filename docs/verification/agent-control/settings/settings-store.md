@@ -37,8 +37,9 @@ N/A - standard test environment.
   colors, built-in section names and entries of groups no repo is in (and that are not in the hierarchy) are dropped
   without failing the load and are not saved back.
 - The group hierarchy round-trips; a file without it loads with every group top level; a damaged one (wrong types,
-  unknown, self or cyclic parents, built-in section names) is repaired without failing the load and the repair is not
-  saved back as damage; a group in the hierarchy survives with no repo in it.
+  unknown, self or cyclic parents, built-in section names) is repaired without failing the load and the load does not
+  rewrite the file (the repair is what a later save writes, and saving and loading again changes nothing); a group in
+  the hierarchy survives with no repo in it.
 - The theme round-trips by name, a settings file without a theme loads as the system default, and an unknown or
   invalid theme value reads as the system default without failing the load.
 - A save leaves only the settings file, holding the latest content.
@@ -225,12 +226,20 @@ tested by `SettingsStore_SaveThenLoad_GroupParents_RoundTrip` and
 `AgentControl-SettingsStore-GroupParents` and `AgentControl-SettingsStore-GroupParentsDefaults`.
 
 **SettingsStore_GroupParents_DamagedValuesAreRepaired**: Parents that name an unknown group, a group that is its own
-parent or form a cycle load without failing, the cycle cut at the group that sorts first, and the repair is not written
-back as damage; entries of the built-in section names or blank names are dropped and a built-in section as a parent
-means top level; a hierarchy that is null, a number, a string or an array reads as empty, and one with members that are
-numbers, arrays or objects keeps only the usable entries, the setting after it still being read; a hierarchy in another
-letter case is spelled like the groups. This scenario is tested by
-`SettingsStore_Load_UnknownSelfAndCyclicParents_AreRepairedAndNotSavedBack`,
+parent or form a cycle load without failing, the cycle cut at the group that sorts first, and the load itself does not
+rewrite the file (`SettingsStore_Load_DamagedHierarchy_DoesNotRewriteTheFile`: the file is byte-for-byte and in its
+write time as it was; only the one-time seeding of the repo order of a file that does not mark it yet writes at
+load); a save of the repaired settings is what writes the repair; entries of the built-in section names or blank names
+are dropped and a built-in section as a parent means top level; a hierarchy that is null, a number, a string or an
+array reads as empty, and one with members that are numbers, arrays or objects keeps only the usable entries, the
+setting after it still being read; a hierarchy in another letter case is spelled like the groups. Six damaged shapes -
+a cycle of two, a cycle with a tail, a cycle whose names differ in letter case, duplicate keys in other letter case with
+different parents, a parent naming a group no repo is in and one that a repo spells in another letter case - are each
+repaired so that no group is lost and a second save, load and save writes the same text
+(`SettingsStore_Load_DamagedHierarchyShapes_AreRepairedAndAFurtherLoadSaveIsAFixedPoint`). This scenario is tested by
+`SettingsStore_Load_UnknownSelfAndCyclicParents_AreRepairedOnLoad`,
+`SettingsStore_Load_DamagedHierarchy_DoesNotRewriteTheFile`,
+`SettingsStore_Load_DamagedHierarchyShapes_AreRepairedAndAFurtherLoadSaveIsAFixedPoint`,
 `SettingsStore_Load_ReservedAndBlankNamesInGroupParents_AreDropped`,
 `SettingsStore_Load_DamagedGroupParents_KeepsOnlyUsableEntries` and
 `SettingsStore_Load_GroupParentsInOtherLetterCase_AreSpelledLikeTheGroups`, covering

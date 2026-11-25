@@ -114,6 +114,7 @@ sections:
           group with nothing in it has no contents to delete or to keep.
         tests:
           - RepoGroupHeaderViewModel_UpdateContents_OffersDeleteWithContentsOnlyForGroupsWithContents
+          - RepoGroupHeaderViewModel_UpdateContents_FalseAfterTrue_RevertsTextAndCommand
 
       - id: AgentControl-RepoGroupHeaderViewModel-AddRepoRequest
         title: >-
@@ -150,6 +151,7 @@ sections:
           - RepoGroupHeaderViewModel_UpdatePlace_DescribesDepthParentIndentAndDirectCount
           - RepoGroupHeaderViewModel_BlankParentName_IsNotNested
           - RepoGroupHeaderViewModel_UpdatePlace_BuiltInSection_StaysTopLevel
+          - RepoGroupHeaderViewModel_UpdatePlace_BackToTopLevelAndNegativeDepth_AreNotIndented
 
       - id: AgentControl-RepoGroupHeaderViewModel-RequiresName
         title: >-
@@ -186,6 +188,7 @@ sections:
         tests:
           - RepoGroupHeaderViewModel_MoveCommands_RaiseRequestsAndFollowAvailability
           - RepoGroupHeaderViewModel_UpdateOrder_DisabledMoveExplainsWhy
+          - RepoGroupHeaderViewModel_UpdateOrderAndSort_BuiltInSection_NeverOffersMoveOrSort
 
       - id: AgentControl-RepoGroupHeaderViewModel-SortByNameRequest
         title: >-
@@ -198,3 +201,4 @@ sections:
           and shows why sorting is not offered.
         tests:
           - RepoGroupHeaderViewModel_UpdateSort_AvailabilityTooltipAndRequest
+          - RepoGroupHeaderViewModel_UpdateOrderAndSort_BuiltInSection_NeverOffersMoveOrSort

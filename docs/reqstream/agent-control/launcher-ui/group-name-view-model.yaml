@@ -18,6 +18,7 @@ sections:
         tests:
           - GroupNameViewModel_TooLongName_ShowsLengthMessage
           - GroupNameViewModel_NewGroup_ValidName_AcceptsCleanedName
+          - GroupNameViewModel_Text_RaisesChangeNotificationsForTheDerivedState
 
       - id: AgentControl-GroupNameViewModel-NeutralUntilTyped
         title: >-
@@ -36,6 +37,7 @@ sections:
           A group with no name could not be shown or told apart from no group.
         tests:
           - GroupNameViewModel_InvalidName_ShowsMessageAndCannotAccept
+          - GroupNameViewModel_BlankBuiltInAndTooLongNames_AreRefusedInEveryMode
 
       - id: AgentControl-GroupNameViewModel-RefusesTooLongName
         title: >-
@@ -46,6 +48,7 @@ sections:
           name keeps what the user typed and what is stored the same.
         tests:
           - GroupNameViewModel_TooLongName_ShowsLengthMessage
+          - GroupNameViewModel_BlankBuiltInAndTooLongNames_AreRefusedInEveryMode
 
       - id: AgentControl-GroupNameViewModel-RefusesBuiltInNames
         title: >-
@@ -56,6 +59,7 @@ sections:
           sections would carry the same name.
         tests:
           - GroupNameViewModel_InvalidName_ShowsMessageAndCannotAccept
+          - GroupNameViewModel_BlankBuiltInAndTooLongNames_AreRefusedInEveryMode
 
       - id: AgentControl-GroupNameViewModel-AcceptsUsableName
         title: >-

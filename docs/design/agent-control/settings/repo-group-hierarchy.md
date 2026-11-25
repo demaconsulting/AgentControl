@@ -9,10 +9,15 @@ groups of one level are listed, which moves keep the tree a tree, what deleting 
 the tree, and how stored parents are repaired. The rules are one shared, pure unit so that the settings loader
 (`AppSettings.RepairGroupSettings`, which must tolerate any stored text) and the main window's view model (which shows,
 moves and deletes groups) agree. Its behavior is specified by the unit requirements
-`AgentControl-RepoGroupHierarchy-ArrangeLevel`, `-FlatListIsTopLevel`, `-TreeOrder`, `-Navigation`, `-AnyDepth`,
-`-RefusesLoops`, `-PutInsideRegisters`, `-PopKeepsSubgroups`, `-PopForgetsGroup`, `-RepairDropsUnusable`,
-`-RepairRegistersParents` and
-`-RepairCycles` (each prefixed `AgentControl-RepoGroupHierarchy`).
+`AgentControl-RepoGroupHierarchy-ArrangeLevel`, `-FlatListIsTopLevel`, `-GroupNamesSanitized`, `-RefusesNullInputs`,
+`-TreeOrder`, `-NavigationParent`, `-NavigationChildren`, `-NavigationDescendants`, `-NavigationSubtree`,
+`-NavigationAncestors`, `-NavigationDepth`, `-NavigationRegistered`, `-NavigationSameOrDescendant`,
+`-NavigationSpelling`, `-NavigationUnknownName`, `-AnyDepth`, `-RefusesLoops`, `-RefusesUnknownGroups`,
+`-AllowsTopLevelAndOtherGroups`, `-PutInsideRegistersMovedGroupAndAncestors`, `-PutInsideTopLevelKeepsRegistration`,
+`-PopKeepsSubgroups`, `-PopForgetsGroup`, `-PopUnknownGroupRefused`, `-RepairDropsBlankAndReservedKeys`,
+`-RepairKeepsFirstCaseVariant`, `-RepairSpellsLikeRepos`, `-RepairReadsBadParentAsTopLevel`,
+`-RepairRegistersParents`, `-RepairCutsCycles`, `-RepairIsDeterministicAndIdempotent` and
+`-DamagedTreeStillListsEveryGroup` (each prefixed `AgentControl-RepoGroupHierarchy`).
 
 **Design decisions** (recorded here because the requirements say what, not how):
 
@@ -65,16 +70,19 @@ every group a registered group is inside is registered too.
 - *Returns*: `Dictionary<string,string>` — a new dictionary whose keys are the registered groups.
 - *Algorithm*: every key and parent goes through `RepoGroupName.Sanitize`; an entry with a blank or reserved key is
   dropped and, of keys differing only in letter case, the first wins, spelled as the repos spell the group
-  (`-RepairDropsUnusable`); a parent that is blank, reserved, the group itself, or neither a registered group nor a
-  group a repo is in means top level; cycles are cut at the member that sorts first, ignoring letter case, which does
-  not depend on the order the entries are stored in and so is deterministic and idempotent (`-RepairCycles`); finally
-  the parent of every registered group is registered (a parent only a repo names becomes a top-level key,
-  `-RepairRegistersParents`).
+  (`-RepairDropsBlankAndReservedKeys`, `-RepairKeepsFirstCaseVariant`, `-RepairSpellsLikeRepos`); a parent that is
+  blank, reserved, the group itself, or neither a registered group nor a group a repo is in means top level
+  (`-RepairReadsBadParentAsTopLevel`); cycles are cut at the member that sorts first, ignoring letter case, which does
+  not depend on the order the entries are stored in and so is deterministic and idempotent (`-RepairCutsCycles`,
+  `-RepairIsDeterministicAndIdempotent`; which of two keys that differ only in letter case is kept does depend on the
+  stored order - the first wins); finally the parent of every registered group is registered (a parent only a repo names
+  becomes a top-level key, `-RepairRegistersParents`).
 
 **Constructor**: Builds the repaired view. It is tolerant by design: an entry about a group that does not exist is
 ignored, a parent that does not exist or is the group itself means top level, a cycle is cut like `RepairParents`
 does, and the parent of every registered group is registered too (as `RepairParents` does,
-`-RepairRegistersParents`), so a damaged file still shows every group (`-RepairCycles`) and the invariant below holds
+`-RepairRegistersParents`), so a damaged file still shows every group (`-DamagedTreeStillListsEveryGroup`) and the
+invariant below holds
 even for settings that were not repaired first.
 
 **Groups** (property): The existing groups, one spelling each (`IReadOnlyCollection<string>`, in no particular order).
@@ -82,32 +90,37 @@ Use `GetTreeOrder` for the order the list shows.
 
 **GetTreeOrder / GetChildren / GetDescendants / GetSubtree / GetAncestors / GetDepth / GetParent / IsSameOrDescendant /
 Contains / IsRegistered / GetName**: Read-only answers about the tree, all ignoring letter case and returning the
-spelling the group has. `GetTreeOrder` lists every group depth first, each followed by its subtree, with the groups of
-a level in `ArrangeGroups` order (`-TreeOrder`, `-FlatListIsTopLevel` for a file without a hierarchy);
-the others answer `-Navigation`. An unknown name gives `null`, an empty list or depth 0, never an exception.
+spelling the group has. `GetTreeOrder` lists every group depth first, each followed by its subtree, with the groups of a
+level in `ArrangeGroups` order (`-TreeOrder`, `-FlatListIsTopLevel` for a file without a hierarchy); the others answer
+`-NavigationParent` (`GetParent`), `-NavigationChildren`, `-NavigationDescendants`, `-NavigationSubtree`,
+`-NavigationAncestors`, `-NavigationDepth`, `-NavigationRegistered` (`IsRegistered`, `Contains`),
+`-NavigationSameOrDescendant` and `-NavigationSpelling` (`GetName`). An unknown name gives `null`, an empty list, depth
+0 or `false`, never an exception (`-NavigationUnknownName`).
 
-**CanMove / PutInside**: `CanMove(group, newParent)` is `false` for a group or parent that does not exist (the built-in
-sections never do) and when the new parent is the group itself or one of its descendants (`-RefusesLoops`);
+**CanMove / PutInside**: `CanMove(group, newParent)` is `false` for a group or parent that does not exist - the built-in
+sections never do (`-RefusesUnknownGroups`) - and when the new parent is the group itself or one of its descendants
+(`-RefusesLoops`) and `true` otherwise (`-AllowsTopLevelAndOtherGroups`);
 `newParent == null` means the top level. `PutInside` returns the new stored parents: a group put inside another group is
-registered together with every group it is now inside, a group put at the top level keeps the registration it had (an
+registered together with every group it is now inside (`-PutInsideRegistersMovedGroupAndAncestors`), a group put at the
+top level keeps the registration it had (an
 ordinary top-level group that is only reordered stays unregistered, so flat lists behave exactly as before)
-(`-PutInsideRegisters`); it does not change the order, which the caller places among the new
+(`-PutInsideTopLevelKeepsRegistration`); it does not change the order, which the caller places among the new
 siblings. *Preconditions*: `CanMove` is `true`; otherwise `InvalidOperationException`.
 
 **Pop**: The stored values after the group is deleted but its contents are kept: its subgroups get the group's parent
 (or the top level) and take the group's *displayed* place among its siblings, whether or not the group has a stored
-place of its own (`-PopKeepsSubgroups`). The level the group was in is read as `GetChildren(parent)` lists it, the
-group is replaced there by its own subgroups in their listed order, and that level is written to the stored order in
-full - after every stored entry that names none of its members - so the arrangement the user saw stays put, the
-alphabetical siblings of a group that was never dragged included; every other level keeps its relative order, because
-only the relative order within a level means anything in the one flat list. Every stored occurrence of the group (in any
-letter case, also repeated) and of its subgroups and siblings is replaced by that one run, so the result names the
-group nowhere and each subgroup once (`-PopForgetsGroup`). A group with no subgroups only leaves the stored order, so
-nothing is written down for its siblings. The group's key is forgotten and its subgroups are stored with the group's
-parent (the empty string at the top level). It does not touch repos: moving the group's own repos to the parent group
-is the caller's job (`MainWindowViewModel.RemoveGroup`). *Preconditions*: the group exists; otherwise
-`ArgumentException`. (This supersedes the first design, in which a group with no stored place left its subgroups where
-they were, so they fell to their alphabetical place among their new siblings.)
+place of its own (`-PopKeepsSubgroups`). The level the group was in is read as `GetChildren(parent)` lists it, the group
+is replaced there by its own subgroups in their listed order, and that level is written to the stored order in full -
+after every stored entry that names none of its members - so the arrangement the user saw stays put, the alphabetical
+siblings of a group that was never dragged included; every other level keeps its relative order, because only the
+relative order within a level means anything in the one flat list. Every stored occurrence of the group (in any letter
+case, also repeated) and of its subgroups and siblings is replaced by that one run, so the result names the group
+nowhere and each subgroup once (`-PopForgetsGroup`). A group with no subgroups only leaves the stored order, so nothing
+is written down for its siblings. The group's key is forgotten and its subgroups are stored with the group's parent (the
+empty string at the top level). It does not touch repos: moving the group's own repos to the parent group is the
+caller's job (`MainWindowViewModel.RemoveGroup`). *Preconditions*: the group exists; otherwise `ArgumentException`
+(`-PopUnknownGroupRefused`). (This supersedes the first design, in which a group with no stored place left its subgroups
+where they were, so they fell to their alphabetical place among their new siblings.)
 
 **GetStoredParents**: The stored form of the repaired hierarchy (registered groups only, empty string for top level),
 used by `PutInside` and `Pop`.
@@ -116,9 +129,10 @@ used by `PutInside` and `Pop`.
 
 Reading never throws: any text, `null` or damaged structure produces a repaired result (`RepairParents`, the
 constructor, the navigation methods). `ArgumentNullException` is thrown by the constructor for `null` group names and by
-`RepairParents` for `null` repo group names. `PutInside` throws `InvalidOperationException` for a move `CanMove` refuses
-and `Pop` throws `ArgumentException` for a group that does not exist; both are programming errors in the caller, which
-asks `CanMove` / checks existence first.
+`RepairParents` for `null` repo group names (`-RefusesNullInputs`). The constructor reads the group names through
+`RepoGroupName.Sanitize` and ignores blank, built-in and repeated names (`-GroupNamesSanitized`). `PutInside` throws
+`InvalidOperationException` for a move `CanMove` refuses and `Pop` throws `ArgumentException` for a group that does not
+exist; both are programming errors in the caller, which asks `CanMove` / checks existence first.
 
 #### Dependencies
 

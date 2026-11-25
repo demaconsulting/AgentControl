@@ -199,16 +199,36 @@ sections:
           - AgentControl-SettingsStore-RegisteredGroupKept
           - AgentControl-RepoGroupHierarchy-ArrangeLevel
           - AgentControl-RepoGroupHierarchy-FlatListIsTopLevel
+          - AgentControl-RepoGroupHierarchy-GroupNamesSanitized
+          - AgentControl-RepoGroupHierarchy-RefusesNullInputs
           - AgentControl-RepoGroupHierarchy-TreeOrder
-          - AgentControl-RepoGroupHierarchy-Navigation
+          - AgentControl-RepoGroupHierarchy-NavigationParent
+          - AgentControl-RepoGroupHierarchy-NavigationChildren
+          - AgentControl-RepoGroupHierarchy-NavigationDescendants
+          - AgentControl-RepoGroupHierarchy-NavigationSubtree
+          - AgentControl-RepoGroupHierarchy-NavigationAncestors
+          - AgentControl-RepoGroupHierarchy-NavigationDepth
+          - AgentControl-RepoGroupHierarchy-NavigationRegistered
+          - AgentControl-RepoGroupHierarchy-NavigationSameOrDescendant
+          - AgentControl-RepoGroupHierarchy-NavigationSpelling
+          - AgentControl-RepoGroupHierarchy-NavigationUnknownName
           - AgentControl-RepoGroupHierarchy-AnyDepth
           - AgentControl-RepoGroupHierarchy-RefusesLoops
-          - AgentControl-RepoGroupHierarchy-PutInsideRegisters
+          - AgentControl-RepoGroupHierarchy-RefusesUnknownGroups
+          - AgentControl-RepoGroupHierarchy-AllowsTopLevelAndOtherGroups
+          - AgentControl-RepoGroupHierarchy-PutInsideRegistersMovedGroupAndAncestors
+          - AgentControl-RepoGroupHierarchy-PutInsideTopLevelKeepsRegistration
           - AgentControl-RepoGroupHierarchy-PopKeepsSubgroups
           - AgentControl-RepoGroupHierarchy-PopForgetsGroup
-          - AgentControl-RepoGroupHierarchy-RepairDropsUnusable
+          - AgentControl-RepoGroupHierarchy-PopUnknownGroupRefused
+          - AgentControl-RepoGroupHierarchy-RepairDropsBlankAndReservedKeys
+          - AgentControl-RepoGroupHierarchy-RepairKeepsFirstCaseVariant
+          - AgentControl-RepoGroupHierarchy-RepairSpellsLikeRepos
+          - AgentControl-RepoGroupHierarchy-RepairReadsBadParentAsTopLevel
           - AgentControl-RepoGroupHierarchy-RepairRegistersParents
-          - AgentControl-RepoGroupHierarchy-RepairCycles
+          - AgentControl-RepoGroupHierarchy-RepairCutsCycles
+          - AgentControl-RepoGroupHierarchy-RepairIsDeterministicAndIdempotent
+          - AgentControl-RepoGroupHierarchy-DamagedTreeStillListsEveryGroup
         tests:
           - SettingsSubsystem_GroupHierarchy_NestedGroupsSurviveSessionsAndDamagedHierarchyIsRepaired
 

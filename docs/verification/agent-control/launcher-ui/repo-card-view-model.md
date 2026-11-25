@@ -832,7 +832,9 @@ favorite that has a group (`AgentControl-RepoCardViewModel-GroupChipForFavorites
 
 **RepoCardViewModel_Depth_SetsIndentAndNotifies**: A card starts at depth 0 with no indent; given depth 2 its indent is
 twice the indent of one level and `IndentWidth` is announced as changed; given depth 100 its indent stops at the deepest
-indented level, the same as a header's. This scenario is tested by `RepoCardViewModel_Depth_SetsIndentAndNotifies`,
+indented level, the same as a header's. A negative depth is not indented at all, and giving the depth it has already
+announces nothing. This scenario is tested by `RepoCardViewModel_Depth_SetsIndentAndNotifies` and
+`RepoCardViewModel_Depth_NegativeIsNotIndentedAndSameValueIsSilent`,
 covering `AgentControl-RepoCardViewModel-GroupDepthIndent`.
 
 **RepoCardViewModel_RemoveMenuText_FollowsTheSelectionSize**: Tested by `RepoMultiSelectTests.cs` (the owner sets the
@@ -840,7 +842,10 @@ selection size). While three cards are selected, the menu text of each of the th
 `Remove 3 selected repos from list` (and the tooltip says `3 selected repos`), the text of a card that is not selected
 is `Remove from list`, and the change is announced; with one card selected the text of every card is `Remove from list`.
 This scenario is tested by `RepoCardViewModel_RemoveMenuText_FollowsTheSelectionSize`, covering
-`AgentControl-RepoCardViewModel-RemoveMenuText`.
+`AgentControl-RepoCardViewModel-RemoveMenuText`. At the card alone (`RepoCardViewModelTests.cs`), giving a card the
+selection size 3, then 1, then 0 changes its "Remove from list" and "Move to group" texts and tooltips accordingly and
+announces each change (`RepoCardViewModel_SelectionSize_ChangesRemoveAndMoveMenuTextAndNotifies`, covering
+`AgentControl-RepoCardViewModel-RemoveMenuText` and `-MoveToGroupMenuText`).
 
 **RepoCardViewModel_MoveToGroupMenuText_FollowsTheSelectionSize**: Tested by `RepoMultiSelectTests.cs` (the owner sets
 the selection size). While three cards are selected, the "Move to group" text of each of the three is
