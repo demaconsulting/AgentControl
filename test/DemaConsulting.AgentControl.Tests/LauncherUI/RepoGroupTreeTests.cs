@@ -494,6 +494,166 @@ public sealed class RepoGroupTreeTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that the groups offered by "Move into group" are every group except the group itself, its
+    ///     descendants (a loop), the group it is inside already and the built-in sections, in tree order.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_GetGroupMoveIntoTargets_ExcludesSelfDescendantsCurrentParentAndBuiltIns()
+    {
+        // Arrange: Client holds Alpha and Project (which holds Deep); Home is a top-level group
+        var viewModel = CreateMoveIntoTree();
+
+        // Act / Assert
+        Assert.Multiple(
+            () => Assert.Equal(["Client", "Alpha", "Project", "Deep"], viewModel.GetGroupMoveIntoTargets("Home")),
+            () => Assert.Equal(["Alpha", "Home"], viewModel.GetGroupMoveIntoTargets("project")),
+            () => Assert.Equal(["Client", "Alpha", "Home"], viewModel.GetGroupMoveIntoTargets("Deep")),
+            () => Assert.Equal(["Home"], viewModel.GetGroupMoveIntoTargets("Client")),
+            () => Assert.Empty(viewModel.GetGroupMoveIntoTargets("Missing")),
+            () => Assert.Empty(viewModel.GetGroupMoveIntoTargets("Favorites")),
+            () => Assert.Empty(viewModel.GetGroupMoveIntoTargets("Ungrouped")));
+    }
+
+    /// <summary>
+    ///     Test that moving a group into another makes it that group's last subgroup, moving it to the top
+    ///     level makes it the last top-level group, a group keeps its repos and subgroups, and the hierarchy
+    ///     and the order are stored.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_MoveGroupInto_IntoAndOutOfGroupsAsLastChildAndSavesOnce()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        var viewModel = CreateMoveIntoTree(configDir);
+        Assert.Equal(
+            ["[Client 2]", "[Alpha 1]", "a1", "[Project 1]", "[Deep 1]", "d1", "[Home 1]", "h1"],
+            Describe(viewModel));
+
+        // Act / Assert: Home goes into Alpha, ahead of Alpha's own repo
+        Assert.True(viewModel.MoveGroupInto("home", "Alpha"));
+        Assert.Equal("Alpha", viewModel.GetGroupParent("Home"));
+        Assert.Equal(
+            ["[Client 3]", "[Alpha 2]", "[Home 1]", "h1", "a1", "[Project 1]", "[Deep 1]", "d1"],
+            Describe(viewModel));
+
+        // Act / Assert: and out to the top level, as the last top-level group
+        Assert.True(viewModel.MoveGroupInto("Home", null));
+        Assert.Null(viewModel.GetGroupParent("Home"));
+        Assert.Equal(
+            ["[Client 2]", "[Alpha 1]", "a1", "[Project 1]", "[Deep 1]", "d1", "[Home 1]", "h1"],
+            Describe(viewModel));
+
+        // Act / Assert: into Client, it becomes the last of Client's subgroups, after Project
+        Assert.True(viewModel.MoveGroupInto("Home", "Client"));
+        Assert.Equal(
+            ["[Client 3]", "[Alpha 1]", "a1", "[Project 1]", "[Deep 1]", "d1", "[Home 1]", "h1"],
+            Describe(viewModel));
+
+        // Act / Assert: a subgroup with its own subgroup moves as a whole
+        Assert.True(viewModel.MoveGroupInto("Project", null));
+        Assert.Equal(
+            ["[Client 2]", "[Alpha 1]", "a1", "[Home 1]", "h1", "[Project 1]", "[Deep 1]", "d1"],
+            Describe(viewModel));
+
+        // Assert: the hierarchy is stored
+        await viewModel.FlushSettingsAsync();
+        var saved = SettingsStore.Load(configDir);
+        Assert.Equal(
+            new Dictionary<string, string>
+            {
+                ["Client"] = string.Empty,
+                ["Alpha"] = "Client",
+                ["Project"] = string.Empty,
+                ["Deep"] = "Project",
+                ["Home"] = "Client"
+            },
+            saved.GroupParents);
+        Assert.Equal(["Client", "Project"], saved.GroupOrder.Where(group => group is "Client" or "Project"));
+    }
+
+    /// <summary>
+    ///     Test that "Move into group" is refused, changing nothing, for a loop, a group it is inside
+    ///     already, a top-level group moved to the top level, a group or target that does not exist, a
+    ///     built-in section and while the filter has text; and that the reason for the disabled item says why.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_MoveGroupInto_RefusedWhileFilteringOrForLoop()
+    {
+        // Arrange
+        var viewModel = CreateMoveIntoTree();
+        var before = Describe(viewModel);
+
+        // Act / Assert: nothing is moved
+        Assert.Multiple(
+            () => Assert.False(viewModel.MoveGroupInto("Client", "Deep")),
+            () => Assert.False(viewModel.MoveGroupInto("Client", "Client")),
+            () => Assert.False(viewModel.MoveGroupInto("Alpha", "Client")),
+            () => Assert.False(viewModel.MoveGroupInto("Home", null)),
+            () => Assert.False(viewModel.MoveGroupInto("Home", "Missing")),
+            () => Assert.False(viewModel.MoveGroupInto("Missing", "Client")),
+            () => Assert.False(viewModel.MoveGroupInto("Favorites", "Client")),
+            () => Assert.False(viewModel.MoveGroupInto("Home", "Favorites")));
+        Assert.Equal(before, Describe(viewModel));
+
+        // Assert: the reasons
+        Assert.Multiple(
+            () => Assert.Null(viewModel.GetGroupMoveIntoDisabledReason("Home")),
+            () => Assert.Null(viewModel.GetGroupMoveIntoDisabledReason("Deep")),
+            () => Assert.Equal(
+                "Favorites always come first and Ungrouped last, so they cannot be moved.",
+                viewModel.GetGroupMoveIntoDisabledReason("Favorites")),
+            () => Assert.Equal(
+                "This group is no longer in the list.", viewModel.GetGroupMoveIntoDisabledReason("Missing")));
+
+        // Act: with filter text it is refused and the reason says so
+        viewModel.FilterText = "h1";
+        Assert.False(viewModel.MoveGroupInto("Home", "Client"));
+        Assert.Equal(
+            MainWindowViewModel.GroupMoveIntoDisabledWhileFilteringMessage,
+            viewModel.GetGroupMoveIntoDisabledReason("Home"));
+    }
+
+    /// <summary>
+    ///     Test that a top-level group with no other group to go into has no "Move into group" choice, and
+    ///     that a nested group always has one (the top level).
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_GetGroupMoveIntoDisabledReason_OnlyGroupHasNowhereToGo()
+    {
+        // Arrange: one top-level group; and a pair where the nested one can still go to the top level
+        var alone = CreateViewModel(parents: null, new Spec("h1", Group: "Home"));
+        var pair = CreateViewModel(
+            new Dictionary<string, string> { ["Client"] = string.Empty, ["Alpha"] = "Client" },
+            new Spec("a1", Group: "Alpha"));
+
+        // Act / Assert
+        Assert.Equal(MainWindowViewModel.GroupMoveIntoNoTargetMessage, alone.GetGroupMoveIntoDisabledReason("Home"));
+        Assert.Equal(MainWindowViewModel.GroupMoveIntoNoTargetMessage, pair.GetGroupMoveIntoDisabledReason("Client"));
+        Assert.Null(pair.GetGroupMoveIntoDisabledReason("Alpha"));
+        Assert.Empty(pair.GetGroupMoveIntoTargets("Alpha"));
+    }
+
+    /// <summary>
+    ///     Creates the tree used by the Move into group tests: Client holds Alpha (<c>a1</c>) and Project,
+    ///     which holds Deep (<c>d1</c>); Home (<c>h1</c>) is a top-level group.
+    /// </summary>
+    /// <param name="configDir">The configuration directory, or <see langword="null"/> for a new one.</param>
+    /// <returns>The view model.</returns>
+    private MainWindowViewModel CreateMoveIntoTree(string? configDir = null) =>
+        CreateViewModel(
+            configDir ?? CreateTempDirectory(),
+            new Dictionary<string, string>
+            {
+                ["Client"] = string.Empty,
+                ["Alpha"] = "Client",
+                ["Project"] = "Client",
+                ["Deep"] = "Project"
+            },
+            new Spec("a1", Group: "Alpha"),
+            new Spec("d1", Group: "Deep"),
+            new Spec("h1", Group: "Home"));
+
+    /// <summary>
     ///     Creates the tree used by most tests: Client holds c1 and the subgroups Project (p1) and
     ///     Alpha (a1); one repo is in no group.
     /// </summary>

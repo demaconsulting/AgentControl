@@ -237,7 +237,9 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   the tree is refused, because a group is identified by its name alone) and creates the group inside that one, even
   with no repo in it yet. A header can be dragged onto another header: its upper third places it before that group,
   its middle third inside it and its lower third after it, at that group's level; a drop onto the group itself or one
-  of its own subgroups is refused. The tree is the user's own choice and is kept in the settings
+  of its own subgroups is refused. The same moves are in the header's menu, which does not need dragging: **Move into
+  group** lists the groups it can go into (and **Move to top level** for a nested group) and puts it there as the last
+  subgroup. The tree is the user's own choice and is kept in the settings
   (`AppSettings.GroupParents`, child to parent, beside the existing group order); `RepoGroupHierarchy` (a `Settings`
   unit) holds the rules - which moves keep it a tree, the order within a level and the repair of a stored tree that was
   edited by hand or is stale - and `MainWindowViewModel` builds the listing from it. Collapsing a group hides its whole
@@ -259,17 +261,19 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   Each asks first and says how many repos and groups are affected and that nothing on disk is deleted; Cancel changes
   nothing. A group with nothing in it offers one plain **Delete group**.
 - *Selecting several repos* (`AgentControl-System-RepoMultiSelect`, `AgentControl-System-RepoMultiSelectActions`): the
-  repo list uses the list control's multiple selection - a plain click selects one card, Ctrl+click adds or removes
-  one, Shift+click selects the range from the last clicked card, and Ctrl+A selects every card. A range follows the
-  order the list shows the cards in, top to bottom - Favorites, then the group tree depth-first, then Ungrouped - and
-  only shown cards are ever selected (a collapsed group's cards and cards the filter hides are not), a section header
-  never is. Selected cards have their own surface color besides the accent border, so the selection never rests on one
-  color, and every selected row reports itself as selected to assistive technology. Dragging any selected card moves
-  all the selected
-  cards together to the drop place, in list order and as one change; dragging a card that is not selected moves it
-  alone. The Delete key, or Remove in the menu of a selected card, removes all the selected cards from the list after
-  one confirmation that says how many go and that nothing on disk is deleted. A plain press on an already selected card
-  keeps the selection until the button is released, so it can start a drag (`RepoListBox`).
+  repo list uses the list control's multiple selection - a plain click selects one card, Ctrl+click adds or removes one,
+  Shift+click selects the range from the last clicked card, and Ctrl+A selects every card. A range follows the order the
+  list shows the cards in, top to bottom - Favorites, then the group tree depth-first, then Ungrouped - and only shown
+  cards are ever selected (a collapsed group's cards and cards the filter hides are not), a section header never is.
+  Selected cards have their own surface color besides the accent border, so the selection never rests on one color, and
+  every selected row reports itself as selected to assistive technology. Dragging any selected card moves all the
+  selected cards together to the drop place, in list order and as one change; dragging a card that is not selected moves
+  it alone. The menu of a selected card does the same without dragging: **Move to group** (with **New group...** and
+  **Remove from group**) acts on all the selected cards and says how many, in one change
+  (`MainWindowViewModel.MoveCardsToGroup`). The Delete key, or Remove in the menu of a selected card, removes all the
+  selected cards from the list after one confirmation that says how many go and that nothing on disk is deleted. A plain
+  press on an already selected card keeps the selection until the button is released, so it can start a drag
+  (`RepoListBox`).
 - *Group colors* (`AgentControl-System-GroupColor`): a user group's header menu has **Group color...**, which opens
   the card palette (the shared `ColorPalettePanel`) with None instead of Automatic;
   `MainWindowViewModel.SetGroupColor` saves the color in `AppSettings.GroupColors`, the header shows it as an accent bar

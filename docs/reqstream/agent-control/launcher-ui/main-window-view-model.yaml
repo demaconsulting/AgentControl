@@ -598,6 +598,32 @@ sections:
           - MainWindowViewModel_DropGroup_BeforeOrAfterAnotherGroup_Reorders
           - MainWindowViewModel_CanDropGroup_SelfBuiltInUnknownOrFiltering_Refused
 
+      - id: AgentControl-MainWindowViewModel-GroupMoveIntoTargets
+        title: >-
+          The MainWindowViewModel class shall list, in the order the list shows them, the groups a group can
+          be moved into: every group except the group itself, the groups inside it and the group it is
+          inside already, never Favorites or Ungrouped.
+        justification: |
+          The menu offers a move without dragging, so it must offer exactly the places the drag would
+          accept and no choice that would do nothing or make a loop.
+        tests:
+          - MainWindowViewModel_GetGroupMoveIntoTargets_ExcludesSelfDescendantsCurrentParentAndBuiltIns
+
+      - id: AgentControl-MainWindowViewModel-GroupMoveInto
+        title: >-
+          The MainWindowViewModel class shall move a group into another group, or to the top level, as the
+          last subgroup of the new parent (or the last top-level group) with its repos and subgroups, store
+          the hierarchy and the order in one save, and shall refuse, changing nothing, a loop, a group it is
+          inside already, a group or target that does not exist, Favorites or Ungrouped, and any move while the
+          filter has text, giving a reason for the item it disables.
+        justification: |
+          Dragging a header is not possible for everybody (WCAG 2.2 SC 2.5.7), so a menu choice must do what
+          the drop does, by the same rules.
+        tests:
+          - MainWindowViewModel_MoveGroupInto_IntoAndOutOfGroupsAsLastChildAndSavesOnce
+          - MainWindowViewModel_MoveGroupInto_RefusedWhileFilteringOrForLoop
+          - MainWindowViewModel_GetGroupMoveIntoDisabledReason_OnlyGroupHasNowhereToGo
+
       - id: AgentControl-MainWindowViewModel-GroupOrderPersisted
         title: >-
           The MainWindowViewModel class shall keep the order of the groups in the settings file, so
@@ -1066,6 +1092,20 @@ sections:
         tests:
           - MainWindowViewModel_DropCards_FilterOrFlatListOtherTier_IsRefused
           - MainWindowViewModel_DropCards_OnCard_InsertsTogetherAndRefusesAnchorInTheSet
+
+      - id: AgentControl-MainWindowViewModel-MoveCardsToGroup
+        title: >-
+          The MainWindowViewModel class shall move several cards into a valid group, or out of their groups,
+          in one saved change that changes only each repo's group (a favorite stays a favorite and no stored
+          position changes), adopting the spelling of an existing group whose name matches ignoring letter
+          case, keep the cards that are still shown selected, and refuse, changing nothing, a name that is too
+          long or a built-in section's name.
+        justification: |
+          Dragging the selection to a group is not possible for everybody (WCAG 2.2 SC 2.5.7), so a menu
+          choice must move the whole selection with the same group rules as a single card.
+        tests:
+          - MainWindowViewModel_MoveCardsToGroup_MovesAllSelectedKeepsFavoritesAndOrderAndSavesOnce
+          - MainWindowViewModel_MoveCardsToGroup_InvalidNameChangesNothing
 
       - id: AgentControl-MainWindowViewModel-RemoveRepos
         title: >-

@@ -893,8 +893,9 @@ internal sealed partial class MainWindow : Window
 
     /// <summary>
     ///     Fills the "Move to group" submenu of a card's "..." menu just before the menu opens: one
-    ///     entry per existing group (the repo's own group is marked), then "New group..." and, when
-    ///     the repo is in a group, "Remove from group".
+    ///     entry per existing group (the group the repo is in is marked), then "New group..." and, when
+    ///     the repo is in a group, "Remove from group". When the card is one of several selected cards
+    ///     the entries act on all the selected repos (as a drag of the card would).
     /// </summary>
     /// <remarks>
     ///     The entries depend on the groups that exist at that moment, which a XAML template cannot
@@ -920,14 +921,19 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
+        // The menu acts on the whole selection when this card is one of several selected cards, as a drag
+        // of it would; for any other card it acts on that card alone
+        var viewModel = TopLevel.GetTopLevel(flyout.Target)?.DataContext as MainWindowViewModel;
+        var cards = viewModel?.GetDragCards(card) ?? [card];
+        var several = cards.Count > 1;
+        var subject = several ? $"the {cards.Count} selected repos" : card.RepoName;
         var entries = new List<object>();
         var groups = card.GetExistingGroupNames();
-        var viewModel = TopLevel.GetTopLevel(flyout.Target)?.DataContext as MainWindowViewModel;
         foreach (var group in groups)
         {
             // The header is a TextBlock so an underscore in a group name is not taken as an access key;
             // a nested group's tooltip gives its path so groups inside different groups are told apart
-            var isCurrent = RepoGroupName.Comparer.Equals(group, card.GroupName ?? string.Empty);
+            var isCurrent = cards.All(other => RepoGroupName.Comparer.Equals(group, other.GroupName ?? string.Empty));
             var path = viewModel?.GetGroupPath(group) ?? group;
             var entry = new MenuItem
             {
@@ -936,10 +942,18 @@ internal sealed partial class MainWindow : Window
             };
             AutomationProperties.SetAutomationId(entry, "MoveToGroupItem");
             AutomationProperties.SetName(entry, group);
-            ToolTip.SetTip(
-                entry,
-                isCurrent ? $"{card.RepoName} is in the group {path}." : $"Move {card.RepoName} to the group {path}.");
-            entry.Click += (_, _) => card.MoveToGroup(group);
+            string tip;
+            if (isCurrent)
+            {
+                tip = several ? $"All of {subject} are in the group {path}." : $"{subject} is in the group {path}.";
+            }
+            else
+            {
+                tip = $"Move {subject} to the group {path}.";
+            }
+
+            ToolTip.SetTip(entry, tip);
+            entry.Click += (_, _) => MoveCardsToGroup(viewModel, card, cards, group);
             entries.Add(entry);
         }
 
@@ -955,25 +969,123 @@ internal sealed partial class MainWindow : Window
             Command = card.NewGroupCommand
         };
         AutomationProperties.SetAutomationId(newGroup, "NewGroupMenuItem");
-        ToolTip.SetTip(newGroup, $"Create a group and move {card.RepoName} into it");
+        ToolTip.SetTip(newGroup, $"Create a group and move {subject} into it");
         entries.Add(newGroup);
 
-        if (card.HasGroup)
+        if (cards.Any(other => other.HasGroup))
         {
             var remove = new MenuItem
             {
                 Header = "Remove from group",
-                Icon = new MaterialIcon { Kind = MaterialIconKind.FolderRemove },
-                Command = card.RemoveFromGroupCommand
+                Icon = new MaterialIcon { Kind = MaterialIconKind.FolderRemove }
             };
+            if (several)
+            {
+                remove.Click += (_, _) => MoveCardsToGroup(viewModel, card, cards, null);
+            }
+            else
+            {
+                remove.Command = card.RemoveFromGroupCommand;
+            }
+
             AutomationProperties.SetAutomationId(remove, "RemoveFromGroupMenuItem");
-            ToolTip.SetTip(remove, $"Take {card.RepoName} out of the group {card.GroupName}");
+            ToolTip.SetTip(
+                remove,
+                several
+                    ? $"Take {subject} out of their groups"
+                    : $"Take {card.RepoName} out of the group {card.GroupName}");
             entries.Add(remove);
         }
 
         submenu.Items.Clear();
         foreach (var entry in entries)
         {
+            submenu.Items.Add(entry);
+        }
+    }
+
+    /// <summary>
+    ///     Moves the cards a card's menu acts on into a group (or out of every group) when the item is
+    ///     clicked: the whole selection through the view model, a single card through the card itself.
+    /// </summary>
+    /// <param name="viewModel">The main view model, or <see langword="null"/> when the window has none.</param>
+    /// <param name="card">The card whose menu it is.</param>
+    /// <param name="cards">The cards the menu acts on; <paramref name="card"/> alone, or the selection.</param>
+    /// <param name="group">The group, or <see langword="null"/> to take the repos out of their groups.</param>
+    private static void MoveCardsToGroup(
+        MainWindowViewModel? viewModel,
+        RepoCardViewModel card,
+        IReadOnlyList<RepoCardViewModel> cards,
+        string? group)
+    {
+        if (viewModel is not null && cards.Count > 1)
+        {
+            viewModel.MoveCardsToGroup(cards, group);
+        }
+        else
+        {
+            card.MoveToGroup(group);
+        }
+    }
+
+    /// <summary>
+    ///     Fills the "Move into group" submenu of a group header's "..." menu just before the menu opens:
+    ///     "Move to top level" when the group is inside another group, then one entry per group it can be
+    ///     moved into; the item is disabled, with the reason as its tooltip, while the filter has text or
+    ///     when the group has nowhere to go.
+    /// </summary>
+    /// <remarks>
+    ///     Like the card's "Move to group" submenu the entries depend on the groups that exist at that
+    ///     moment, so the code-behind builds them from the view model, which also decides what is allowed
+    ///     (see <see cref="MainWindowViewModel.GetGroupMoveIntoTargets"/> and
+    ///     <see cref="MainWindowViewModel.GetGroupMoveIntoDisabledReason"/>) and does the move. The header is
+    ///     found through the flyout's placement target, whose data context is the header.
+    /// </remarks>
+    /// <param name="sender">The header's <see cref="MenuFlyout"/>.</param>
+    /// <param name="e">Event arguments (unused).</param>
+    private static void GroupMenu_Opening(object? sender, EventArgs e)
+    {
+        if (sender is not MenuFlyout { Target.DataContext: RepoGroupHeaderViewModel header } flyout ||
+            flyout.Items.OfType<MenuItem>().FirstOrDefault(item => item.Name == "GroupMoveIntoMenuItem") is not { } submenu)
+        {
+            return;
+        }
+
+        submenu.Items.Clear();
+        var viewModel = TopLevel.GetTopLevel(flyout.Target)?.DataContext as MainWindowViewModel;
+        var reason = viewModel is null ? "The groups cannot be moved now." : viewModel.GetGroupMoveIntoDisabledReason(header.Name);
+        submenu.IsEnabled = reason is null;
+        ToolTip.SetTip(
+            submenu,
+            reason ?? $"Put {header.Name} inside another group, or back at the top level, without dragging");
+        if (viewModel is null || reason is not null)
+        {
+            return;
+        }
+
+        if (viewModel.GetGroupParent(header.Name) is not null)
+        {
+            var top = new MenuItem
+            {
+                Header = "Move to top level",
+                Icon = new MaterialIcon { Kind = MaterialIconKind.FolderUpload }
+            };
+            AutomationProperties.SetAutomationId(top, "GroupMoveToTopLevelMenuItem");
+            ToolTip.SetTip(top, $"Take {header.Name} out of its parent group and make it a top-level group");
+            top.Click += (_, _) => viewModel.MoveGroupInto(header.Name, null);
+            submenu.Items.Add(top);
+            submenu.Items.Add(new Separator());
+        }
+
+        foreach (var target in viewModel.GetGroupMoveIntoTargets(header.Name))
+        {
+            // The header is a TextBlock so an underscore in a group name is not taken as an access key;
+            // the tooltip gives the path so groups inside different groups are told apart
+            var entry = new MenuItem { Header = new TextBlock { Text = target } };
+            AutomationProperties.SetAutomationId(entry, "GroupMoveIntoItem");
+            AutomationProperties.SetName(entry, target);
+            ToolTip.SetTip(entry, $"Put {header.Name} inside the group {viewModel.GetGroupPath(target)}");
+            entry.Click += (_, _) => viewModel.MoveGroupInto(header.Name, target);
             submenu.Items.Add(entry);
         }
     }
@@ -2565,19 +2677,31 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Shows the name prompt for a new group and, when a name is chosen, moves
-    ///     <paramref name="card"/>'s repo into that group.
+    ///     Shows the name prompt for a new group and, when a name is chosen, moves the repo of
+    ///     <paramref name="card"/> - or all the selected repos when the card is one of several selected -
+    ///     into that group.
     /// </summary>
     /// <param name="card">The card that asked for a new group.</param>
     private async Task ShowNewGroupPrompt(RepoCardViewModel card)
     {
+        var cards = DataContext is MainWindowViewModel viewModel ? viewModel.GetDragCards(card) : [card];
+        var subject = cards.Count > 1 ? $"the {cards.Count} selected repos" : $"\"{card.RepoName}\"";
         var prompt = new GroupNameViewModel(
             "New group",
-            $"Name of the new group for \"{card.RepoName}\":",
+            $"Name of the new group for {subject}:",
             "Create",
             card.GetExistingGroupNames());
         var name = await new GroupNameWindow(prompt).ShowDialog<string?>(this);
-        if (name is not null)
+        if (name is null)
+        {
+            return;
+        }
+
+        if (cards.Count > 1 && DataContext is MainWindowViewModel owner)
+        {
+            owner.MoveCardsToGroup(cards, name);
+        }
+        else
         {
             card.MoveToGroup(name);
         }

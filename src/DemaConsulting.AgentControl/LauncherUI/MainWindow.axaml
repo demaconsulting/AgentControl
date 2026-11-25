@@ -267,7 +267,7 @@
                                      ToolTip.Tip="Add a repository to this group, or move, sort, color, rename or delete the group">
                                 <materialIcons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
                                 <Button.Flyout>
-                                    <MenuFlyout>
+                                    <MenuFlyout Opening="GroupMenu_Opening">
                                         <MenuItem Name="GroupAddRepoMenuItem"
                                                    AutomationProperties.AutomationId="GroupAddRepoMenuItem"
                                                    Header="Add repository..."
@@ -307,6 +307,19 @@
                                                    Command="{Binding MoveDownCommand}">
                                             <MenuItem.Icon>
                                                 <materialIcons:MaterialIcon Kind="ArrowDown" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <!-- Move into group: the submenu (Move to top level, then one entry per
+                                             group it can go into) is filled in when the menu opens - see
+                                             GroupMenu_Opening; the item is disabled, with the reason as its
+                                             tooltip, while the filter has text and when no group is a target -->
+                                        <MenuItem Name="GroupMoveIntoMenuItem"
+                                                   AutomationProperties.AutomationId="GroupMoveIntoMenuItem"
+                                                   Header="Move into group"
+                                                   ToolTip.Tip="Put this group inside another group, or back at the top level, without dragging"
+                                                   ToolTip.ShowOnDisabled="True">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="FolderMove" />
                                             </MenuItem.Icon>
                                         </MenuItem>
                                         <MenuItem Name="GroupSortByNameMenuItem"
@@ -546,8 +559,8 @@
                                                  are filled in when the menu opens: see CardMenu_Opening -->
                                             <MenuItem Name="MoveToGroupMenuItem"
                                                        AutomationProperties.AutomationId="MoveToGroupMenuItem"
-                                                       Header="Move to group"
-                                                       ToolTip.Tip="Put this repo in one of your groups, or start a new group (stored only in your AgentControl settings, never in the repository)">
+                                                       Header="{Binding MoveToGroupMenuText}"
+                                                       ToolTip.Tip="{Binding MoveToGroupMenuTooltip}">
                                                 <MenuItem.Icon>
                                                     <materialIcons:MaterialIcon Kind="FolderMultipleOutline" />
                                                 </MenuItem.Icon>

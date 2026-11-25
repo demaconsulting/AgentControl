@@ -842,6 +842,14 @@ is `Remove from list`, and the change is announced; with one card selected the t
 This scenario is tested by `RepoCardViewModel_RemoveMenuText_FollowsTheSelectionSize`, covering
 `AgentControl-RepoCardViewModel-RemoveMenuText`.
 
+**RepoCardViewModel_MoveToGroupMenuText_FollowsTheSelectionSize**: Tested by `RepoMultiSelectTests.cs` (the owner sets
+the selection size). While three cards are selected, the "Move to group" text of each of the three is
+`Move 3 selected repos to group` (and the tooltip says `3 selected repos`), the text and tooltip of a card that is not
+selected are the plain ones (`Move to group`, no mention of a selection), and both changes are announced; with one card
+selected the text of every card is `Move to group`. This scenario is tested by
+`RepoCardViewModel_MoveToGroupMenuText_FollowsTheSelectionSize`, covering
+`AgentControl-RepoCardViewModel-MoveToGroupMenuText`.
+
 **RepoCardViewModel_CardColor_ChooseResetRefuseAndFallBack**: The palette has one entry per avatar palette
 index with distinct names; a card with no choice uses the path-hash color; choosing "tEaL" stores `Teal` and moves
 the palette index and style class, and choosing Automatic returns to the hash color and clears the value

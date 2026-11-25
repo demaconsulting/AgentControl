@@ -695,9 +695,25 @@ internal sealed class RepoCardViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(RemoveMenuText));
                 OnPropertyChanged(nameof(RemoveMenuTooltip));
+                OnPropertyChanged(nameof(MoveToGroupMenuText));
+                OnPropertyChanged(nameof(MoveToGroupMenuTooltip));
             }
         }
     }
+
+    /// <summary>
+    ///     Gets the text of the "Move to group" menu item: it says how many repos it moves when this card is
+    ///     one of several selected, because the item (and the "New group..." and "Remove from group" items in
+    ///     its submenu) then acts on all of them.
+    /// </summary>
+    public string MoveToGroupMenuText => _selectionSize > 1 ? $"Move {_selectionSize} selected repos to group" : "Move to group";
+
+    /// <summary>
+    ///     Gets the tooltip of the "Move to group" menu item.
+    /// </summary>
+    public string MoveToGroupMenuTooltip => _selectionSize > 1
+        ? $"Put the {_selectionSize} selected repos in one of your groups, or start a new group (stored only in your AgentControl settings, never in the repository)"
+        : "Put this repo in one of your groups, or start a new group (stored only in your AgentControl settings, never in the repository)";
 
     /// <summary>
     ///     Gets the text of the "Remove from list" menu item: it says how many repos it removes when this

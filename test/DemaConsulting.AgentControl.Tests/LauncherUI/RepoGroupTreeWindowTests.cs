@@ -232,6 +232,112 @@ public sealed class RepoGroupTreeWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that a group header's menu has "Move into group" listing the groups the group can go into
+    ///     (never itself, its own subgroups, Favorites or Ungrouped; the group it is inside is replaced by
+    ///     "Move to top level"), each with the path in its tooltip, and that choosing one puts the group
+    ///     (with its repos) inside it as the last subgroup - a way to nest a group that does not need dragging.
+    /// </summary>
+    [Fact]
+    public void MainWindow_HeaderMenu_MoveInto_ListsValidTargetsAndMovesGroup() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: Client holds Project and Alpha; Home is a top-level group
+        var (window, viewModel, _) = CreateWindow(
+            new Dictionary<string, string> { ["Client"] = string.Empty, ["Project"] = "Client", ["Alpha"] = "Client" },
+            ("c1", "Client"), ("p1", "Project"), ("a1", "Alpha"), ("h1", "Home"), ("loose", null));
+
+        try
+        {
+            // Act: the menu of Alpha
+            var menu = OpenHeaderMenu(window, "Alpha");
+            var submenu = menu.Items.OfType<MenuItem>().Single(item => item.Name == "GroupMoveIntoMenuItem");
+            var entries = submenu.Items.OfType<MenuItem>()
+                .Where(item => AutomationProperties.GetAutomationId(item) == "GroupMoveIntoItem")
+                .ToList();
+
+            // Assert: Project and Home (not Client, which it is inside; not itself)
+            Assert.True(submenu.IsEnabled);
+            Assert.Equal(["Project", "Home"], entries.Select(AutomationProperties.GetName));
+            Assert.Equal("Put Alpha inside the group Client > Project", ToolTip.GetTip(entries[0])?.ToString());
+            Assert.Contains(
+                submenu.Items.OfType<MenuItem>(),
+                item => AutomationProperties.GetAutomationId(item) == "GroupMoveToTopLevelMenuItem");
+
+            // Act: choose Home
+            entries[1].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert
+            Assert.Equal("Home", viewModel.GetGroupParent("Alpha"));
+            Assert.Equal("Home", viewModel.Settings.GroupParents["Alpha"]);
+            Assert.Contains("Alpha, 1 repo, expanded, inside Home", HeaderAccessibleNames(window));
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that the "Move into group" menu of a nested group starts with "Move to top level", which makes
+    ///     it a top-level group again, that a top-level group's menu does not have that entry, and that the
+    ///     item is disabled, the reason being its tooltip, while the filter has text.
+    /// </summary>
+    [Fact]
+    public void MainWindow_HeaderMenu_MoveInto_NestedGroupOffersTopLevel() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, viewModel, _) = CreateClientWindow();
+
+        try
+        {
+            // Act: Client has nowhere to go (Project and Alpha are inside it); Alpha's menu starts with
+            // "Move to top level"
+            var topMenu = OpenHeaderMenu(window, "Client");
+            var topSubmenu = topMenu.Items.OfType<MenuItem>().Single(item => item.Name == "GroupMoveIntoMenuItem");
+            var topEnabled = topSubmenu.IsEnabled;
+            var topReason = ToolTip.GetTip(topSubmenu)?.ToString();
+            topMenu.Hide();
+            Dispatcher.UIThread.RunJobs();
+            var menu = OpenHeaderMenu(window, "Alpha");
+            var entries = menu.Items.OfType<MenuItem>().Single(item => item.Name == "GroupMoveIntoMenuItem")
+                .Items.OfType<MenuItem>().ToList();
+
+            // Assert
+            Assert.False(topEnabled);
+            Assert.Equal(MainWindowViewModel.GroupMoveIntoNoTargetMessage, topReason);
+            Assert.Empty(topSubmenu.Items);
+            Assert.Equal("GroupMoveToTopLevelMenuItem", AutomationProperties.GetAutomationId(entries[0]));
+            Assert.Equal(["Project"], entries.Skip(1).Select(AutomationProperties.GetName).OfType<string>());
+
+            // Act: Move to top level
+            entries[0].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert
+            Assert.Null(viewModel.GetGroupParent("Alpha"));
+            Assert.Contains("Alpha, 1 repo, expanded", HeaderAccessibleNames(window));
+
+            // Act: with filter text the item is disabled and says why
+            viewModel.FilterText = "c1";
+            Dispatcher.UIThread.RunJobs();
+            menu = OpenHeaderMenu(window, "Client");
+            var submenu = menu.Items.OfType<MenuItem>().Single(item => item.Name == "GroupMoveIntoMenuItem");
+
+            // Assert
+            Assert.False(submenu.IsEnabled);
+            Assert.Equal(MainWindowViewModel.GroupMoveIntoDisabledWhileFilteringMessage, ToolTip.GetTip(submenu)?.ToString());
+            Assert.Empty(submenu.Items);
+            menu.Hide();
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that a group header is dropped in one of three places by where the pointer is over another
     ///     group's header - the upper third puts it before that group, the middle third inside it (the
     ///     header is tinted), the lower third after it - and that a group dropped next to a nested group
@@ -850,6 +956,16 @@ public sealed class RepoGroupTreeWindowTests : IDisposable
         menu.Hide();
         Dispatcher.UIThread.RunJobs();
     }
+
+    /// <summary>
+    ///     Opens the "..." menu of a group's header.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <param name="groupName">The group's name.</param>
+    /// <returns>The open menu.</returns>
+    private static MenuFlyout OpenHeaderMenu(MainWindow window, string groupName) =>
+        OpenMenu(window.GetVisualDescendantsOf<Button>("GroupHeaderMenuButton")
+            .Single(candidate => candidate.DataContext is RepoGroupHeaderViewModel header && header.Name == groupName));
 
     /// <summary>
     ///     Opens the "..." menu of the named repo's card.

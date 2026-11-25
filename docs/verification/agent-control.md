@@ -775,7 +775,8 @@ typing `Phase 1` and confirming lists a group `Phase 1` with no repos inside Wor
 repository. After the application is closed and started again the same tree is listed. This scenario is tested by
 `windows@GroupHeaderMenu_NewSubgroup_ListsGroupInsideParentStoresHierarchyInSettingsOnlyAndKeepsItAfterRestart`,
 covering `AgentControl-System-NestedGroups`. That the headers are indented by depth, that a header dropped in the three
-zones of another group's header nests, reorders and un-nests, and that a drop onto a group inside the dragged group is
+zones of another group's header nests, reorders and un-nests, that the header menu's "Move into group" and "Move to top
+level" nest and un-nest a group without dragging, and that a drop onto a group inside the dragged group is
 refused are verified in the headless window tests of the `LauncherUI` subsystem.
 
 **AgentControl_RepoMultiSelect_SelectSeveralCardsAndDeleteRemovesOnlyTheSelectedRepos**: With three repos in no group,
@@ -786,8 +787,9 @@ again and answering Yes only the second repo is listed, the settings file no lon
 the two removed repos are still on disk. This scenario is tested by
 `windows@RepoList_SelectSeveralCardsAndPressDelete_ConfirmsOnceAndRemovesOnlyTheSelectedRepos`, covering
 `AgentControl-System-RepoMultiSelect` and `AgentControl-System-RepoMultiSelectActions` (the removal). Ctrl+click,
-Shift+click, Ctrl+A, the dragging of a selection and the look of a selected card are verified in the headless window
-tests of the `LauncherUI` subsystem, because they depend on pointer and drag input.
+Shift+click, Ctrl+A, the dragging of a selection, the "Move to group" item of a selected card (which moves the whole
+selection without dragging) and the look of a selected card are verified in the headless window tests of the
+`LauncherUI` subsystem, because they depend on pointer and drag input.
 
 **AgentControl_GroupSortByName_MenuSortsRepoCardsAndKeepsOrderAfterRestart**: With three repos in the group Work stored
 in the order Charlie, Alpha, Bravo, choosing "Sort by name" in the Work header's menu lists the cards as Alpha, Bravo,

@@ -323,6 +323,116 @@ public sealed class RepoMultiSelectTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that moving several cards to a group puts every one in it - a favorite stays a favorite and no
+    ///     stored position changes - under the group's own spelling for a name in another letter case, in one
+    ///     saved change, that the cards that are still shown stay selected, and that a null name takes them
+    ///     out of their groups.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_MoveCardsToGroup_MovesAllSelectedKeepsFavoritesAndOrderAndSavesOnce()
+    {
+        // Arrange: a favorite of Home, an ungrouped repo and a repo of Home go to Project
+        var configDir = CreateTempDirectory();
+        var viewModel = CreateTree(configDir);
+        var cards = new[] { Card(viewModel, "l2"), Card(viewModel, "f1"), Card(viewModel, "h1") };
+        viewModel.SetSelectedCards(cards);
+        var storedOrder = Names(viewModel.RepoCards);
+
+        // Act
+        var moved = viewModel.MoveCardsToGroup(viewModel.GetDragCards(cards[0]), "project");
+        await viewModel.FlushSettingsAsync();
+        var saved = SettingsStore.Load(configDir);
+
+        // Assert: all in Project, f1 still a favorite, the stored order untouched, still selected
+        Assert.True(moved);
+        Assert.All(new[] { "l2", "f1", "h1" }, name => Assert.Equal("Project", Card(viewModel, name).GroupName));
+        Assert.True(Card(viewModel, "f1").IsFavorite);
+        Assert.Equal(storedOrder, Names(viewModel.RepoCards));
+        Assert.Equal(["f1", "h1", "l2"], Names(viewModel.SelectedCards));
+        Assert.Equal(storedOrder, saved.RecentRepos.Select(repo => Path.GetFileName(repo.Path)));
+        Assert.All(
+            saved.RecentRepos.Where(repo => Path.GetFileName(repo.Path) is "l2" or "f1" or "h1"),
+            repo => Assert.Equal("Project", repo.GroupName));
+        Assert.True(saved.RecentRepos.Single(repo => Path.GetFileName(repo.Path) == "f1").IsFavorite);
+        Assert.Equal(
+            ["h1", "p1", "p2", "l2"],
+            Names(viewModel.DisplayedRepoCards.Where(card => card.GroupName == "Project" && !card.IsFavorite)));
+
+        // Act: taking them out of their groups
+        Assert.True(viewModel.MoveCardsToGroup(cards, null));
+
+        // Assert
+        Assert.All(cards, card => Assert.Null(card.GroupName));
+        Assert.True(Card(viewModel, "f1").IsFavorite);
+
+        // Act: a new name makes a new group, the same group again changes nothing
+        Assert.True(viewModel.MoveCardsToGroup([Card(viewModel, "l1")], "  Brand   New "));
+        Assert.True(viewModel.MoveCardsToGroup([Card(viewModel, "l1")], "brand new"));
+
+        // Assert
+        Assert.Equal("Brand New", Card(viewModel, "l1").GroupName);
+        Assert.Contains("Brand New", viewModel.GroupNames);
+    }
+
+    /// <summary>
+    ///     Test that a name that is not a valid group name (a built-in section's name or one that is too
+    ///     long), or no card in the list, changes nothing and returns <see langword="false"/>.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_MoveCardsToGroup_InvalidNameChangesNothing()
+    {
+        // Arrange
+        var viewModel = CreateTree();
+        var cards = new[] { Card(viewModel, "l1"), Card(viewModel, "l2") };
+        var stray = CreateViewModel(parents: null, new Spec("other")).RepoCards.Single();
+
+        // Act / Assert
+        Assert.Multiple(
+            () => Assert.False(viewModel.MoveCardsToGroup(cards, "Favorites")),
+            () => Assert.False(viewModel.MoveCardsToGroup(cards, "ungrouped")),
+            () => Assert.False(viewModel.MoveCardsToGroup(cards, new string('x', 41))),
+            () => Assert.False(viewModel.MoveCardsToGroup([], "Client")),
+            () => Assert.False(viewModel.MoveCardsToGroup([stray], "Client")));
+        Assert.All(cards, card => Assert.Null(card.GroupName));
+        Assert.Throws<ArgumentNullException>(() => viewModel.MoveCardsToGroup(null!, "Client"));
+    }
+
+    /// <summary>
+    ///     Test that a card's "Move to group" text and tooltip say how many repos they move while the card is
+    ///     one of several selected cards, and are the plain text for a card that is alone or not selected.
+    /// </summary>
+    [Fact]
+    public void RepoCardViewModel_MoveToGroupMenuText_FollowsTheSelectionSize()
+    {
+        // Arrange
+        var viewModel = CreateTree();
+        var a1 = Card(viewModel, "a1");
+        var h1 = Card(viewModel, "h1");
+        var l1 = Card(viewModel, "l1");
+        var changed = new List<string?>();
+        a1.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        // Act: three selected
+        viewModel.SetSelectedCards([a1, h1, l1]);
+
+        // Assert
+        Assert.Equal("Move 3 selected repos to group", a1.MoveToGroupMenuText);
+        Assert.Equal("Move 3 selected repos to group", l1.MoveToGroupMenuText);
+        Assert.Equal("Move to group", Card(viewModel, "l2").MoveToGroupMenuText);
+        Assert.Contains("3 selected repos", a1.MoveToGroupMenuTooltip);
+        Assert.DoesNotContain("selected", Card(viewModel, "l2").MoveToGroupMenuTooltip);
+        Assert.Contains(nameof(RepoCardViewModel.MoveToGroupMenuText), changed);
+        Assert.Contains(nameof(RepoCardViewModel.MoveToGroupMenuTooltip), changed);
+
+        // Act: one selected
+        viewModel.SetSelectedCards([a1]);
+
+        // Assert
+        Assert.Equal("Move to group", a1.MoveToGroupMenuText);
+        Assert.Equal("Move to group", h1.MoveToGroupMenuText);
+    }
+
+    /// <summary>
     ///     Gets a card by the folder name of its repo.
     /// </summary>
     /// <param name="viewModel">The view model.</param>

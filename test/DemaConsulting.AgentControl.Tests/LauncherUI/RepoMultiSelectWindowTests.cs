@@ -425,6 +425,99 @@ public sealed class RepoMultiSelectWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that the card menu's "Move to group" item of a card that is one of several selected cards says
+    ///     how many repos it moves and moves them all - choosing a group, a new group named in the prompt (which
+    ///     names the count) and "Remove from group" - while the item of a card that is not selected moves that
+    ///     card alone.
+    /// </summary>
+    [Fact]
+    public void MainWindow_CardMenu_MoveToGroupOnSelectedCard_MovesTheWholeSelection() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: u1 and u2 selected
+        var (window, viewModel) = CreateWindow();
+
+        try
+        {
+            Click(window, "u1");
+            Click(window, "u2", RawInputModifiers.Control);
+
+            // Act: the menu of u2, one of the selected cards; choose the group Work
+            var menu = OpenCardMenu(window, "u2");
+            var submenu = menu.Items.OfType<MenuItem>().Single(candidate => candidate.Name == "MoveToGroupMenuItem");
+            var text = submenu.Header?.ToString();
+            var entry = submenu.Items.OfType<MenuItem>()
+                .Single(candidate => Avalonia.Automation.AutomationProperties.GetAutomationId(candidate) == "MoveToGroupItem");
+            var tooltip = ToolTip.GetTip(entry)?.ToString();
+            var hasRemove = submenu.Items.OfType<MenuItem>()
+                .Any(candidate => Avalonia.Automation.AutomationProperties.GetAutomationId(candidate) == "RemoveFromGroupMenuItem");
+            entry.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: both moved, u3 not
+            Assert.Equal("Move 2 selected repos to group", text);
+            Assert.Equal("Move the 2 selected repos to the group Work.", tooltip);
+            Assert.False(hasRemove);
+            Assert.Equal("Work", viewModel.RepoCards.Single(card => card.RepoName == "u1").GroupName);
+            Assert.Equal("Work", viewModel.RepoCards.Single(card => card.RepoName == "u2").GroupName);
+            Assert.Null(viewModel.RepoCards.Single(card => card.RepoName == "u3").GroupName);
+            Assert.Equal(["u1", "u2"], Names(viewModel.SelectedCards));
+
+            // Act: New group... from the menu of u1 asks for one name for both
+            menu = OpenCardMenu(window, "u1");
+            submenu = menu.Items.OfType<MenuItem>().Single(candidate => candidate.Name == "MoveToGroupMenuItem");
+            var newGroup = submenu.Items.OfType<MenuItem>()
+                .Single(candidate => Avalonia.Automation.AutomationProperties.GetAutomationId(candidate) == "NewGroupMenuItem");
+            newGroup.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+            var prompt = Assert.Single(window.OwnedWindows.OfType<GroupNameWindow>());
+            var promptModel = (GroupNameViewModel)prompt.DataContext!;
+            promptModel.Text = "Fresh";
+            var promptText = promptModel.Prompt;
+            DialogWindowTests.Click(prompt, "GroupNameAcceptButton");
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert
+            Assert.Equal("Name of the new group for the 2 selected repos:", promptText);
+            Assert.Equal("Fresh", viewModel.RepoCards.Single(card => card.RepoName == "u1").GroupName);
+            Assert.Equal("Fresh", viewModel.RepoCards.Single(card => card.RepoName == "u2").GroupName);
+
+            // Act: Remove from group takes both out of their group
+            menu = OpenCardMenu(window, "u2");
+            submenu = menu.Items.OfType<MenuItem>().Single(candidate => candidate.Name == "MoveToGroupMenuItem");
+            var remove = submenu.Items.OfType<MenuItem>()
+                .Single(candidate => Avalonia.Automation.AutomationProperties.GetAutomationId(candidate) == "RemoveFromGroupMenuItem");
+            remove.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert
+            Assert.All(["u1", "u2"], name => Assert.Null(viewModel.RepoCards.Single(card => card.RepoName == name).GroupName));
+
+            // Act: the menu of a card that is not selected acts on that card alone
+            menu = OpenCardMenu(window, "u3");
+            submenu = menu.Items.OfType<MenuItem>().Single(candidate => candidate.Name == "MoveToGroupMenuItem");
+            var plain = submenu.Header?.ToString();
+            entry = submenu.Items.OfType<MenuItem>()
+                .First(candidate => Avalonia.Automation.AutomationProperties.GetAutomationId(candidate) == "MoveToGroupItem");
+            entry.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: u3 moved alone, into the only group left (Fresh lost its last repo)
+            Assert.Equal("Move to group", plain);
+            Assert.Equal("Work", viewModel.RepoCards.Single(card => card.RepoName == "u3").GroupName);
+            Assert.Null(viewModel.RepoCards.Single(card => card.RepoName == "u1").GroupName);
+            Assert.Null(viewModel.RepoCards.Single(card => card.RepoName == "u2").GroupName);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that a selected card is exposed to assistive technology: its list row reports it is selected,
     ///     the automation peer of the row says so through the selection-item pattern, and the list's peer says
     ///     that several items can be selected.

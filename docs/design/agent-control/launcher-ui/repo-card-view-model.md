@@ -258,7 +258,11 @@ one (0 when it is not selected), set by `MainWindowViewModel` through `UpdateSel
 **RemoveMenuTooltip** are the text and tooltip of the card menu's "Remove from list" item: the plain wording
 (`Remove from list`) unless the card is one of several selected cards, when they say
 `Remove {n} selected repos from list`, because the item then acts on all of them
-(`AgentControl-RepoCardViewModel-RemoveMenuText`); **RaiseOrganizationChanged** refreshes the favorite flag and the
+(`AgentControl-RepoCardViewModel-RemoveMenuText`); **MoveToGroupMenuText** / **MoveToGroupMenuTooltip** are the text and
+tooltip of the card menu's "Move to group" item in the same way (`Move to group`, or `Move {n} selected repos to group`
+for one of several selected cards), because the item - and the "New group..." and "Remove from group" entries of its
+submenu, which the window builds for the selection - then acts on all of them
+(`AgentControl-RepoCardViewModel-MoveToGroupMenuText`); **RaiseOrganizationChanged** refreshes the favorite flag and the
 group properties after the owner changed them for several cards at once. **GroupName** reads the stored name through
 `RepoGroupName.Sanitize` (a blank, overlong or reserved stored value yields a valid name or none), **HasGroup** is
 `GroupName is not null`, and **ShowGroupChip** (`IsFavorite && HasGroup`,
@@ -1175,8 +1179,8 @@ a retired card raises nothing.
   `NewGroupRequested`, `ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`,
   `CommittedFilesConversionRequested` (answered through a modal `ConfirmationWindow`), `AgentFilesChoiceRequested`
   (answered through a modal `ConfirmationWindow` with the request's own button labels), and `ErrorOccurred` to drive
-  dialogs/windows (detaching these handlers when a card leaves the list), calling
-  and awaiting `AcceptAgentsMdTemplateAsync`/`DeclineAgentsMdTemplateAsync` from the `ConfirmationWindow` shown for
-  the AGENTS.md template
-  offer, `MoveToGroup` from the card menu's "Move to group" entries and the name prompt, and `SetCardColor` from the
-  color palette pop-up.
+  dialogs/windows (detaching these handlers when a card leaves the list), calling and awaiting
+  `AcceptAgentsMdTemplateAsync`/`DeclineAgentsMdTemplateAsync` from the `ConfirmationWindow` shown for the AGENTS.md
+  template offer, `MoveToGroup` from the card menu's "Move to group" entries and the name prompt (for a card that is one
+  of several selected cards the window calls `MainWindowViewModel.MoveCardsToGroup` instead), and `SetCardColor` from
+  the color palette pop-up.

@@ -4411,6 +4411,139 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    ///     The explanation shown (as the tooltip of the disabled "Move into group" item of a group header's
+    ///     menu) while the filter has text and so the groups cannot be rearranged.
+    /// </summary>
+    public const string GroupMoveIntoDisabledWhileFilteringMessage =
+        "Clear the filter to move a group into another: while the filter has text only some groups are " +
+        "shown, so the groups cannot be rearranged.";
+
+    /// <summary>
+    ///     The explanation shown when a top-level group has no other group it could be moved into.
+    /// </summary>
+    public const string GroupMoveIntoNoTargetMessage = "There is no other group this group can be moved into.";
+
+    /// <summary>
+    ///     Gets the groups a group can be moved into from its header's menu, in the order the list shows
+    ///     them (each group followed by its subgroups).
+    /// </summary>
+    /// <remarks>
+    ///     Every group except the group itself, the groups inside it (that would make a loop) and the group
+    ///     it is inside already. Favorites and Ungrouped are not groups, so they are never listed. A group
+    ///     whose repos are all favorites (it has no header) is listed too: moving a group into it makes it
+    ///     visible, and putting a group inside another is not a matter of what the other holds.
+    /// </remarks>
+    /// <param name="groupName">The group's name; letter case is ignored.</param>
+    /// <returns>The target groups' names as spelled; empty for a name that is no group.</returns>
+    public IReadOnlyList<string> GetGroupMoveIntoTargets(string groupName)
+    {
+        ArgumentNullException.ThrowIfNull(groupName);
+
+        return GetMoveIntoTargets(BuildGroupHierarchy(), groupName);
+    }
+
+    /// <summary>
+    ///     Gets the groups a group can be moved into, for a tree that is already built.
+    /// </summary>
+    /// <param name="tree">The tree.</param>
+    /// <param name="groupName">The group's name; letter case is ignored.</param>
+    /// <returns>The target groups' names, in tree order.</returns>
+    private static List<string> GetMoveIntoTargets(RepoGroupHierarchy tree, string groupName)
+    {
+        if (!tree.Contains(groupName))
+        {
+            return [];
+        }
+
+        var parent = tree.GetParent(groupName) ?? string.Empty;
+        return
+        [
+            .. tree.GetTreeOrder()
+                .Select(node => node.Name)
+                .Where(name => !RepoGroupName.Comparer.Equals(name, groupName) &&
+                               !RepoGroupName.Comparer.Equals(name, parent) &&
+                               tree.CanMove(groupName, name))
+        ];
+    }
+
+    /// <summary>
+    ///     Gets why the "Move into group" choices of a group's header menu are not available now.
+    /// </summary>
+    /// <remarks>
+    ///     The wording is what the menu shows as the tooltip of the disabled item. The choices are available
+    ///     when the filter has no text and the group can go into at least one group, or is inside a group and
+    ///     so can go to the top level.
+    /// </remarks>
+    /// <param name="groupName">The group's name; letter case is ignored.</param>
+    /// <returns>The reason, or <see langword="null"/> when the group can be moved somewhere.</returns>
+    public string? GetGroupMoveIntoDisabledReason(string groupName)
+    {
+        ArgumentNullException.ThrowIfNull(groupName);
+
+        if (!IsReorderEnabled)
+        {
+            return GroupMoveIntoDisabledWhileFilteringMessage;
+        }
+
+        if (RepoGroupName.IsReserved(groupName))
+        {
+            return "Favorites always come first and Ungrouped last, so they cannot be moved.";
+        }
+
+        var tree = BuildGroupHierarchy();
+        if (!tree.Contains(groupName))
+        {
+            return "This group is no longer in the list.";
+        }
+
+        return tree.GetParent(groupName) is null && GetMoveIntoTargets(tree, groupName).Count == 0
+            ? GroupMoveIntoNoTargetMessage
+            : null;
+    }
+
+    /// <summary>
+    ///     Moves a group into another group, or to the top level, from its header's menu - the way to do
+    ///     what dragging the header inside another does, for people who cannot or do not want to drag.
+    /// </summary>
+    /// <remarks>
+    ///     The group becomes the last subgroup of the new parent (or the last top-level group), with its
+    ///     repos and subgroups; the hierarchy and the order are stored in one save. A collapsed group stays
+    ///     collapsed. Nothing changes (and nothing is saved) when the move is not allowed: the filter has
+    ///     text, the group or the target does not exist, the target is the group itself or inside it, or the
+    ///     group is inside that target (or at the top level) already.
+    /// </remarks>
+    /// <param name="groupName">The group's name; letter case is ignored.</param>
+    /// <param name="newParent">The group to move it into (letter case is ignored), or
+    ///     <see langword="null"/> for the top level.</param>
+    /// <returns><see langword="true"/> when the group was moved; <see langword="false"/> otherwise.</returns>
+    public bool MoveGroupInto(string groupName, string? newParent)
+    {
+        ArgumentNullException.ThrowIfNull(groupName);
+
+        if (!IsReorderEnabled)
+        {
+            return false;
+        }
+
+        var plan = BuildGroupPlan();
+        var tree = plan.Tree;
+        var group = tree.GetName(groupName);
+        if (group is null || !tree.CanMove(group, newParent))
+        {
+            return false;
+        }
+
+        var parent = tree.GetName(newParent);
+        if (RepoGroupName.Comparer.Equals(tree.GetParent(group) ?? string.Empty, parent ?? string.Empty))
+        {
+            return false;
+        }
+
+        var last = tree.GetChildren(parent).LastOrDefault(child => !RepoGroupName.Comparer.Equals(child, group));
+        return PlaceGroup(plan, group, parent, last, insertBefore: false);
+    }
+
+    /// <summary>
     ///     The explanation shown (as the tooltip of the disabled "Sort by name" item of a group header's
     ///     menu) while the filter has text and so only some of the repos of a group are shown.
     /// </summary>
@@ -5068,6 +5201,65 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         SyncCollection(RepoCards, ordered);
+        UpdateDisplayedRepoCards();
+        return true;
+    }
+
+    /// <summary>
+    ///     Moves several repos into a group, or out of every group, in one change - the menu's way of doing
+    ///     what a drop of the selection on a group header does, for people who cannot or do not want to drag.
+    /// </summary>
+    /// <remarks>
+    ///     Exactly what <see cref="RepoCardViewModel.MoveToGroup"/> does for one repo, for each card: only the
+    ///     group changes (a favorite stays a favorite, and every stored position is untouched), a name that
+    ///     matches an existing group ignoring letter case joins that group under its own spelling, and a
+    ///     built-in section's name or a name that is too long is refused. All changes are applied at once and
+    ///     saved once. The cards that are still shown stay selected. Cards that are not in the list are
+    ///     ignored; the same card twice counts once.
+    /// </remarks>
+    /// <param name="cards">The cards to move.</param>
+    /// <param name="groupName">The group's name, or <see langword="null"/> (or blank) to take the repos out
+    ///     of their groups.</param>
+    /// <returns><see langword="true"/> when every card is now in the requested place (including when they
+    ///     already were); <see langword="false"/> when the name is not a valid group name or none of the
+    ///     cards is in the list, in which case nothing changed.</returns>
+    public bool MoveCardsToGroup(IReadOnlyList<RepoCardViewModel> cards, string? groupName)
+    {
+        ArgumentNullException.ThrowIfNull(cards);
+
+        var requested = RepoGroupName.Normalize(groupName);
+        if (requested is not null && RepoGroupName.Validate(requested) != RepoGroupNameProblem.None)
+        {
+            return false;
+        }
+
+        var moved = OrderCards(cards).Where(RepoCards.Contains).ToList();
+        if (moved.Count == 0)
+        {
+            return false;
+        }
+
+        var target = requested is null ? null : RepoGroupName.Canonicalize(requested, GroupNames);
+        var changing = moved.Where(card => !string.Equals(card.GroupName, target, StringComparison.Ordinal)).ToList();
+        if (changing.Count == 0)
+        {
+            return true;
+        }
+
+        var changingPaths = new HashSet<string>(changing.Select(card => card.RepoPath), StringComparer.OrdinalIgnoreCase);
+        CommitSettingsChange(settings =>
+        {
+            foreach (var repo in settings.RecentRepos.Where(repo => changingPaths.Contains(repo.Path)))
+            {
+                repo.GroupName = target;
+            }
+        });
+
+        foreach (var card in changing)
+        {
+            card.RaiseOrganizationChanged();
+        }
+
         UpdateDisplayedRepoCards();
         return true;
     }

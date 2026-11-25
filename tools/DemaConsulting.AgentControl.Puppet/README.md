@@ -171,6 +171,11 @@ without it.
   its name is the color, for example `Group color: Teal`) and `GroupHeaderMenuButton` with the menu items
   `GroupAddRepoMenuItem`, `GroupNewSubgroupMenuItem` (a new group inside this one), `MoveGroupUpMenuItem`,
   `MoveGroupDownMenuItem` (disabled for the first and last group among its siblings and while the filter has text),
+  `GroupMoveIntoMenuItem` (a submenu built when the menu opens, so a group can be nested without dragging: first
+  `GroupMoveToTopLevelMenuItem` for a nested group, then one `GroupMoveIntoItem` per group it can go into - its
+  accessible name is the group's name, so `menu GroupMoveIntoMenuItem/Work` reaches it; the group becomes the last
+  subgroup of the one chosen; the item is disabled, with the reason as its tooltip, while the filter has text and
+  when no group is a target),
   `GroupSortByNameMenuItem` (sorts the repos listed directly in the group by name; disabled, with the reason as its
   tooltip, while the filter has text, for a group with fewer than two repos of its own and when they are sorted
   already), `GroupColorMenuItem`, `RenameGroupMenuItem`, `RemoveGroupMenuItem` (its text is `Delete group, keep
@@ -178,7 +183,8 @@ without it.
   `RemoveGroupWithContentsMenuItem` (`Delete group and its contents`; present only for a group that has a repo or a
   subgroup). A nested group's header name also says `, inside {parent}`. A user group's header can also be dragged
   (press anywhere on it except `GroupHeaderMenuButton`) above or below another group's header to reorder the groups, or
-  onto the middle of another group's header to put it inside that group.
+  onto the middle of another group's header to put it inside that group (the menu's `GroupMoveIntoMenuItem` does the
+  same without dragging).
   `--item` matches repo cards only, so a header command acts on the first header (the one at the top of the list);
   to start with a particular group collapsed, list it in `CollapsedGroups` in the settings file before `launch`.
 - **Repo card** (repeated, one per list item): `RepoNameText`, `RepoStatusAccent` (the status bar; its name is the
@@ -203,7 +209,9 @@ without it.
 - **Card menu** (pop-up of `MoreActionsButton`): `PullButton` (Git Pull), `RefreshMenuItem`, `SelectPackageMenuItem`
   (only for a repo that has no package yet), `ChangePackageMenuItem` (Change package..., only for a repo that has a
   package: it opens Select Package on the current choice), `UpgradeMenuItem` (only while an upgrade is available),
-  `MoveToGroupMenuItem` (its submenu, built when the menu opens: one `MoveToGroupItem` per group - find it by name, for
+  `MoveToGroupMenuItem` (its text is `Move to group`, or `Move {n} selected repos to group` when the card is one of
+  several selected cards, in which case its entries act on all of them; its submenu, built when the menu opens: one
+  `MoveToGroupItem` per group - find it by name, for
   example `menu MoveToGroupMenuItem/Work` - then `NewGroupMenuItem`, and `RemoveFromGroupMenuItem` for a grouped repo),
   `ReorderMenuItem` (a submenu, disabled while the filter has text and for the only repo of its section) holding
   `MoveToTopMenuItem`, `MoveUpMenuItem`, `MoveDownMenuItem`, `MoveToBottomMenuItem` (reorder the card within its

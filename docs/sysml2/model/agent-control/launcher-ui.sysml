@@ -23,7 +23,8 @@ package AgentControl_LauncherUISubsystem {
          * any depth as a collapsible indented tree (header menu and header drag: new subgroup, move up
          * and down, move into another group or to the top level, sort by name, the two deletes -
          * keeping or together with the contents - and drops of cards and headers), several repo
-         * cards selected at once (Ctrl+click, Shift+click, Ctrl+A) to drag, move to a group or
+         * cards selected at once (Ctrl+click, Shift+click, Ctrl+A) to drag, move to a group (from
+         * the card's menu too, without dragging) or
          * remove together,
          * adding several repos at once (multi-select folder picker and
          * folders dropped from the file manager, Git repository roots only, checked off the UI

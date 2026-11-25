@@ -582,6 +582,21 @@ sections:
           - MainWindow_RepoList_DeleteKey_ConfirmsWithTheCountAndRemovesTheSelection
           - MainWindow_CardMenu_RemoveOnSelectedCard_RemovesTheWholeSelection
 
+      - id: AgentControl-LauncherUI-RepoMultiMoveToGroup
+        title: >-
+          The LauncherUI subsystem shall let the user move the selected cards to a group without dragging:
+          the "Move to group" item of a card that is one of several selected cards (which says how many it
+          moves) and the "New group..." and "Remove from group" items in its submenu act on all the selected
+          cards, and the item of a card that is not selected acts on that card alone.
+        justification: |
+          Dragging the selection is not possible for everybody, so the same move must be available in the
+          menu (WCAG 2.2 SC 2.5.7 Dragging Movements); the card menu already removes the whole selection.
+        children:
+          - AgentControl-MainWindowViewModel-MoveCardsToGroup
+          - AgentControl-RepoCardViewModel-MoveToGroupMenuText
+        tests:
+          - MainWindow_CardMenu_MoveToGroupOnSelectedCard_MovesTheWholeSelection
+
       - id: AgentControl-LauncherUI-GroupSortByName
         title: >-
           The LauncherUI subsystem shall offer "Sort by name" in the menu of each of the user's group
@@ -1423,6 +1438,23 @@ sections:
         tests:
           - MainWindow_HeaderMenu_MoveUpDown_ReorderGroupsAndDisableAtTheEnds
           - MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator
+
+      - id: AgentControl-LauncherUI-GroupMoveInto
+        title: >-
+          The LauncherUI subsystem shall offer "Move into group" in the menu of each of the user's group
+          headers - "Move to top level" first for a nested group, then every group it can go into, each
+          with its path as the tooltip - which puts the group, with its repos and subgroups, inside the
+          chosen group as its last subgroup (or at the end of the top level), and is disabled with a tooltip
+          that says why while the filter has text or when the group has nowhere to go.
+        justification: |
+          Dragging a header is not possible for everybody, so nesting a group and bringing it back to the top
+          level must also be possible from the menu (WCAG 2.2 SC 2.5.7 Dragging Movements).
+        children:
+          - AgentControl-MainWindowViewModel-GroupMoveIntoTargets
+          - AgentControl-MainWindowViewModel-GroupMoveInto
+        tests:
+          - MainWindow_HeaderMenu_MoveInto_ListsValidTargetsAndMovesGroup
+          - MainWindow_HeaderMenu_MoveInto_NestedGroupOffersTopLevel
 
       - id: AgentControl-LauncherUI-GroupDragReorder
         title: >-

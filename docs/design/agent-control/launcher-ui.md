@@ -832,7 +832,8 @@ card, and a section header - a fixed 8-pixel slot for the group's color accent, 
 count chip) that collapses or expands the section, plus, for the user's own groups, a "..." menu
 (`GroupHeaderMenuButton`, tooltip "Add a repository to this group, or move, sort, color, rename or delete the group")
 with **Add repository...** (`GroupAddRepoMenuItem`), **New subgroup...** (`GroupNewSubgroupMenuItem`), a separator,
-**Move up** (`MoveGroupUpMenuItem`), **Move down** (`MoveGroupDownMenuItem`), **Sort by name**
+**Move up** (`MoveGroupUpMenuItem`), **Move down** (`MoveGroupDownMenuItem`), **Move into group**
+(`GroupMoveIntoMenuItem`, a submenu), **Sort by name**
 (`GroupSortByNameMenuItem`), **Group color...** (`GroupColorMenuItem`), a separator, **Rename group...**, **Delete
 group, keep contents** and **Delete group and its contents**. The header button's accessible name says the section, its
 count and its state (`Work, 2 repos, collapsed`, with `, inside Client` for a nested group); the group's color does not
@@ -856,7 +857,19 @@ depends on the groups that exist when the menu opens, which a XAML template cann
 commands, so `MainWindow`'s code-behind fills it in the flyout's `Opening` event (a check mark on the repo's own group,
 a separator, **New group...**, and **Remove from group** for a grouped repo); the groups offered are all that exist,
 groups with no repo and nested groups included, a nested group's tooltip giving its path (`Client > Project`,
-`MainWindowViewModel.GetGroupPath`); the choices run `RepoCardViewModel.MoveToGroup` and its commands. Group names are
+`MainWindowViewModel.GetGroupPath`); the choices run `RepoCardViewModel.MoveToGroup` and its commands, but when the card
+is one of several selected cards the entries - the groups, **New group...** (whose prompt then names the count) and
+**Remove from group** (shown when any selected repo is in a group) - act on the whole selection
+(`MainWindowViewModel.GetDragCards`, `MoveCardsToGroup`), and the item's text and tooltip say so
+(`RepoCardViewModel.MoveToGroupMenuText`, `AgentControl-LauncherUI-RepoMultiMoveToGroup`): the way to move the
+selection that does not need dragging (WCAG 2.2 SC 2.5.7). *Move into group.* The header's submenu is filled the
+same way in the `Opening` event of the header's flyout (`GroupMenu_Opening`, the header found through the flyout's
+target): **Move to top level** (`GroupMoveToTopLevelMenuItem`) first for a nested group, then one entry per group the
+group can go into (`GroupMoveIntoItem`, accessible name the group's name, tooltip the path), from
+`MainWindowViewModel.GetGroupMoveIntoTargets`; choosing one calls `MoveGroupInto`, which makes the group the last
+subgroup of that group (or the last top-level group). The submenu item is disabled, with the reason as its tooltip,
+while the filter has text and for a top-level group with no target (`GetGroupMoveIntoDisabledReason`;
+`AgentControl-LauncherUI-GroupMoveInto`). Group names are
 shown in text blocks, so an underscore is not taken as an access key. **New group...** and **Rename group...** show the
 small `GroupNameWindow`, whose `GroupNameViewModel` validates while the user types (blank, longer than 40 characters,
 and the built-in names *Favorites* and *Ungrouped* are refused; a duplicate is refused when renaming and joins the
@@ -952,7 +965,8 @@ live in `MainWindowViewModel` and the window only translates input and shows fee
   `MainWindowViewModel.DropCard` (for several cards `DropCards`). A drag that does not carry this data format, or a repo
   that is not listed, is ignored.
 - *Selecting several repos* (`AgentControl-System-RepoMultiSelect`, `AgentControl-System-RepoMultiSelectActions`,
-  `AgentControl-LauncherUI-RepoMultiSelect`, `-RepoMultiSelectHighlight`, `-RepoMultiDrag`, `-RepoMultiRemove`): the
+  `AgentControl-LauncherUI-RepoMultiSelect`, `-RepoMultiSelectHighlight`, `-RepoMultiDrag`, `-RepoMultiMoveToGroup`,
+  `-RepoMultiRemove`): the
   list is a `RepoListBox` (a supporting type of this subsystem, a `ListBox` with `SelectionMode="Multiple"` that keeps
   the `ListBox` styles and template through its style key, so the AutomationId `RepoListBox`, the UI Automation list and
   list-item peers - `Selection.CanSelectMultiple`, `SelectionItem.IsSelected` on each row - and the `repoList` styles
@@ -1042,7 +1056,9 @@ live in `MainWindowViewModel` and the window only translates input and shows fee
   alphabetically. Two ways change it, both ending in `MainWindowViewModel`: the header menu's **Move up** and **Move
   down** (`MoveGroupUpMenuItem`, `MoveGroupDownMenuItem`, bound to the header's `MoveUpCommand`/`MoveDownCommand`,
   disabled with the reason as tooltip - shown even while disabled - at the first or last group and while the filter has
-  text, `AgentControl-LauncherUI-GroupMoveMenu`) call `MoveGroup`, which swaps the group with its neighbor; and dragging
+  text, `AgentControl-LauncherUI-GroupMoveMenu`) call `MoveGroup`, which swaps the group with its neighbor; the header
+  menu's **Move into group** puts it inside another group or back at the top level (see *Move into group* above);
+  and dragging
   a header (`AgentControl-LauncherUI-GroupDragReorder`). *Sorting a group* (`AgentControl-System-GroupSortByName`,
 `AgentControl-LauncherUI-GroupSortByName`): the header menu's **Sort by name** (`GroupSortByNameMenuItem`, bound to the
 header's `SortByNameCommand`, tooltip `SortByNameTooltip` shown even while disabled) calls `SortGroupByName`, which
@@ -1060,7 +1076,8 @@ order already. **Group drag source**: a left-button press anywhere on a user
   after it (the `dropBelow` line) and the middle third **inside** it as its last subgroup (the header tinted with the
   `dropHeader` class, as for a card dropped on a header) - a `GroupDropTarget` - and a group dropped before or after a
   nested group becomes that group's sibling, leaving the group it was in
-  (`AgentControl-LauncherUI-NestedGroupDrag`); the thirds keep "upper" and "lower" meaning what the halves did.
+  (`AgentControl-LauncherUI-NestedGroupDrag`); the thirds keep "upper" and "lower" meaning what the halves did. A drag
+  is never the only way: **Move into group** and **Move to top level** do the same from the menu.
   `MainWindowViewModel.CanDropGroup` decides, refusing a drop next to or inside the dragged group's own subgroups, and
   `DropGroup` does it. Over the *Favorites* or
   *Ungrouped* header, a card, a refused place or empty space the effect is `None` and no line or tint shows. A collapsed

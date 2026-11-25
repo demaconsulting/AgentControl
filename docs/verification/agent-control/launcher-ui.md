@@ -175,7 +175,8 @@ refresh queue, which spawn real subprocesses via `GitStub` or the system git exe
   the group header offer moving, renaming and removing groups, a chosen card color is shown on the tile only, and
   the letters on every palette color have at least 4.5:1 contrast in both themes.
 - A theme chosen in Settings takes effect on the running application and every text color of the shared styles has at
-  least 4.5:1 contrast, and the status bars and the favorite star at least 3:1, in both themes; the contrast of every
+  least 4.5:1 contrast, and the status bars and the favorite star at least 3:1, in both themes (on the normal, the
+  hovered and the selected card surface); the contrast of every
   state of every control and the drawn keyboard focus ring are not asserted (the focus-visible state of the focused
   control is).
 - A change the user makes is applied only when it was saved; when the save fails nothing changes and the user is told,
@@ -216,6 +217,9 @@ refresh queue, which spawn real subprocesses via `GitStub` or the system git exe
 - The groups are listed in the user's order (alphabetically until ordered) between Favorites and Ungrouped, are moved
   with the header menu's Move items (disabled with a reason at the ends and while filtering) and by dragging a header
   above or below another group's header (refused elsewhere and while filtering), and the order survives a restart.
+- Nesting a group, and bringing it back to the top level, can be done from the header menu (Move into group, Move to
+  top level) as well as by dragging, and moving the selected cards to a group can be done from the card menu as well as
+  by dragging; the menu entries say how many cards they move and are disabled with a reason where they do not apply.
 - The picker accepts several folders and folders dropped from the file manager are added (into the group dropped on,
   otherwise ungrouped, with copy feedback that is cleared); only top folders of Git repositories are added, and one
   message says which folders were not added and why.
@@ -502,7 +506,7 @@ cover `AgentControl-LauncherUI-GroupMoveMenu` (children `AgentControl-MainWindow
 **LauncherUI_GroupSortByName_MenuSortsDirectReposAndExplainsWhenUnavailable**: A group header's menu has a **Sort by
 name** item with a tooltip; choosing it on a group whose repos are out of order lists them in name order, and the item
 is then disabled with a tooltip saying the repos are already sorted
-(`MainWindow_HeaderMenu_SortByName_SortsGroupThenIsUnavailable`); the menu holds the item after Move down
+(`MainWindow_HeaderMenu_SortByName_SortsGroupThenIsUnavailable`); the menu holds the item after Move into group
 (`MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator`). These cover `AgentControl-LauncherUI-GroupSortByName`
 (children `AgentControl-MainWindowViewModel-GroupSortByName`, `-GroupSortAvailability` and
 `AgentControl-RepoGroupHeaderViewModel-SortByNameRequest`). Which repos are sorted, how names are compared and when
@@ -1255,6 +1259,15 @@ name. The requirements are split by behavior; each is covered by the tests that 
   no repos and the words `inside Project`. `MainWindow_CardMenu_MoveToGroup_ListsEmptyAndNestedGroupsWithPath`: the
   submenu lists a group with no repo and a nested group, the nested group's tooltip giving its path, and choosing the
   empty group moves the repo into it.
+- `AgentControl-LauncherUI-GroupMoveInto` (moving a group into another from its header's menu, without dragging):
+  `MainWindow_HeaderMenu_MoveInto_ListsValidTargetsAndMovesGroup`: the "Move into group" submenu of Alpha (inside
+  Client) starts with "Move to top level" and lists the groups Project and Home - not Alpha, not Client, which is its
+  parent (replaced by "Move to top level") - with the path as the tooltip; choosing Home puts Alpha inside Home (its
+  header says `inside Home`, the settings hold the parent). `MainWindow_HeaderMenu_MoveInto_NestedGroupOffersTopLevel`:
+  the item of Client, which has nowhere to go (everything else is inside it), is disabled with that reason as its
+  tooltip and no entries; choosing "Move to top level" for Alpha makes it a top-level group again; while the filter has
+  text the item is   disabled and its tooltip says to clear the filter. The menu holds the item after Move down
+  (`MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator`).
 - `AgentControl-LauncherUI-NestedGroupDrag` (dragging a group header into, out of and among groups):
   `MainWindow_DragGroupHeader_ThreeZones_NestBeforeAndAfter`: a top-level group is dragged over the middle of another
   group's header (the header is tinted, no line) and dropped inside it, over the upper third of a nested group's header
@@ -1301,6 +1314,13 @@ name. The requirements are split by behavior; each is covered by the tests that 
   `MainWindow_CardMenu_RemoveOnSelectedCard_RemovesTheWholeSelection`: the item of a card that is one of two selected
   cards reads `Remove 2 selected repos from list` and removes both after one question, and the item of a card that is
   not selected reads `Remove from list` and removes that card alone.
+- `AgentControl-LauncherUI-RepoMultiMoveToGroup` (moving the selection to a group without dragging):
+  `MainWindow_CardMenu_MoveToGroupOnSelectedCard_MovesTheWholeSelection`: the "Move to group" item of a card that is one
+  of two selected cards reads `Move 2 selected repos to group`, its group entries say `the 2 selected repos` in their
+  tooltips and no "Remove from group" is offered while none is in a group; choosing the group Work moves both and keeps
+  them selected; "New group..." asks for one name in a prompt that names the 2 selected repos and puts both in the new
+  group; "Remove from group" takes both out; and the item of a card that is not selected reads `Move to group` and
+  moves that card alone.
 - `AgentControl-LauncherUI-RepoGroupCollapse` (collapse and expand from the header):
   `MainWindow_HeaderToggle_CollapsesAndExpandsSection`.
 

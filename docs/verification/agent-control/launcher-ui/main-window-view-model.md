@@ -87,6 +87,10 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 - Groups move up and down and are dropped before or after another group, the full order of the groups is stored and
   read by the next start, and a move or drop that does not apply (an end, a built-in section, a group without a
   section, the group itself, while the filter has text) is refused with its reason, changing nothing.
+- A group can be moved into another group, or to the top level, as the last subgroup, without dragging; only valid
+  targets are offered, and a move that does not apply is refused with its reason, changing nothing.
+- Several cards can be moved into a group, or out of their groups, in one saved change that changes only their
+  groups, with the same name rules as one card.
 - The group-name prompt validates as the user types and completes exactly once.
 - Every change the user makes (favorite, group, card color, group color, group order, recorded launch, collapse, group
   rename and removal,
@@ -380,6 +384,23 @@ while the filter has text, each with its reason, and the headers offer the moves
 (`MainWindowViewModel_GetGroupMoveDisabledReason_EndsBuiltInSectionsAndFilter`, covering
 `AgentControl-MainWindowViewModel-MoveGroupAvailability`).
 
+**MainWindowViewModel_MoveGroupInto_IntoAndOutOfGroupsAsLastChildAndSavesOnce**: Tested by `RepoGroupTreeTests.cs`.
+The groups offered for moving a group into are every group except the group itself, its descendants, the group it is
+inside already, *Favorites*, *Ungrouped* and names that are no group, in tree order
+(`MainWindowViewModel_GetGroupMoveIntoTargets_ExcludesSelfDescendantsCurrentParentAndBuiltIns`, covering
+`AgentControl-MainWindowViewModel-GroupMoveIntoTargets`). Moving Home into Alpha makes it Alpha's subgroup (listed
+before Alpha's own repo), moving it to the top level makes it the last top-level group, moving it into Client makes it
+the last of Client's subgroups, a subgroup with its own subgroup moves as a whole, and the stored hierarchy and order
+read back from the file hold the result
+(`MainWindowViewModel_MoveGroupInto_IntoAndOutOfGroupsAsLastChildAndSavesOnce`, covering
+`AgentControl-MainWindowViewModel-GroupMoveInto`). A move into the group itself or one of its descendants, into the
+group it is inside already, to the top level for a top-level group, of or into a group that does not exist or a
+built-in section, and any move while the filter has text, are refused and change nothing, with the reasons for the
+disabled item for *Favorites*, an unknown group and the filter
+(`MainWindowViewModel_MoveGroupInto_RefusedWhileFilteringOrForLoop`, covering `-GroupMoveInto`); a top-level group with
+no group to go into has the "nowhere to go" reason and a nested group has none, because it can go to the top level
+(`MainWindowViewModel_GetGroupMoveIntoDisabledReason_OnlyGroupHasNowhereToGo`, covering `-GroupMoveInto`).
+
 **MainWindowViewModel_SortGroupByName_SortsDirectReposOfOneGroupByName**: Tested by `RepoGroupSortTests.cs`. Sorting a
 group puts its direct repos in name order ignoring letter case, in the places its repos had in the stored list, so repos
 of other groups and ungrouped repos between them do not move, and the new order is the user's own
@@ -463,6 +484,17 @@ non-favorites with no group, after the repos already there
 (`MainWindowViewModel_DropCards_OnFavoritesAndUngrouped_ChangeEveryCard`, covering `-DropCards`). In a flat list a drop
 into the other tier is refused as a whole, and with filter text nothing can be dropped and an empty set of cards is
 refused (`MainWindowViewModel_DropCards_FilterOrFlatListOtherTier_IsRefused`, covering `-DropCardsRefused`).
+
+**MainWindowViewModel_MoveCardsToGroup_MovesTheSelectionInOneChange**: Tested by `RepoMultiSelectTests.cs`. Moving an
+ungrouped repo, a favorite of Home and a repo of Home to the group `project` (another letter case) puts all three in
+Project under its own spelling, the favorite stays a favorite, the stored order of the repos is as before, the cards
+stay selected, and the settings file read back holds the same groups, order and favorite flag from the one change;
+taking them out of their groups clears the groups and leaves the favorite; a new name with extra white space makes a
+group under the cleaned name, and the same name in another letter case changes nothing
+(`MainWindowViewModel_MoveCardsToGroup_MovesAllSelectedKeepsFavoritesAndOrderAndSavesOnce`, covering
+`AgentControl-MainWindowViewModel-MoveCardsToGroup`). The names *Favorites* and *ungrouped* (any letter case), a name of
+41 characters, no card, and a card that is not in the list are refused and change nothing, and a null list of cards
+throws (`MainWindowViewModel_MoveCardsToGroup_InvalidNameChangesNothing`, covering `-MoveCardsToGroup`).
 
 **MainWindowViewModel_RemoveRepos_RemovesOnlyTheGivenCardsAndSaves**: Tested by `RepoMultiSelectTests.cs`. Removing a
 repo of a group, a favorite and an ungrouped repo (one of them given twice) removes exactly those three cards, reports

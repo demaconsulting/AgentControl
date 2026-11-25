@@ -247,7 +247,8 @@ is in at most one group. A group can also be inside another group (see *Nested G
    small prompt checks the name as you type: it must not be blank, may have up to 40 characters, and may not be
    **Favorites** or **Ungrouped** (those are the built-in sections). Typing the name of an existing group in
    another letter case simply adds the repo to that group. **Create** stays disabled until the name is usable.
-3. To take a repo out of its group, choose **Remove from group** in the same submenu.
+3. To take a repo out of its group, choose **Remove from group** in the same submenu. When the repo's card is one of
+   several selected cards, these choices apply to all the selected cards (see *Selecting Several Repos*).
 
 As soon as one repo is in a group the list is shown in **sections**, each with a header that shows the section's
 name and how many repos it holds:
@@ -266,7 +267,8 @@ sections you collapsed. A group's header also has a "..." menu. Its first item, 
 folder picker as the **Add repository** button in the app bar, where you can choose one or more folders, and puts
 the repos you choose straight into that group (a repo that is already in the list is moved into the group and a
 message tells you so; if you cancel the picker, nothing changes). **New subgroup...** creates a group inside this one
-(see *Nested Groups*). After a separator come **Move up** and **Move down** (see *Ordering Your Repos*),
+(see *Nested Groups*). After a separator come **Move up** and **Move down** (see *Ordering Your Repos*), **Move into
+group** (see *Nested Groups*),
 **Sort by name** (see *Sorting a Group*) and **Group color...** (see *Choosing a Group Color*), and after another
 separator **Rename group...** (the same prompt; another group's name is refused) and the two ways to delete a group,
 **Delete group, keep contents** and **Delete group and its contents** (see *Deleting a Group*). Nothing on disk
@@ -276,8 +278,8 @@ changes. The built-in **Favorites** and **Ungrouped** headers have no menu.
 Move down (disabled, as Client Work is the last group) and Group color..., then Rename group... and Remove
 group](images/group-menu.png)
 
-The picture shows the menu as it was before **New subgroup...**, **Sort by name** and **Delete group and its
-contents** were added, and with the delete item named **Remove group**.
+The picture shows the menu as it was before **New subgroup...**, **Move into group**, **Sort by name** and **Delete
+group and its contents** were added, and with the delete item named **Remove group**.
 
 The **filter box** always searches all repos: while it has text, every section is shown expanded and a section
 without a match disappears, so a repo is never hidden inside a collapsed group; clear the filter and your collapsed
@@ -309,6 +311,13 @@ a group nested deeper looks as deep as level 8, and its accessible name still sa
   group you dropped it on, so dropping next to a nested group takes the dragged group out of the group it was in.
   A group cannot be dropped on itself or on a group inside it (nothing is shown there, and nothing changes), and
   **Favorites** and **Ungrouped** can neither be moved nor contain a group.
+- **Move a group into another from the menu.** Choose **Move into group** in the group's "..." menu: its submenu lists
+  every group the group can go into (hover over one to see its path, for example "Client > Project") and the group
+  becomes the **last subgroup** of the one you choose, with its repos and subgroups. For a group that is inside another
+  group the submenu starts with **Move to top level**, which makes it a top-level group again (the last one). This does
+  the same as dragging and needs no dragging. The group itself, the groups inside it and the group it is already inside
+  are not listed; the item is disabled, with a tooltip that says why, while the filter has text and for a top-level
+  group that has no other group to go into.
 - **Move up and Move down** move a group one place among the groups of its own level. They are disabled at the ends
   of the level, and while the filter has text.
 - **Rename** keeps a group's place in the tree, its color, and everything inside it.
@@ -372,6 +381,11 @@ readers report each card as selected (and that the list allows several selected 
   Your Repos*). The cards keep their order of the list and stay selected afterwards, and the move is one change. Drag a
   card that is **not** selected and only that card moves. A drop next to one of the dragged cards themselves is
   refused, with no line shown.
+- **Move to group** in the "..." menu of any selected card does the same without dragging, for people who cannot or
+  do not want to drag: it then reads "Move 3 selected repos to group" when three are selected, and its entries - one of
+  your groups, **New group...** (the prompt then says it is for the selected repos) and **Remove from group** - act on
+  **all** the selected cards. Only the group changes: a favorite stays a favorite and no repo changes its place in
+  the stored order. The item of a card that is not selected moves only that card.
 - **Delete** (the key) removes all the selected cards from the list after **one** confirmation that says how many
   repos will be removed and that nothing on disk is deleted or modified; **No** changes nothing. The **Remove from
   list** item in the menu of a selected card does the same (it then reads "Remove 3 selected repos from list" when

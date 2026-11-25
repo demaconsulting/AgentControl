@@ -989,6 +989,17 @@ sections:
         tests:
           - RepoCardViewModel_RemoveMenuText_FollowsTheSelectionSize
 
+      - id: AgentControl-RepoCardViewModel-MoveToGroupMenuText
+        title: >-
+          The RepoCardViewModel class shall give the text and the tooltip of its "Move to group" item as the
+          plain wording while the card is not selected or is the only selected card, and as wording that says
+          how many selected repos the item moves while the card is one of several selected cards.
+        justification: |
+          The item, and the "New group..." and "Remove from group" items in its submenu, act on the whole
+          selection when its card is selected, so the item must say so before the user chooses it.
+        tests:
+          - RepoCardViewModel_MoveToGroupMenuText_FollowsTheSelectionSize
+
       - id: AgentControl-RepoCardViewModel-GroupDepthIndent
         title: >-
           The RepoCardViewModel class shall expose how many groups the card is inside in the list
