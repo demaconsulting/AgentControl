@@ -24,7 +24,7 @@ This user guide covers:
 
 - Installing AgentControl
 - The main window: the app bar, the repo cards, and the light and dark themes
-- Adding a repository to the repo list
+- Adding a repository to the repo list, and cloning a repository from its address into a new folder
 - Keeping the repo list in your own order: groups (nested, sorted by name, deleted with or without their repos),
   selecting several repos to move or remove together, the Reorder submenu and drag and drop
 - Reading a repo card's chips: pinned package, upgrade, branch, and status warnings
@@ -34,7 +34,7 @@ This user guide covers:
 - Selecting an initial agent package for a never-pinned repo, changing the package or version of a pinned repo,
   and upgrading an already-pinned repo
 - Launch behavior, including how the agent files are checked against the pin before launch
-- Pulling the latest commits for a repo
+- Pulling the latest commits for a repo, and switching a repo to another branch
 - Configuring per-user settings (package sources, git executable, agent tool, shell)
 - The About dialog
 - Authoring agent packages (zip files, NuGet packages and tagged Git repositories) so AgentControl can discover and
@@ -70,8 +70,9 @@ holds:
 - the AgentControl **logo** (hover for its name; the name and a short description are in the **About** dialog),
 - the **filter box**, which stretches across the bar and narrows first when the window is made narrower (it is
   also the first stop when you press **Tab**), and
-- three icon buttons: **Add repository** (a folder with a plus; it adds one or more repositories, see *Adding a
-  Repository*), **Settings** (a gear) and **About** (an information mark), each with a tooltip.
+- four icon buttons: **Add repository** (a folder with a plus; it adds one or more repositories, see *Adding a
+  Repository*), **Clone repository** (a cloud with a down arrow; it downloads a repository with Git and adds it, see
+  *Cloning a Repository*), **Settings** (a gear) and **About** (an information mark), each with a tooltip.
 
 Below the app bar is the list of **repo cards**, described in the next section, in your own order within each
 section (see *Organizing Repos with Groups* and *Ordering Your Repos*). With no repos, or when the filter matches
@@ -200,7 +201,8 @@ Each repo card shows:
   and, in smaller muted text below them, the repo's full path. When the window is narrow a long name is
   shortened at its end and a long path in the middle, so the repo's own folder name at the end of the path stays
   visible (hover over either for the full text)
-- The "..." menu is grouped. **Repository**: **Git Pull** (see *Pulling Changes*) and **Refresh** (re-checks
+- The "..." menu is grouped. **Repository**: **Git Pull** (see *Pulling Changes*), **Switch branch...** (see
+  *Switching Branches*) and **Refresh** (re-checks
   the repo's git state, upgrade status and committed-agent-files chip without waiting for the next app
   launch - its read goes ahead of any background reading of the other cards - and re-reads all your package sources -
   NuGet, zip folders and Git repositories - so that a newly
@@ -225,6 +227,58 @@ color... under Organize, and Remove from list](images/card-menu.png)
 Removing a repo from the list prompts for confirmation first, since it is a destructive
 action against AgentControl's own repo list state (it does not touch the repository
 itself).
+
+## Cloning a Repository
+
+Click the **Clone repository** button (the cloud-with-arrow icon) in the app bar to download a repository with Git
+into a new folder and add it to the list in one step. A dialog asks for:
+
+- **Repository address** - what you would give `git clone`: an `https://` URL, an SSH address such as
+  `git@host:owner/repo.git`, or the path of a repository on your computer. The address is used only for this clone;
+  it is not stored.
+- **Parent folder** - the existing folder the new folder is created in. Type it, or choose it with **Browse...**; it
+  starts in your user profile folder.
+- **Folder name** - the name of the new folder inside the parent folder. It follows the address (the last part of
+  it without `.git`, so `https://host/owner/repo.git` suggests `repo`) until you type a name of your own; a line under
+  the box shows the full path the clone will be made in.
+- **Group** - where the new card is listed: **Ungrouped**, or one of your groups (a group inside another is shown with
+  its path, for example `Work > Backend`).
+
+**Clone** stays unavailable until the address, the parent folder and the folder name are filled in and acceptable. A
+message under the boxes says what is not, for example:
+
+- an address that starts with a dash, that uses Git's *remote helper* syntax (such as `ext::...` or `fd::...`) or that
+  spans more than one line is refused - AgentControl treats the address as an address and never lets Git read it as
+  an option or as a command to run;
+- the folder name must be one valid Windows folder name: no `\`, `/`, `:`, `*`, `?`, `"`, `<`, `>` or `|`, no `.` or
+  `..`, no trailing dot or space, and not a name Windows reserves (`CON`, `NUL`, `COM1`...);
+- the parent folder must be a complete path such as `C:\Source`.
+
+When you press **Clone** (or **Enter**), AgentControl checks the folder in the background: the parent folder must
+exist, and the new folder must not exist yet or must be an empty folder. A folder that already holds anything is never
+used - the dialog stays open and says so, so nothing of yours can be overwritten or mixed with the clone.
+
+The dialog then closes and the clone runs in the background, shown in the progress strip under the app bar as
+"Cloning repo...". The window stays usable meanwhile, and you can start another clone into a different folder (a second
+clone into the folder that is being cloned into is refused).
+
+- **Cancel.** **Cancel** in the strip (named "Cancel cloning repository" for screen readers) stops Git and removes what
+  the clone had written so far. Only what the clone created is removed: a new folder is removed completely; if you chose
+  a folder that already existed and was empty, the folder stays and only the clone's files in it are removed. No
+  message is shown after a Cancel. A clone that Git itself ends with an error removes nothing on AgentControl's part
+  (Git cleans up after itself).
+- **Added like any repo.** When Git has finished, the folder is added to the list exactly as **Add repository** adds
+  it - into the group you chose, which is created again if you removed it meanwhile - and the card appears. If that add
+  cannot be saved, the same **Retry** or **Discard** question is asked, and the message that follows says that the
+  cloned folder is still on disk.
+- **When it fails.** A message starting "Cloning failed:" gives Git's own reason, for example that the repository was
+  not found or that access was denied, and nothing is added. A password written into an address
+  (`https://user:password@host/...`) is removed from every message and log, but it is better not to put one there.
+- **Signing in.** Git runs without a terminal, so it cannot ask for a password in the window. A credential helper such
+  as Git Credential Manager can still show its own sign-in window; if Git needs a sign-in that no helper provides, the
+  clone fails with Git's message - sign in with your Git credential helper first (see *Git on Your Computer*) and
+  clone again.
+- **Time limit.** A clone may take up to 60 minutes; use **Cancel** to end it sooner.
 
 ## Giving a Repo a Card Icon
 
@@ -539,8 +593,10 @@ its last repo leaves it.
   source never blocks the window.
 - **No agent package chip** (grey) — the repo has no pin yet. Click it, or use "..." > **Select
   Package...**, to choose one.
-- **Branch chip** — the repo's current git branch. While the card is still being read it shows a dimmed **...**
-  instead (see *The Main Window*).
+- **Branch chip** — the repo's current git branch. While the card
+  is still being read it shows a dimmed **...** instead (see *The Main Window*). Each branch can pin its own agent
+  package, so after you switch branches (see *Switching Branches*) the chip and the package chip follow the new
+  branch.
 - **Uncommitted changes** (amber) — the repo has uncommitted local changes; this disables the
   **Git Pull** action for that card.
 - **Committed agent files** (amber) — one or more of `.github/agents`, `.github/standards`,
@@ -579,10 +635,12 @@ Below the chips, a card shows the outcome of the last action you started on it -
 **Git Pull** failed - in small text under the repo's path (hover for the full text).
 
 **When Git does not answer.** AgentControl gives each Git command on your repo 60 seconds (a **Git Pull** 10 minutes,
-since it uses the network and may wait for your sign-in). A Git command that takes longer - for example on a network
-share that has gone away, or a Git that waits for something - is stopped, and the card's message says: "Git did not
-answer within 60 seconds and was stopped; the repo's Git state is unknown. Use Refresh to try again." The rest of the
-window, and the other cards, carry on meanwhile. When the cause is gone, choose **Refresh** in the card's "..." menu.
+since it uses the network and may wait for your sign-in; switching branches 10 minutes, since checking out a large
+working tree can be slow; cloning 60 minutes, which you can end sooner with **Cancel**). A Git command that takes
+longer - for example on a network share that has gone away, or a Git that waits for something - is stopped, and the
+card's message says: "Git did not answer within 60 seconds and was stopped; the repo's Git state is unknown. Use Refresh
+to try again." The rest of the window, and the other cards, carry on meanwhile. When the cause is gone, choose
+**Refresh** in the card's "..." menu.
 
 # Package Sources
 
@@ -1481,6 +1539,37 @@ first realized, before its initial (deferred) Git status check has completed. Th
 "Uncommitted changes" chip, if shown, specifically denotes a confirmed dirty working tree - it is not
 shown when Git Pull is disabled because of a missing repo, an undetermined status, or a status
 check that simply hasn't run yet.
+
+# Switching Branches
+
+**Switch branch...**, in the "..." menu of a repo card (under **Repository**, right after **Git Pull**), opens a
+dialog in which you choose the branch the repo's working directory should be on. It is unavailable while the card is
+still being read, while the repo's folder is missing and while another operation runs on the card.
+
+The dialog says where the repo is now ("Currently on main", or "Detached HEAD at 1a2b3c4" when no branch is checked out)
+and lists the branches Git already knows: the **local** branches first, then the **remote** branches (each with its
+remote's name, for example "remote origin"). The current branch is marked and cannot be chosen. Type in the filter box
+to narrow the list (letter case does not matter); when only one branch you can choose is left it is selected, so typing
+a few letters and pressing **Enter** is enough. **Enter** or a double-click on a branch switches to it, **Switch** does
+the same for the selected branch, and **Cancel** or **Esc** closes the dialog and changes nothing.
+
+- **Remote branches.** Choosing a remote branch creates a local branch of the same name that tracks it and switches to
+  it. A remote branch that already has a local branch of the same name is listed once, as the local branch.
+- **Nothing is fetched.** The list is what Git already knows, so the dialog opens at once and never asks you to sign
+  in. To see branches that were pushed recently, use **Git Pull** first (it also updates what Git knows of the remote).
+- **Your changes.** AgentControl uses `git switch` as it is and never forces anything: uncommitted changes that do not
+  touch the files that differ between the two branches go with you to the new branch, and nothing is stashed,
+  discarded or merged for you.
+- **When Git refuses.** If switching would overwrite your uncommitted work, Git refuses and nothing is changed. The
+  card and a message show Git's own reason, for example "Could not switch to 'main': error: Your local changes to the
+  following files would be overwritten by checkout: ... Nothing was changed." Commit or stash your changes (or move
+  them somewhere else), then switch again.
+
+While the switch runs, the card shows "Switching to main..." and its actions are unavailable; the switch may take up to
+10 minutes. When it has finished, the card says "Switched to branch 'main'." and refreshes completely, the same as after
+**Git Pull**: the **branch chip** shows the new branch, and because each branch has its own `.agentcontrol.json`, the
+**agent package chip**, the upgrade chip, the committed-files chip and the uncommitted-changes warning are those of the
+new branch. The next **Launch** works with the pin of the branch you are on.
 
 # Settings
 

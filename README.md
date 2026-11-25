@@ -34,7 +34,8 @@ places them in the .github folders (normally git-ignored), and launches the agen
 - 📄 **AGENTS.md Template**: Offers a package's starter AGENTS.md to repos that lack one
 - 🚀 **Configurable Agent Tool**: Launches Copilot CLI, Claude Code, Cursor, or a custom command
 - 🐚 **Shell Choice**: Picks the launch shell and can keep it open after the tool exits
-- 🌿 **Git Integration**: Shows the branch, runs Git Pull, and warns about committed agent files
+- 🌿 **Git Integration**: Shows the branch, runs Git Pull, switches branches from the repo card, clones a repository
+  from its address into a new folder (with progress and Cancel), and warns about committed agent files
 - 🏷️ **Repo Cards**: Show a status bar and chips for package, upgrade, and branch
 - ⭐ **Groups and Favorites**: Organizes repos with favorites, colored groups that can nest inside each other, card
   colors and a sort by name, all in your own order; select several repos to move or remove them together, and delete a
@@ -49,14 +50,16 @@ places them in the .github folders (normally git-ignored), and launches the agen
 2. Run the installer and follow the prompts.
 3. Launch **AgentControl** from the Start menu.
 
-The application is self-contained, so the machine needs no .NET runtime. Only a Git repository package source needs
-[Git](https://git-scm.com/downloads) 2.29 or newer; the other source kinds need no Git.
+The application is self-contained, so the machine needs no .NET runtime. A Git repository package source needs
+[Git](https://git-scm.com/downloads) 2.29 or newer; switching branches needs Git 2.23 or newer; Git Pull and cloning use
+your own Git too.
 
 ## Getting Started
 
 1. Open **Settings** and add a package source: a zip folder, a NuGet folder or server, or a Git repository.
 2. Click **Add repository** and choose one or more Git repository folders, or drag them from File Explorer onto the
-   list.
+   list. To get a repository you do not have yet, click **Clone repository** instead, enter its address and a folder,
+   and the clone is added for you.
 3. In the repo card's "..." menu, choose **Select Package...** and pick a package and version.
 4. Click **Launch** to start your agentic CLI tool in the repo.
 

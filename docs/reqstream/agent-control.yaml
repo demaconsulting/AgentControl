@@ -718,6 +718,8 @@ sections:
           - AgentControl-GitIntegration-SwitchBranch
           - AgentControl-LauncherUI-SwitchBranch
           - AgentControl-LauncherUI-SwitchBranchDialog
+        tests:
+          - windows@SwitchBranchMenuItem_ChooseOtherBranch_ChangesBranchChipAndBlockedSwitchShowsGitsReason
 
       - id: AgentControl-System-CloneRepository
         title: >-
@@ -735,6 +737,8 @@ sections:
           - AgentControl-LauncherUI-CloneRepositoryDialog
           - AgentControl-LauncherUI-CloneRepository
           - AgentControl-LauncherUI-CloneProgressCancel
+        tests:
+          - windows@CloneRepoButton_CloneFromLocalBareRepoIntoGroup_AddsTheCardAndRemovesTheProgressStrip
 
       - id: AgentControl-System-CloneSafety
         title: >-
@@ -750,6 +754,8 @@ sections:
           - AgentControl-GitIntegration-CloneUrlIsData
           - AgentControl-GitIntegration-CloneNeverLogsCredentials
           - AgentControl-GitIntegration-CloneRemovesOnlyWhatItCreated
+        tests:
+          - windows@CloneRepoButton_UrlThatLooksLikeAnOption_IsRefusedAndRunsNoGit
 
       - id: AgentControl-System-SelectPackage
         title: >-

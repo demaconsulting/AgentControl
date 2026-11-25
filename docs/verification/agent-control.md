@@ -116,6 +116,10 @@ never prompts and that work the user started may. What is not exercised end to e
 address, and Git Credential Manager's own dialog - whether it can be shown from a hidden-console process - which is
 left to a manual check on a machine with a private https repository.
 
+The branch and clone scenarios (`BranchAndCloneTests.cs`) build on the same fixture: the switch and clone scenarios
+run the application with the real `git` against a repository cloned from a real local bare repository, isolated and
+skipped or failed exactly like the Git source scenarios; the clone-safety scenario needs no git, because it runs with
+the arg-logger stub and shows that a refused address starts no `git clone` at all. No network is used.
 `AgentControl-System-PackageAuthenticity` is stated as far as one end-to-end scenario in `MultipleSourcesTests.cs`
 can show it: the published application runs against a real NuGet folder feed that holds an unsigned newer package,
 with the source configured to require signed packages, and the upgrade is refused with a message that says the
@@ -344,6 +348,39 @@ executable is invoked with the `pull` argument, proving the pull action is wired
 configured git executable and gated on a clean working tree. This scenario is tested by
 `windows@PullMenuItem_Click_InvokesConfiguredGitExecutableWithPullArgument`, covering
 `AgentControl-System-Pull`.
+
+**AgentControl_SwitchBranch_ChooseOtherBranch_BranchChipFollowsAndBlockedSwitchShowsGitsReason**: In the published
+application, started over the real git against a repository cloned from a local bare repository (on `main`, with a local
+branch `feature` and a branch `from-remote` that exists only on the remote), the card's "..." menu item
+**Switch branch...** opens the dialog; typing `from-remote` in its filter selects the only branch left to choose and
+Switch makes it the current branch: the repository really is on a new local branch `from-remote` with that branch's
+file content, the branch chip reads `from-remote` and the card says "Switched to branch 'from-remote'.". With the
+file then changed locally in a way the other branch would overwrite, switching to `main` is refused: a message
+quotes git's reason ("would be overwritten") and says "Nothing was changed.", and afterwards the repository is
+still on `from-remote` with the local change intact. This scenario is tested by
+`windows@SwitchBranchMenuItem_ChooseOtherBranch_ChangesBranchChipAndBlockedSwitchShowsGitsReason`, covering
+`AgentControl-System-SwitchBranch`; the dialog's rules, the pin following the branch and the card's refusal handling
+are verified one level down (`SwitchBranchViewModel`, `RepoCardViewModel`, `GitClient`), because the end-to-end
+test cannot observe git's guarantees beyond what it checks on disk.
+
+**AgentControl_CloneRepository_CloneFromLocalBareRepoIntoGroup_AddsTheCardAndRemovesTheProgressStrip**: In the
+published application, started over the real git with one repo in the group `Work`, the app bar's **Clone repository**
+button opens the dialog; the address of a local bare repository (never the network), the parent folder, a folder
+name and the group `Work` are entered and Clone is pressed. The card named after the folder appears, the progress strip
+and the dialog are gone, the destination is a working clone on `main` with the repository's files, the header
+`Work` counts two repos and the settings file stores the new repo with the group `Work`. This scenario is tested by
+`windows@CloneRepoButton_CloneFromLocalBareRepoIntoGroup_AddsTheCardAndRemovesTheProgressStrip`, covering
+`AgentControl-System-CloneRepository`; Cancel, the failure message, one clone per destination and the add path are
+verified one level down (`MainWindowViewModel`, `GitClient`).
+
+**AgentControl_CloneSafety_UrlThatLooksLikeAnOption_IsRefusedAndRunsNoGit**: In the published application, with the
+arg-logger stub standing in for git, the Clone dialog is given `--upload-pack="echo ran > marker"` and then
+`ext::sh -c "echo ran > marker"`: each is refused with a message under the fields and the Clone button stays disabled.
+After the dialog is closed the stub recorded no `clone`, the marker file the addresses would have written does not
+exist and the list is unchanged. This scenario is tested by
+`windows@CloneRepoButton_UrlThatLooksLikeAnOption_IsRefusedAndRunsNoGit`, covering `AgentControl-System-CloneSafety`;
+that a password in an address is never logged and that only what a clone created is removed after a cancel are
+verified one level down (`GitClient`, `GitIntegration`).
 
 **AgentControl_SelectPackage_SelectPackageMenuItem_AppliesChosenPackageAndSyncsFolders**: The
 Select Package menu item is clicked on an unpinned repo card, a package name/version is chosen
