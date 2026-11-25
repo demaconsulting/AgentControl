@@ -50,7 +50,8 @@ on:
 jobs:
   test:
     name: Test ${{ inputs.project }} on ${{ inputs.os }}
-    runs-on: ${{ inputs.os }}
+    # Resolved through a static allowlist so an out-of-band input cannot select another runner label.
+    runs-on: ${{ fromJSON('{"windows-latest":"windows-latest","ubuntu-latest":"ubuntu-latest","macos-latest":"macos-latest"}')[inputs.os] || 'windows-latest' }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -69,6 +70,10 @@ jobs:
             Tests)         path="test/DemaConsulting.AgentControl.Tests/DemaConsulting.AgentControl.Tests.csproj" ;;
             Puppet.Tests)  path="tools/DemaConsulting.AgentControl.Puppet.Tests/DemaConsulting.AgentControl.Puppet.Tests.csproj" ;;
             *) echo "::error::Unknown project '${PROJECT}'"; exit 1 ;;
+          esac
+          case "${RUNNER_OS_INPUT}" in
+            windows-latest|ubuntu-latest|macos-latest) ;;
+            *) echo "::error::Unsupported os '${RUNNER_OS_INPUT}'"; exit 1 ;;
           esac
           # These projects target net10.0-windows: they restore everywhere, but their test host
           # (and the UI under test) only runs on Windows. See the note on the Test step in build.yaml.
@@ -104,7 +109,7 @@ jobs:
         env:
           TEST_FILTER: ${{ inputs.filter }}
         run: >
-          dotnet test "${{ steps.select.outputs.path }}"
+          dotnet test --project "${{ steps.select.outputs.path }}"
           --no-build
           --configuration Release
           --filter-query "${TEST_FILTER}"
