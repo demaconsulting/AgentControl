@@ -355,16 +355,22 @@ sections:
           The LauncherUI subsystem shall let the user drag a group's header onto another of the user's
           group headers and drop it before that group (upper third), inside it as its last subgroup
           (middle third, the header tinted) or after it (lower third, a line shown), a group dropped next
-          to a nested group leaving the group it was in, and shall refuse a drop onto a group inside the
-          dragged group, showing nothing there.
+          to a nested group leaving the group it was in, except that in an auto-scroll edge zone of the
+          list the header is split in halves (before, after) and nothing nests, and shall refuse a drop
+          onto a group inside the dragged group, showing nothing there.
         justification: |
           Dragging is the direct way to nest a group and to take it out again; a group inside itself
-          would be a loop, so no place inside the dragged group may look like a target.
+          would be a loop, so no place inside the dragged group may look like a target. A held pointer
+          in an edge zone has the list moving under it, so the part of a row it is over cannot be aimed
+          at and must not nest a group by chance.
         children:
           - AgentControl-MainWindowViewModel-NestedGroupDrop
         tests:
           - MainWindow_DragGroupHeader_ThreeZones_NestBeforeAndAfter
           - MainWindow_DragGroupHeader_OntoOwnDescendant_IsRefused
+          - MainWindow_GetGroupDropZone_ThirdsOrHalvesInAutoScrollZone_NestsOnlyOutsideTheZone
+          - MainWindow_DragGroupHeaderInAutoScrollZone_NeverNestsAndReorders
+          - MainWindow_DragGroupHeaderAtEdgeOfListThatFits_StillNests
 
       - id: AgentControl-LauncherUI-NestedGroupRemembered
         title: >-

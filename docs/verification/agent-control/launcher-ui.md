@@ -1276,7 +1276,18 @@ name. The requirements are split by behavior; each is covered by the tests that 
   group's header (the header is tinted, no line) and dropped inside it, over the upper third of a nested group's header
   (the line above it) and dropped before it, and over the lower third of the parent's own header (the line below) and
   dropped after it, leaving the parent; and `MainWindow_DragGroupHeader_OntoOwnDescendant_IsRefused`: a group dragged
-  over each third of a group inside it shows nothing and the drop changes nothing.
+  over each third of a group inside it shows nothing and the drop changes nothing. In an auto-scroll edge zone the
+  thirds do not apply: `MainWindow_GetGroupDropZone_ThirdsOrHalvesInAutoScrollZone_NestsOnlyOutsideTheZone` checks the
+  pure zone function with exact heights - thirds (before, inside, after) outside the zone, halves (before, after, never
+  inside) in it; `MainWindow_DragGroupHeaderInAutoScrollZone_NeverNestsAndReorders` drops a header over the middle of
+  another's header in the middle of the list (nested, tinted) and then, with the groups collapsed and the list scrolled
+  to its end and to its start (so the pointer's row stays put while the timer ticks), over what would be the middle
+  third of the last and of the first header, in the bottom and top zones - the line is shown (below, above), no row is
+  tinted and the drop reorders instead of nesting; and `MainWindow_DragGroupHeaderAtEdgeOfListThatFits_StillNests`: in a
+  list that fits its viewport the edges are no zones and a drop over the middle of the first header still nests. The
+  windows' held-still drop at the bottom edge is verified end to end in
+  `AgentControl_GroupReorder_DragHeaderHeldStillAtBottomEdge_ScrollsAndDropsBeyondTheFirstView` of the system
+  verification.
 - `AgentControl-LauncherUI-NestedGroupRemembered`: `MainWindow_NestedGroups_TreeSurvivesAWindowRestart`: a group
   created inside another and a group dropped into it are written; a new window over the saved settings lists the same
   tree.

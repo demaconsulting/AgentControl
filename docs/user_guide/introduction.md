@@ -312,6 +312,10 @@ in, and then by its own repo payments-api](images/nested-groups.png)
   group (a line shows where), dropped on the **middle third** it goes **inside** that group, as its last subgroup (the
   header is tinted), and dropped on the **lower third** it goes **after** that group - in each case at the level of the
   group you dropped it on, so dropping next to a nested group takes the dragged group out of the group it was in.
+  While you hold the header near the top or bottom edge of a list that scrolls (see *Scrolling while you drag*), the
+  list is moving under the pointer, so a header there is split in halves instead: the upper half puts the group
+  **before** it, the lower half **after** it, and it is never put inside - move the pointer toward the middle of the
+  list to nest it.
   A group cannot be dropped on itself or on a group inside it (nothing is shown there, and nothing changes), and
   **Favorites** and **Ungrouped** can neither be moved nor contain a group.
 - **Move a group into another from the menu.** Choose **Move into group** in the group's "..." menu: its submenu lists
@@ -452,7 +456,8 @@ Inside a group, its subgroups are ordered the same way among themselves.
   They are disabled for the first and the last group, and the tooltip says why.
 - **Drag a header.** Press anywhere on a group's header except its "..." button and drag it onto another group's
   header: the upper third puts it before that group, the lower third after it (a line shows where it will land) and
-  the middle third inside it (see *Nested Groups*). **Favorites** and **Ungrouped** cannot be moved, and a group
+  the middle third inside it (see *Nested Groups*; near the top or bottom edge of a list that scrolls a header is split
+  in halves, before and after, and nothing nests there). **Favorites** and **Ungrouped** cannot be moved, and a group
   cannot be dropped on them. A collapsed group stays collapsed.
 - **While the filter has text**, groups cannot be reordered either: clear the filter first.
 

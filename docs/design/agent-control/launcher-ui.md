@@ -1077,8 +1077,15 @@ order already. **Group drag source**: a left-button press anywhere on a user
   after it (the `dropBelow` line) and the middle third **inside** it as its last subgroup (the header tinted with the
   `dropHeader` class, as for a card dropped on a header) - a `GroupDropTarget` - and a group dropped before or after a
   nested group becomes that group's sibling, leaving the group it was in
-  (`AgentControl-LauncherUI-NestedGroupDrag`); the thirds keep "upper" and "lower" meaning what the halves did. A drag
-  is never the only way: **Move into group** and **Move to top level** do the same from the menu.
+  (`AgentControl-LauncherUI-NestedGroupDrag`); the thirds keep "upper" and "lower" meaning what the halves did.
+  **The thirds apply except in an auto-scroll edge zone**: while the pointer is in a zone where the list scrolls
+  (`IsInAutoScrollZone`: the list has something to scroll and `GetAutoScrollStep` is not 0 at the pointer - also once
+  the list has reached its end), the list moves under a pointer that is held still, so the row under it, and the part of
+  the row, cannot be aimed at; `GetGroupDropZone` is then given `inAutoScrollZone` and splits the row in halves, before
+  and after, and never offers **inside**. `GetGroupDropTarget` is the one place that asks, and both the feedback
+  (`ShowGroupDropFeedback`, also redrawn after every auto-scroll tick) and the drop (`GroupDrop`) call it, so the line
+  that is shown is what a drop does. A list that fits its viewport has no such zones. A drag is
+  never the only way: **Move into group** and **Move to top level** do the same from the menu.
   `MainWindowViewModel.CanDropGroup` decides, refusing a drop next to or inside the dragged group's own subgroups, and
   `DropGroup` does it. Over the *Favorites* or
   *Ungrouped* header, a card, a refused place or empty space the effect is `None` and no line or tint shows. A collapsed

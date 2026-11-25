@@ -234,17 +234,18 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   match is never hidden, without changing the remembered state.
 - *Nested groups* (`AgentControl-System-NestedGroups`): a group can be inside another group, to any depth. "New
   subgroup..." in a header's menu asks for a name with the same prompt as a new group (a name already used anywhere in
-  the tree is refused, because a group is identified by its name alone) and creates the group inside that one, even
-  with no repo in it yet. A header can be dragged onto another header: its upper third places it before that group,
-  its middle third inside it and its lower third after it, at that group's level; a drop onto the group itself or one
-  of its own subgroups is refused. The same moves are in the header's menu, which does not need dragging: **Move into
-  group** lists the groups it can go into (and **Move to top level** for a nested group) and puts it there as the last
-  subgroup. The tree is the user's own choice and is kept in the settings
-  (`AppSettings.GroupParents`, child to parent, beside the existing group order); `RepoGroupHierarchy` (a `Settings`
-  unit) holds the rules - which moves keep it a tree, the order within a level and the repair of a stored tree that was
-  edited by hand or is stale - and `MainWindowViewModel` builds the listing from it. Collapsing a group hides its whole
-  subtree, a rename keeps the group's place, and the header and the cards of a nested group are indented by depth. A
-  file written before groups nested loads with every group at the top level, exactly as it was shown.
+  the tree is refused, because a group is identified by its name alone) and creates the group inside that one, even with
+  no repo in it yet. A header can be dragged onto another header: its upper third places it before that group, its
+  middle third inside it and its lower third after it, at that group's level (while the pointer is held in a zone where
+  the list scrolls, a header is split in halves, before and after, and nothing nests); a drop onto the group itself or
+  one of its own subgroups is refused. The same moves are in the header's menu, which does not need dragging: **Move
+  into group** lists the groups it can go into (and **Move to top level** for a nested group) and puts it there as the
+  last subgroup. The tree is the user's own choice and is kept in the settings (`AppSettings.GroupParents`, child to
+  parent, beside the existing group order); `RepoGroupHierarchy` (a `Settings` unit) holds the rules - which moves keep
+  it a tree, the order within a level and the repair of a stored tree that was edited by hand or is stale - and
+  `MainWindowViewModel` builds the listing from it. Collapsing a group hides its whole subtree, a rename keeps the
+  group's place, and the header and the cards of a nested group are indented by depth. A file written before groups
+  nested loads with every group at the top level, exactly as it was shown.
 - *Sorting a group* (`AgentControl-System-GroupSortByName`): **Sort by name** in a header's menu puts the group's own
   repos in alphabetical order of their names (ignoring letter case, by the current culture, ties keeping their order)
   by writing them back into the same places of the stored list, so no other section is touched; it is unavailable,

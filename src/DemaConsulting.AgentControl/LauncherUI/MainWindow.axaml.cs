@@ -1766,8 +1766,13 @@ internal sealed partial class MainWindow : Window
     /// <summary>
     ///     Works out where a drop at the pointer's position would put a dragged group: next to the user's
     ///     group whose header the pointer is over (before it over the upper third, after it over the
-    ///     lower third) or inside it (over the middle third).
+    ///     lower third) or inside it (over the middle third) - except in an auto-scroll zone, where the
+    ///     row is split in halves and nothing nests.
     /// </summary>
+    /// <remarks>
+    ///     The feedback (the line or the tint) and the drop both use this, so what is shown is what a
+    ///     drop does.
+    /// </remarks>
     /// <param name="pointInWindow">The pointer's position, relative to this window.</param>
     /// <returns>The place and the header's row, or <see langword="null"/> when the pointer is not over
     ///     the header of one of the user's groups (a card, Favorites, Ungrouped or empty space).</returns>
@@ -1780,9 +1785,25 @@ internal sealed partial class MainWindow : Window
         }
 
         var y = GetYWithin(pointInWindow, container);
-        var (insertBefore, inside) = GetGroupDropZone(y, container.Bounds.Height);
+        var (insertBefore, inside) = GetGroupDropZone(y, container.Bounds.Height, IsInAutoScrollZone(pointInWindow));
         return (new GroupDropTarget(header.Name, insertBefore, inside), container);
     }
+
+    /// <summary>
+    ///     Gets whether the pointer is in a zone where the list auto-scrolls and has something to scroll.
+    /// </summary>
+    /// <remarks>
+    ///     A list that fits its viewport never scrolls, so its edges are not scroll zones and nothing
+    ///     is taken away from the rows there. A list already scrolled to its end still counts: the
+    ///     pointer is held in the zone, and the row under it is the one the scrolling brought there.
+    /// </remarks>
+    /// <param name="pointInWindow">The pointer's position, relative to this window.</param>
+    /// <returns><see langword="true"/> when a held pointer here scrolls the list (or would, were the
+    ///     list not already at its end).</returns>
+    private bool IsInAutoScrollZone(Point pointInWindow) =>
+        GetRepoListScroller() is { } scroller &&
+        scroller.Extent.Height - scroller.Viewport.Height >= MinimumScrollDistance &&
+        Math.Abs(GetAutoScrollStep(scroller, pointInWindow)) >= MinimumScrollDistance;
 
     /// <summary>
     ///     Decides whether a group header is dropped before, after or inside the group header it is
@@ -1791,14 +1812,25 @@ internal sealed partial class MainWindow : Window
     /// <remarks>
     ///     The row is split in thirds: the upper third is "before" and the lower third "after" (the two
     ///     places the halves were before groups nested, so "upper" and "lower" keep their meaning), and
-    ///     the middle third puts the dragged group inside the header's group.
+    ///     the middle third puts the dragged group inside the header's group. In an auto-scroll zone the
+    ///     list moves under a pointer that is held still, so the row under it - and the part of the row -
+    ///     is not something the user can aim at: nesting is not offered and the row is split in halves
+    ///     (before, after) like the card rows. Pure.
     /// </remarks>
     /// <param name="y">The pointer's vertical position within the row.</param>
     /// <param name="height">The row's height.</param>
-    /// <returns><c>InsertBefore</c> for the upper third and <c>Inside</c> for the middle third; both
-    ///     <see langword="false"/> for the lower third (insert after).</returns>
-    internal static (bool InsertBefore, bool Inside) GetGroupDropZone(double y, double height)
+    /// <param name="inAutoScrollZone">Whether the pointer is in a zone where the list auto-scrolls.</param>
+    /// <returns><c>InsertBefore</c> for the upper third (the upper half in an auto-scroll zone) and
+    ///     <c>Inside</c> for the middle third (never in an auto-scroll zone); both
+    ///     <see langword="false"/> for the lower third (the lower half in an auto-scroll zone), which
+    ///     is insert after.</returns>
+    internal static (bool InsertBefore, bool Inside) GetGroupDropZone(double y, double height, bool inAutoScrollZone)
     {
+        if (inAutoScrollZone)
+        {
+            return (y < height / 2, false);
+        }
+
         if (y < height / 3)
         {
             return (true, false);

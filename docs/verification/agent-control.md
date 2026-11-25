@@ -769,7 +769,8 @@ headless window tests of the `LauncherUI` subsystem.
 application, with more collapsed groups than the window shows, the first group's header is dragged with the real mouse
 to just above the list's bottom edge and the pointer is held perfectly still there for three seconds before the button
 is released: the group is stored after every group whose header was in view when the drag started, and it is still
-collapsed. This scenario is tested by
+collapsed. The pointer is held in the list's bottom auto-scroll zone while the rows move under it, so the drop is never
+a nest, whichever part of whichever header it ends over (the zone splits a header in halves). This scenario is tested by
 `windows@RepoList_DragGroupHeaderHeldStillAtBottomEdge_ScrollsAndDropsBeyondTheFirstView`, covering
 `AgentControl-System-GroupReorder`.
 
