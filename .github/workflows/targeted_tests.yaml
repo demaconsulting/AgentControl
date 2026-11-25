@@ -101,20 +101,24 @@ jobs:
       # to the AgentControl app and the ArgLoggerStub, which TestPaths.cs finds under bin/Release.
       - name: Build
         shell: bash
-        run: dotnet build "${{ steps.select.outputs.path }}" --configuration Release
+        env:
+          TEST_PROJECT_PATH: ${{ steps.select.outputs.path }}
+        run: dotnet build "${TEST_PROJECT_PATH}" --configuration Release
 
       # A filter that matches nothing makes the test run fail (exit code 8), which is intended.
       - name: Test
         shell: bash
         env:
           TEST_FILTER: ${{ inputs.filter }}
+          TEST_PROJECT_PATH: ${{ steps.select.outputs.path }}
+          TEST_OS: ${{ inputs.os }}
         run: >
-          dotnet test --project "${{ steps.select.outputs.path }}"
+          dotnet test --project "${TEST_PROJECT_PATH}"
           --no-build
           --configuration Release
           --filter-query "${TEST_FILTER}"
           --report-trx
-          --report-trx-filename "${{ inputs.os }}_{asm}_{tfm}_{arch}.trx"
+          --report-trx-filename "${TEST_OS}_{asm}_{tfm}_{arch}.trx"
           --results-directory artifacts
 
       - name: Upload test results
