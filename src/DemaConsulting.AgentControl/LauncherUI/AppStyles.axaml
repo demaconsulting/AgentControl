@@ -200,9 +200,9 @@
                     <SolidColorBrush x:Key="LogoBackingBackground" Color="#FFFFFF" />
 
                     <SolidColorBrush x:Key="StatusAccentUpToDate" Color="#1A7F37" />
-                    <SolidColorBrush x:Key="StatusAccentUpgrade" Color="#BF8700" />
+                    <SolidColorBrush x:Key="StatusAccentUpgrade" Color="#A87400" />
                     <SolidColorBrush x:Key="StatusAccentProblem" Color="#CF222E" />
-                    <SolidColorBrush x:Key="StatusAccentNeutral" Color="#8C959F" />
+                    <SolidColorBrush x:Key="StatusAccentNeutral" Color="#78828C" />
 
                     <SolidColorBrush x:Key="ChipNeutralBackground" Color="#0F000000" />
                     <SolidColorBrush x:Key="ChipNeutralBorder" Color="#26000000" />

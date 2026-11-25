@@ -976,8 +976,9 @@ live in `MainWindowViewModel` and the window only translates input and shows fee
   it already had and, new, the background `RepoCardBackgroundSelected` - defined, like every color, in both the Light
   and the Dark dictionary, so the selection is not carried by a border color alone - and `ThemeResourceTests` checks the
   keys exist in both and that the text, chips, buttons and icons keep their contrast on it (status accents and the
-  favorite star at least 2.5:1: on the light theme they only just reach 3:1 on a white card, so any tint lowers it, and
-  the status is also told in words). **Mass drag**: the drag carries every selected card (above), a drop calls
+  favorite star at least 3:1 on the selected surface, as on a normal or hovered card: the light theme's Upgrade and
+  Neutral accents are chosen dark enough for that, so the selection tint does not need a lower threshold).
+  **Mass drag**: the drag carries every selected card (above), a drop calls
   `DropCards`, and the cards stay selected. **Mass remove**: `Delete` and the "Remove from list" item of a card that is
   one of several selected cards (its text and tooltip come from the card's `RemoveMenuText`/`RemoveMenuTooltip`, which
   say how many) go through `ConfirmAndRemoveCards`: one `ConfirmationWindow` saying "Remove {n} repos from

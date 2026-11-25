@@ -533,13 +533,15 @@ sections:
 
       - id: AgentControl-LauncherUI-RepoMultiSelectHighlight
         title: >-
-          The LauncherUI subsystem shall show a selected card with a border and a tinted surface of its own
-          that are legible in the light and the dark theme, keep the text on a selected card legible, and
+          The LauncherUI subsystem shall make a selected card distinguishable from an unselected one without
+          relying on color alone and keep it, and the text and status graphics on it, legible in the light and
+          the dark theme (status accents and the favorite star at least 3:1, text at least 4.5:1), and shall
           expose each card's selected state, and that the list allows several selected items, to assistive
           technology.
         justification: |
           A selection that cannot be seen against both themes, or that only a mouse user can read, is not a
-          selection; the border and the tint together keep it from resting on one color cue.
+          selection; the status graphics on the selected surface must meet the same contrast as on any other
+          card surface.
         tests:
           - ThemeResources_SelectedCard_IsTintedAndStaysLegibleInLightAndDark
           - MainWindow_RepoList_SelectedCard_UsesSelectedSurfaceInLightAndDark

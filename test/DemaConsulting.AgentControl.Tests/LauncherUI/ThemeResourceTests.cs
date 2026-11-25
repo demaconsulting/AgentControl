@@ -47,14 +47,6 @@ public class ThemeResourceTests
     private const double GraphicContrast = 3.0;
 
     /// <summary>
-    ///     The least contrast of a status accent or the favorite star against the tinted surface of a
-    ///     selected card. A little below <see cref="GraphicContrast"/>: on the light theme the accents
-    ///     only just reach 3:1 against a white card, so any tint that tells a selected card apart lowers
-    ///     it; the status is also said in words (chips, tooltip), so it is never carried by the accent alone.
-    /// </summary>
-    private const double SelectedGraphicContrast = 2.5;
-
-    /// <summary>
     ///     The number of avatar palette entries the style resources must define; the view model's
     ///     <see cref="RepoCardViewModel.AvatarPaletteSize"/> chooses among them.
     /// </summary>
@@ -130,7 +122,8 @@ public class ThemeResourceTests
     ///     Test that every text color of the shared styles has at least AA contrast against the
     ///     surface it is drawn on, in both themes: chips, secondary and disabled buttons, ghost icon
     ///     buttons, validation, warning and success text, the empty-state tile and every avatar
-    ///     palette entry; and that status accents and the favorite star reach graphics contrast.
+    ///     palette entry; and that status accents and the favorite star reach graphics contrast on the
+    ///     card and on the hovered card.
     /// </summary>
     /// <param name="variantName">The theme variant to check.</param>
     [Theory]
@@ -218,6 +211,17 @@ public class ThemeResourceTests
             CheckText(graphic, Opaque(palette, graphic), card, GraphicContrast);
         }
 
+        // The status accents and the star must also stay visible on the hovered card
+        var hovered = Over(Brush(palette, "RepoCardBackgroundHover"), card);
+        foreach (var graphic in new[]
+                 {
+                     "StatusAccentUpToDate", "StatusAccentUpgrade", "StatusAccentProblem",
+                     "StatusAccentNeutral", "FavoriteStarForeground"
+                 })
+        {
+            CheckText($"{graphic} on hover", Opaque(palette, graphic), hovered, GraphicContrast);
+        }
+
         Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
     });
 
@@ -290,7 +294,7 @@ public class ThemeResourceTests
     ///     Test that a selected card is drawn with its own tinted surface in both themes - not the card's
     ///     normal surface or the page's, so the selection is not carried by the border alone - and that
     ///     the chips, buttons and icons on it keep AA text contrast, and the status accents and favorite star
-    ///     stay clearly visible (the status is also told in words by the chips and the accent's tooltip).
+    ///     keep graphics contrast (3:1) on it, as on a normal card.
     /// </summary>
     /// <param name="variantName">The theme variant to check.</param>
     [Theory]
@@ -329,7 +333,7 @@ public class ThemeResourceTests
                      "StatusAccentNeutral", "FavoriteStarForeground"
                  })
         {
-            Check(graphic, Opaque(palette, graphic), selected, SelectedGraphicContrast);
+            Check(graphic, Opaque(palette, graphic), selected, GraphicContrast);
         }
 
         // Assert: its own surface, visibly different from the normal card, and the text keeps its contrast

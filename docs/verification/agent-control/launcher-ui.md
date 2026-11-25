@@ -1280,7 +1280,8 @@ name. The requirements are split by behavior; each is covered by the tests that 
   `ThemeResources_SelectedCard_IsTintedAndStaysLegibleInLightAndDark` (`ThemeResourceTests.cs`): in the light and the
   dark theme the selected card's surface is neither the normal card's nor the page's, differs from the card's by at
   least 5% in luminance ratio, and the chips, secondary button, ghost icon buttons keep AA text contrast on it and the
-  status accents and the favorite star at least 2.5:1.
+  status accents and the favorite star at least 3:1 (the same threshold as on a normal card; the hovered card is
+  checked for the accents and the star in `AppStyles_TextAndGraphicColors_MeetContrastInBothThemes`).
   `MainWindow_RepoList_SelectedCard_UsesSelectedSurfaceInLightAndDark`: with the theme set to light and to dark a
   selected card is drawn with the selected surface resource of that theme and an unselected one with the normal card
   surface. `MainWindow_RepoList_SelectedCards_AreExposedThroughTheRowAndTheAutomationPeers`: the selected rows report
