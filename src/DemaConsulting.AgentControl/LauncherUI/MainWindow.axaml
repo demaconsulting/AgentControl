@@ -129,10 +129,10 @@
                     <Button Grid.Column="1"
                             Name="GlobalProgressCancelButton"
                             AutomationProperties.AutomationId="GlobalProgressCancelButton"
-                            AutomationProperties.Name="Cancel adding repositories"
+                            AutomationProperties.Name="{Binding GlobalProgress.CancelAccessibleName}"
                             Command="{Binding GlobalProgress.CancelCommand}"
                             IsVisible="{Binding GlobalProgress.CanCancel}"
-                            ToolTip.Tip="Stop adding repositories; nothing more is added"
+                            ToolTip.Tip="{Binding GlobalProgress.CancelToolTip}"
                             Padding="8,1" FontSize="11">
                         <StackPanel Orientation="Horizontal" Spacing="3">
                             <materialIcons:MaterialIcon Kind="Cancel" Width="12" Height="12" />

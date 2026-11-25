@@ -85,3 +85,16 @@ sections:
           running.
         tests:
           - GlobalProgressViewModel_Begin_ShowsIndeterminateText
+
+      - id: AgentControl-GlobalProgressViewModel-CancelDescribesOperation
+        title: >-
+          The GlobalProgressViewModel class shall name the Cancel button, for screen readers and in
+          its tooltip, after the operation that is shown (using the description the operation gave
+          when it began), and shall use the text for adding repositories when the operation gave none
+          or none is shown.
+        justification: |
+          The one Cancel button stops whichever cancelable operation is shown; a name that always
+          said "adding repositories" would tell a screen-reader user, and anyone who hovers the
+          button, the wrong thing while another operation (a clone) runs.
+        tests:
+          - GlobalProgressViewModel_Cancel_NamesTheOperation

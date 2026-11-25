@@ -12,7 +12,7 @@ responsibility is to show which bulk operation runs and how far it has got, and 
 knows nothing of repos, settings or threads. The `GlobalProgressOperation` class in the same file is part of this unit:
 it is the handle through which one operation's owner reports and ends it. Its behavior is specified by the unit
 requirements `AgentControl-GlobalProgressViewModel-IdleHidden`, `-ShowsOperation`, `-ReportsAmount`, `-CancelOnce`,
-`-NoCancelWhenNotCancelable`, `-OverlappingOperations` and `-AccessibleName` (each prefixed
+`-NoCancelWhenNotCancelable`, `-OverlappingOperations`, `-AccessibleName` and `-CancelDescribesOperation` (each prefixed
 `AgentControl-GlobalProgressViewModel`), and together with `MainWindowViewModel` (which decides what is reported) it
 provides `AgentControl-LauncherUI-GlobalProgress` and `AgentControl-LauncherUI-AddCancel`.
 
@@ -35,6 +35,15 @@ and is 0 while indeterminate. Idle: indeterminate, 0 of 1 (`AgentControl-GlobalP
 **CanCancel** (`bool`) and **CancelCommand** (`RelayCommand`): whether the shown operation can be canceled now, so the
 strip shows its Cancel button, and the button's command, enabled only while `CanCancel`; a change of `CanCancel` raises
 the command's `CanExecuteChanged` (`AgentControl-GlobalProgressViewModel-CancelOnce`, `-NoCancelWhenNotCancelable`).
+
+**CancelAccessibleName** and **CancelToolTip** (`string`, derived): the name screen readers announce for the Cancel
+button and its tooltip, taken from the shown operation's `GlobalProgressCancelDescription` (a record in the same file:
+`AccessibleName` and `ToolTip`). The one Cancel button serves every cancelable operation - adding repositories,
+cloning a repository - so a button that always said "Cancel adding repositories" would tell a screen-reader user the
+wrong thing while a clone runs. An operation that gives no description, and an idle strip, get
+`GlobalProgressCancelDescription.AddingRepositories` ("Cancel adding repositories" / "Stop adding repositories;
+nothing more is added"), the text the button always had; a change of the shown operation notifies both properties
+(`AgentControl-GlobalProgressViewModel-CancelDescribesOperation`).
 
 **_operations** (`List<GlobalProgressOperation>`, private): the running operations, oldest first. **Shown**
 (`GlobalProgressOperation?`, private) is the one shown: the most recently begun running operation that can still be
@@ -61,10 +70,12 @@ continuations of their background work, which resume on the UI thread); it is no
 
 #### Key Methods
 
-**Begin(text, cancel = null)**: Starts showing an operation, indeterminate, with the given text.
+**Begin(text, cancel = null, cancelDescription = null)**: Starts showing an operation, indeterminate, with the given text.
 
 - *Parameters*: `string text` (not null, `ArgumentNullException`), `Action? cancel` - what the strip's Cancel button
-  does for this operation, run on the UI thread at most once, or `null` for an operation that cannot be canceled.
+  does for this operation, run on the UI thread at most once, or `null` for an operation that cannot be canceled;
+  `GlobalProgressCancelDescription? cancelDescription` - how the Cancel button is named while this operation is shown
+  (`null` for the adding-repositories text).
 - *Returns*: the `GlobalProgressOperation`; its owner reports through it and disposes it when the work has ended.
 - *Postconditions*: the operation is appended to `_operations` and becomes the shown one, unless an older operation
   that can still be canceled is running (`AgentControl-GlobalProgressViewModel-OverlappingOperations`): `IsActive` is
@@ -114,6 +125,8 @@ caught: the owner's cancel action (`MainWindowViewModel.CancelAddRepos`) only si
   operation per session of adds (`Adding repositories...`, then `Adding {completed} of {total} repositories...`,
   `Saving...` with `AllowCancel` off) and one operation without a cancel action for each wave of counted reads of the
   shared refresh queue, such as the cards' reads at start-up and their refresh after a settings save (`Refreshing
-  repositories {completed} of {total}...`), and disposes them when the work ends.
+  repositories {completed} of {total}...`), and disposes them when the work ends; it also begins the cancelable,
+  indeterminate operation of a clone with its own cancel description.
 - **MainWindow** (view) - binds the strip (`GlobalProgressStrip`), its bar (`GlobalProgressBar`), its text
-  (`GlobalProgressText`) and its Cancel button (`GlobalProgressCancelButton`) to the properties and `CancelCommand`.
+  (`GlobalProgressText`) and its Cancel button (`GlobalProgressCancelButton`, whose accessible name and tooltip are bound
+  to `CancelAccessibleName` and `CancelToolTip`) to the properties and `CancelCommand`.

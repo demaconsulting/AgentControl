@@ -1136,14 +1136,18 @@ sections:
           The LauncherUI subsystem shall offer a Cancel button in the progress strip while repos are
           being added, including while the repo cards are refreshed at the same time, that stops the
           add, and every add queued after it, before anything is added or saved, without a message
-          afterwards.
+          afterwards, and shall name that button, for screen readers and in its tooltip, after the
+          operation it would stop.
         justification: |
           A drop of the wrong folders, or of far more than intended, must be stoppable without
-          having to remove the repos one by one afterwards.
+          having to remove the repos one by one afterwards; the one button also serves other
+          cancelable operations, and a name that always said "adding" would mislead while one of
+          them is shown.
         children:
           - AgentControl-MainWindowViewModel-AddReposCancel
           - AgentControl-GlobalProgressViewModel-CancelOnce
           - AgentControl-GlobalProgressViewModel-NoCancelWhenNotCancelable
+          - AgentControl-GlobalProgressViewModel-CancelDescribesOperation
         tests:
           - MainWindow_GlobalProgressCancel_WhileAddingFolders_AddsNothing
 

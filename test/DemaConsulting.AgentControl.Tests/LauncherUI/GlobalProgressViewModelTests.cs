@@ -240,4 +240,42 @@ public sealed class GlobalProgressViewModelTests
         Assert.Equal(string.Empty, progress.Text);
         Assert.False(progress.CanCancel);
     }
+
+    /// <summary>
+    ///     Test that the Cancel button is named after the operation that is shown: the default
+    ///     description for an add, an operation's own description while it is shown (also when it is shown
+    ///     over an older cancelable one), and the default again once it ended.
+    /// </summary>
+    [Fact]
+    public void GlobalProgressViewModel_Cancel_NamesTheOperation()
+    {
+        // Arrange: an idle strip names the add, as the strip always did
+        var progress = new GlobalProgressViewModel();
+        var changed = new List<string?>();
+        progress.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        Assert.Equal("Cancel adding repositories", progress.CancelAccessibleName);
+        Assert.Equal("Stop adding repositories; nothing more is added", progress.CancelToolTip);
+
+        // Act: an add without its own description, then a clone with one
+        using var add = progress.Begin("Adding repositories...", () => { });
+        var addName = progress.CancelAccessibleName;
+        using var clone = progress.Begin(
+            "Cloning agents...",
+            () => { },
+            new GlobalProgressCancelDescription("Cancel cloning agents", "Stop cloning; the partly cloned folder is removed"));
+
+        // Assert: the clone is shown, with its own name and tooltip, and the change was announced
+        Assert.Equal("Cancel adding repositories", addName);
+        Assert.Equal("Cancel cloning agents", progress.CancelAccessibleName);
+        Assert.Equal("Stop cloning; the partly cloned folder is removed", progress.CancelToolTip);
+        Assert.Contains(nameof(GlobalProgressViewModel.CancelAccessibleName), changed);
+        Assert.Contains(nameof(GlobalProgressViewModel.CancelToolTip), changed);
+
+        // Act: the clone ends, the add is shown again
+        clone.Dispose();
+
+        // Assert
+        Assert.Equal("Cancel adding repositories", progress.CancelAccessibleName);
+        Assert.Equal("Stop adding repositories; nothing more is added", progress.CancelToolTip);
+    }
 }

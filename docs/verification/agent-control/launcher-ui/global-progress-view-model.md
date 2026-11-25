@@ -31,6 +31,8 @@ N/A - standard test environment (no window, no files and no processes are involv
 - An older running operation that can still be canceled stays shown, with its Cancel (or without it during a step that
   does not allow a cancel), over a newer one that cannot be canceled; once it was canceled or ended the newer one is
   shown.
+- The Cancel button's accessible name and tooltip describe the shown operation (an operation's own description while it
+  is shown) and are the adding-repositories text for an operation without a description and while idle.
 
 #### Test Scenarios
 
@@ -74,3 +76,10 @@ text once an operation begins. This scenario is tested by `GlobalProgressViewMod
 `GlobalProgressViewModel_Idle_IsInactiveWithNoText`), covering `AgentControl-GlobalProgressViewModel-AccessibleName`;
 that the window's progress bar carries this name is shown by
 `MainWindow_DropFolders_WhileChecked_WindowStaysResponsiveAndShowsProgress` at the subsystem level.
+
+**GlobalProgressViewModel_CancelDescribesOperation**: An idle strip names its Cancel button "Cancel adding
+repositories" with the tooltip "Stop adding repositories; nothing more is added"; an add without a description keeps
+that name; a clone begun with its own description is shown with that description's name and tooltip, and the change of
+both properties is announced; when the clone ends the add's text is shown again. This scenario is tested by
+`GlobalProgressViewModel_Cancel_NamesTheOperation`, covering
+`AgentControl-GlobalProgressViewModel-CancelDescribesOperation`.
