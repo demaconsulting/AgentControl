@@ -228,6 +228,7 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(HasParent));
                 OnPropertyChanged(nameof(AccessibleName));
+                OnPropertyChanged(nameof(RemoveGroupTooltip));
             }
         }
     }
@@ -401,11 +402,24 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     public string RemoveGroupText => _hasContents ? "Delete group, keep contents" : "Delete group";
 
     /// <summary>
-    ///     Gets the tooltip of the delete item that keeps what is in the group.
+    ///     Gets the tooltip of the delete item that keeps what is in the group: where its repos and
+    ///     subgroups go - into the group this one is inside, or, for a top-level group, the repos
+    ///     become ungrouped and the subgroups become top-level groups.
     /// </summary>
-    public string RemoveGroupTooltip => _hasContents
-        ? "Delete this group but keep its repos and subgroups: they stay in the list, in the group this one is inside (or ungrouped)"
-        : "Delete this group; it has no repos or subgroups";
+    public string RemoveGroupTooltip
+    {
+        get
+        {
+            if (!_hasContents)
+            {
+                return "Delete this group; it has no repos or subgroups";
+            }
+
+            return HasParent
+                ? "Delete this group but keep its repos and subgroups: they stay in the list, in the group this one is inside"
+                : "Delete this group but keep its repos and subgroups: its repos stay in the list, ungrouped, and its subgroups become top-level groups";
+        }
+    }
 
     /// <summary>
     ///     Raised when the user asks to collapse or expand the section.

@@ -523,10 +523,12 @@ sections:
       - id: AgentControl-System-GroupDelete
         title: >-
           The tool shall let the user delete a group from its header's menu in two ways - keeping what is
-          in it, so that its repos and subgroups stay in the list in the group it was inside (or
-          ungrouped), or together with its repos and the groups inside it, removing them from the list -
-          each after a confirmation that says how many repos and groups are affected and that nothing on
-          disk is deleted, and shall change nothing when the user cancels.
+          in it, so that its repos stay in the group it was inside (or become ungrouped for a top-level
+          group), at the end of that group's own repos, and its subgroups move into that group (or become
+          top-level groups) taking the deleted group's place among its siblings, or together with its repos
+          and the groups inside it, removing them from the list - each after a confirmation that says how
+          many repos and groups are affected and that nothing on disk is deleted, and shall change nothing
+          when the user cancels.
         tags: [system]
         justification: |
           Retiring a group should not need removing its repos one by one, yet deleting repos must never

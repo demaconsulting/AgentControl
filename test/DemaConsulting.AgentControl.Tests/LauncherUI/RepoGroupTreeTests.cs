@@ -452,7 +452,7 @@ public sealed class RepoGroupTreeTests : IDisposable
         // Act: remove the nested Project group
         Assert.True(viewModel.RemoveGroup("Project"));
 
-        // Assert: p1 moved to Client, listed with Client's own repos in their stored order
+        // Assert: p1 moved to Client, listed after Client's own repo c1 (as the last of its own repos)
         Assert.Equal(
             ["[Client 3]", "[Alpha 1]", "a1", "c1", "p1", "[Ungrouped 1]", "loose"],
             Describe(viewModel));
@@ -461,8 +461,8 @@ public sealed class RepoGroupTreeTests : IDisposable
         // Act: remove the top-level Client group; its subgroup and repos go up a level
         Assert.True(viewModel.RemoveGroup("Client"));
 
-        // Assert: Alpha stays a (registered) group of its own, the repos are ungrouped
-        Assert.Equal(["[Alpha 1]", "a1", "[Ungrouped 3]", "c1", "p1", "loose"], Describe(viewModel));
+        // Assert: Alpha stays a (registered) group of its own, the repos are ungrouped behind the one that was
+        Assert.Equal(["[Alpha 1]", "a1", "[Ungrouped 3]", "loose", "c1", "p1"], Describe(viewModel));
         await viewModel.FlushSettingsAsync();
         var saved = SettingsStore.Load(configDir);
         Assert.Equal(new Dictionary<string, string> { ["Alpha"] = string.Empty }, saved.GroupParents);

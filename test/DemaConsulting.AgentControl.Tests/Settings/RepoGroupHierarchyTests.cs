@@ -254,14 +254,16 @@ public class RepoGroupHierarchyTests
 
     /// <summary>
     ///     Test that deleting a group with its contents kept moves its subgroups to its parent, in
-    ///     their own order and in the group's place in the stored order, and forgets the group.
+    ///     their own order and in the group's place in the stored order, forgets the group, and leaves
+    ///     the order of every other level as it was.
     /// </summary>
     [Fact]
     public void RepoGroupHierarchy_Pop_SubgroupsGoToTheParentInTheGroupsPlace()
     {
-        // Arrange: Root has Before, Mid, After; Mid has Two (first) and One
+        // Arrange: Root has Before, Mid, After; Mid has Two (first) and One; Root is also on the top level
+        var groups = new[] { "Root", "Before", "Mid", "After", "One", "Two", "Other" };
         var hierarchy = new RepoGroupHierarchy(
-            ["Root", "Before", "Mid", "After", "One", "Two", "Other"],
+            groups,
             new Dictionary<string, string>
             {
                 ["Root"] = string.Empty,
@@ -275,39 +277,194 @@ public class RepoGroupHierarchyTests
 
         // Act
         var (parents, order) = hierarchy.Pop("mid");
-        var after = new RepoGroupHierarchy(
-            ["Root", "Before", "After", "One", "Two", "Other"], parents, order);
+        var after = new RepoGroupHierarchy(["Root", "Before", "After", "One", "Two", "Other"], parents, order);
 
         // Assert
         Assert.Multiple(
             () => Assert.False(parents.ContainsKey("Mid")),
             () => Assert.Equal("Root", parents["One"]),
             () => Assert.Equal("Root", parents["Two"]),
-            () => Assert.Equal(["Before", "Two", "One", "After", "Root"], order),
-            () => Assert.Equal(["Before", "Two", "One", "After"], after.GetChildren("Root")));
+            () => Assert.DoesNotContain("Mid", order),
+            () => Assert.Equal(["Before", "Two", "One", "After"], after.GetChildren("Root")),
+            () => Assert.Equal(["Root", "Other"], after.GetChildren(null)));
     }
 
     /// <summary>
-    ///     Test that deleting a top-level group with no stored place leaves its subgroups top level and
-    ///     the stored order untouched, and that a group that does not exist is refused.
+    ///     Test that deleting a nested group that was never dragged (so it has no stored place) puts its
+    ///     subgroups where the group was listed among its siblings, not at their alphabetical slot,
+    ///     and leaves the other levels as they were.
     /// </summary>
     [Fact]
-    public void RepoGroupHierarchy_Pop_TopLevelGroupWithoutPlace_SubgroupsBecomeTopLevel()
+    public void RepoGroupHierarchy_Pop_GroupWithoutStoredPlace_NestedSubgroupsTakeItsDisplayedPlace()
     {
-        // Arrange
+        // Arrange: Root lists Alpha, Mid, Zulu alphabetically (no stored order at all); Mid lists One, Two
+        string[] groups = ["Root", "Alpha", "Mid", "Zulu", "One", "Two"];
         var hierarchy = new RepoGroupHierarchy(
-            ["Parent", "Child"],
+            groups,
+            new Dictionary<string, string>
+            {
+                ["Root"] = string.Empty,
+                ["Alpha"] = "Root",
+                ["Mid"] = "Root",
+                ["Zulu"] = "Root",
+                ["One"] = "Mid",
+                ["Two"] = "Mid"
+            },
+            null);
+
+        // Act
+        var (parents, order) = hierarchy.Pop("Mid");
+        var after = new RepoGroupHierarchy(["Root", "Alpha", "Zulu", "One", "Two"], parents, order);
+
+        // Assert: Alpha, One, Two, Zulu (the subgroups in Mid's slot) - not One, Two after Zulu or before Alpha
+        Assert.Multiple(
+            () => Assert.Equal(["Alpha", "One", "Two", "Zulu"], after.GetChildren("Root")),
+            () => Assert.Equal(["Root"], after.GetChildren(null)),
+            () => Assert.Equal("Root", after.GetParent("One")),
+            () => Assert.False(parents.ContainsKey("Mid")));
+    }
+
+    /// <summary>
+    ///     Test that deleting a top-level group with no stored place puts its subgroups where the group
+    ///     was listed among the top-level groups, makes them top level, and that a group that does not
+    ///     exist is refused.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Pop_TopLevelGroupWithoutStoredPlace_SubgroupsTakeItsDisplayedPlaceAmongTopLevelGroups()
+    {
+        // Arrange: the top level lists Alpha, Parent, Zulu alphabetically; Parent has Child; Other is in the order only
+        string[] groups = ["Parent", "Child", "Alpha", "Zulu"];
+        var hierarchy = new RepoGroupHierarchy(
+            groups,
             new Dictionary<string, string> { ["Parent"] = string.Empty, ["Child"] = "Parent" },
             ["Other"]);
 
         // Act
         var (parents, order) = hierarchy.Pop("Parent");
+        var after = new RepoGroupHierarchy(["Child", "Alpha", "Zulu"], parents, order);
 
         // Assert
         Assert.Multiple(
             () => Assert.Equal(new Dictionary<string, string> { ["Child"] = string.Empty }, parents),
-            () => Assert.Equal(["Other"], order),
+            () => Assert.Equal(["Alpha", "Child", "Zulu"], after.GetChildren(null)),
+            () => Assert.Contains("Other", order),
             () => Assert.Throws<ArgumentException>(() => hierarchy.Pop("Unknown")));
+    }
+
+    /// <summary>
+    ///     Test that a stored order that names the deleted group or its subgroups more than once ends up
+    ///     naming the subgroups once and the group not at all.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Pop_DuplicateStoredLater_IsDropped()
+    {
+        // Arrange: Mid and One are stored twice, in another letter case the second time
+        var hierarchy = new RepoGroupHierarchy(
+            ["Root", "Mid", "One", "Other"],
+            new Dictionary<string, string> { ["Root"] = string.Empty, ["Mid"] = "Root", ["One"] = "Mid" },
+            ["Mid", "Other", "One", "MID", "one", "Root"]);
+
+        // Act
+        var (_, order) = hierarchy.Pop("Mid");
+
+        // Assert: One once, no Mid, Other and Root still there
+        Assert.Multiple(
+            () => Assert.Single(order, entry => string.Equals(entry, "One", StringComparison.OrdinalIgnoreCase)),
+            () => Assert.DoesNotContain(order, entry => string.Equals(entry, "Mid", StringComparison.OrdinalIgnoreCase)),
+            () => Assert.Contains("Other", order),
+            () => Assert.Contains("Root", order));
+    }
+
+    /// <summary>
+    ///     Test that deleting a group with no subgroups only forgets it: its siblings keep their order
+    ///     and nothing else changes in the stored parents.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Pop_LeafGroup_OnlyForgetsTheGroup()
+    {
+        // Arrange
+        var hierarchy = new RepoGroupHierarchy(
+            ["Root", "A", "Leaf", "C"],
+            new Dictionary<string, string>
+            {
+                ["Root"] = string.Empty,
+                ["A"] = "Root",
+                ["Leaf"] = "Root",
+                ["C"] = "Root"
+            },
+            ["C", "Leaf", "A"]);
+
+        // Act
+        var (parents, order) = hierarchy.Pop("Leaf");
+        var after = new RepoGroupHierarchy(["Root", "A", "C"], parents, order);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal(
+                new Dictionary<string, string> { ["Root"] = string.Empty, ["A"] = "Root", ["C"] = "Root" }, parents),
+            () => Assert.Equal(["C", "A"], after.GetChildren("Root")),
+            () => Assert.DoesNotContain("Leaf", order));
+    }
+
+    /// <summary>
+    ///     Test that deleting a group nested more than one level deep gives its subgroups to the group it
+    ///     was inside, in its place there, and leaves the groups above it as they were.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Pop_DeeperNestedGroup_SubgroupsGoToTheirGrandparentInPlace()
+    {
+        // Arrange: Top > Mid > (X, Deep, Y); Deep > (D1, D2); Top also has Side
+        string[] groups = ["Top", "Side", "Mid", "X", "Deep", "Y", "D1", "D2"];
+        var hierarchy = new RepoGroupHierarchy(
+            groups,
+            new Dictionary<string, string>
+            {
+                ["Top"] = string.Empty,
+                ["Side"] = "Top",
+                ["Mid"] = "Top",
+                ["X"] = "Mid",
+                ["Deep"] = "Mid",
+                ["Y"] = "Mid",
+                ["D1"] = "Deep",
+                ["D2"] = "Deep"
+            },
+            ["Side", "Mid", "X", "Deep", "Y", "D2", "D1"]);
+
+        // Act
+        var (parents, order) = hierarchy.Pop("Deep");
+        var after = new RepoGroupHierarchy(["Top", "Side", "Mid", "X", "Y", "D1", "D2"], parents, order);
+
+        // Assert: Mid lists X, D2, D1, Y (Deep's slot, D2 before D1 as stored); Top is unchanged
+        Assert.Multiple(
+            () => Assert.Equal(["X", "D2", "D1", "Y"], after.GetChildren("Mid")),
+            () => Assert.Equal(["Side", "Mid"], after.GetChildren("Top")),
+            () => Assert.Equal(["Top"], after.GetChildren(null)),
+            () => Assert.Equal("Mid", after.GetParent("D1")),
+            () => Assert.False(parents.ContainsKey("Deep")));
+    }
+
+    /// <summary>
+    ///     Test that the constructor registers the group a registered group is inside, even when no stored
+    ///     entry names that parent, as the repair of stored parents does.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHierarchy_Constructor_ParentOfRegisteredGroup_IsRegistered()
+    {
+        // Arrange: only Child is stored; its parent Parent is named by a repo but not registered
+        var hierarchy = new RepoGroupHierarchy(
+            ["Parent", "Child", "Plain"],
+            new Dictionary<string, string> { ["Child"] = "Parent" },
+            null);
+
+        // Act
+        var stored = hierarchy.GetStoredParents();
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.True(hierarchy.IsRegistered("Parent")),
+            () => Assert.False(hierarchy.IsRegistered("Plain")),
+            () => Assert.Equal(
+                new Dictionary<string, string> { ["Parent"] = string.Empty, ["Child"] = "Parent" }, stored));
     }
 
     /// <summary>

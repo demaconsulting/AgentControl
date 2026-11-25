@@ -98,13 +98,28 @@ sections:
         title: >-
           The RepoGroupHierarchy class shall, when a group is deleted with its contents kept, move
           its subgroups to the group's parent (or the top level) in their own order and in the
-          group's place in the stored order, and forget the group.
+          group's displayed place among its siblings, whether or not the group had a place of its
+          own in the stored order, and leave the order of every other level as it was.
         justification: |
           Deleting a group must not lose the groups inside it or shuffle them among their new
-          siblings.
+          siblings: they appear where the group was, also for a group that was never dragged.
         tests:
           - RepoGroupHierarchy_Pop_SubgroupsGoToTheParentInTheGroupsPlace
-          - RepoGroupHierarchy_Pop_TopLevelGroupWithoutPlace_SubgroupsBecomeTopLevel
+          - RepoGroupHierarchy_Pop_GroupWithoutStoredPlace_NestedSubgroupsTakeItsDisplayedPlace
+          - RepoGroupHierarchy_Pop_TopLevelGroupWithoutStoredPlace_SubgroupsTakeItsDisplayedPlaceAmongTopLevelGroups
+          - RepoGroupHierarchy_Pop_DeeperNestedGroup_SubgroupsGoToTheirGrandparentInPlace
+
+      - id: AgentControl-RepoGroupHierarchy-PopForgetsGroup
+        title: >-
+          The RepoGroupHierarchy class shall, when a group is deleted with its contents kept, leave
+          no stored entry that names the group, in any letter case or more than once, and name each
+          of its subgroups once in the stored order.
+        justification: |
+          A deleted group must not come back through a stale entry, and a repeated entry must not
+          give a group two places.
+        tests:
+          - RepoGroupHierarchy_Pop_DuplicateStoredLater_IsDropped
+          - RepoGroupHierarchy_Pop_LeafGroup_OnlyForgetsTheGroup
 
       # ---- Repairing stored parents ----
       - id: AgentControl-RepoGroupHierarchy-RepairDropsUnusable
@@ -128,6 +143,7 @@ sections:
           A registered group could not be shown if the group it is inside were allowed to vanish.
         tests:
           - RepoGroupHierarchy_RepairParents_ParentNamedByRepo_IsRegisteredAsTopLevel
+          - RepoGroupHierarchy_Constructor_ParentOfRegisteredGroup_IsRegistered
 
       - id: AgentControl-RepoGroupHierarchy-RepairCycles
         title: >-

@@ -137,6 +137,9 @@ internal sealed class RepoGroupHierarchy
         foreach (var (child, parent) in resolved.Where(entry => entry.Value.Length > 0))
         {
             _parents[child] = parent;
+
+            // Every group a registered group is inside is registered too (as RepairParents does)
+            _registered.Add(parent);
         }
 
         // The listing order of every level: the stored order first, the rest alphabetically
@@ -488,11 +491,18 @@ internal sealed class RepoGroupHierarchy
     /// <summary>
     ///     Computes the stored parents and order after a group is deleted but everything in it is
     ///     kept: the group's subgroups go to the group's parent (or the top level) and take the
-    ///     group's place in the order, in their own order.
+    ///     group's place among its siblings, in their own order.
     /// </summary>
     /// <remarks>
-    ///     The group's own repos are not part of the tree; the caller moves them to the parent group.
-    ///     Pure.
+    ///     The place is the one the window shows, whether or not the group has a position of its own
+    ///     in the stored order: the siblings are listed as <see cref="GetChildren"/> lists them, the
+    ///     group is replaced there by its subgroups (in their listed order), and that level is stored
+    ///     in full, so the arrangement the user saw stays put and a group that was never dragged is
+    ///     handled like one that was. Every stored occurrence of the group, of its subgroups and of
+    ///     its siblings is replaced by that one run, so the result names the group nowhere and no
+    ///     group twice; the relative order within every other level is untouched. A group with no
+    ///     subgroups only leaves the stored order. The group's own
+    ///     repos are not part of the tree; the caller moves them to the parent group. Pure.
     /// </remarks>
     /// <param name="group">The group to delete.</param>
     /// <returns>The new stored parents and the new stored order, neither containing the group.</returns>
@@ -505,7 +515,7 @@ internal sealed class RepoGroupHierarchy
         }
 
         var removed = _spellings[group];
-        var grandParent = GetParent(removed) ?? string.Empty;
+        var grandParent = GetParent(removed);
         var subgroups = GetChildren(removed);
 
         // The parents: the subgroups move up one level, the group is forgotten
@@ -513,33 +523,35 @@ internal sealed class RepoGroupHierarchy
         parents.Remove(removed);
         foreach (var subgroup in subgroups)
         {
-            parents[subgroup] = grandParent;
+            parents[subgroup] = grandParent ?? string.Empty;
         }
 
-        // The order: the subgroups take the group's place, in their own order; a group with no
-        // stored place leaves its subgroups where they are
-        var order = new List<string>();
-        var position = _order.FindIndex(entry => RepoGroupName.Comparer.Equals(entry, removed));
-        if (position < 0)
+        // The order: the level the group was in, as shown, with the group replaced by its subgroups.
+        // A group with no subgroups only leaves the order (the others keep their relative places, so
+        // the siblings that have no stored place need not be written down)
+        if (subgroups.Count == 0)
         {
-            order.AddRange(_order);
+            return (parents, _order.Where(entry => !RepoGroupName.Comparer.Equals(entry, removed)).ToList());
         }
-        else
+
+        var level = GetChildren(grandParent);
+        var newLevel = new List<string>(level.Count + subgroups.Count);
+        foreach (var sibling in level)
         {
-            for (var index = 0; index < _order.Count; index++)
+            if (RepoGroupName.Comparer.Equals(sibling, removed))
             {
-                var entry = _order[index];
-                if (index == position)
-                {
-                    order.AddRange(subgroups);
-                }
-                else if (!subgroups.Contains(entry, RepoGroupName.Comparer))
-                {
-                    order.Add(entry);
-                }
+                newLevel.AddRange(subgroups);
+            }
+            else
+            {
+                newLevel.Add(sibling);
             }
         }
 
+        // Everything else of the stored order stays, in its order; the rewritten level is stored last
+        var replaced = new HashSet<string>(newLevel, RepoGroupName.Comparer) { removed };
+        var order = _order.Where(entry => !replaced.Contains(entry)).ToList();
+        order.AddRange(newLevel);
         return (parents, order);
     }
 

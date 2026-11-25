@@ -413,17 +413,26 @@ cover `AgentControl-MainWindowViewModel-GroupRemoveWithContents`. Favorites, Ung
 are refused, with or without contents, and nothing changes
 (`MainWindowViewModel_RemoveGroupWithContents_BuiltInOrUnknown_IsRefused`, covering
 `AgentControl-MainWindowViewModel-GroupRemoveWithContentsRefusals`). What is in a group is counted for the
-confirmation - its repos directly and in all, how many are favorites, its subgroups directly and in all
-(`MainWindowViewModel_GetGroupContents_CountsReposAndSubgroups`, covering
+confirmation - its repos directly and in all, how many are favorites, its subgroups directly and in all, and its name as
+stored whatever letter case was asked for (`MainWindowViewModel_GetGroupContents_CountsReposAndSubgroups`, covering
 `AgentControl-MainWindowViewModel-GroupContentsCounted`). The header's delete commands follow whether the group has
 contents and raise the requests of the view model with the group's name
 (`MainWindowViewModel_GroupHeader_DeleteCommands_FollowContentsAndRaiseRequests`, covering
-`AgentControl-MainWindowViewModel-GroupHeaderRequests`). Deleting a group but keeping its contents leaves the repos of a
-top-level group ungrouped where they were stored and forgets the group's settings
-(`MainWindowViewModel_RemoveGroup_TopLevel_LeavesReposUngroupedInPlaceAndForgetsTheGroup`), and for a nested group moves
-the repos into the parent and puts its subgroups, in their own order, into the group's place
-(`MainWindowViewModel_RemoveGroup_Nested_KeepsRepoOrderAndSubgroupsTakeTheGroupsPlace`, covering
-`AgentControl-MainWindowViewModel-GroupRemove` and `-NestedGroupRemoveKeepsContents`).
+`AgentControl-MainWindowViewModel-GroupHeaderRequests`). Deleting a group but keeping its contents makes the repos of a
+top-level group ungrouped at the end of Ungrouped, keeps its favorite where it was among the favorites and forgets the
+group's settings (`MainWindowViewModel_RemoveGroup_TopLevel_MovesReposToTheEndOfUngroupedAndForgetsTheGroup`), and for a
+nested group moves the repos into the parent and puts its subgroups, in their own order, into the group's place
+(`MainWindowViewModel_RemoveGroup_Nested_KeepsReposInTheParentAndSubgroupsTakeTheGroupsPlace`, covering
+`AgentControl-MainWindowViewModel-GroupRemove` and `-NestedGroupRemoveKeepsContents`); a group that was never dragged
+hands its subgroups its displayed place, nested and at the top level
+(`MainWindowViewModel_RemoveGroup_NeverDraggedGroup_SubgroupsTakeItsDisplayedPlace`, covering
+`-NestedGroupRemoveKeepsContents`); the repos listed directly under the group move as one block behind the repos its
+parent lists directly, whatever sits between them in the stored order
+(`MainWindowViewModel_RemoveGroup_ReposGoAsOneBlockToTheEndOfTheParentsOwnRepos`), its favorite stays in its place in
+Favorites and is not part of the block (`MainWindowViewModel_RemoveGroup_FavoritesOfTheGroupKeepTheirPlaceInFavorites`),
+and a delete whose repos already sit at the end leaves the repo order and its "chosen by the user" marker as they were
+(`MainWindowViewModel_RemoveGroup_OrderAlreadyAtEnd_DoesNotMarkUserOrder`) - covering
+`AgentControl-MainWindowViewModel-GroupRemoveRepoBlock`.
 
 **MainWindowViewModel_RepoSelection_OrderPruneAndDragCards**: Tested by `RepoMultiSelectTests.cs`, with a list that has
 a favorite, the group Client with two subgroups (Alpha and Project) and a repo of its own, the group Home and two
@@ -664,7 +673,8 @@ five requirements) and `MainWindowViewModel_FilterText_NoMatch_ShowsNothing` (co
 and the collapsed entry and is persisted (`AgentControl-MainWindowViewModel-GroupManagement`), accepts a change of
 letter case only, and is refused for an unknown group, a blank, reserved or overlong name and another group's name
 (`AgentControl-MainWindowViewModel-GroupRenameRules`); both are tested by
-`MainWindowViewModel_RenameGroup_MovesMembersAndRefusesBadNames`. Removing a group leaves its repos ungrouped and
+`MainWindowViewModel_RenameGroup_MovesMembersAndRefusesBadNames`. Removing a group moves its repos out of it (ungrouped
+for a top-level group) and
 forgets its collapsed entry (`MainWindowViewModel_RemoveGroup_LeavesMembersUngrouped`, covering
 `AgentControl-MainWindowViewModel-GroupRemove`). A header's rename and remove commands raise the view model's requests
 with the group's name and change nothing by themselves
@@ -747,7 +757,8 @@ changes nothing (`MainWindowViewModel_DropGroup_RefusesLoopsBuiltInSectionsAndFi
 `AgentControl-MainWindowViewModel-NestedGroupDrop`. Renaming a group keeps it where it was in the hierarchy as a group
 and as a parent, and its color (`MainWindowViewModel_RenameGroup_KeepsTheHierarchy`, covering
 `AgentControl-MainWindowViewModel-NestedGroupRename`). Removing a nested group moves its repo to the group it was
-inside, and removing the top-level group makes its repos ungrouped and its subgroup a top-level group, with the
+inside (behind that group's own repos), and removing the top-level group makes its repos ungrouped (behind the
+ungrouped repos there already were) and its subgroup a top-level group, with the
 stored hierarchy and order forgetting the removed groups
 (`MainWindowViewModel_RemoveGroup_NestedGroups_KeepsRepoAndSubgroupsInTheParent`, covering
 `AgentControl-MainWindowViewModel-NestedGroupRemoveKeepsContents`).

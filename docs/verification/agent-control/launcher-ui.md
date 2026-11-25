@@ -1209,20 +1209,26 @@ name. The requirements are split by behavior; each is covered by the tests that 
   `MainWindow_NewGroupMenuItem_PromptsForNameAndCreatesGroup`.
 - `AgentControl-LauncherUI-GroupNamePrompt` (the prompt validates the typed name and can be canceled):
   `GroupNameWindow_ValidatesWhileTyping_AndAccepts` and `MainWindow_NewGroupPrompt_Canceled_ChangesNothing`.
-- `AgentControl-LauncherUI-RepoGroupManagement` (rename from the header): `MainWindow_HeaderMenu_RenameAndRemoveGroup`.
+- `AgentControl-LauncherUI-RepoGroupManagement` (rename from the header):
+  `MainWindow_HeaderMenu_RenameGroup_AsksForTheNameAndRenames` (the prompt starts with the group's name, canceling it
+  changes nothing, accepting renames the group and its repos).
 - `AgentControl-LauncherUI-GroupDeleteKeepContents` (deleting a group but keeping what is in it):
   `MainWindow_HeaderMenu_RenameAndRemoveGroup` (a flat group is confirmed, declined and confirmed again; its repos are
   still listed, ungrouped, and no header is left) and
   `MainWindow_HeaderMenu_DeleteGroupKeepContents_ConfirmationSaysWhereContentsGo`: deleting a group that is inside
   another asks a question that names the group, says its repos stay in AgentControl's list in the parent group and that
   nothing on disk changes, and answering Yes moves the repos into the parent.
-  `MainWindow_HeaderMenu_DeleteEmptyGroup_OffersOnlyPlainDelete`: a group with nothing in it offers only **Delete
-  group**, whose question says it has no repos or subgroups.
+  `MainWindow_HeaderMenu_DeleteGroupKeepContents_ConfirmationOmitsZeroParts`: the question for a group with only a
+  subgroup says where the subgroup goes and never "0 repo(s)", and the question for a group with only a repo never says
+  "0 subgroup(s)". `MainWindow_HeaderMenu_DeleteEmptyGroup_OffersOnlyPlainDelete`: a group with nothing in it offers
+  only **Delete group**, whose question says it has no repos or subgroups.
 - `AgentControl-LauncherUI-GroupDeleteWithContents` (deleting a group together with its repos and subgroups):
   `MainWindow_HeaderMenu_DeleteGroupWithContents_ConfirmationSaysCountsAndYesDeletesNoKeeps`: the question names the
   group and says how many repos and subgroups go and that nothing on disk is deleted; answering No leaves the list and
   the groups as they were; answering Yes leaves only the repo that was in no group, listed without a header, while every
-  repo folder is still on disk. `MainWindow_HeaderMenu_DeleteEmptyGroup_OffersOnlyPlainDelete`: the item that deletes
+  repo folder is still on disk. `MainWindow_HeaderMenu_DeleteWithContents_ConfirmationOmitsZeroParts`: the question
+  leaves out the part about repos for a group with only a subgroup and the part about subgroups for a group with only a
+  repo. `MainWindow_HeaderMenu_DeleteEmptyGroup_OffersOnlyPlainDelete`: the item that deletes
   the contents is hidden for a group with nothing in it and shown for a group with contents.
   `MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator` holds both items in the documented place and with
   tooltips. What each deletion changes in the settings (colors, order, collapsed state, hierarchy) is verified in the

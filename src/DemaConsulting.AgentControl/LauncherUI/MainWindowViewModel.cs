@@ -225,6 +225,8 @@ internal sealed record GroupDropTarget(string GroupName, bool InsertBefore, bool
 /// <summary>
 ///     What is in a group, for the confirmations of the two ways of deleting it.
 /// </summary>
+/// <param name="Name">The group's name as stored (its own spelling, whatever letter case was asked
+///     for); the name asked for when the group does not exist.</param>
 /// <param name="DirectRepoCount">The repos whose group it is, favorites included (a favorite keeps its
 ///     group, though it is listed under Favorites).</param>
 /// <param name="DirectSubgroupCount">The groups directly inside it.</param>
@@ -232,7 +234,7 @@ internal sealed record GroupDropTarget(string GroupName, bool InsertBefore, bool
 /// <param name="SubgroupCount">The groups inside it, however deeply.</param>
 /// <param name="FavoriteCount">How many of the <paramref name="RepoCount"/> repos are favorites.</param>
 internal readonly record struct GroupContents(
-    int DirectRepoCount, int DirectSubgroupCount, int RepoCount, int SubgroupCount, int FavoriteCount)
+    string Name, int DirectRepoCount, int DirectSubgroupCount, int RepoCount, int SubgroupCount, int FavoriteCount)
 {
     /// <summary>
     ///     Gets a value indicating whether the group has no repo and no group inside it, so there is
@@ -4060,8 +4062,15 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     forgotten (nothing on disk or in any repository changes).
     /// </summary>
     /// <remarks>
-    ///     The group's repos keep their positions in the repo list, and its subgroups take the group's
-    ///     place in the group order in their own order (see <see cref="RepoGroupHierarchy.Pop"/>).
+    ///     The group's subgroups take the group's displayed place among its siblings, in their own
+    ///     order, whether or not the group had a stored place in the group order (see
+    ///     <see cref="RepoGroupHierarchy.Pop"/>). The repos listed directly under the group (not its
+    ///     favorites, which are listed under Favorites) move as one block, in the order they were
+    ///     listed in, to the end of the repos the parent group lists directly - or to the end of
+    ///     Ungrouped for a top-level group - so they follow the repos the parent already had; every other
+    ///     repo keeps its place, and so do the group's favorites, which only change group. The new repo
+    ///     order counts as chosen by the user only when it differs from the old one. Everything is
+    ///     one change of the settings (one save).
     /// </remarks>
     /// <param name="name">The group's name; letter case is ignored.</param>
     /// <returns><see langword="true"/> when the group existed and was removed.</returns>
@@ -4076,6 +4085,17 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var removed = tree.GetName(name)!;
         var parent = tree.GetParent(removed);
         var (parents, order) = tree.Pop(removed);
+
+        // The group's listed repos move as one block behind the parent's own listed repos (or, with
+        // none, to the end of the list, as a drop on a header does)
+        var moving = GetDirectCards(removed);
+        var movingSet = new HashSet<RepoCardViewModel>(moving, ReferenceEqualityComparer.Instance);
+        var ordered = RepoCards.Where(card => !movingSet.Contains(card)).ToList();
+        var index = ordered.FindLastIndex(card =>
+            !card.IsFavorite && RepoGroupName.Comparer.Equals(card.GroupName ?? string.Empty, parent ?? string.Empty)) + 1;
+        ordered.InsertRange(index == 0 ? ordered.Count : index, moving);
+        var orderChanged = !ordered.SequenceEqual(RepoCards, ReferenceEqualityComparer.Instance);
+        var paths = ordered.Select(card => card.RepoPath).ToList();
         CommitSettingsChange(settings =>
         {
             foreach (var repo in settings.RecentRepos.Where(repo => IsInGroup(repo, name)))
@@ -4083,11 +4103,22 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 repo.GroupName = parent;
             }
 
+            if (orderChanged)
+            {
+                ApplyRepoOrder(settings.RecentRepos, paths);
+                settings.HasUserRepoOrder = true;
+            }
+
             settings.CollapsedGroups?.RemoveAll(entry => RepoGroupName.Comparer.Equals(entry, name));
             RemoveGroupColor(settings, name);
             settings.GroupParents = parents;
             settings.GroupOrder = order;
         });
+
+        if (orderChanged)
+        {
+            SyncCollection(RepoCards, ordered);
+        }
 
         FinishGroupEdit();
         return true;
@@ -4106,6 +4137,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var subtree = new HashSet<string>(tree.GetSubtree(groupName), RepoGroupName.Comparer);
         var inside = RepoCards.Where(card => card.HasGroup && subtree.Contains(card.GroupName!)).ToList();
         return new GroupContents(
+            Name: tree.GetName(groupName) ?? groupName,
             DirectRepoCount: inside.Count(card => RepoGroupName.Comparer.Equals(card.GroupName, groupName)),
             DirectSubgroupCount: tree.GetChildren(groupName).Count,
             RepoCount: inside.Count,

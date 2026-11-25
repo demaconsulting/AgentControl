@@ -278,6 +278,52 @@ public sealed class RepoGroupWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that the header's "..." menu renames a group through the prompt, which starts with the
+    ///     group's own name, and that canceling the prompt changes nothing.
+    /// </summary>
+    [Fact]
+    public void MainWindow_HeaderMenu_RenameGroup_AsksForTheNameAndRenames() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, viewModel) = CreateWindow(("a", "Work", false), ("b", "Work", false));
+
+        try
+        {
+            // Act: Rename group..., canceled
+            var menuButton = window.GetVisualDescendantsOf<Button>("GroupHeaderMenuButton").Single(button => button.IsVisible);
+            var menu = OpenMenu(menuButton);
+            FindMenuItem(menu, "RenameGroupMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+            var prompt = Assert.Single(window.OwnedWindows.OfType<GroupNameWindow>());
+            Assert.Equal("Work", ((GroupNameViewModel)prompt.DataContext!).Text);
+            ((GroupNameViewModel)prompt.DataContext).Cancel();
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert
+            Assert.Equal(["Work"], viewModel.GroupNames);
+
+            // Act: Rename group..., accepted with a new name
+            menu = OpenMenu(window.GetVisualDescendantsOf<Button>("GroupHeaderMenuButton").Single(button => button.IsVisible));
+            FindMenuItem(menu, "RenameGroupMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+            prompt = Assert.Single(window.OwnedWindows.OfType<GroupNameWindow>());
+            ((GroupNameViewModel)prompt.DataContext!).Text = "Office";
+            DialogWindowTests.Click(prompt, "GroupNameAcceptButton");
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert
+            Assert.Equal(["Office"], viewModel.GroupNames);
+            Assert.All(viewModel.RepoCards, card => Assert.Equal("Office", card.GroupName));
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that the header's "..." menu renames a group through the prompt and removes it after a
     ///     confirmation, leaving its repos ungrouped.
     /// </summary>

@@ -832,10 +832,17 @@ are decided once, from the live state, before the change) — and returns `false
 an invalid name or another group's name; changing only the letter case of the group's own name is allowed
 (`-GroupRenameRules`). **RemoveGroup**: Removes a group but keeps what is in it - the group's repos go to the group it
 was inside (they become ungrouped for a top-level group, so the flat behavior is unchanged), its subgroups go there too
-and take the group's place in the group order in their own order (`RepoGroupHierarchy.Pop`), and its collapsed entry,
-color, place in the group order and place in the hierarchy are forgotten (`-GroupRemove`,
-`-NestedGroupRemoveKeepsContents`, `-GroupSettingsFollowRenameAndRemove`). The repos keep their positions in the repo
-list. Both are applied through `CommitSettingsChange`, persist to the settings file only (never to a repository,
+and take the group's *displayed* place among its siblings, in their own order, whether or not the group had a place of
+its own in the group order (`RepoGroupHierarchy.Pop`), and its collapsed entry, color, place in the group order and
+place in the hierarchy are forgotten (`-GroupRemove`, `-NestedGroupRemoveKeepsContents`,
+`-GroupSettingsFollowRenameAndRemove`). The repos listed directly under the group (`GetDirectCards`: not its
+favorites, which are listed under Favorites and keep their place there, changing only group) move as one block, in
+the order they were listed, to the end of the repos the parent group lists directly - the end of the stored list when
+it lists none; for a top-level group, the end of Ungrouped - exactly where a drop on a header would put them
+(`-GroupRemoveRepoBlock`); every other repo keeps its place. The new order is written with `ApplyRepoOrder`, and
+`HasUserRepoOrder` is set only when the order changed, in the same single `CommitSettingsChange` as the group, parent
+and order changes (this supersedes the earlier rule that the repos keep their stored positions). Both are applied
+through `CommitSettingsChange`, persist to the settings file only (never to a repository,
 `-GroupSettingsOnly`) and then refresh the cards' group properties (`FinishGroupEdit`, which calls
 `RaiseGroupPropertiesChanged` on every card) and the list. A group whose last repo leaves it by any other path (a card
 moved out, a repo removed) forgets its color and position the same way unless it is registered, through the repair that
@@ -862,9 +869,11 @@ by themselves (`-GroupHeaderRequests`); `MainWindow` shows the name prompt or a 
 **GetGroupContents**: Counts what is in a group, for the confirmations
 (`AgentControl-MainWindowViewModel-GroupContentsCounted`).
 
-- *Returns*: a `GroupContents` with the repos directly in the group, the groups directly inside it, the repos in the
+- *Returns*: a `GroupContents` with the group's name as stored (`Name`: its own spelling, whatever letter case was asked
+  for), the repos directly in the group, the groups directly inside it, the repos in the
   whole subtree (favorites included) and how many of them are favorites, and the groups in the subtree besides the group
-  itself; all 0 for a group that does not exist. `IsEmpty` is true when the group has neither a repo nor a group inside.
+  itself; all 0 for a group that does not exist (and the name as asked). `IsEmpty` is true when the group has neither a
+  repo nor a group inside.
 
 **CreateSubgroup**: Creates a group inside another group (`AgentControl-MainWindowViewModel-NestedGroupCreate`).
 

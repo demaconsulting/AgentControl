@@ -124,9 +124,12 @@ header told that sorting is available still offers none and still has a non-empt
 delete-with-contents command cannot execute and its plain delete item is named "Delete group"; after the owner says it
 has contents the command can execute, executing it raises a delete-with-contents request (and not the plain delete's),
 executing the plain delete raises its own request, and the plain item is named "Delete group, keep contents" with a
-tooltip that says the repos and subgroups are kept. A *Favorites* header told that it has contents has none. This
+tooltip that says the repos and subgroups are kept, and, for a top-level group, that the repos become ungrouped and the
+subgroups top-level groups; once the group is inside another group the tooltip says they stay in the group it is
+inside, and says so through a change notification. A *Favorites* header told that it has contents has none. This
 scenario is tested by `RepoGroupHeaderViewModel_UpdateContents_OffersDeleteWithContentsOnlyForGroupsWithContents`,
-covering `AgentControl-RepoGroupHeaderViewModel-RemoveGroupWithContentsRequest`.
+covering `AgentControl-RepoGroupHeaderViewModel-RemoveGroupWithContentsRequest` and the tooltip of
+`AgentControl-RepoGroupHeaderViewModel-RemoveGroupRequest`.
 
 **RepoGroupHeaderViewModel_RequiresName**: A blank name and a `null` name are refused. This scenario is tested by
 `RepoGroupHeaderViewModel_Constructor_BlankName_Throws`, covering `AgentControl-RepoGroupHeaderViewModel-RequiresName`.

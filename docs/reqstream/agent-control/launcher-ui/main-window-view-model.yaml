@@ -771,13 +771,17 @@ sections:
 
       - id: AgentControl-MainWindowViewModel-NestedGroupRemoveKeepsContents
         title: >-
-          The MainWindowViewModel class shall, when a nested group is removed, move its repos and its
-          subgroups to the group it was inside (or, at the top level, make its repos ungrouped and its
-          subgroups top-level groups) and forget the group.
+          The MainWindowViewModel class shall, when a group is removed, move its subgroups to the group
+          it was inside (or, at the top level, make them top-level groups) in the group's displayed
+          place among its siblings, whether or not the group had a place of its own in the group order,
+          and forget the group.
         justification: |
-          Removing a group must not lose the repos and groups in it; they stay where they were seen.
+          Removing a group must not lose the groups in it; they stay where they were seen, also when
+          the group was never dragged.
         tests:
           - MainWindowViewModel_RemoveGroup_NestedGroups_KeepsRepoAndSubgroupsInTheParent
+          - MainWindowViewModel_RemoveGroup_Nested_KeepsReposInTheParentAndSubgroupsTakeTheGroupsPlace
+          - MainWindowViewModel_RemoveGroup_NeverDraggedGroup_SubgroupsTakeItsDisplayedPlace
 
       - id: AgentControl-MainWindowViewModel-GroupNamesIncludeEmptyGroups
         title: >-
@@ -945,12 +949,30 @@ sections:
 
       - id: AgentControl-MainWindowViewModel-GroupRemove
         title: >-
-          The MainWindowViewModel class shall remove a group so that its repos become ungrouped and
-          its collapsed state is forgotten.
+          The MainWindowViewModel class shall remove a group so that its repos move to the group it was
+          inside (ungrouped for a top-level group) and its collapsed state, color and place in the order
+          are forgotten.
         justification: |
           Removing a group removes only the grouping, never the repos in it.
         tests:
           - MainWindowViewModel_RemoveGroup_LeavesMembersUngrouped
+          - MainWindowViewModel_RemoveGroup_TopLevel_MovesReposToTheEndOfUngroupedAndForgetsTheGroup
+
+      - id: AgentControl-MainWindowViewModel-GroupRemoveRepoBlock
+        title: >-
+          The MainWindowViewModel class shall, when a group is removed, move the repos listed directly
+          under it, in the order they were listed, as one block to the end of the repos the group it was
+          inside lists directly (the end of Ungrouped for a top-level group), keep the group's favorites
+          in their place in Favorites, leave every other repo where it was, and count the new repo
+          order as chosen by the user only when it changed.
+        justification: |
+          The repos of a removed group follow the repos the parent already had, together and in the
+          order the user saw, instead of being scattered among them; the order the user has not changed
+          stays the order of the file.
+        tests:
+          - MainWindowViewModel_RemoveGroup_ReposGoAsOneBlockToTheEndOfTheParentsOwnRepos
+          - MainWindowViewModel_RemoveGroup_FavoritesOfTheGroupKeepTheirPlaceInFavorites
+          - MainWindowViewModel_RemoveGroup_OrderAlreadyAtEnd_DoesNotMarkUserOrder
 
       - id: AgentControl-MainWindowViewModel-GroupRemoveWithContents
         title: >-
@@ -981,7 +1003,8 @@ sections:
         title: >-
           The MainWindowViewModel class shall tell what is in a group - the repos directly in it, the repos
           in it and in the groups inside it (favorites included, and how many are favorites) and its
-          subgroups, directly and in all - so a confirmation can state what a delete affects.
+          subgroups, directly and in all, and the group's name as it is stored - so a confirmation can
+          state what a delete affects.
         justification: |
           The user must be told the numbers before repos and groups are removed.
         tests:

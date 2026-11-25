@@ -205,6 +205,7 @@ sections:
           - AgentControl-RepoGroupHierarchy-RefusesLoops
           - AgentControl-RepoGroupHierarchy-PutInsideRegisters
           - AgentControl-RepoGroupHierarchy-PopKeepsSubgroups
+          - AgentControl-RepoGroupHierarchy-PopForgetsGroup
           - AgentControl-RepoGroupHierarchy-RepairDropsUnusable
           - AgentControl-RepoGroupHierarchy-RepairRegistersParents
           - AgentControl-RepoGroupHierarchy-RepairCycles

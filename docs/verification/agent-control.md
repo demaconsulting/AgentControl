@@ -804,9 +804,10 @@ repos go; answering No changes nothing, and confirming lists only the third repo
 group, and the two repo folders are still on disk. These scenarios are tested by
 `windows@GroupHeaderMenu_DeleteGroupKeepContents_RemovesTheHeaderAndKeepsAllRepos` and
 `windows@GroupHeaderMenu_DeleteGroupAndItsContents_RemovesGroupAndReposFromTheListAndKeepsFoldersOnDisk`, covering
-`AgentControl-System-GroupDelete`. That nested groups and favorites are handled, and what exactly the confirmations
-say, are verified in the unit tests of `MainWindowViewModel` and the headless window tests of the `LauncherUI`
-subsystem.
+`AgentControl-System-GroupDelete`. That nested groups and favorites are handled, where the repos and subgroups of a
+deleted group land (subgroups in the group's place among its siblings, repos behind the parent's own repos), and what
+exactly the confirmations say, are verified in the unit tests of `MainWindowViewModel` and `RepoGroupHierarchy` and the
+headless window tests of the `LauncherUI` subsystem.
 
 **AgentControl_ListChangesKept_FavoriteCollapseColorsAndGroupOrderAreKept**: The favorite star, a section's
 collapse, a card color, a group color and the order of the groups are each changed in the real application and found

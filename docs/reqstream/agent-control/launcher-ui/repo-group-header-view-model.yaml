@@ -93,12 +93,15 @@ sections:
       - id: AgentControl-RepoGroupHeaderViewModel-RemoveGroupRequest
         title: >-
           The RepoGroupHeaderViewModel class shall request that its group be removed when the
-          user chooses the remove action of the header.
+          user chooses the remove action of the header, and shall explain in that action's tooltip
+          where the group's repos and subgroups go: into the group it is inside, or, for a top-level
+          group, the repos become ungrouped and the subgroups become top-level groups.
         justification: |
           Removing a group needs a confirmation that belongs to the window; the header only
-          reports what the user asked for.
+          reports what the user asked for and says what the action does before it is chosen.
         tests:
           - RepoGroupHeaderViewModel_RenameAndRemoveCommands_RaiseRequests
+          - RepoGroupHeaderViewModel_UpdateContents_OffersDeleteWithContentsOnlyForGroupsWithContents
 
       - id: AgentControl-RepoGroupHeaderViewModel-RemoveGroupWithContentsRequest
         title: >-

@@ -2506,32 +2506,44 @@ internal sealed partial class MainWindow : Window
 
     /// <summary>
     ///     Asks the user to confirm deleting a group but keeping what is in it and, if confirmed, deletes
-    ///     it (its repos and subgroups go to the group it was inside, or become ungrouped at the top
-    ///     level). Nothing on disk or in any repository changes, which the message says.
+    ///     it (its repos and subgroups go to the group it was inside; at the top level the repos become
+    ///     ungrouped and the subgroups become top-level groups). Nothing on disk or in any repository
+    ///     changes, which the message says.
     /// </summary>
+    /// <remarks>
+    ///     The message names the group as it is stored, counts what is directly in the group and leaves
+    ///     out the part of the sentence about repos or subgroups when the group has none, so it never
+    ///     reads "0 repo(s)".
+    /// </remarks>
     /// <param name="viewModel">The main view model that owns the groups.</param>
     /// <param name="groupName">The group to delete.</param>
     private async Task ConfirmAndRemoveGroup(MainWindowViewModel viewModel, string groupName)
     {
         var contents = viewModel.GetGroupContents(groupName);
-        var parent = viewModel.GetGroupParent(groupName);
-        var message = $"Delete the group \"{groupName}\"?\n\n";
+        var parent = viewModel.GetGroupParent(contents.Name);
+        var message = $"Delete the group \"{contents.Name}\"?\n\n";
         if (contents.IsEmpty)
         {
             message += "The group has no repos or subgroups.";
         }
         else
         {
-            var where = parent is null ? "ungrouped" : $"in the group \"{parent}\"";
-            var subgroupText = string.Empty;
+            var sentences = new List<string>();
+            if (contents.DirectRepoCount > 0)
+            {
+                var where = parent is null ? "ungrouped" : $"in the group \"{parent}\"";
+                sentences.Add($"Its {contents.DirectRepoCount} repo(s) stay in AgentControl's list, {where}.");
+            }
+
             if (contents.DirectSubgroupCount > 0)
             {
                 var target = parent is null ? "to the top level" : $"into \"{parent}\"";
-                subgroupText = $" Its {contents.DirectSubgroupCount} subgroup(s) move {target} too.";
+                var also = contents.DirectRepoCount > 0 ? " too" : string.Empty;
+                sentences.Add($"Its {contents.DirectSubgroupCount} subgroup(s) move {target}{also}.");
             }
 
-            message += $"Its {contents.DirectRepoCount} repo(s) stay in AgentControl's list, {where}.{subgroupText} " +
-                "This only changes how AgentControl lists them - nothing on disk or in any repository is changed.";
+            sentences.Add("This only changes how AgentControl lists them - nothing on disk or in any repository is changed.");
+            message += string.Join(' ', sentences);
         }
 
         var confirmed = await new ConfirmationWindow(message).ShowDialog<bool>(this);
@@ -2548,16 +2560,30 @@ internal sealed partial class MainWindow : Window
     ///     them from AgentControl's list. Nothing on disk or in any repository is deleted, which the message
     ///     says.
     /// </summary>
+    /// <remarks>
+    ///     The message names the group as it is stored and leaves out the part about repos or subgroups
+    ///     when there are none, so it never reads "0 repo(s)".
+    /// </remarks>
     /// <param name="viewModel">The main view model that owns the groups.</param>
     /// <param name="groupName">The group to delete with its contents.</param>
     private async Task ConfirmAndRemoveGroupWithContents(MainWindowViewModel viewModel, string groupName)
     {
         var contents = viewModel.GetGroupContents(groupName);
-        var favorites = contents.FavoriteCount > 0 ? $" ({contents.FavoriteCount} of them favorites)" : string.Empty;
-        var subgroups = contents.SubgroupCount > 0 ? $" and its {contents.SubgroupCount} subgroup(s)" : string.Empty;
+        var question = $"Delete the group \"{contents.Name}\"";
+        if (contents.SubgroupCount > 0)
+        {
+            question += $" and its {contents.SubgroupCount} subgroup(s)";
+        }
+
+        if (contents.RepoCount > 0)
+        {
+            var favorites = contents.FavoriteCount > 0 ? $" ({contents.FavoriteCount} of them favorites)" : string.Empty;
+            question += $" together with its {contents.RepoCount} repo(s){favorites}";
+        }
+
+        var removed = contents.RepoCount > 0 ? "The repos are removed from AgentControl's list." : "The groups are removed from AgentControl's list.";
         var confirmed = await new ConfirmationWindow(
-                $"Delete the group \"{groupName}\"{subgroups} together with its {contents.RepoCount} repo(s){favorites}?\n\n" +
-                "The repos are removed from AgentControl's list. This only removes them from AgentControl - nothing " +
+                $"{question}?\n\n{removed} This only removes them from AgentControl - nothing " +
                 "on disk or in any repository is deleted.")
             .ShowDialog<bool>(this);
 

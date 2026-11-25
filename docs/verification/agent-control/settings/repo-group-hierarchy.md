@@ -23,7 +23,9 @@ N/A - standard test environment (no files, windows or processes are involved).
   at least 5000 levels deep is handled without failing.
 - A group cannot be put inside itself or one of its descendants, nor an unknown group be moved or used as a parent; a
   move registers the moved group and every group it is now inside.
-- Deleting a group with its contents kept gives its subgroups to its parent in the group's place in the order.
+- Deleting a group with its contents kept gives its subgroups to its parent in the group's displayed place among its
+  siblings (also when the group had no stored place), leaves no stored entry that names the group or names a subgroup
+  twice, and leaves every other level in its order.
 - Repair drops entries with an unusable name, keeps the first of names differing in letter case, spells groups as their
   repos do, reads an unknown, self or reserved parent as top level, registers the parent of a registered group, and cuts
   a cycle at the member that sorts first, deterministically and idempotently.
@@ -74,17 +76,44 @@ put at the top level is not registered. This scenario is tested by
 
 **RepoGroupHierarchy_Pop_SubgroupsGoToTheParentInTheGroupsPlace**: A group in the middle of its parent's subgroups, with
 two subgroups of its own, is deleted: the subgroups go to the parent in the group's slot of the stored order, in their
-own order, and the group is forgotten; a top-level group with no stored place leaves its subgroup top level and the
-order untouched. This scenario is tested by `RepoGroupHierarchy_Pop_SubgroupsGoToTheParentInTheGroupsPlace` and
-`RepoGroupHierarchy_Pop_TopLevelGroupWithoutPlace_SubgroupsBecomeTopLevel`, covering
+own order, and the group is forgotten, while the top-level order is untouched. A hierarchy built from the result lists
+the parent's subgroups in that order at every level. This scenario is tested by
+`RepoGroupHierarchy_Pop_SubgroupsGoToTheParentInTheGroupsPlace`, covering
 `AgentControl-RepoGroupHierarchy-PopKeepsSubgroups`.
+
+**RepoGroupHierarchy_Pop_GroupWithoutStoredPlace_NestedSubgroupsTakeItsDisplayedPlace**: A nested group that has no
+place of its own in the stored order (nothing is stored at all) lists between two siblings; deleting it puts its
+subgroups, in their listed order, in its slot between the same siblings, not at their alphabetical slot. This scenario
+is tested by `RepoGroupHierarchy_Pop_GroupWithoutStoredPlace_NestedSubgroupsTakeItsDisplayedPlace`, covering
+`AgentControl-RepoGroupHierarchy-PopKeepsSubgroups`.
+
+**RepoGroupHierarchy_Pop_TopLevelGroupWithoutStoredPlace_SubgroupsTakeItsDisplayedPlaceAmongTopLevelGroups**: A
+top-level group with a subgroup and no stored place, listed between two other top-level groups, is deleted: its
+subgroup becomes a top-level group in its slot between them, an unrelated stored name is kept, and a group that does
+not exist is refused. This scenario is tested by
+`RepoGroupHierarchy_Pop_TopLevelGroupWithoutStoredPlace_SubgroupsTakeItsDisplayedPlaceAmongTopLevelGroups`, covering
+`AgentControl-RepoGroupHierarchy-PopKeepsSubgroups`.
+
+**RepoGroupHierarchy_Pop_DeeperNestedGroup_SubgroupsGoToTheirGrandparentInPlace**: A group two levels down with two
+subgroups of its own, between two siblings, is deleted: its subgroups go to its parent in its slot, and the levels above
+are unchanged. This scenario is tested by
+`RepoGroupHierarchy_Pop_DeeperNestedGroup_SubgroupsGoToTheirGrandparentInPlace`, covering
+`AgentControl-RepoGroupHierarchy-PopKeepsSubgroups`.
+
+**RepoGroupHierarchy_Pop_DuplicateStoredLater_IsDropped**: A stored order that names the deleted group and its subgroup
+more than once, in another letter case the second time, ends up naming the subgroup once and the group not at all, the
+other stored names kept. A group with no subgroups only leaves the order
+(`RepoGroupHierarchy_Pop_LeafGroup_OnlyForgetsTheGroup`: its siblings keep their order and the stored parents lose only
+its key). This scenario is tested by `RepoGroupHierarchy_Pop_DuplicateStoredLater_IsDropped` and
+`RepoGroupHierarchy_Pop_LeafGroup_OnlyForgetsTheGroup`, covering `AgentControl-RepoGroupHierarchy-PopForgetsGroup`.
 
 **RepoGroupHierarchy_RepairParents_DropsUnusableEntriesAndTopLevelsBadParents**: Stored parents with a padded name, a
 case duplicate, the built-in `Favorites`, a blank name, a self parent, an unknown parent, a reserved parent and a blank
 parent are repaired as described: usable keys kept and spelled like their repos, the others dropped or made top level. A
-parent that only a repo names is registered. This scenario is tested by
-`RepoGroupHierarchy_RepairParents_DropsUnusableEntriesAndTopLevelsBadParents` and
-`RepoGroupHierarchy_RepairParents_ParentNamedByRepo_IsRegisteredAsTopLevel`, covering
+parent that only a repo names is registered, by the repair and by the constructor. This scenario is tested by
+`RepoGroupHierarchy_RepairParents_DropsUnusableEntriesAndTopLevelsBadParents`,
+`RepoGroupHierarchy_RepairParents_ParentNamedByRepo_IsRegisteredAsTopLevel` and
+`RepoGroupHierarchy_Constructor_ParentOfRegisteredGroup_IsRegistered`, covering
 `AgentControl-RepoGroupHierarchy-RepairDropsUnusable` and `AgentControl-RepoGroupHierarchy-RepairRegistersParents`.
 
 **RepoGroupHierarchy_RepairParents_Cycle_CutAtFirstMemberDeterministicallyAndIdempotently**: Three groups inside each

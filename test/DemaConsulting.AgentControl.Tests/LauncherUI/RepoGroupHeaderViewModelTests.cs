@@ -457,8 +457,19 @@ public class RepoGroupHeaderViewModelTests
         Assert.True(header.RemoveGroupWithContentsCommand.CanExecute(null));
         Assert.Equal("Delete group, keep contents", header.RemoveGroupText);
         Assert.Contains("keep its repos and subgroups", header.RemoveGroupTooltip);
+        Assert.Contains("ungrouped", header.RemoveGroupTooltip);
+        Assert.Contains("top-level groups", header.RemoveGroupTooltip);
         Assert.Equal((1, 1), (plain, withContents));
         Assert.Contains(nameof(RepoGroupHeaderViewModel.RemoveGroupText), changed);
         Assert.False(favorites.HasContents);
+
+        // Act: the group is inside another one
+        changed.Clear();
+        header.UpdatePlace(1, "Client");
+
+        // Assert: the tooltip says they stay in the group this one is inside, and says so when it changes
+        Assert.Contains("in the group this one is inside", header.RemoveGroupTooltip);
+        Assert.DoesNotContain("ungrouped", header.RemoveGroupTooltip);
+        Assert.Contains(nameof(RepoGroupHeaderViewModel.RemoveGroupTooltip), changed);
     }
 }

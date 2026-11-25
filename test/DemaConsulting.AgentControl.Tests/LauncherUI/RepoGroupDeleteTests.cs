@@ -44,12 +44,12 @@ public sealed class RepoGroupDeleteTests : IDisposable
     private readonly List<MainWindowViewModel> _viewModels = [];
 
     /// <summary>
-    ///     Test that deleting a top-level group but keeping its contents leaves its repos, favorites
-    ///     included, ungrouped where they were stored, and forgets the group's color, collapsed state and place in the
-    ///     order - exactly what removing a group did before groups could be nested.
+    ///     Test that deleting a top-level group but keeping its contents makes its repos ungrouped and puts
+    ///     them at the end of Ungrouped, keeps its favorites in Favorites where they were (they only lose
+    ///     the group), and forgets the group's color, collapsed state and place in the order.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_RemoveGroup_TopLevel_LeavesReposUngroupedInPlaceAndForgetsTheGroup()
+    public void MainWindowViewModel_RemoveGroup_TopLevel_MovesReposToTheEndOfUngroupedAndForgetsTheGroup()
     {
         // Arrange
         var viewModel = CreateViewModel(
@@ -64,10 +64,11 @@ public sealed class RepoGroupDeleteTests : IDisposable
         // Act
         var removed = viewModel.RemoveGroup("work");
 
-        // Assert
+        // Assert: w1 (listed in Work) goes behind everything else; the favorite w2 keeps its place and loses the group
         Assert.True(removed);
-        Assert.Equal(["w1", "h1", "w2"], viewModel.RepoCards.Select(card => card.RepoName));
-        Assert.Equal([null, "Home", null], viewModel.RepoCards.Select(card => card.GroupName));
+        Assert.Equal(["h1", "w2", "w1"], viewModel.RepoCards.Select(card => card.RepoName));
+        Assert.Equal(["Home", null, null], viewModel.RepoCards.Select(card => card.GroupName));
+        Assert.True(viewModel.Settings.HasUserRepoOrder);
         Assert.Equal(["Home"], viewModel.GroupNames);
         Assert.Empty(viewModel.Settings.GroupColors);
         Assert.DoesNotContain("Work", viewModel.Settings.CollapsedGroups, RepoGroupName.Comparer);
@@ -75,12 +76,12 @@ public sealed class RepoGroupDeleteTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that deleting a nested group but keeping its contents moves its repos into its parent,
-    ///     keeps their order, and puts its subgroups, in their own order, in the group's place in the order
-    ///     of the parent's groups.
+    ///     Test that deleting a nested group but keeping its contents moves its repos into its parent
+    ///     (behind the repos the parent already lists), and puts its subgroups, in their own order, in the
+    ///     group's place in the order of the parent's groups.
     /// </summary>
     [Fact]
-    public void MainWindowViewModel_RemoveGroup_Nested_KeepsRepoOrderAndSubgroupsTakeTheGroupsPlace()
+    public void MainWindowViewModel_RemoveGroup_Nested_KeepsReposInTheParentAndSubgroupsTakeTheGroupsPlace()
     {
         // Arrange: Client holds the groups Zed, Mid (with Beta and Alpha, ordered Beta then Alpha) and Last
         var viewModel = CreateViewModel(
@@ -104,10 +105,11 @@ public sealed class RepoGroupDeleteTests : IDisposable
         // Act
         var removed = viewModel.RemoveGroup("Mid");
 
-        // Assert: Mid's repos are in Client in their stored order; its subgroups are in Client where Mid was
+        // Assert: Mid's repos are in Client, after every repo that was there (Client lists none, so at the
+        // end of the list), in their own order; its subgroups are in Client where Mid was
         Assert.True(removed);
         Assert.Equal("Client", viewModel.RepoCards.Single(card => card.RepoName == "m2").GroupName);
-        Assert.Equal(["m2", "z1", "m1"], viewModel.RepoCards.Take(3).Select(card => card.RepoName));
+        Assert.Equal(["z1", "b1", "a1", "l1", "m2", "m1"], viewModel.RepoCards.Select(card => card.RepoName));
         Assert.Equal(
             ["Zed", "Beta", "Alpha", "Last"],
             viewModel.DisplayedItems.OfType<RepoGroupHeaderViewModel>()
@@ -115,6 +117,131 @@ public sealed class RepoGroupDeleteTests : IDisposable
         Assert.Equal("Client", viewModel.GetGroupParent("Beta"));
         Assert.Equal("Client", viewModel.GetGroupParent("Alpha"));
         Assert.DoesNotContain("Mid", viewModel.GroupNames);
+    }
+
+    /// <summary>
+    ///     Test that a group that was never dragged or moved (so the settings hold no place for it) still
+    ///     hands its subgroups its displayed place among its siblings when it is deleted, in a nested
+    ///     group and at the top level.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_RemoveGroup_NeverDraggedGroup_SubgroupsTakeItsDisplayedPlace()
+    {
+        // Arrange: Client lists Aaa, Mid, Zzz alphabetically and Mid lists Alpha, Beta (the stored order of
+        // the groups is empty); at the top level Charlie and Delta sit next to Client
+        var viewModel = CreateViewModel(
+            new Dictionary<string, string>
+            {
+                ["Client"] = string.Empty,
+                ["Aaa"] = "Client",
+                ["Mid"] = "Client",
+                ["Zzz"] = "Client",
+                ["Beta"] = "Mid",
+                ["Alpha"] = "Mid",
+                ["Charlie"] = string.Empty
+            },
+            new Spec("a1", "Aaa"),
+            new Spec("m1", "Mid"),
+            new Spec("z1", "Zzz"),
+            new Spec("b1", "Beta"),
+            new Spec("p1", "Alpha"),
+            new Spec("c1", "Charlie"),
+            new Spec("d1", "Delta"));
+        Assert.Empty(viewModel.Settings.GroupOrder);
+
+        // Act: Mid (nested), then Client (top level: its subgroups go between Charlie and Delta)
+        Assert.True(viewModel.RemoveGroup("Mid"));
+        var nested = GroupChildren(viewModel, "Client");
+        Assert.True(viewModel.RemoveGroup("Client"));
+        var topLevel = viewModel.DisplayedItems.OfType<RepoGroupHeaderViewModel>()
+            .Where(header => header.Kind == RepoGroupKind.Group).Select(header => header.Name).ToList();
+
+        // Assert
+        Assert.Equal(["Aaa", "Alpha", "Beta", "Zzz"], nested);
+        Assert.Equal(["Charlie", "Aaa", "Alpha", "Beta", "Zzz", "Delta"], topLevel);
+    }
+
+    /// <summary>
+    ///     Test that the repos listed directly under a deleted group move as one block, in their order, to
+    ///     the end of the repos its parent lists directly, whatever sits between them in the stored order.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_RemoveGroup_ReposGoAsOneBlockToTheEndOfTheParentsOwnRepos()
+    {
+        // Arrange: Client lists c1, c2; Mid (inside Client) lists m1, m2; o1 is in another group and e1 is
+        // ungrouped; the stored order interleaves them all
+        var viewModel = CreateViewModel(
+            new Dictionary<string, string> { ["Client"] = string.Empty, ["Mid"] = "Client" },
+            new Spec("m1", "Mid"),
+            new Spec("c1", "Client"),
+            new Spec("o1", "Other"),
+            new Spec("m2", "Mid"),
+            new Spec("e1"),
+            new Spec("c2", "Client"));
+
+        // Act
+        Assert.True(viewModel.RemoveGroup("Mid"));
+
+        // Assert: m1, m2 follow c2 (the last of Client's own repos) as a block; nothing else moves
+        Assert.Equal(["c1", "o1", "e1", "c2", "m1", "m2"], viewModel.RepoCards.Select(card => card.RepoName));
+        Assert.Equal(
+            ["Client", "Other", null, "Client", "Client", "Client"],
+            viewModel.RepoCards.Select(card => card.GroupName));
+        Assert.True(viewModel.Settings.HasUserRepoOrder);
+        Assert.Equal(
+            viewModel.RepoCards.Select(card => card.RepoPath),
+            viewModel.Settings.RecentRepos.Select(repo => repo.Path));
+    }
+
+    /// <summary>
+    ///     Test that a favorite of the deleted group stays where it was among the favorites (it only
+    ///     changes group, to the parent), and is not part of the block of repos that moves.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_RemoveGroup_FavoritesOfTheGroupKeepTheirPlaceInFavorites()
+    {
+        // Arrange: Mid's favorite mf sits between two other favorites; Client lists c1
+        var viewModel = CreateViewModel(
+            new Dictionary<string, string> { ["Client"] = string.Empty, ["Mid"] = "Client" },
+            new Spec("f1", "Other", IsFavorite: true),
+            new Spec("mf", "Mid", IsFavorite: true),
+            new Spec("m1", "Mid"),
+            new Spec("f2", "Other", IsFavorite: true),
+            new Spec("c1", "Client"));
+
+        // Act
+        Assert.True(viewModel.RemoveGroup("Mid"));
+
+        // Assert: the favorites are still f1, mf, f2, and mf is now in Client; m1 follows c1
+        var favorites = viewModel.DisplayedItems.OfType<RepoCardViewModel>().Where(card => card.IsFavorite)
+            .Select(card => card.RepoName);
+        Assert.Equal(["f1", "mf", "f2"], favorites);
+        Assert.Equal("Client", viewModel.RepoCards.Single(card => card.RepoName == "mf").GroupName);
+        Assert.Equal(["f1", "mf", "f2", "c1", "m1"], viewModel.RepoCards.Select(card => card.RepoName));
+    }
+
+    /// <summary>
+    ///     Test that deleting a group whose repos already are where they would go leaves the repo order and
+    ///     its "chosen by the user" marker as they were, and saves once.
+    /// </summary>
+    [Fact]
+    public void MainWindowViewModel_RemoveGroup_OrderAlreadyAtEnd_DoesNotMarkUserOrder()
+    {
+        // Arrange: the list holds the ungrouped e1 and then Work's w1, w2; the order is not the user's yet
+        var viewModel = CreateViewModel(
+            parents: null,
+            new Spec("e1"),
+            new Spec("w1", "Work"),
+            new Spec("w2", "Work"));
+        viewModel.Settings.HasUserRepoOrder = false;
+
+        // Act
+        Assert.True(viewModel.RemoveGroup("Work"));
+
+        // Assert: still e1, w1, w2 (the block was already at the end of Ungrouped); the marker is untouched
+        Assert.Equal(["e1", "w1", "w2"], viewModel.RepoCards.Select(card => card.RepoName));
+        Assert.Equal([null, null, null], viewModel.RepoCards.Select(card => card.GroupName));
+        Assert.False(viewModel.Settings.HasUserRepoOrder);
     }
 
     /// <summary>
@@ -276,9 +403,9 @@ public sealed class RepoGroupDeleteTests : IDisposable
         var unknown = viewModel.GetGroupContents("No such group");
 
         // Assert
-        Assert.Equal(new GroupContents(2, 1, 5, 2, 2), client);
-        Assert.Equal(new GroupContents(2, 0, 2, 0, 1), deep);
-        Assert.Equal(new GroupContents(0, 0, 0, 0, 0), unknown);
+        Assert.Equal(new GroupContents("Client", 2, 1, 5, 2, 2), client);
+        Assert.Equal(new GroupContents("Deep", 2, 0, 2, 0, 1), deep);
+        Assert.Equal(new GroupContents("No such group", 0, 0, 0, 0, 0), unknown);
     }
 
     /// <summary>
@@ -339,6 +466,16 @@ public sealed class RepoGroupDeleteTests : IDisposable
         Assert.Equal(["Client"], withContents);
         Assert.Equal(["Client"], keep);
     }
+
+    /// <summary>
+    ///     Gets the names of the groups directly inside a group, in the order the list shows them.
+    /// </summary>
+    /// <param name="viewModel">The view model.</param>
+    /// <param name="parent">The parent group's name.</param>
+    /// <returns>The subgroups' names, first to last.</returns>
+    private static List<string> GroupChildren(MainWindowViewModel viewModel, string parent) =>
+        [.. viewModel.DisplayedItems.OfType<RepoGroupHeaderViewModel>()
+            .Where(header => header.ParentName == parent).Select(header => header.Name)];
 
     /// <summary>
     ///     Describes the displayed items as text: a header as <c>[Name count]</c> (with <c>collapsed</c> when

@@ -862,36 +862,37 @@ existing group, with a note, when creating); the header menu deletes a group in 
 `ConfirmationWindow` (`AgentControl-System-GroupDelete`): **Delete group, keep contents** (`RemoveGroupMenuItem`, text
 and tooltip from the header's `RemoveGroupText` and `RemoveGroupTooltip`; plain **Delete group** for a group with
 nothing in it) says that nothing on disk or in any repository changes and where the group's repos and subgroups go (the
-group it is inside, or ungrouped at the top level, `ConfirmAndRemoveGroup`,
+group it is inside; at the top level the repos become ungrouped and the subgroups become top-level groups; the group is
+named as it is stored and the part about repos or subgroups is left out when there are none, `ConfirmAndRemoveGroup`,
 `AgentControl-LauncherUI-GroupDeleteKeepContents`), and **Delete group and its contents**
 (`RemoveGroupWithContentsMenuItem`, shown only while the header's `HasContents` is true) names the group and says how
 many repos - favorites included, with how many of them are favorites - and how many subgroups are removed from
-AgentControl's list and that nothing on disk is deleted (`ConfirmAndRemoveGroupWithContents`,
-`AgentControl-LauncherUI-GroupDeleteWithContents`); the counts come from `MainWindowViewModel.GetGroupContents`, and
-answering No (or closing the dialog, which means No) changes nothing. *Card color.* **Card color...** opens a small
-palette pop-up (an attached `Flyout` on the "..." button, whose content is a `ColorPalettePanel` with AutomationId
-`CardColorPalette`) with one round swatch per `CardColorPalette` entry - the same ten theme-aware avatar colors the
-automatic color is drawn from - plus **Automatic**. Each swatch has an AutomationId (`CardColorSwatch_<Name>`), its name
-as tooltip and accessible name, and the chosen one shows a check mark and a ring, so the choice is not carried by color
-alone. The color goes only to the avatar tile (palette style classes `avatar0` ... `avatar9`, driven by bindings on the
-card's `AvatarStyleClass`); the status accent bar and chips are unaffected. A repo that shows its own picture keeps the
-tile's light backing so a logo drawn for a white page stays legible, and the chosen color - the card's own or its
-group's (`RepoCardViewModel.IsTileColorChosen`) - is drawn as a ring around the picture. The letters on every palette
-color use whichever of white and near-black reads better on that fill in each theme, at least 4.5:1
-(`ThemeResourceTests` checks every entry in both themes). *Group color.* **Group color...** in a user group's header
-menu opens the same palette for the group (a `ColorPalettePanel` with AutomationId `GroupColorPalette` in a `Flyout`
-attached to `GroupHeaderMenuButton`, opened by the window's `GroupColorMenuItem_Click`, which posts the opening to the
-dispatcher like the card's), with **None** instead of **Automatic** (`GroupColorSwatch_<Name>`, `GroupColorHeadingText`,
-`GroupColorNoneButton`); its heading names the group's color (`Group color: Teal`, or `Group color: None`) and the
-chosen swatch is marked. The window's `GroupColorPalette_ColorChosen` calls `MainWindowViewModel.SetGroupColor`, which
-saves the choice first (`AgentControl-LauncherUI-GroupColor`). A colored group's header shows a 4 by 20 pixel rounded
-bar (`GroupColorAccent`) in its fixed-width slot, so headers stay aligned whether or not they are colored; the bar's
-tooltip and accessible name name the color (`Group color: Teal`), so it is never conveyed by color alone, and
-*Favorites* and *Ungrouped* are never colored (they have no menu). The bar is drawn with its own brushes `GroupAccent0`
-... `GroupAccent9` (style classes `groupAccent0` ... `groupAccent9`, from the header's `ColorStyleClass`) rather than
-the avatar fills, because a header accent is a graphic on the page and must reach 3:1 on `PageBackground` and on the
-drop tint `RepoDropTargetBackground` over the page in both themes: the dark theme uses lighter tones, the light theme
-the avatar fills except Amber, which is darker there (`ThemeResourceTests`,
+AgentControl's list (leaving out what there are none of) and that nothing on disk is deleted
+(`ConfirmAndRemoveGroupWithContents`, `AgentControl-LauncherUI-GroupDeleteWithContents`); the counts come from
+`MainWindowViewModel.GetGroupContents`, and answering No (or closing the dialog, which means No) changes nothing. *Card
+color.* **Card color...** opens a small palette pop-up (an attached `Flyout` on the "..." button, whose content is a
+`ColorPalettePanel` with AutomationId `CardColorPalette`) with one round swatch per `CardColorPalette` entry - the same
+ten theme-aware avatar colors the automatic color is drawn from - plus **Automatic**. Each swatch has an AutomationId
+(`CardColorSwatch_<Name>`), its name as tooltip and accessible name, and the chosen one shows a check mark and a ring,
+so the choice is not carried by color alone. The color goes only to the avatar tile (palette style classes `avatar0` ...
+`avatar9`, driven by bindings on the card's `AvatarStyleClass`); the status accent bar and chips are unaffected. A repo
+that shows its own picture keeps the tile's light backing so a logo drawn for a white page stays legible, and the chosen
+color - the card's own or its group's (`RepoCardViewModel.IsTileColorChosen`) - is drawn as a ring around the picture.
+The letters on every palette color use whichever of white and near-black reads better on that fill in each theme, at
+least 4.5:1 (`ThemeResourceTests` checks every entry in both themes). *Group color.* **Group color...** in a user
+group's header menu opens the same palette for the group (a `ColorPalettePanel` with AutomationId `GroupColorPalette` in
+a `Flyout` attached to `GroupHeaderMenuButton`, opened by the window's `GroupColorMenuItem_Click`, which posts the
+opening to the dispatcher like the card's), with **None** instead of **Automatic** (`GroupColorSwatch_<Name>`,
+`GroupColorHeadingText`, `GroupColorNoneButton`); its heading names the group's color (`Group color: Teal`, or
+`Group color: None`) and the chosen swatch is marked. The window's `GroupColorPalette_ColorChosen` calls
+`MainWindowViewModel.SetGroupColor`, which saves the choice first (`AgentControl-LauncherUI-GroupColor`). A colored
+group's header shows a 4 by 20 pixel rounded bar (`GroupColorAccent`) in its fixed-width slot, so headers stay aligned
+whether or not they are colored; the bar's tooltip and accessible name name the color (`Group color: Teal`), so it is
+never conveyed by color alone, and *Favorites* and *Ungrouped* are never colored (they have no menu). The bar is drawn
+with its own brushes `GroupAccent0` ... `GroupAccent9` (style classes `groupAccent0` ... `groupAccent9`, from the
+header's `ColorStyleClass`) rather than the avatar fills, because a header accent is a graphic on the page and must
+reach 3:1 on `PageBackground` and on the drop tint `RepoDropTargetBackground` over the page in both themes: the dark
+theme uses lighter tones, the light theme the avatar fills except Amber, which is darker there (`ThemeResourceTests`,
 `AgentControl-LauncherUI-GroupColorLegible`). The tiles of the group's repos that have no card color of their own take
 the group's color, a card's own color wins, a favorite keeps its group's color (its chip says which group), and the card
 palette's heading says `Card color: Automatic (group color Teal)` when a tile follows its group

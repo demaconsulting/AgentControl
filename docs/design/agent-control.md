@@ -250,8 +250,11 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   Favorites and subgroups are not sorted and there is no automatic sorting; the sorted order is simply the user's
   repo order from then on.
 - *Deleting a group* (`AgentControl-System-GroupDelete`): the header's menu offers two kinds of delete. **Delete
-  group, keep contents** removes the group and moves its repos and subgroups to the group it was inside (or to
-  Ungrouped), so nothing leaves the list; **Delete group and its contents** removes the group, every group inside it
+  group, keep contents** removes the group and keeps what is in it: its repos stay in the group it was inside (or
+  become ungrouped for a top-level group), together and in their order at the end of that group's own repos (the end of
+  Ungrouped), and its subgroups move into that group (or become top-level groups) taking the deleted group's place
+  among its siblings, so nothing leaves the list and the contents appear where the group was; **Delete group and its
+  contents** removes the group, every group inside it
   and every repo in any of them from the list (a repo that is also a favorite goes too, which the confirmation says).
   Each asks first and says how many repos and groups are affected and that nothing on disk is deleted; Cancel changes
   nothing. A group with nothing in it offers one plain **Delete group**.

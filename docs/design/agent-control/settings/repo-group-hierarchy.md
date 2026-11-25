@@ -10,7 +10,8 @@ the tree, and how stored parents are repaired. The rules are one shared, pure un
 (`AppSettings.RepairGroupSettings`, which must tolerate any stored text) and the main window's view model (which shows,
 moves and deletes groups) agree. Its behavior is specified by the unit requirements
 `AgentControl-RepoGroupHierarchy-ArrangeLevel`, `-FlatListIsTopLevel`, `-TreeOrder`, `-Navigation`, `-AnyDepth`,
-`-RefusesLoops`, `-PutInsideRegisters`, `-PopKeepsSubgroups`, `-RepairDropsUnusable`, `-RepairRegistersParents` and
+`-RefusesLoops`, `-PutInsideRegisters`, `-PopKeepsSubgroups`, `-PopForgetsGroup`, `-RepairDropsUnusable`,
+`-RepairRegistersParents` and
 `-RepairCycles` (each prefixed `AgentControl-RepoGroupHierarchy`).
 
 **Design decisions** (recorded here because the requirements say what, not how):
@@ -45,7 +46,8 @@ only), `_children` (the groups of each level in listing order, the top level und
 copy of the stored order).
 
 **Invariants**: the tree has no cycle and no group is its own parent (the constructor applies the same repair as
-`RepairParents`); a group whose stored parent does not exist is top level; every existing group is in exactly one level.
+`RepairParents`); a group whose stored parent does not exist is top level; every existing group is in exactly one level;
+every group a registered group is inside is registered too.
 
 #### Key Methods
 
@@ -70,8 +72,10 @@ copy of the stored order).
   `-RepairRegistersParents`).
 
 **Constructor**: Builds the repaired view. It is tolerant by design: an entry about a group that does not exist is
-ignored, a parent that does not exist or is the group itself means top level and a cycle is cut like `RepairParents`
-does, so a damaged file still shows every group (`-RepairCycles`).
+ignored, a parent that does not exist or is the group itself means top level, a cycle is cut like `RepairParents`
+does, and the parent of every registered group is registered too (as `RepairParents` does,
+`-RepairRegistersParents`), so a damaged file still shows every group (`-RepairCycles`) and the invariant below holds
+even for settings that were not repaired first.
 
 **Groups** (property): The existing groups, one spelling each (`IReadOnlyCollection<string>`, in no particular order).
 Use `GetTreeOrder` for the order the list shows.
@@ -91,10 +95,19 @@ ordinary top-level group that is only reordered stays unregistered, so flat list
 siblings. *Preconditions*: `CanMove` is `true`; otherwise `InvalidOperationException`.
 
 **Pop**: The stored values after the group is deleted but its contents are kept: its subgroups get the group's parent
-(or the top level) and take the group's place in the stored order, in their own order; a group with no stored place
-leaves them where they are; the group's key is forgotten (`-PopKeepsSubgroups`). It does not touch repos: moving the
-group's own repos to the parent group is the caller's job. *Preconditions*: the group exists; otherwise
-`ArgumentException`.
+(or the top level) and take the group's *displayed* place among its siblings, whether or not the group has a stored
+place of its own (`-PopKeepsSubgroups`). The level the group was in is read as `GetChildren(parent)` lists it, the
+group is replaced there by its own subgroups in their listed order, and that level is written to the stored order in
+full - after every stored entry that names none of its members - so the arrangement the user saw stays put, the
+alphabetical siblings of a group that was never dragged included; every other level keeps its relative order, because
+only the relative order within a level means anything in the one flat list. Every stored occurrence of the group (in any
+letter case, also repeated) and of its subgroups and siblings is replaced by that one run, so the result names the
+group nowhere and each subgroup once (`-PopForgetsGroup`). A group with no subgroups only leaves the stored order, so
+nothing is written down for its siblings. The group's key is forgotten and its subgroups are stored with the group's
+parent (the empty string at the top level). It does not touch repos: moving the group's own repos to the parent group
+is the caller's job (`MainWindowViewModel.RemoveGroup`). *Preconditions*: the group exists; otherwise
+`ArgumentException`. (This supersedes the first design, in which a group with no stored place left its subgroups where
+they were, so they fell to their alphabetical place among their new siblings.)
 
 **GetStoredParents**: The stored form of the repaired hierarchy (registered groups only, empty string for top level),
 used by `PutInside` and `Pop`.

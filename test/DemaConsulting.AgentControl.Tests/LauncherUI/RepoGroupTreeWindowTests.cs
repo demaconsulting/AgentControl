@@ -475,6 +475,104 @@ public sealed class RepoGroupTreeWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that the confirmation of "Delete group, keep contents" leaves out the part about repos for a
+    ///     group that has only subgroups and the part about subgroups for a group that has only repos, so it
+    ///     never reads "0 repo(s)" or "0 subgroup(s)".
+    /// </summary>
+    [Fact]
+    public void MainWindow_HeaderMenu_DeleteGroupKeepContents_ConfirmationOmitsZeroParts() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: Holder (inside Client) has only the subgroup Inner; Alpha has only the repo a1
+        var (window, viewModel, _) = CreateClientWindow();
+        Assert.True(viewModel.CreateSubgroup("Client", "Holder"));
+        Assert.True(viewModel.CreateSubgroup("Holder", "Inner"));
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            // Act
+            var subgroupOnly = AskKeepContents(window, "Holder");
+            var repoOnly = AskKeepContents(window, "Alpha");
+
+            // Assert
+            Assert.Contains("Its 1 subgroup(s) move into \"Client\".", subgroupOnly);
+            Assert.DoesNotContain("repo(s)", subgroupOnly);
+            Assert.Contains("Its 1 repo(s) stay in AgentControl's list, in the group \"Client\".", repoOnly);
+            Assert.DoesNotContain("subgroup(s)", repoOnly);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that the confirmation of "Delete group and its contents" leaves out the part about repos for a
+    ///     group that has only subgroups and the part about subgroups for a group that has only repos.
+    /// </summary>
+    [Fact]
+    public void MainWindow_HeaderMenu_DeleteWithContents_ConfirmationOmitsZeroParts() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: Holder (inside Client) has only the subgroup Inner; Alpha has only the repo a1
+        var (window, viewModel, _) = CreateClientWindow();
+        Assert.True(viewModel.CreateSubgroup("Client", "Holder"));
+        Assert.True(viewModel.CreateSubgroup("Holder", "Inner"));
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            // Act
+            var subgroupOnly = AskDeleteWithContents(window, "Holder");
+            var repoOnly = AskDeleteWithContents(window, "Alpha");
+
+            // Assert
+            Assert.Contains("Delete the group \"Holder\" and its 1 subgroup(s)?", subgroupOnly);
+            Assert.DoesNotContain("repo(s)", subgroupOnly);
+            Assert.Contains("Delete the group \"Alpha\" together with its 1 repo(s)?", repoOnly);
+            Assert.DoesNotContain("subgroup(s)", repoOnly);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Opens "Delete group, keep contents" on a group, reads the question and answers No.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <param name="groupName">The group.</param>
+    /// <returns>The question.</returns>
+    private static string AskKeepContents(MainWindow window, string groupName) =>
+        Ask(window, groupName, "RemoveGroupMenuItem");
+
+    /// <summary>
+    ///     Opens "Delete group and its contents" on a group, reads the question and answers No.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <param name="groupName">The group.</param>
+    /// <returns>The question.</returns>
+    private static string AskDeleteWithContents(MainWindow window, string groupName) =>
+        Ask(window, groupName, "RemoveGroupWithContentsMenuItem");
+
+    /// <summary>
+    ///     Chooses a header menu item that asks for a confirmation, reads the question and answers No.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <param name="groupName">The group.</param>
+    /// <param name="itemName">The menu item's name.</param>
+    /// <returns>The question.</returns>
+    private static string Ask(MainWindow window, string groupName, string itemName)
+    {
+        ClickHeaderMenuItem(window, groupName, itemName);
+        var confirmation = Assert.Single(window.OwnedWindows.OfType<ConfirmationWindow>());
+        var message = confirmation.FindControl<TextBlock>("ConfirmationMessageText")!.Text!;
+        DialogWindowTests.Click(confirmation, "ConfirmationNoButton");
+        Dispatcher.UIThread.RunJobs();
+        return message;
+    }
+
+    /// <summary>
     ///     Test that a group with no repo and no subgroup offers only one plain "Delete group" item (the
     ///     item that deletes the contents is hidden), whose confirmation says the group is empty, while a
     ///     group with contents shows both items.
