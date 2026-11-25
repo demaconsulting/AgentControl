@@ -141,12 +141,14 @@ sections:
           group that is directly, and the indent that depth gives (capped so a deep group stays in
           view), shall name the group it is inside in its accessible name, and shall say, in the
           tooltip of its count, how many of the repos are directly in the group when the count
-          includes the repos of groups inside it; the built-in sections are never inside a group.
+          includes the repos of groups inside it; a blank parent name means the group is not inside
+          any group, and the built-in sections are never inside a group.
         justification: |
           A tree needs to show where each group is in it, in words as well as by position, so nested
           groups with the same count can be told apart by a person using assistive technology.
         tests:
           - RepoGroupHeaderViewModel_UpdatePlace_DescribesDepthParentIndentAndDirectCount
+          - RepoGroupHeaderViewModel_BlankParentName_IsNotNested
           - RepoGroupHeaderViewModel_UpdatePlace_BuiltInSection_StaysTopLevel
 
       - id: AgentControl-RepoGroupHeaderViewModel-RequiresName
@@ -175,7 +177,8 @@ sections:
         title: >-
           The RepoGroupHeaderViewModel class shall request that its group be moved up or down when
           the user chooses Move up or Move down, offer each only while its owner says the move is
-          possible, explain an unavailable move with its owner's reason as the tooltip, and never
+          possible, explain an unavailable move with its owner's reason as the tooltip, say in the
+          tooltip of an available move that it moves the group among its sibling groups, and never
           offer a move for Favorites or Ungrouped.
         justification: |
           The order is the owner's state; the header only reports what the user asked for and shows

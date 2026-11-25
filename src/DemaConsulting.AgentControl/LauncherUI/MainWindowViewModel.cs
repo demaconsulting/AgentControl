@@ -4419,14 +4419,22 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         "their order cannot be changed.";
 
     /// <summary>
+    ///     The explanation given when a name that is no group (an empty name included) is asked to be sorted.
+    /// </summary>
+    public const string GroupSortNoSuchGroupMessage = "That group does not exist.";
+
+    /// <summary>
     ///     Gets the repos listed directly under a group - those whose group it is that are not
     ///     favorites (a favorite is listed under Favorites) - in the stored order. The repos of its
     ///     subgroups are not included.
     /// </summary>
     /// <param name="groupName">The group's name; letter case is ignored.</param>
-    /// <returns>The repos' cards, in the order they are stored in.</returns>
+    /// <returns>The repos' cards, in the order they are stored in; empty for a name that is no group
+    ///     (the repos of no group are not a group's repos).</returns>
     private List<RepoCardViewModel> GetDirectCards(string groupName) =>
-        [.. RepoCards.Where(card => !card.IsFavorite && RepoGroupName.Comparer.Equals(card.GroupName ?? string.Empty, groupName))];
+        GroupNames.Contains(groupName, RepoGroupName.Comparer)
+            ? [.. RepoCards.Where(card => !card.IsFavorite && RepoGroupName.Comparer.Equals(card.GroupName ?? string.Empty, groupName))]
+            : [];
 
     /// <summary>
     ///     Gets why a group's repos cannot be sorted by name now, for the repos listed directly under it.
@@ -4480,6 +4488,11 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return "Favorites and Ungrouped cannot be sorted.";
         }
 
+        if (!GroupNames.Contains(groupName, RepoGroupName.Comparer))
+        {
+            return GroupSortNoSuchGroupMessage;
+        }
+
         return GetGroupSortReason(GetDirectCards(groupName));
     }
 
@@ -4509,7 +4522,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ArgumentNullException.ThrowIfNull(groupName);
 
         var direct = GetDirectCards(groupName);
-        if (RepoGroupName.IsReserved(groupName) || GetGroupSortReason(direct) is not null)
+        if (RepoGroupName.IsReserved(groupName) ||
+            !GroupNames.Contains(groupName, RepoGroupName.Comparer) ||
+            GetGroupSortReason(direct) is not null)
         {
             return false;
         }
@@ -4981,8 +4996,9 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     into Favorites marks the repos as favorites and keeps their groups, dropping into a group or into
     ///     Ungrouped un-favorites them and sets that group or none. The first card (in the order of the list)
     ///     lands at the drop position - before or after the anchor card, or at the end of the section for a
-    ///     drop on a header - and the others follow it in order. Cards that are not in the list, or the same
-    ///     card twice, count once. The selection is kept (the cards that are still shown stay selected).
+    ///     drop on a header - and the others follow it in order. The same card twice counts once; the drop is
+    ///     refused as a whole (see <see cref="CanDropCards"/>) when any of the cards is not in the list or
+    ///     could not go there. The selection is kept (the cards that are still shown stay selected).
     /// </remarks>
     /// <param name="cards">The dragged cards.</param>
     /// <param name="target">The place; see <see cref="CanDropCards"/> for what is refused.</param>

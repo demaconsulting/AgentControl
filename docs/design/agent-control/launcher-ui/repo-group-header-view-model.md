@@ -78,8 +78,8 @@ color alone. The header's `AccessibleName` is unchanged by the color
 **MoveUpCommand**, **MoveDownCommand** (`RelayCommand`) and the event **MoveRequested** (`EventHandler<RepoGroupMove>`,
 with `RepoGroupMove.Up` or `.Down`; the enumeration is declared beside `MainWindowViewModel`): each command only raises
 the event, and can execute only while its move is available. **MoveUpTooltip** / **MoveDownTooltip** say what the item
-does (`Move this group one place up in the list`, `... down ...`) or, while it is unavailable, why. A move is
-unavailable until the owner has called `UpdateOrder`, and always for *Favorites* and *Ungrouped*
+does (`Move this group one place up among its sibling groups`, `... down ...`) or, while it is unavailable, why. A move
+is unavailable until the owner has called `UpdateOrder`, and always for *Favorites* and *Ungrouped*
 (`AgentControl-RepoGroupHeaderViewModel-MoveRequests`).
 
 **SortByNameCommand** (`RelayCommand`) and the event **SortByNameRequested**: the command only raises the event and can
@@ -101,7 +101,9 @@ owner keeps one header instance per section and updates it rather than replacing
 focus when it is toggled (`AgentControl-RepoGroupHeaderViewModel-UpdatesInPlace`).
 
 **UpdatePlace(depth, parentName)**: Sets where the group is in the tree - `Depth` and `ParentName` - and raises the
-notifications for `IndentWidth`, `HasParent` and the accessible name when they change; ignored (top level) for
+notifications for `IndentWidth`, `HasParent`, the accessible name and `RemoveGroupTooltip` when they change; a blank or
+`null` parent name means the group is not inside any group (no `HasParent`, no `, inside ` in its accessible name);
+ignored (top level) for
 *Favorites* and *Ungrouped* (`AgentControl-RepoGroupHeaderViewModel-NestedPlace`).
 
 **UpdateColor(colorName)**: Sets `ColorName` to the palette color named by `colorName` (letter case ignored, through

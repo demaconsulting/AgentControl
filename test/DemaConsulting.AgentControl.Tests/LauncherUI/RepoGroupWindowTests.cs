@@ -278,6 +278,61 @@ public sealed class RepoGroupWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that a window whose data context is cleared and assigned again handles each request of the
+    ///     view model once (not once per assignment), keeps the list's selection in step, and stops
+    ///     handling a view model that another one replaced.
+    /// </summary>
+    [Fact]
+    public void MainWindow_DataContextAssignedAgain_HandlesEachRequestOnceAndOnlyForTheCurrentViewModel() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, viewModel) = CreateWindow(("a", "Work", false), ("b", "Work", false));
+        MainWindowViewModel? other = null;
+
+        try
+        {
+            var header = viewModel.DisplayedItems.OfType<RepoGroupHeaderViewModel>().Single(item => item.Name == "Work");
+
+            // Act: the same view model is assigned again, then asks to delete the group
+            window.DataContext = null;
+            window.DataContext = viewModel;
+            Dispatcher.UIThread.RunJobs();
+            viewModel.SetSelectedCards(viewModel.RepoCards);
+            var selected = window.FindControl<ListBox>("RepoListBox")!.SelectedItems!.Count;
+            header.RemoveGroupCommand.Execute(null);
+            Dispatcher.UIThread.RunJobs();
+            var questions = window.OwnedWindows.OfType<ConfirmationWindow>().ToList();
+            foreach (var question in questions)
+            {
+                DialogWindowTests.Click(question, "ConfirmationNoButton");
+            }
+
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: one question, and the selection followed
+            Assert.Single(questions);
+            Assert.Equal(2, selected);
+
+            // Act: another view model replaces it, and the old header asks again
+            other = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory());
+            window.DataContext = other;
+            Dispatcher.UIThread.RunJobs();
+            header.RemoveGroupCommand.Execute(null);
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the window no longer handles the old view model, nor tracks its cards
+            Assert.Empty(window.OwnedWindows.OfType<ConfirmationWindow>());
+            Assert.Equal(0, window.TrackedCardCount);
+        }
+        finally
+        {
+            window.Close();
+            viewModel.Dispose();
+            other?.Dispose();
+        }
+    });
+
+    /// <summary>
     ///     Test that the header's "..." menu renames a group through the prompt, which starts with the
     ///     group's own name, and that canceling the prompt changes nothing.
     /// </summary>

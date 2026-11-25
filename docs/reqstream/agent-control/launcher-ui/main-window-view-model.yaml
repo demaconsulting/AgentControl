@@ -627,13 +627,14 @@ sections:
         title: >-
           The MainWindowViewModel class shall refuse, with a reason and changing nothing, to sort a
           group that has fewer than two repos of its own, whose repos are in name order already, that is
-          Favorites or Ungrouped, or any group while the filter has text, and shall give the group
-          headers that availability.
+          Favorites or Ungrouped or a name that is no group, or any group while the filter has text.
         justification: |
           The reason is what the disabled menu item shows, so the user knows why sorting is not offered
-          and how to get it back; while the filter has text only some of a group's repos are shown.
+          and how to get it back; while the filter has text only some of a group's repos are shown, and
+          a name that is no group (an empty one would match the repos of no group) must never sort them.
         tests:
           - MainWindowViewModel_SortGroupByName_NothingToSort_ExplainsAndChangesNothing
+          - MainWindowViewModel_SortGroupByName_UnknownOrEmptyGroup_IsRefusedAndSavesNothing
           - MainWindowViewModel_SortGroupByName_WhileFiltering_IsRefusedUntilFilterCleared
           - MainWindowViewModel_GroupHeaderSortCommand_FollowsAvailabilityAndSorts
 

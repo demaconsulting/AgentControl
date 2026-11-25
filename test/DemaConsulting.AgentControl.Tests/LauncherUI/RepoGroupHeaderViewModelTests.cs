@@ -213,6 +213,42 @@ public class RepoGroupHeaderViewModelTests
     }
 
     /// <summary>
+    ///     Test that a blank or missing parent name means a top-level group - it is not "inside" anything
+    ///     and its accessible name does not end in "inside" - and that going back to the top level clears a
+    ///     parent that was set.
+    /// </summary>
+    /// <param name="parentName">The blank parent name.</param>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void RepoGroupHeaderViewModel_BlankParentName_IsNotNested(string? parentName)
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Project");
+        header.Update(count: 1, isCollapsed: false, isToggleEnabled: true);
+        header.UpdatePlace(depth: 1, parentName: "Client");
+
+        // Act
+        header.UpdatePlace(depth: 0, parentName: parentName);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.False(header.HasParent),
+            () => Assert.Null(header.ParentName),
+            () => Assert.Equal("Project, 1 repo, expanded", header.AccessibleName));
+
+        // Act: a blank parent given directly is read the same way
+        var other = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Other");
+        other.UpdatePlace(depth: 2, parentName: parentName);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.False(other.HasParent),
+            () => Assert.DoesNotContain("inside", other.AccessibleName));
+    }
+
+    /// <summary>
     ///     Test that the built-in sections are never inside a group and so ignore the place they are given.
     /// </summary>
     /// <param name="kindName">The name of the kind of built-in section.</param>
@@ -375,7 +411,7 @@ public class RepoGroupHeaderViewModelTests
 
         // Assert
         Assert.Equal("This group is already the first group.", header.MoveUpTooltip);
-        Assert.Equal("Move this group one place down in the list", header.MoveDownTooltip);
+        Assert.Equal("Move this group one place down among its sibling groups", header.MoveDownTooltip);
         Assert.Contains(nameof(RepoGroupHeaderViewModel.MoveUpTooltip), changed);
         Assert.False(favorites.MoveUpCommand.CanExecute(null));
         Assert.False(favorites.MoveDownCommand.CanExecute(null));

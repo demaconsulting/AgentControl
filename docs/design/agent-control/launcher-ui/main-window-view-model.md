@@ -926,7 +926,9 @@ not why (`AgentControl-MainWindowViewModel-GroupSortAvailability`).
 
 - *Returns*: `null` when sorting is allowed; otherwise the text the header's menu shows as the tooltip of the disabled
   item: `GroupSortDisabledWhileFilteringMessage` while the filter has text; "Favorites and Ungrouped cannot be sorted."
-  for a built-in name; "This group has fewer than two repos of its own, so there is nothing to sort." when fewer than
+  for a built-in name; `GroupSortNoSuchGroupMessage` ("That group does not exist.") for a name that is no group, an
+  empty one included (it would match the repos of no group, so it must never sort the Ungrouped repos); "This group has
+  fewer than two repos of its own, so there is nothing to sort." when fewer than
   two repos are **listed directly** under the group (a favorite is listed under Favorites and a subgroup's repos under
   the subgroup, so neither counts); "This group's repos are already sorted by name." when sorting would not change the
   order. `CanSortGroup` is `true` exactly when there is no reason.

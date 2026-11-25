@@ -478,12 +478,12 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     /// <summary>
     ///     Gets the tooltip of the "Move up" item: what it does, or why it is unavailable now.
     /// </summary>
-    public string MoveUpTooltip => _moveUpDisabledReason ?? "Move this group one place up in the list";
+    public string MoveUpTooltip => _moveUpDisabledReason ?? "Move this group one place up among its sibling groups";
 
     /// <summary>
     ///     Gets the tooltip of the "Move down" item: what it does, or why it is unavailable now.
     /// </summary>
-    public string MoveDownTooltip => _moveDownDisabledReason ?? "Move this group one place down in the list";
+    public string MoveDownTooltip => _moveDownDisabledReason ?? "Move this group one place down among its sibling groups";
 
     /// <summary>
     ///     Raised when the user asks to move the group up or down; the owning view model moves it.
@@ -636,11 +636,11 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     /// </summary>
     /// <param name="depth">How many groups the section is inside; ignored (0) for Favorites and
     ///     Ungrouped, which are never inside a group.</param>
-    /// <param name="parentName">The group it is inside, or <see langword="null"/> for a top-level
-    ///     group; ignored for Favorites and Ungrouped.</param>
+    /// <param name="parentName">The group it is inside, or <see langword="null"/> (or blank) for a
+    ///     top-level group; ignored for Favorites and Ungrouped.</param>
     public void UpdatePlace(int depth, string? parentName)
     {
         Depth = IsUserGroup ? Math.Max(depth, 0) : 0;
-        ParentName = IsUserGroup ? parentName : null;
+        ParentName = IsUserGroup && !string.IsNullOrWhiteSpace(parentName) ? parentName : null;
     }
 }

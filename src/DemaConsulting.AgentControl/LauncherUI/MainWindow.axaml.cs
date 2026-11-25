@@ -20,6 +20,7 @@
 
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Automation;
@@ -113,12 +114,19 @@ internal sealed partial class MainWindow : Window
         Closed += (_, _) =>
         {
             StopAutoScroll();
+            DetachViewModel();
             (DataContext as MainWindowViewModel)?.Dispose();
         };
         // Remember which card's favorite star has the keyboard focus (see RestoreStarFocus)
         AddHandler(GotFocusEvent, OnAnyGotFocus, RoutingStrategies.Bubble);
         Deactivated += (_, _) => _focusedStarCard = null;
     }
+
+    /// <summary>
+    ///     The view model whose events this window handles (the data context it was last attached to), or
+    ///     <see langword="null"/> when it has none; kept so those subscriptions can be removed again.
+    /// </summary>
+    private MainWindowViewModel? _subscribedViewModel;
 
     /// <summary>
     ///     The card whose favorite star had the focus most recently, or <see langword="null"/> when the
@@ -249,37 +257,38 @@ internal sealed partial class MainWindow : Window
     ///     Wires up per-repo-card event subscriptions once the view model is attached, and keeps
     ///     them current as cards are added to <see cref="MainWindowViewModel.RepoCards"/>.
     /// </summary>
+    /// <remarks>
+    ///     A view model this window was attached to before is detached first (see
+    ///     <see cref="DetachViewModel"/>), so assigning a data context again - or none - never leaves the
+    ///     window handling the events of two view models, or of one twice.
+    /// </remarks>
     /// <param name="sender">This window (unused).</param>
     /// <param name="e">Event arguments (unused).</param>
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
+        DetachViewModel();
         if (DataContext is not MainWindowViewModel viewModel)
         {
             return;
         }
 
+        _subscribedViewModel = viewModel;
         foreach (var card in viewModel.RepoCards)
         {
             AttachCardHandlers(card);
         }
 
         viewModel.RepoCards.CollectionChanged += OnRepoCardsChanged;
-        viewModel.PropertyChanged += (_, args) =>
-        {
-            if (args.PropertyName == nameof(MainWindowViewModel.SelectedCards))
-            {
-                SyncListSelectionFromViewModel(viewModel);
-            }
-        };
+        viewModel.PropertyChanged += ViewModelPropertyChanged;
         // A change that could not be saved in the background is told once per failure streak; the
         // message box is not awaited, so the window keeps working behind it
-        viewModel.SettingsSaveFailed += (_, message) => new MessageBoxWindow(message).ShowDialog(this);
-        viewModel.GroupRenameRequested += async (_, name) => await ShowRenameGroupPrompt(viewModel, name);
-        viewModel.GroupRemoveRequested += async (_, name) => await ConfirmAndRemoveGroup(viewModel, name);
-        viewModel.GroupRemoveWithContentsRequested += async (_, name) => await ConfirmAndRemoveGroupWithContents(viewModel, name);
-        viewModel.GroupAddRepoRequested += async (_, name) => await ShowNoticeAsync(await AddRepoAsync(viewModel, name));
-        viewModel.GroupNewSubgroupRequested += async (_, name) => await ShowNewSubgroupPrompt(viewModel, name);
-        viewModel.AddSaveFailed += async (_, request) => await AskAddSaveRetryAsync(request);
+        viewModel.SettingsSaveFailed += OnSettingsSaveFailed;
+        viewModel.GroupRenameRequested += OnGroupRenameRequested;
+        viewModel.GroupRemoveRequested += OnGroupRemoveRequested;
+        viewModel.GroupRemoveWithContentsRequested += OnGroupRemoveWithContentsRequested;
+        viewModel.GroupAddRepoRequested += OnGroupAddRepoRequested;
+        viewModel.GroupNewSubgroupRequested += OnGroupNewSubgroupRequested;
+        viewModel.AddSaveFailed += OnAddSaveFailed;
 
         // The upgrade check reads package sources, which may be slow or unreachable, so it starts
         // in the background now that the window has its data rather than delaying the window
@@ -290,6 +299,125 @@ internal sealed partial class MainWindow : Window
         // posted back to it.
         viewModel.StartPeriodicUpgradeRecheck(action => Dispatcher.UIThread.Post(action));
     }
+
+    /// <summary>
+    ///     Unsubscribes this window from the view model it handles the events of, and from its cards, so
+    ///     it stops reacting to a view model it no longer shows (a data context that was replaced or
+    ///     cleared, or the window closing).
+    /// </summary>
+    private void DetachViewModel()
+    {
+        if (_subscribedViewModel is not { } viewModel)
+        {
+            return;
+        }
+
+        _subscribedViewModel = null;
+        viewModel.RepoCards.CollectionChanged -= OnRepoCardsChanged;
+        viewModel.PropertyChanged -= ViewModelPropertyChanged;
+        viewModel.SettingsSaveFailed -= OnSettingsSaveFailed;
+        viewModel.GroupRenameRequested -= OnGroupRenameRequested;
+        viewModel.GroupRemoveRequested -= OnGroupRemoveRequested;
+        viewModel.GroupRemoveWithContentsRequested -= OnGroupRemoveWithContentsRequested;
+        viewModel.GroupAddRepoRequested -= OnGroupAddRepoRequested;
+        viewModel.GroupNewSubgroupRequested -= OnGroupNewSubgroupRequested;
+        viewModel.AddSaveFailed -= OnAddSaveFailed;
+        DetachCardHandlers([.. _cardHandlerRemovers.Keys]);
+    }
+
+    /// <summary>
+    ///     Keeps the list's selection in step with the view model's selected cards.
+    /// </summary>
+    /// <param name="sender">The view model.</param>
+    /// <param name="args">Names the property that changed.</param>
+    private void ViewModelPropertyChanged(object? sender, PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName == nameof(MainWindowViewModel.SelectedCards) && sender is MainWindowViewModel viewModel)
+        {
+            SyncListSelectionFromViewModel(viewModel);
+        }
+    }
+
+    /// <summary>
+    ///     Tells the user that a change could not be saved, without waiting for the answer.
+    /// </summary>
+    /// <param name="sender">The view model (unused).</param>
+    /// <param name="message">What went wrong.</param>
+    private void OnSettingsSaveFailed(object? sender, string message) =>
+        _ = new MessageBoxWindow(message).ShowDialog(this);
+
+    /// <summary>
+    ///     Asks for the new name of a group whose header asked to be renamed.
+    /// </summary>
+    /// <param name="sender">The view model.</param>
+    /// <param name="name">The group.</param>
+    private async void OnGroupRenameRequested(object? sender, string name)
+    {
+        if (sender is MainWindowViewModel viewModel)
+        {
+            await ShowRenameGroupPrompt(viewModel, name);
+        }
+    }
+
+    /// <summary>
+    ///     Confirms and deletes a group, keeping its contents, whose header asked for it.
+    /// </summary>
+    /// <param name="sender">The view model.</param>
+    /// <param name="name">The group.</param>
+    private async void OnGroupRemoveRequested(object? sender, string name)
+    {
+        if (sender is MainWindowViewModel viewModel)
+        {
+            await ConfirmAndRemoveGroup(viewModel, name);
+        }
+    }
+
+    /// <summary>
+    ///     Confirms and deletes a group together with its contents, whose header asked for it.
+    /// </summary>
+    /// <param name="sender">The view model.</param>
+    /// <param name="name">The group.</param>
+    private async void OnGroupRemoveWithContentsRequested(object? sender, string name)
+    {
+        if (sender is MainWindowViewModel viewModel)
+        {
+            await ConfirmAndRemoveGroupWithContents(viewModel, name);
+        }
+    }
+
+    /// <summary>
+    ///     Asks for folders to add to a group whose header asked for it, and tells the outcome.
+    /// </summary>
+    /// <param name="sender">The view model.</param>
+    /// <param name="name">The group.</param>
+    private async void OnGroupAddRepoRequested(object? sender, string name)
+    {
+        if (sender is MainWindowViewModel viewModel)
+        {
+            await ShowNoticeAsync(await AddRepoAsync(viewModel, name));
+        }
+    }
+
+    /// <summary>
+    ///     Asks for the name of a new group inside a group whose header asked for it.
+    /// </summary>
+    /// <param name="sender">The view model.</param>
+    /// <param name="name">The parent group.</param>
+    private async void OnGroupNewSubgroupRequested(object? sender, string name)
+    {
+        if (sender is MainWindowViewModel viewModel)
+        {
+            await ShowNewSubgroupPrompt(viewModel, name);
+        }
+    }
+
+    /// <summary>
+    ///     Asks whether to retry or discard an add whose save failed.
+    /// </summary>
+    /// <param name="sender">The view model (unused).</param>
+    /// <param name="request">The failed save.</param>
+    private async void OnAddSaveFailed(object? sender, SettingsSaveRetryRequest request) =>
+        await AskAddSaveRetryAsync(request);
 
     /// <summary>
     ///     Attaches this window's error/release-notes handlers to newly-added repo cards.

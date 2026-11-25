@@ -90,9 +90,12 @@ This scenario is tested by `RepoGroupHeaderViewModel_NewSubgroupCommand_RaisesRe
 **RepoGroupHeaderViewModel_NestedPlace**: A group updated to three repos with one directly in it is a top-level group
 (depth 0, no parent, no indent, a count tooltip that names the one directly in the group); given depth 2 and the parent
 `Client` it exposes both, an indent of twice the indent of a level and an accessible name that ends `, inside Client`;
-given depth 40 its indent stops at the deepest indented level while its depth stays 40. *Favorites* and *Ungrouped*
+given depth 40 its indent stops at the deepest indented level while its depth stays 40. A blank, empty or missing parent
+name (also after a real one) leaves the group not inside any group, with an accessible name that does not end in
+`inside`. *Favorites* and *Ungrouped*
 headers given a depth and a parent stay top level. This scenario is tested by
-`RepoGroupHeaderViewModel_UpdatePlace_DescribesDepthParentIndentAndDirectCount` and the theory
+`RepoGroupHeaderViewModel_UpdatePlace_DescribesDepthParentIndentAndDirectCount`, the theory
+`RepoGroupHeaderViewModel_BlankParentName_IsNotNested` and the theory
 `RepoGroupHeaderViewModel_UpdatePlace_BuiltInSection_StaysTopLevel`, covering
 `AgentControl-RepoGroupHeaderViewModel-NestedPlace`.
 
@@ -107,7 +110,8 @@ and the theory `RepoGroupHeaderViewModel_UpdateColor_BuiltInSection_StaysUncolor
 **RepoGroupHeaderViewModel_MoveRequests**: A new user group's Move up and Move down commands cannot execute; after the
 owner makes both available, executing them raises an up and then a down request and `CanExecuteChanged` was raised;
 after the owner gives a reason for up only, up cannot execute and down can. A move made unavailable with a reason shows
-that reason as its tooltip (with the tooltip's change notification) while the available one says what it does, and a
+that reason as its tooltip (with the tooltip's change notification) while the available one says what it does (it moves
+the group one place among its sibling groups), and a
 *Favorites* header told that both moves are available still offers neither and still has a non-empty tooltip. This
 scenario is tested by `RepoGroupHeaderViewModel_MoveCommands_RaiseRequestsAndFollowAvailability` and
 `RepoGroupHeaderViewModel_UpdateOrder_DisabledMoveExplainsWhy`, covering

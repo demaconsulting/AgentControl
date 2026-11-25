@@ -28,7 +28,9 @@ session). The windows themselves are exercised by headless Avalonia tests
 and key input, the "Check again" menu item, the up-to-date check mark, the narrow card, the Settings sections, the
 keyboard behavior of the dialogs, the About version row, the order of the AGENTS.md question and the release
 notes and the keep-or-update and launch-anyway questions about a repo's agent files,
-`RepoGroupWindowTests.cs` for the group headers, the card menu's
+`RepoGroupWindowTests.cs` for the group headers (including that a window whose data context is cleared and assigned
+again handles each header request once, and stops handling a view model that another one replaced:
+`MainWindow_DataContextAssignedAgain_HandlesEachRequestOnceAndOnlyForTheCurrentViewModel`), the card menu's
 "Move to group" submenu, the group-name prompt, the card and group color palette pop-ups (and the shared
 `ColorPalettePanel`), and adding several folders from the picker,
 `RepoReorderWindowTests.cs` for the user's own repo order (cards that stay put, the card menu's Reorder submenu, drag

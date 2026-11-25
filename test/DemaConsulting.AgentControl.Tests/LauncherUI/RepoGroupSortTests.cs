@@ -186,6 +186,37 @@ public sealed class RepoGroupSortTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a name that is no group - an empty or blank one, which would match the repos of no
+    ///     group, or an unknown one - is refused with an explanation, does not sort the Ungrouped repos,
+    ///     and saves nothing.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_SortGroupByName_UnknownOrEmptyGroup_IsRefusedAndSavesNothing()
+    {
+        // Arrange: the ungrouped repos are out of name order; Work exists
+        var configDir = CreateTempDirectory();
+        var viewModel = CreateViewModel(configDir, new Spec("z"), new Spec("a"), new Spec("m", "Work"));
+        var before = viewModel.RepoCards.Select(card => card.RepoPath).ToList();
+
+        // Act
+        var results = WithCulture("en-US", () => new[]
+        {
+            viewModel.SortGroupByName(string.Empty),
+            viewModel.SortGroupByName("   "),
+            viewModel.SortGroupByName("No such group")
+        });
+        await viewModel.FlushSettingsAsync();
+
+        // Assert
+        Assert.All(results, Assert.False);
+        Assert.Equal(before, viewModel.RepoCards.Select(card => card.RepoPath));
+        Assert.Equal(MainWindowViewModel.GroupSortNoSuchGroupMessage, viewModel.GetGroupSortDisabledReason(string.Empty));
+        Assert.Equal(MainWindowViewModel.GroupSortNoSuchGroupMessage, viewModel.GetGroupSortDisabledReason("No such group"));
+        Assert.False(viewModel.CanSortGroup(string.Empty));
+        Assert.Empty(Directory.GetFiles(configDir));
+    }
+
+    /// <summary>
     ///     Test that sorting is refused with the filter explanation while the filter has text, and is
     ///     available again when it is cleared.
     /// </summary>

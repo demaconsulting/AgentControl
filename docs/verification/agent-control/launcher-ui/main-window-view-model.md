@@ -392,8 +392,10 @@ settings has the sorted order (`MainWindowViewModel_SortGroupByName_SavesTheNewO
 `AgentControl-MainWindowViewModel-GroupSortByName`. A group with fewer than two repos of its own (a favorite and a
 subgroup's repos do not count), a group in order already, *Favorites*, *Ungrouped* and an unknown group are refused,
 each with its reason, and change nothing
-(`MainWindowViewModel_SortGroupByName_NothingToSort_ExplainsAndChangesNothing`); while the filter has text sorting is
-refused with the filter explanation and is available again after it is cleared
+(`MainWindowViewModel_SortGroupByName_NothingToSort_ExplainsAndChangesNothing`); an empty, blank or unknown name is
+refused with the "does not exist" reason, does not sort the ungrouped repos and saves nothing
+(`MainWindowViewModel_SortGroupByName_UnknownOrEmptyGroup_IsRefusedAndSavesNothing`); while the filter has text sorting
+is refused with the filter explanation and is available again after it is cleared
 (`MainWindowViewModel_SortGroupByName_WhileFiltering_IsRefusedUntilFilterCleared`); and the group header's command
 follows that availability, sorts the group when executed and then is unavailable
 (`MainWindowViewModel_GroupHeaderSortCommand_FollowsAvailabilityAndSorts`). These cover
