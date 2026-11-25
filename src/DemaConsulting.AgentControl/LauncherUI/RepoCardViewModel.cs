@@ -594,13 +594,39 @@ internal sealed class RepoCardViewModel : ViewModelBase
     /// </summary>
     public bool ShowGroupChip => IsFavorite && HasGroup;
 
+    /// <summary>Backing field for <see cref="Depth"/>.</summary>
+    private int _depth;
+
     /// <summary>
-    ///     Gets the names of the groups that exist now (the groups of all repos in the settings),
-    ///     sorted, for the "Move to group" submenu.
+    ///     Gets how many groups the card is inside in the list: the depth of the group whose section
+    ///     lists it, 0 for a card under Favorites, Ungrouped or a top-level group (and in a flat list).
+    ///     Set by the owning <see cref="MainWindowViewModel"/> each time it builds the list.
+    /// </summary>
+    public int Depth
+    {
+        get => _depth;
+        internal set
+        {
+            if (SetField(ref _depth, value))
+            {
+                OnPropertyChanged(nameof(IndentWidth));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets how far the card is indented from the left edge of the list, in device-independent
+    ///     pixels; the same indent as the header of the group that lists it.
+    /// </summary>
+    public double IndentWidth => RepoGroupHeaderViewModel.GetIndentWidth(Depth);
+
+    /// <summary>
+    ///     Gets the names of the groups that exist now - the groups the repos in the settings are in plus the
+    ///     registered groups of the hierarchy (a group created empty or moved within the tree), see
+    ///     <see cref="AppSettings.GetGroupNames"/> - sorted, for the "Move to group" submenu.
     /// </summary>
     /// <returns>The distinct group names, alphabetically.</returns>
-    public IReadOnlyList<string> GetExistingGroupNames() =>
-        RepoGroupName.DistinctNames(_getSettings().RecentRepos.Select(repo => repo.GroupName));
+    public IReadOnlyList<string> GetExistingGroupNames() => _getSettings().GetGroupNames();
 
     /// <summary>
     ///     Moves this repo into a group, or out of every group.
@@ -643,6 +669,71 @@ internal sealed class RepoCardViewModel : ViewModelBase
         GroupChanged?.Invoke(this, EventArgs.Empty);
         return true;
     }
+
+    /// <summary>
+    ///     Tells the view that this card's favorite mark and group may have changed because the owning
+    ///     <see cref="MainWindowViewModel"/> changed them for several cards at once (a drop of a selection).
+    /// </summary>
+    internal void RaiseOrganizationChanged()
+    {
+        OnPropertyChanged(nameof(IsFavorite));
+        RaiseGroupPropertiesChanged();
+    }
+
+    /// <summary>Backing field for <see cref="SelectionSize"/>.</summary>
+    private int _selectionSize;
+
+    /// <summary>
+    ///     Gets how many cards are selected together with this one, or 0 when this card is not selected;
+    ///     set by the owning <see cref="MainWindowViewModel"/> when the selection changes.
+    /// </summary>
+    public int SelectionSize
+    {
+        get => _selectionSize;
+        private set
+        {
+            if (SetField(ref _selectionSize, value))
+            {
+                OnPropertyChanged(nameof(RemoveMenuText));
+                OnPropertyChanged(nameof(RemoveMenuTooltip));
+                OnPropertyChanged(nameof(MoveToGroupMenuText));
+                OnPropertyChanged(nameof(MoveToGroupMenuTooltip));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets the text of the "Move to group" menu item: it says how many repos it moves when this card is
+    ///     one of several selected, because the item (and the "New group..." and "Remove from group" items in
+    ///     its submenu) then acts on all of them.
+    /// </summary>
+    public string MoveToGroupMenuText => _selectionSize > 1 ? $"Move {_selectionSize} selected repos to group" : "Move to group";
+
+    /// <summary>
+    ///     Gets the tooltip of the "Move to group" menu item.
+    /// </summary>
+    public string MoveToGroupMenuTooltip => _selectionSize > 1
+        ? $"Put the {_selectionSize} selected repos in one of your groups, or start a new group (stored only in your AgentControl settings, never in the repository)"
+        : "Put this repo in one of your groups, or start a new group (stored only in your AgentControl settings, never in the repository)";
+
+    /// <summary>
+    ///     Gets the text of the "Remove from list" menu item: it says how many repos it removes when this
+    ///     card is one of several selected, because the item then acts on all of them.
+    /// </summary>
+    public string RemoveMenuText => _selectionSize > 1 ? $"Remove {_selectionSize} selected repos from list" : "Remove from list";
+
+    /// <summary>
+    ///     Gets the tooltip of the "Remove from list" menu item.
+    /// </summary>
+    public string RemoveMenuTooltip => _selectionSize > 1
+        ? $"Remove the {_selectionSize} selected repos from AgentControl's recent-repos list (does not delete them from disk)"
+        : "Remove this repo from AgentControl's recent-repos list (does not delete it from disk)";
+
+    /// <summary>
+    ///     Records how many cards are selected together with this one.
+    /// </summary>
+    /// <param name="size">The number of selected cards when this card is selected, otherwise 0.</param>
+    internal void UpdateSelection(int size) => SelectionSize = size;
 
     /// <summary>
     ///     Tells the view that this card's group properties may have changed because the group was

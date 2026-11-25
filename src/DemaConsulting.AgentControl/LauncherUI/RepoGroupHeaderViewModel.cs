@@ -46,20 +46,38 @@ internal enum RepoGroupKind
 /// <summary>
 ///     The collapsible header row that starts a section of the main window's repo list: the
 ///     section's name, how many repos match in it, and (for the user's own groups) the group's
-///     color and the actions that add a repo to, move, color, rename or remove the group.
+///     color, its place in the tree of groups inside groups, and the actions that add a repo to,
+///     create a subgroup in, move, sort by name, color, rename or delete (keeping the contents or
+///     together with them) the group.
 /// </summary>
 /// <remarks>
 ///     Headers sit among the repo cards in <see cref="MainWindowViewModel.DisplayedItems"/>. The
 ///     owning <see cref="MainWindowViewModel"/> keeps one instance per section and updates its
-///     <see cref="Count"/>, collapsed state, color (<see cref="UpdateColor"/>) and move availability
-///     (<see cref="UpdateOrder"/>) in place (so a header keeps keyboard focus when it is toggled), and
-///     handles the request events; the actions that need a dialog are forwarded to the window. Not
+///     <see cref="Count"/>, collapsed state, tree place (<see cref="UpdatePlace"/>), color
+///     (<see cref="UpdateColor"/>), move availability (<see cref="UpdateOrder"/>), sort availability
+///     (<see cref="UpdateSort"/>) and whether the group has contents (<see cref="UpdateContents"/>)
+///     in place (so a header keeps keyboard focus when it is toggled), and handles the request
+///     events; the actions that need a dialog are forwarded to the window. A group nested deeper
+///     than <see cref="MaxIndentedDepth"/> levels is drawn no further in (its depth in the data is
+///     not limited), and its accessible name still says which group it is inside. Not
 ///     thread-safe; used on the UI thread only.
 /// </remarks>
 internal sealed class RepoGroupHeaderViewModel : ViewModelBase
 {
     /// <summary>Backing field for <see cref="Count"/>.</summary>
     private int _count;
+
+    /// <summary>Backing field for <see cref="DirectCount"/>.</summary>
+    private int _directCount;
+
+    /// <summary>Backing field for <see cref="Depth"/>.</summary>
+    private int _depth;
+
+    /// <summary>Backing field for <see cref="ParentName"/>.</summary>
+    private string? _parentName;
+
+    /// <summary>Backing field for <see cref="HasContents"/>.</summary>
+    private bool _hasContents;
 
     /// <summary>Backing field for <see cref="IsCollapsed"/>.</summary>
     private bool _isCollapsed;
@@ -75,6 +93,15 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
 
     /// <summary>Why "Move down" is unavailable now, or <see langword="null"/> when it is available.</summary>
     private string? _moveDownDisabledReason = NotMovableReason;
+
+    /// <summary>Why "Sort by name" is unavailable now, or <see langword="null"/> when it is available.</summary>
+    private string? _sortDisabledReason = NotSortableReason;
+
+    /// <summary>
+    ///     The explanation of a disabled Sort by name item before the owning view model has said where
+    ///     the group stands (a header that is not in the list yet has nothing to sort).
+    /// </summary>
+    private const string NotSortableReason = "This section cannot be sorted.";
 
     /// <summary>
     ///     The explanation of a disabled Move item before the owning view model has said where the
@@ -99,11 +126,16 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
             () => ToggleRequested?.Invoke(this, EventArgs.Empty), () => IsToggleEnabled);
         RenameCommand = new RelayCommand(() => RenameRequested?.Invoke(this, EventArgs.Empty));
         AddRepoCommand = new RelayCommand(() => AddRepoRequested?.Invoke(this, EventArgs.Empty));
+        NewSubgroupCommand = new RelayCommand(() => NewSubgroupRequested?.Invoke(this, EventArgs.Empty));
         RemoveGroupCommand = new RelayCommand(() => RemoveGroupRequested?.Invoke(this, EventArgs.Empty));
+        RemoveGroupWithContentsCommand = new RelayCommand(
+            () => RemoveGroupWithContentsRequested?.Invoke(this, EventArgs.Empty), () => _hasContents);
         MoveUpCommand = new RelayCommand(
             () => MoveRequested?.Invoke(this, RepoGroupMove.Up), () => _moveUpDisabledReason is null);
         MoveDownCommand = new RelayCommand(
             () => MoveRequested?.Invoke(this, RepoGroupMove.Down), () => _moveDownDisabledReason is null);
+        SortByNameCommand = new RelayCommand(
+            () => SortByNameRequested?.Invoke(this, EventArgs.Empty), () => _sortDisabledReason is null);
     }
 
     /// <summary>
@@ -134,7 +166,8 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
 
     /// <summary>
     ///     Gets the number of repos in the section that match the current filter (all of its repos
-    ///     when there is no filter), whether or not the section is collapsed.
+    ///     when there is no filter), whether or not the section is collapsed. For a group this
+    ///     includes the repos in the groups inside it, however deeply.
     /// </summary>
     public int Count
     {
@@ -148,6 +181,88 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
             }
         }
     }
+
+    /// <summary>
+    ///     Gets the number of repos listed directly under this section (those in a group inside it are
+    ///     not counted); equal to <see cref="Count"/> for a group with no group inside it and for the
+    ///     built-in sections.
+    /// </summary>
+    public int DirectCount
+    {
+        get => _directCount;
+        private set
+        {
+            if (SetField(ref _directCount, value))
+            {
+                OnPropertyChanged(nameof(CountTooltip));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets how many groups this section is inside: 0 for a top-level group and for the built-in
+    ///     sections.
+    /// </summary>
+    public int Depth
+    {
+        get => _depth;
+        private set
+        {
+            if (SetField(ref _depth, value))
+            {
+                OnPropertyChanged(nameof(IndentWidth));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets the name of the group this group is inside, or <see langword="null"/> for a top-level
+    ///     group and for the built-in sections.
+    /// </summary>
+    public string? ParentName
+    {
+        get => _parentName;
+        private set
+        {
+            if (SetField(ref _parentName, value))
+            {
+                OnPropertyChanged(nameof(HasParent));
+                OnPropertyChanged(nameof(AccessibleName));
+                OnPropertyChanged(nameof(RemoveGroupTooltip));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether this group is inside another group.
+    /// </summary>
+    public bool HasParent => _parentName is not null;
+
+    /// <summary>
+    ///     Gets how far the header is indented from the left edge of the list, in device-independent
+    ///     pixels: <see cref="IndentPerLevel"/> for each level the group is inside, up to
+    ///     <see cref="MaxIndentedDepth"/> levels (a deeper group is shown as deep as that, so the
+    ///     header can never be pushed out of view; its depth in the data is not limited).
+    /// </summary>
+    public double IndentWidth => GetIndentWidth(Depth);
+
+    /// <summary>
+    ///     The indent for each level a group is inside, in device-independent pixels.
+    /// </summary>
+    public const double IndentPerLevel = 20;
+
+    /// <summary>
+    ///     The deepest level that is indented further; deeper groups are drawn at this level.
+    /// </summary>
+    public const int MaxIndentedDepth = 8;
+
+    /// <summary>
+    ///     Gets the indent for a depth, shared by the headers and the repo cards under them so a group
+    ///     and its repos line up.
+    /// </summary>
+    /// <param name="depth">How many groups the row is inside; a negative depth counts as 0.</param>
+    /// <returns>The indent in device-independent pixels.</returns>
+    public static double GetIndentWidth(int depth) => Math.Clamp(depth, 0, MaxIndentedDepth) * IndentPerLevel;
 
     /// <summary>
     ///     Gets a value indicating whether the section's cards are hidden. Never
@@ -192,10 +307,12 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
 
     /// <summary>
     ///     Gets the header's accessible name, which says the section, how many repos it has and
-    ///     whether it is collapsed, so a screen reader (and a UI test) needs no other context.
+    ///     whether it is collapsed, so a screen reader (and a UI test) needs no other context. A group
+    ///     that is inside another group says which one, so nested groups are told apart.
     /// </summary>
     public string AccessibleName =>
-        $"{Name}, {Count} {(Count == 1 ? "repo" : "repos")}, {(IsCollapsed ? "collapsed" : "expanded")}";
+        $"{Name}, {Count} {(Count == 1 ? "repo" : "repos")}, {(IsCollapsed ? "collapsed" : "expanded")}" +
+        (_parentName is null ? string.Empty : $", inside {_parentName}");
 
     /// <summary>
     ///     Gets the tooltip of the collapse toggle.
@@ -214,9 +331,12 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     }
 
     /// <summary>
-    ///     Gets the tooltip of the repo count.
+    ///     Gets the tooltip of the repo count; for a group with a group inside it, it also says how many
+    ///     of the repos are directly in the group.
     /// </summary>
-    public string CountTooltip => Count == 1 ? "1 repo" : $"{Count} repos";
+    public string CountTooltip =>
+        (Count == 1 ? "1 repo" : $"{Count} repos") +
+        (DirectCount == Count ? string.Empty : $" ({DirectCount} directly in this group)");
 
     /// <summary>
     ///     Gets the command that collapses or expands the section; it raises
@@ -231,6 +351,12 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     public RelayCommand AddRepoCommand { get; }
 
     /// <summary>
+    ///     Gets the command that asks to create a new group inside this group; it raises
+    ///     <see cref="NewSubgroupRequested"/>. Offered for the user's own groups only.
+    /// </summary>
+    public RelayCommand NewSubgroupCommand { get; }
+
+    /// <summary>
     ///     Gets the command that asks to rename the group; it raises <see cref="RenameRequested"/>.
     ///     Offered for the user's own groups only.
     /// </summary>
@@ -241,6 +367,59 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     ///     <see cref="RemoveGroupRequested"/>. Offered for the user's own groups only.
     /// </summary>
     public RelayCommand RemoveGroupCommand { get; }
+
+    /// <summary>
+    ///     Gets the command that asks to delete the group together with its repos and the groups inside
+    ///     it; it raises <see cref="RemoveGroupWithContentsRequested"/>. Offered for the user's own groups
+    ///     that have contents only (see <see cref="HasContents"/>).
+    /// </summary>
+    public RelayCommand RemoveGroupWithContentsCommand { get; }
+
+    /// <summary>
+    ///     Gets a value indicating whether the group has a repo (a favorite too) or a group inside it, so
+    ///     that deleting it has contents to keep or to delete as well; the menu then offers both ways of
+    ///     deleting, otherwise one plain delete. Always <see langword="false"/> for Favorites and
+    ///     Ungrouped.
+    /// </summary>
+    public bool HasContents
+    {
+        get => _hasContents;
+        private set
+        {
+            if (SetField(ref _hasContents, value))
+            {
+                OnPropertyChanged(nameof(RemoveGroupText));
+                OnPropertyChanged(nameof(RemoveGroupTooltip));
+                RemoveGroupWithContentsCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets the text of the delete item that keeps what is in the group: <c>Delete group, keep
+    ///     contents</c>, or just <c>Delete group</c> for a group with nothing in it.
+    /// </summary>
+    public string RemoveGroupText => _hasContents ? "Delete group, keep contents" : "Delete group";
+
+    /// <summary>
+    ///     Gets the tooltip of the delete item that keeps what is in the group: where its repos and
+    ///     subgroups go - into the group this one is inside, or, for a top-level group, the repos
+    ///     become ungrouped and the subgroups become top-level groups.
+    /// </summary>
+    public string RemoveGroupTooltip
+    {
+        get
+        {
+            if (!_hasContents)
+            {
+                return "Delete this group; it has no repos or subgroups";
+            }
+
+            return HasParent
+                ? "Delete this group but keep its repos and subgroups: they stay in the list, in the group this one is inside"
+                : "Delete this group but keep its repos and subgroups: its repos stay in the list, ungrouped, and its subgroups become top-level groups";
+        }
+    }
 
     /// <summary>
     ///     Raised when the user asks to collapse or expand the section.
@@ -254,6 +433,12 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     public event EventHandler? AddRepoRequested;
 
     /// <summary>
+    ///     Raised when the user asks to create a group inside this group; the window shows the name
+    ///     prompt.
+    /// </summary>
+    public event EventHandler? NewSubgroupRequested;
+
+    /// <summary>
     ///     Raised when the user asks to rename the group; the window shows the name prompt.
     /// </summary>
     public event EventHandler? RenameRequested;
@@ -262,6 +447,19 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     ///     Raised when the user asks to remove the group; the window confirms first.
     /// </summary>
     public event EventHandler? RemoveGroupRequested;
+
+    /// <summary>
+    ///     Raised when the user asks to delete the group together with its contents; the window confirms
+    ///     first.
+    /// </summary>
+    public event EventHandler? RemoveGroupWithContentsRequested;
+
+    /// <summary>
+    ///     Brings what the header knows about the group's contents up to date.
+    /// </summary>
+    /// <param name="hasContents">Whether the group has a repo (a favorite too) or a group inside it.
+    ///     Ignored (no contents) for Favorites and Ungrouped.</param>
+    public void UpdateContents(bool hasContents) => HasContents = IsUserGroup && hasContents;
 
     /// <summary>
     ///     Gets the command that asks to move the group one place up; it raises
@@ -280,17 +478,52 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     /// <summary>
     ///     Gets the tooltip of the "Move up" item: what it does, or why it is unavailable now.
     /// </summary>
-    public string MoveUpTooltip => _moveUpDisabledReason ?? "Move this group one place up in the list";
+    public string MoveUpTooltip => _moveUpDisabledReason ?? "Move this group one place up among its sibling groups";
 
     /// <summary>
     ///     Gets the tooltip of the "Move down" item: what it does, or why it is unavailable now.
     /// </summary>
-    public string MoveDownTooltip => _moveDownDisabledReason ?? "Move this group one place down in the list";
+    public string MoveDownTooltip => _moveDownDisabledReason ?? "Move this group one place down among its sibling groups";
 
     /// <summary>
     ///     Raised when the user asks to move the group up or down; the owning view model moves it.
     /// </summary>
     public event EventHandler<RepoGroupMove>? MoveRequested;
+
+    /// <summary>
+    ///     Gets the command that asks to sort the repos listed directly under the group by name; it
+    ///     raises <see cref="SortByNameRequested"/>. Available only when <see cref="UpdateSort"/> said so
+    ///     (never for Favorites or Ungrouped).
+    /// </summary>
+    public RelayCommand SortByNameCommand { get; }
+
+    /// <summary>
+    ///     Gets the tooltip of the "Sort by name" item: what it does, or why it is unavailable now.
+    /// </summary>
+    public string SortByNameTooltip =>
+        _sortDisabledReason ?? "Sort the repos in this group alphabetically by name (the repos in its subgroups are left as they are)";
+
+    /// <summary>
+    ///     Raised when the user asks to sort the group's repos by name; the owning view model sorts them.
+    /// </summary>
+    public event EventHandler? SortByNameRequested;
+
+    /// <summary>
+    ///     Brings the availability of "Sort by name" up to date.
+    /// </summary>
+    /// <param name="sortDisabledReason">Why the group's repos cannot be sorted now (shown as the item's
+    ///     tooltip), or <see langword="null"/> when they can. Ignored for Favorites and Ungrouped,
+    ///     which are never sorted.</param>
+    public void UpdateSort(string? sortDisabledReason)
+    {
+        var reason = IsUserGroup ? sortDisabledReason : NotSortableReason;
+        if (!string.Equals(reason, _sortDisabledReason, StringComparison.Ordinal))
+        {
+            _sortDisabledReason = reason;
+            OnPropertyChanged(nameof(SortByNameTooltip));
+            SortByNameCommand.RaiseCanExecuteChanged();
+        }
+    }
 
     /// <summary>
     ///     Gets the name of the palette color the user chose for this group, or
@@ -384,13 +617,30 @@ internal sealed class RepoGroupHeaderViewModel : ViewModelBase
     /// <summary>
     ///     Brings the header up to date with the current list.
     /// </summary>
-    /// <param name="count">The number of repos in the section that match the filter.</param>
+    /// <param name="count">The number of repos in the section that match the filter (for a group, in
+    ///     the group and all the groups inside it).</param>
     /// <param name="isCollapsed">Whether the section's cards are hidden.</param>
     /// <param name="isToggleEnabled">Whether the user can collapse or expand the section now.</param>
-    public void Update(int count, bool isCollapsed, bool isToggleEnabled)
+    /// <param name="directCount">The number of those repos listed directly under the section, or
+    ///     <see langword="null"/> when that is all of them.</param>
+    public void Update(int count, bool isCollapsed, bool isToggleEnabled, int? directCount = null)
     {
         Count = count;
+        DirectCount = directCount ?? count;
         IsCollapsed = isCollapsed;
         IsToggleEnabled = isToggleEnabled;
+    }
+
+    /// <summary>
+    ///     Brings the header's place in the group tree up to date.
+    /// </summary>
+    /// <param name="depth">How many groups the section is inside; ignored (0) for Favorites and
+    ///     Ungrouped, which are never inside a group.</param>
+    /// <param name="parentName">The group it is inside, or <see langword="null"/> (or blank) for a
+    ///     top-level group; ignored for Favorites and Ungrouped.</param>
+    public void UpdatePlace(int depth, string? parentName)
+    {
+        Depth = IsUserGroup ? Math.Max(depth, 0) : 0;
+        ParentName = IsUserGroup && !string.IsNullOrWhiteSpace(parentName) ? parentName : null;
     }
 }

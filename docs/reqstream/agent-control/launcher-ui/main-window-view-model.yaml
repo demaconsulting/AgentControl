@@ -598,6 +598,32 @@ sections:
           - MainWindowViewModel_DropGroup_BeforeOrAfterAnotherGroup_Reorders
           - MainWindowViewModel_CanDropGroup_SelfBuiltInUnknownOrFiltering_Refused
 
+      - id: AgentControl-MainWindowViewModel-GroupMoveIntoTargets
+        title: >-
+          The MainWindowViewModel class shall list, in the order the list shows them, the groups a group can
+          be moved into: every group except the group itself, the groups inside it and the group it is
+          inside already, never Favorites or Ungrouped.
+        justification: |
+          The menu offers a move without dragging, so it must offer exactly the places the drag would
+          accept and no choice that would do nothing or make a loop.
+        tests:
+          - MainWindowViewModel_GetGroupMoveIntoTargets_ExcludesSelfDescendantsCurrentParentAndBuiltIns
+
+      - id: AgentControl-MainWindowViewModel-GroupMoveInto
+        title: >-
+          The MainWindowViewModel class shall move a group into another group, or to the top level, as the
+          last subgroup of the new parent (or the last top-level group) with its repos and subgroups, store
+          the hierarchy and the order in one save, and shall refuse, changing nothing, a loop, a group it is
+          inside already, a group or target that does not exist, Favorites or Ungrouped, and any move while the
+          filter has text, giving a reason for the item it disables.
+        justification: |
+          Dragging a header is not possible for everybody (WCAG 2.2 SC 2.5.7), so a menu choice must do what
+          the drop does, by the same rules.
+        tests:
+          - MainWindowViewModel_MoveGroupInto_IntoAndOutOfGroupsAsLastChildAndSavesOnce
+          - MainWindowViewModel_MoveGroupInto_RefusedWhileFilteringOrForLoop
+          - MainWindowViewModel_GetGroupMoveIntoDisabledReason_OnlyGroupHasNowhereToGo
+
       - id: AgentControl-MainWindowViewModel-GroupOrderPersisted
         title: >-
           The MainWindowViewModel class shall keep the order of the groups in the settings file, so
@@ -606,6 +632,37 @@ sections:
           The order must survive a restart to be the user's order.
         tests:
           - MainWindowViewModel_MoveGroup_PersistsOrderForANewViewModel
+
+      - id: AgentControl-MainWindowViewModel-GroupSortByName
+        title: >-
+          The MainWindowViewModel class shall sort the repos listed directly in a group - not its
+          favorites, which are listed under Favorites, and not the repos of its subgroups - by name,
+          ignoring letter case and following the current culture, keeping repos with the same name in
+          their order, put the sorted repos into the places the group's repos had in the stored list so
+          that nothing else moves, and save the new order.
+        justification: |
+          Sorting must change only the group the user asked about, in the order a reader of that
+          language expects, and the result must be the user's order from then on.
+        tests:
+          - MainWindowViewModel_SortGroupByName_SortsDirectReposIntoTheirOwnSlots
+          - MainWindowViewModel_SortGroupByName_LeavesSubgroupsFavoritesAndEqualNamesAlone
+          - MainWindowViewModel_SortGroupByName_FollowsTheCurrentCulture
+          - MainWindowViewModel_SortGroupByName_SavesTheNewOrder
+
+      - id: AgentControl-MainWindowViewModel-GroupSortAvailability
+        title: >-
+          The MainWindowViewModel class shall refuse, with a reason and changing nothing, to sort a
+          group that has fewer than two repos of its own, whose repos are in name order already, that is
+          Favorites or Ungrouped or a name that is no group, or any group while the filter has text.
+        justification: |
+          The reason is what the disabled menu item shows, so the user knows why sorting is not offered
+          and how to get it back; while the filter has text only some of a group's repos are shown, and
+          a name that is no group (an empty one would match the repos of no group) must never sort them.
+        tests:
+          - MainWindowViewModel_SortGroupByName_NothingToSort_ExplainsAndChangesNothing
+          - MainWindowViewModel_SortGroupByName_UnknownOrEmptyGroup_IsRefusedAndSavesNothing
+          - MainWindowViewModel_SortGroupByName_WhileFiltering_IsRefusedUntilFilterCleared
+          - MainWindowViewModel_GroupHeaderSortCommand_FollowsAvailabilityAndSorts
 
       - id: AgentControl-MainWindowViewModel-GroupColor
         title: >-
@@ -645,12 +702,123 @@ sections:
 
       - id: AgentControl-MainWindowViewModel-GroupSettingsKeptOnApplySettings
         title: >-
-          The MainWindowViewModel class shall keep the group colors and the group order when settings
-          are applied from the Settings window.
+          The MainWindowViewModel class shall keep the group colors, the group order and the group
+          hierarchy when settings are applied from the Settings window.
         justification: |
           The Settings window does not edit them, so applying its changes must not lose them.
         tests:
           - MainWindowViewModel_ApplySettings_KeepsGroupColorsAndOrder
+          - MainWindowViewModel_ApplySettingsAsync_GroupParents_KeptInMemoryAndWritten
+
+      # ---- Nested groups ----
+      - id: AgentControl-MainWindowViewModel-NestedGroupTree
+        title: >-
+          The MainWindowViewModel class shall list nested groups depth first - each group's header
+          followed by its subgroups (in the order of the groups) and then by its own repos, which are
+          not favorites - with the number of matching repos in the whole subtree on each header, shall
+          hide the whole subtree of a collapsed group, and, while a filter has text, shall show every
+          match under the headers of the groups that hold it, whatever is collapsed.
+        justification: |
+          Nested groups are shown as a tree so that related groups, for example by customer and then
+          by project, can be organized and still scanned top to bottom.
+        tests:
+          - MainWindowViewModel_DisplayedItems_NestedGroups_ListedDepthFirstSubgroupsBeforeOwnRepos
+          - MainWindowViewModel_DisplayedItems_CollapsedGroup_HidesSubtreeAndFilterShowsAncestors
+
+      - id: AgentControl-MainWindowViewModel-NestedGroupFlatListUnchanged
+        title: >-
+          The MainWindowViewModel class shall list groups exactly as before - every group at the top
+          level, none inside another - while the settings hold no group hierarchy.
+        justification: |
+          A user who does not nest groups, and every settings file written before groups nested, must
+          see no change.
+        tests:
+          - MainWindowViewModel_DisplayedItems_NoHierarchy_FlatGroupsShownAsBefore
+          - MainWindowViewModel_MoveGroup_FlatGroups_DoesNotCreateAHierarchy
+
+      - id: AgentControl-MainWindowViewModel-NestedGroupEmptyListed
+        title: >-
+          The MainWindowViewModel class shall keep listing a group that was created inside another
+          group, or moved within the hierarchy, with a count of 0 when no repo is in it - until it is
+          removed - shall hide it while a filter has text, and shall keep listing a nested group whose
+          only repo is a favorite, the favorite staying under Favorites.
+        justification: |
+          A group the user placed in the hierarchy must not vanish because its last repo moved away; a
+          group that only exists while a repo is in it would make an empty group impossible to create.
+        tests:
+          - MainWindowViewModel_RegisteredEmptyGroup_StaysUntilRemoved
+          - MainWindowViewModel_DisplayedItems_NestedGroupWithOnlyFavorite_StaysListedWithNoRepos
+
+      - id: AgentControl-MainWindowViewModel-NestedGroupCreate
+        title: >-
+          The MainWindowViewModel class shall create a group inside another group, listing it with no
+          repos, expanding the groups it is inside and saving it only in the settings, and shall refuse
+          a name that is invalid or that any group - wherever it is - already has, and a parent that
+          does not exist.
+        justification: |
+          Group names are unique across the whole tree so that a group is identified by its name
+          alone; creating a group inside another is how a hierarchy is started.
+        tests:
+          - MainWindowViewModel_CreateSubgroup_ListsEmptyGroupRegistersAncestorsAndSaves
+          - MainWindowViewModel_CreateSubgroup_RefusesTakenInvalidAndUnknownParent
+
+      - id: AgentControl-MainWindowViewModel-NestedGroupReorder
+        title: >-
+          The MainWindowViewModel class shall move a nested group up or down among the groups inside
+          the same parent group, saying in the reason it gives for a disabled move when the group is
+          the first or last of its parent group, without changing the places of other groups.
+        justification: |
+          The Move items of a group header keep working the same way at every level.
+        tests:
+          - MainWindowViewModel_MoveGroup_NestedGroups_SwapWithinTheirParent
+
+      - id: AgentControl-MainWindowViewModel-NestedGroupDrop
+        title: >-
+          The MainWindowViewModel class shall, when a group header is dropped before or after another
+          group's header, put the dragged group next to it inside the same parent group (so it leaves
+          the group it was in when that differs), shall, when it is dropped inside a group, make it
+          that group's last subgroup, shall save the hierarchy and the order together, and shall refuse
+          a drop onto itself or a group inside itself, onto Favorites or Ungrouped, onto a group that
+          does not exist, and while a filter has text.
+        justification: |
+          Dragging a header is the direct way to nest and to un-nest a group; a group inside itself
+          would be a loop, and the built-in sections have fixed places.
+        tests:
+          - MainWindowViewModel_DropGroup_NestsReordersAndLeavesTheOldParent
+          - MainWindowViewModel_DropGroup_RefusesLoopsBuiltInSectionsAndFilter
+
+      - id: AgentControl-MainWindowViewModel-NestedGroupRename
+        title: >-
+          The MainWindowViewModel class shall keep a renamed group's place in the hierarchy, both as a
+          group and as the parent of other groups.
+        justification: |
+          Renaming a group must not move it or empty its parent.
+        tests:
+          - MainWindowViewModel_RenameGroup_KeepsTheHierarchy
+
+      - id: AgentControl-MainWindowViewModel-NestedGroupRemoveKeepsContents
+        title: >-
+          The MainWindowViewModel class shall, when a group is removed, move its subgroups to the group
+          it was inside (or, at the top level, make them top-level groups) in the group's displayed
+          place among its siblings, whether or not the group had a place of its own in the group order,
+          and forget the group.
+        justification: |
+          Removing a group must not lose the groups in it; they stay where they were seen, also when
+          the group was never dragged.
+        tests:
+          - MainWindowViewModel_RemoveGroup_NestedGroups_KeepsRepoAndSubgroupsInTheParent
+          - MainWindowViewModel_RemoveGroup_Nested_KeepsReposInTheParentAndSubgroupsTakeTheGroupsPlace
+          - MainWindowViewModel_RemoveGroup_NeverDraggedGroup_SubgroupsTakeItsDisplayedPlace
+
+      - id: AgentControl-MainWindowViewModel-GroupNamesIncludeEmptyGroups
+        title: >-
+          The MainWindowViewModel class shall offer, as the groups that exist, the groups that have no
+          repo in them as well as those that have, so a repo can be moved into an empty or nested
+          group.
+        justification: |
+          A repo can only be moved into a group that is offered.
+        tests:
+          - MainWindowViewModel_GroupNames_IncludeEmptyAndNestedGroups
 
       - id: AgentControl-MainWindowViewModel-GroupSectionHeaders
         title: >-
@@ -808,12 +976,147 @@ sections:
 
       - id: AgentControl-MainWindowViewModel-GroupRemove
         title: >-
-          The MainWindowViewModel class shall remove a group so that its repos become ungrouped and
-          its collapsed state is forgotten.
+          The MainWindowViewModel class shall remove a group so that its repos move to the group it was
+          inside (ungrouped for a top-level group) and its collapsed state, color and place in the order
+          are forgotten.
         justification: |
           Removing a group removes only the grouping, never the repos in it.
         tests:
           - MainWindowViewModel_RemoveGroup_LeavesMembersUngrouped
+          - MainWindowViewModel_RemoveGroup_TopLevel_MovesReposToTheEndOfUngroupedAndForgetsTheGroup
+
+      - id: AgentControl-MainWindowViewModel-GroupRemoveRepoBlock
+        title: >-
+          The MainWindowViewModel class shall, when a group is removed, move the repos listed directly
+          under it, in the order they were listed, as one block to the end of the repos the group it was
+          inside lists directly (the end of Ungrouped for a top-level group), keep the group's favorites
+          in their place in Favorites, leave every other repo where it was, and count the new repo
+          order as chosen by the user only when it changed.
+        justification: |
+          The repos of a removed group follow the repos the parent already had, together and in the
+          order the user saw, instead of being scattered among them; the order the user has not changed
+          stays the order of the file.
+        tests:
+          - MainWindowViewModel_RemoveGroup_ReposGoAsOneBlockToTheEndOfTheParentsOwnRepos
+          - MainWindowViewModel_RemoveGroup_FavoritesOfTheGroupKeepTheirPlaceInFavorites
+          - MainWindowViewModel_RemoveGroup_OrderAlreadyAtEnd_DoesNotMarkUserOrder
+
+      - id: AgentControl-MainWindowViewModel-GroupRemoveWithContents
+        title: >-
+          The MainWindowViewModel class shall delete a group together with its contents - the group, every
+          group inside it and every repo in any of them, favorites included - in one saved change, forget
+          the color, collapsed state, place in the order and place in the hierarchy of every deleted
+          group, stop the removed repos' cards, leave every other group and repo as it was, and touch
+          nothing on disk.
+        justification: |
+          Deleting a group with its contents must remove exactly the group's subtree from the list, save
+          it once, and never delete a repository folder.
+        tests:
+          - MainWindowViewModel_RemoveGroupWithContents_RemovesSubtreeReposAndForgetsItsSettings
+          - MainWindowViewModel_RemoveGroupWithContents_SavesAndLeavesFoldersOnDisk
+          - MainWindowViewModel_RemoveGroupWithContents_RetiresTheRemovedCards
+          - MainWindowViewModel_RemoveGroupWithContents_EmptyGroup_IsDeletedAndNothingElseChanges
+
+      - id: AgentControl-MainWindowViewModel-GroupRemoveWithContentsRefusals
+        title: >-
+          The MainWindowViewModel class shall refuse, changing nothing, to delete Favorites, Ungrouped or
+          a group that does not exist, with or without its contents.
+        justification: |
+          The built-in sections are not groups of the user's own, so they can never be deleted.
+        tests:
+          - MainWindowViewModel_RemoveGroupWithContents_BuiltInOrUnknown_IsRefused
+
+      - id: AgentControl-MainWindowViewModel-GroupContentsCounted
+        title: >-
+          The MainWindowViewModel class shall tell what is in a group - the repos directly in it and how
+          many of those are favorites, the repos
+          in it and in the groups inside it (favorites included, and how many are favorites) and its
+          subgroups, directly and in all, and the group's name as it is stored - so a confirmation can
+          state what a delete affects.
+        justification: |
+          The user must be told the numbers before repos and groups are removed.
+        tests:
+          - MainWindowViewModel_GetGroupContents_CountsReposAndSubgroups
+
+      - id: AgentControl-MainWindowViewModel-RepoSelection
+        title: >-
+          The MainWindowViewModel class shall hold the repo cards the list reports as selected in the order
+          the list shows them - favorites, then the groups as a tree, then the repos in no group - leaving
+          out a card that is not shown and counting a card given twice once.
+        justification: |
+          Shift+click ranges and mass actions follow the order the user sees, not the order the settings
+          store, and only shown cards may be acted on.
+        tests:
+          - MainWindowViewModel_SetSelectedCards_KeepsVisualOrderAcrossNestedGroups
+
+      - id: AgentControl-MainWindowViewModel-RepoSelectionPruned
+        title: >-
+          The MainWindowViewModel class shall take a card out of the selection when it stops being shown -
+          its group is collapsed, the filter hides it or it is removed - and keep the other cards selected.
+        justification: |
+          An action on the selection must never reach a repo the user cannot see.
+        tests:
+          - MainWindowViewModel_SelectedCards_CollapseAndFilterPruneTheSelection
+
+      - id: AgentControl-MainWindowViewModel-DragCards
+        title: >-
+          The MainWindowViewModel class shall name the cards a drag moves: all the selected cards, in the
+          order the list shows them, when the card the drag started on is selected, otherwise that card
+          alone.
+        justification: |
+          Dragging a selected card moves the selection, dragging any other card moves just that card, so
+          a drag never moves cards the user did not mean.
+        tests:
+          - MainWindowViewModel_GetDragCards_SelectedCardMovesTheSelectionUnselectedCardMovesAlone
+
+      - id: AgentControl-MainWindowViewModel-DropCards
+        title: >-
+          The MainWindowViewModel class shall drop several cards at a place in one saved change: each card
+          takes the section the place is in as a single dropped card would (favorite marks and groups
+          changed alike), and the cards are put together at the place, in the order the list shows them, the
+          first at the drop position and the others after it; the cards stay selected.
+        justification: |
+          A mass drop must give the same result as dropping the cards one by one, in one predictable order,
+          and be saved once.
+        tests:
+          - MainWindowViewModel_DropCards_OnNestedGroupHeader_MovesAllInVisualOrderAndSavesOnce
+          - MainWindowViewModel_DropCards_OnCard_InsertsTogetherAndRefusesAnchorInTheSet
+          - MainWindowViewModel_DropCards_OnFavoritesAndUngrouped_ChangeEveryCard
+
+      - id: AgentControl-MainWindowViewModel-DropCardsRefused
+        title: >-
+          The MainWindowViewModel class shall refuse, changing nothing, a drop of several cards when any
+          one of them could not be dropped there as a single card, when the place is next to one of the
+          dragged cards, when there is no card, and while the filter has text.
+        justification: |
+          A mass drop is all or nothing, so a refused card never leaves the others half moved.
+        tests:
+          - MainWindowViewModel_DropCards_FilterOrFlatListOtherTier_IsRefused
+          - MainWindowViewModel_DropCards_OnCard_InsertsTogetherAndRefusesAnchorInTheSet
+
+      - id: AgentControl-MainWindowViewModel-MoveCardsToGroup
+        title: >-
+          The MainWindowViewModel class shall move several cards into a valid group, or out of their groups,
+          in one saved change that changes only each repo's group (a favorite stays a favorite and no stored
+          position changes), adopting the spelling of an existing group whose name matches ignoring letter
+          case, keep the cards that are still shown selected, and refuse, changing nothing, a name that is too
+          long or a built-in section's name.
+        justification: |
+          Dragging the selection to a group is not possible for everybody (WCAG 2.2 SC 2.5.7), so a menu
+          choice must move the whole selection with the same group rules as a single card.
+        tests:
+          - MainWindowViewModel_MoveCardsToGroup_MovesAllSelectedKeepsFavoritesAndOrderAndSavesOnce
+          - MainWindowViewModel_MoveCardsToGroup_InvalidNameChangesNothing
+
+      - id: AgentControl-MainWindowViewModel-RemoveRepos
+        title: >-
+          The MainWindowViewModel class shall remove several repo cards from the list in one saved change,
+          stop the removed cards, take them out of the selection, count a card given twice or a card that is
+          not in the list once or not at all, and touch nothing on disk.
+        justification: |
+          Cleaning up many repos is one action with one save; the repos themselves are never deleted.
+        tests:
+          - MainWindowViewModel_RemoveRepos_RemovesOnlyTheGivenCardsAndSaves
 
       - id: AgentControl-MainWindowViewModel-GroupSettingsOnly
         title: >-
@@ -826,13 +1129,14 @@ sections:
 
       - id: AgentControl-MainWindowViewModel-GroupHeaderRequests
         title: >-
-          The MainWindowViewModel class shall forward a section header's rename and remove requests
-          to the window, with the group's name, changing nothing by itself.
+          The MainWindowViewModel class shall forward a section header's rename, delete and
+          delete-with-contents requests to the window, with the group's name, changing nothing by itself.
         justification: |
           The window shows the name prompt or the confirmation; the list must change only after
           the user has answered.
         tests:
           - MainWindowViewModel_HeaderCommands_RaiseGroupRequestsWithTheGroupName
+          - MainWindowViewModel_GroupHeader_DeleteCommands_FollowContentsAndRaiseRequests
 
       - id: AgentControl-MainWindowViewModel-ChangeAppliedWhenSaved
         title: >-

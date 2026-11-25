@@ -55,10 +55,12 @@ internal enum RepoGroupNameProblem
 ///     treated as one group.
 /// </summary>
 /// <remarks>
-///     A group exists only as a name stored on the recent-repos entries of its members (in the
-///     per-user settings file), so there is no separate list of groups that could disagree with the
-///     repos. These rules are one shared, pure unit so the settings loader (which must tolerate any
-///     stored text), the view models and the name prompt all agree. Stateless and thread-safe.
+///     A group is a name: it exists while a repo's settings entry names it, or while it is registered in
+///     the group hierarchy (<see cref="AppSettings.GroupParents"/>), so there is no separate list of
+///     groups that could disagree with the repos beyond that one map. The names of groups are unique
+///     across the whole hierarchy, whatever level a group is at. These rules are one shared, pure unit
+///     so the settings loader (which must tolerate any stored text), the view models and the name prompt
+///     all agree. Stateless and thread-safe.
 /// </remarks>
 internal static class RepoGroupName
 {

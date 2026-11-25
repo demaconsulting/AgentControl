@@ -287,6 +287,84 @@ public class SettingsSubsystemTests
     }
 
     /// <summary>
+    ///     Test that the hierarchy of the user's groups - which group is inside which, including a group
+    ///     with no repo in it - is kept for the next session in the settings file only, that a file
+    ///     written before groups nested reads as a flat list, and that a damaged hierarchy (a cycle, an
+    ///     unknown parent) is repaired while the values around it are kept.
+    /// </summary>
+    [Fact]
+    public void SettingsSubsystem_GroupHierarchy_NestedGroupsSurviveSessionsAndDamagedHierarchyIsRepaired()
+    {
+        // Arrange
+        var configDir = CreateTempDirectory();
+        try
+        {
+            var firstSession = new AppSettings
+            {
+                RecentRepos =
+                [
+                    new RecentRepo { Path = @"C:\repos\a", GroupName = "Project" },
+                    new RecentRepo { Path = @"C:\repos\b", GroupName = "Home" }
+                ],
+                GroupParents = new() { ["Client"] = string.Empty, ["Project"] = "Client" },
+                GroupColors = new() { ["Client"] = "Teal" }
+            };
+
+            // Act: the first session saves; a later session loads
+            SettingsStore.Save(firstSession, configDir);
+            var secondSession = SettingsStore.Load(configDir);
+            var tree = new RepoGroupHierarchy(
+                secondSession.GetGroupNames(), secondSession.GroupParents, secondSession.GroupOrder);
+
+            // Assert: Client exists though no repo is in it, with Project inside it, and Home is top level
+            Assert.Multiple(
+                () => Assert.Equal(["Client", "Home", "Project"], secondSession.GetGroupNames()),
+                () => Assert.Equal("Client", tree.GetParent("Project")),
+                () => Assert.Null(tree.GetParent("Home")),
+                () => Assert.Equal("Teal", secondSession.FindGroupColor("Client")),
+                () => Assert.Equal(
+                    ["settings.json"], Directory.GetFileSystemEntries(configDir).Select(Path.GetFileName)));
+
+            // Arrange: a file from before groups nested
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                "{ \"RecentRepos\": [ { \"Path\": \"a\", \"GroupName\": \"Work\" } ] }");
+
+            // Act
+            var flat = SettingsStore.Load(configDir);
+
+            // Assert
+            Assert.Multiple(
+                () => Assert.Empty(flat.GroupParents),
+                () => Assert.Equal(["Work"], flat.GetGroupNames()));
+
+            // Arrange: a damaged hierarchy - a cycle and an unknown parent - and a later value
+            File.WriteAllText(
+                Path.Combine(configDir, "settings.json"),
+                "{ \"RecentRepos\": [ { \"Path\": \"a\", \"GroupName\": \"One\" }, { \"Path\": \"b\", \"GroupName\": \"Two\" } ]," +
+                " \"GroupParents\": { \"One\": \"Two\", \"Two\": \"One\", \"Lost\": \"Nowhere\" }," +
+                " \"GitExecutablePath\": \"git-after\" }");
+
+            // Act
+            var damaged = SettingsStore.Load(configDir);
+            SettingsStore.Save(damaged, configDir);
+            var json = File.ReadAllText(Path.Combine(configDir, "settings.json"));
+
+            // Assert: the cycle is cut at One, the unknown parent is top level, nothing unknown is written back
+            Assert.Multiple(
+                () => Assert.Equal(string.Empty, damaged.GroupParents["One"]),
+                () => Assert.Equal("One", damaged.GroupParents["Two"]),
+                () => Assert.Equal(string.Empty, damaged.GroupParents["Lost"]),
+                () => Assert.Equal("git-after", damaged.GitExecutablePath),
+                () => Assert.DoesNotContain("Nowhere", json, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(configDir, recursive: true);
+        }
+    }
+
+    /// <summary>
     ///     Test that the subsystem writes the settings the way the window uses it: changes handed to the
     ///     background writer on a thread that refuses blocking calls are written - the newest state,
     ///     once - by the settings store on another thread, and the next session reads them; a direct

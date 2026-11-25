@@ -6,8 +6,10 @@
 
 `RepoGroupName` holds the rules for the names of the user's own repo groups: how a typed or stored name is cleaned up,
 which names are acceptable, how a stored name is repaired, and how names that differ only in letter case are treated
-as one group. A group exists only as a name stored on the recent-repos entries of its members (in the per-user
-settings file), so there is no separate list of groups that could disagree with the repos. The rules are one shared,
+as one group. A group exists while at least one repo names it in the per-user settings file, or while it is
+registered in `AppSettings.GroupParents` (the tree of groups inside groups; a group without repos may exist only
+there), and a name is unique across the whole tree, so there is no separate list of groups that could disagree
+with the repos or the tree. The rules are one shared,
 pure, stateless unit so that the settings loader (which must tolerate any stored text), the view models and the group
 name prompt all agree. Its behavior is specified by the unit requirements `AgentControl-RepoGroupName-Normalize`,
 `-NormalizeNothingLeft`, `-AcceptsUsableName`, `-RefusesBlankName`, `-RefusesTooLongName`, `-RefusesReservedNames`,
@@ -94,6 +96,8 @@ None beyond the .NET base class library (`System.Text.StringBuilder`, `System.St
 
 - **AppSettings** (same subsystem) — `NormalizeNulls`, run by `SettingsStore.Load`, sanitizes every stored group name,
   gives look-alike groups the first spelling and cleans the collapsed-sections list.
+- **RepoGroupHierarchy** (same subsystem) — compares group names with `Comparer` and sanitizes every name it reads
+  from the stored tree with `Sanitize`, which also leaves out the reserved names.
 - **RepoCardViewModel**/**MainWindowViewModel** (`LauncherUI`) — read a repo's group through `Sanitize`, validate and
   place a group a user typed, list the existing groups, compare group names and use the built-in section names.
 - **GroupNameViewModel** (`LauncherUI`) — the prompt's live validation and the adoption of an existing group's

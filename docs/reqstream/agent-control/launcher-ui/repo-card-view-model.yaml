@@ -952,7 +952,8 @@ sections:
 
       - id: AgentControl-RepoCardViewModel-GroupList
         title: >-
-          The RepoCardViewModel class shall list the existing groups of all the repos.
+          The RepoCardViewModel class shall list the existing groups: those of all the repos and the
+          registered ones.
         justification: |
           The card's menu offers the groups a repo can be moved to.
         tests:
@@ -977,6 +978,41 @@ sections:
           show which group it belongs to.
         tests:
           - RepoCardViewModel_NewGroupCommand_RaisesRequest_AndChipShowsForGroupedFavorites
+
+      - id: AgentControl-RepoCardViewModel-RemoveMenuText
+        title: >-
+          The RepoCardViewModel class shall give the text and the tooltip of its "Remove from list" item as
+          the plain wording while the card is not selected or is the only selected card, and as wording that
+          says how many selected repos the item removes while the card is one of several selected cards.
+        justification: |
+          The item acts on the whole selection when its card is selected, so it must say so before the user
+          chooses it.
+        tests:
+          - RepoCardViewModel_RemoveMenuText_FollowsTheSelectionSize
+          - RepoCardViewModel_SelectionSize_ChangesRemoveAndMoveMenuTextAndNotifies
+
+      - id: AgentControl-RepoCardViewModel-MoveToGroupMenuText
+        title: >-
+          The RepoCardViewModel class shall give the text and the tooltip of its "Move to group" item as the
+          plain wording while the card is not selected or is the only selected card, and as wording that says
+          how many selected repos the item moves while the card is one of several selected cards.
+        justification: |
+          The item, and the "New group..." and "Remove from group" items in its submenu, act on the whole
+          selection when its card is selected, so the item must say so before the user chooses it.
+        tests:
+          - RepoCardViewModel_MoveToGroupMenuText_FollowsTheSelectionSize
+          - RepoCardViewModel_SelectionSize_ChangesRemoveAndMoveMenuTextAndNotifies
+
+      - id: AgentControl-RepoCardViewModel-GroupDepthIndent
+        title: >-
+          The RepoCardViewModel class shall expose how many groups the card is inside in the list
+          and the indent that depth gives, the same indent as the header of its group, and shall tell
+          the view when it changes.
+        justification: |
+          A repo listed in a nested group must line up with the header of the group that lists it.
+        tests:
+          - RepoCardViewModel_Depth_SetsIndentAndNotifies
+          - RepoCardViewModel_Depth_NegativeIsNotIndentedAndSameValueIsSilent
 
       - id: AgentControl-RepoCardViewModel-CardColor
         title: >-

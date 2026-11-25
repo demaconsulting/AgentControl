@@ -556,8 +556,8 @@ public sealed class MainWindowViewModelTests : IDisposable
         var settings = new AppSettings { RecentRepos = [new RecentRepo { Path = alphaRepo }, new RecentRepo { Path = betaRepo }] };
         var viewModel = new MainWindowViewModel(settings, configDirectory: CreateTempDirectory());
 
-        // Act: filter for "alpha" (mixed case, substring)
-        viewModel.FilterText = "aLpHa";
+        // Act: filter for "alpha-project" (mixed case, substring; the hyphen keeps a temp root from matching)
+        viewModel.FilterText = "aLpHa-pRoJ";
 
         // Assert: only the alpha repo remains displayed
         var displayed = Assert.Single(viewModel.DisplayedRepoCards);

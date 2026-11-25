@@ -8,13 +8,15 @@ the way the application does - through its public surface (`SettingsStore.Load` 
 
 - by saving in one session and loading in a later one against a real temporary configuration directory, and are the
 evidence of the theme, organization and background-writing requirements. The `SettingsStore` unit's
-test suite (`SettingsStoreTests.cs`, `SettingsStoreOrganizingTests.cs` and `SettingsStoreRepoOrderTests.cs`) and the
-`RepoGroupName` unit's test suite
-(`RepoGroupNameTests.cs`) and the `SettingsWriter` unit's test suite (`SettingsWriterTests.cs`) carry the unit
+test suite (`SettingsStoreTests.cs`, `SettingsStoreOrganizingTests.cs`, `SettingsStoreGroupHierarchyTests.cs` and
+`SettingsStoreRepoOrderTests.cs`), the `RepoGroupName` unit's test suite
+(`RepoGroupNameTests.cs`), the `RepoGroupHierarchy` unit's test suite (`RepoGroupHierarchyTests.cs`) and the
+`SettingsWriter` unit's test suite (`SettingsWriterTests.cs`) carry the unit
 requirements and, as before, the persistence and package-source requirements
 of the subsystem. The `AppSettings`, `RecentRepo`, `AgentToolKind` and `ThemePreference` data types have no dedicated
-test file and are exercised only as values round-tripped through `SettingsStore`; `RepoGroupName` is a unit with its
-own verification design. All tests use a real temporary configuration directory on disk.
+test file and are exercised only as values round-tripped through `SettingsStore`; `RepoGroupName` and
+`RepoGroupHierarchy` are units with their own verification designs. All tests use a real temporary configuration
+directory on disk.
 
 ### Test Environment
 
@@ -23,8 +25,10 @@ temporary configuration directory.
 
 ### Acceptance Criteria
 
-- All subsystem tests and all unit tests for `SettingsStore`, `SettingsWriter` and `RepoGroupName` pass with zero
-  failures.
+- All subsystem tests and all unit tests for `SettingsStore`, `SettingsWriter`, `RepoGroupName` and
+  `RepoGroupHierarchy` pass with zero failures.
+- The hierarchy of nested groups survives a later session, a group that takes part in it survives with no repo in it, a
+  file from before groups nested reads as a flat list, and a damaged hierarchy is repaired without failing the load.
 - Changes handed to the background writer on a thread guarded against blocking calls are written once, with the newest
   state, off that thread and read by the next session; a direct save on that thread is refused.
 - Saved settings survive a save-then-load round trip unchanged.
@@ -44,7 +48,8 @@ temporary configuration directory.
 - The user's repo order survives sessions in the settings file only; a file written before the order was stored is
   arranged once as favorites first and then by most recent launch, and a damaged marker reads as not arranged yet.
 - The color and the position of each of the user's groups survive sessions in the settings file only, are found by
-  group name ignoring letter case, and damaged entries, unknown colors and entries of groups no repo is in are dropped
+  group name ignoring letter case, and damaged entries, unknown colors and entries of groups that do not exist (no
+  repo names them and they are not registered in the hierarchy) are dropped
   without failing the load and are not written back.
 
 ### Test Scenarios
@@ -87,7 +92,7 @@ setting that follows. This scenario is tested by
 `AgentControl-Settings-KeepShellOpen` (children: `AgentControl-SettingsStore-KeepShellOpen`,
 `AgentControl-SettingsStore-KeepShellOpenDefaultsToOn`, `AgentControl-SettingsStore-KeepShellOpenInvalidReadsAsOn`).
 
-**Settings_RepoOrganization_GroupsColorsAndCollapsedSectionsSurviveSessionsInSettingsFileOnly**: A first session saves
+**Settings_RepoOrganization_GroupColorAndCollapsedSectionsSurviveSessionsInSettingsFileOnly**: A first session saves
 three repos (one grouped, colored and favorite, one grouped, one plain) and two collapsed sections; a later session
 loads them, changes a group, a card color, the collapsed sections and another setting and saves; a third session
 finds the changes and everything that was not changed, and the configuration directory holds the settings file and
@@ -127,30 +132,47 @@ persists what it is given and refuses a credential in the address. This scenario
 tests are `SettingsStore_SaveThenLoad_GitSource_RoundTripsByNameWithoutSecretLikeProperties` and
 `SettingsStore_Save_GitSourceAddressWithCredential_IsRefusedWithoutChangingTheFile`).
 
-**Settings_RepoOrder_SurvivesSessionsAndSeedsALegacyFileOnce**: A settings file as an older version wrote it (the
-repos in the order they were added, no repo-order marker) is loaded by a first session, which finds it arranged as the
-favorite first and then by most recent launch; the user then swaps two repos and saves; a later session sees the swapped
-order although it changes a launch time and saves again, and the configuration directory holds the settings file and
-nothing else. A file whose marker has the wrong type is loaded and arranged once without failing. This scenario is
+**SettingsSubsystem_RepoOrder_SurvivesSessionsAndSeedsALegacyFileOnce**: A settings file as an older version wrote it
+(the repos in the order they were added, no repo-order marker) is loaded by a first session, which finds it arranged as
+the favorite first and then by most recent launch; the user then swaps two repos and saves; a later session sees the
+swapped order although it changes a launch time and saves again, and the configuration directory holds the settings file
+and nothing else. A file whose marker has the wrong type is loaded and arranged once without failing. This scenario is
 tested by `SettingsSubsystem_RepoOrder_SurvivesSessionsAndSeedsALegacyFileOnce`, covering
 `AgentControl-Settings-RepoOrder` (children: `AgentControl-SettingsStore-RepoOrder`,
 `AgentControl-SettingsStore-RepoOrderLegacySeed` and `AgentControl-SettingsStore-RepoOrderMarkerRepaired`, whose unit
 tests are in `SettingsStoreRepoOrderTests.cs`).
 
-**Settings_GroupOrganization_ColorAndOrderSurviveSessionsAndDamagedOrStaleEntriesAreDropped**: A first session saves
-three repos (one in *Client Work*, one in *Home* that is also a favorite, one without a group) with a color for each
-group and the order *Home* then *Client Work*; a later session loads them and finds each color by the group's name in
-another letter case and the order unchanged, and the configuration directory holds the settings file and nothing
+**SettingsSubsystem_GroupOrganization_ColorAndOrderSurviveSessionsAndDamagedOrStaleEntriesAreDropped**: A first session
+saves three repos (one in *Client Work*, one in *Home* that is also a favorite, one without a group) with a color for
+each group and the order *Home* then *Client Work*; a later session loads them and finds each color by the group's name
+in another letter case and the order unchanged, and the configuration directory holds the settings file and nothing
 else. Then a damaged file - a color under a group name in another letter case and spelled in lower case, a color of a
-group no repo is in, a color for the built-in *Ungrouped* section, a color that is a number, and an order holding a
-stale group, a number and the group in another letter case - is loaded without failing: only the usable color and
-position are kept, spelled the way the group is spelled on its repo, the setting after the damage is kept, and saving
-what was loaded does not write the stale group back. This scenario is tested by
+group that does not exist (no repo names it and it is not registered in the hierarchy), a color for the built-in
+*Ungrouped* section, a color that is a number, and an order holding a stale group, a number and the group in another
+letter case - is loaded without failing: only the usable color and position are kept, spelled the way the group is
+spelled on its repo, the setting after the damage is kept, and saving what was loaded does not write the stale group
+back. This scenario is tested by
 `SettingsSubsystem_GroupOrganization_ColorAndOrderSurviveSessionsAndDamagedOrStaleEntriesAreDropped`, covering
 `AgentControl-Settings-GroupOrganization` (children: `AgentControl-SettingsStore-GroupColorsAndOrder`,
 `AgentControl-SettingsStore-GroupColorsAndOrderDefaults`,
-`AgentControl-SettingsStore-InvalidGroupColorsAndOrderRepaired`
-and `AgentControl-SettingsStore-StaleGroupSettingsDropped`, whose unit tests are in `SettingsStoreOrganizingTests.cs`).
+`AgentControl-SettingsStore-InvalidGroupColorsAndOrderRepaired` and
+`AgentControl-SettingsStore-StaleGroupSettingsDropped`, whose unit tests are in `SettingsStoreOrganizingTests.cs`).
+
+**SettingsSubsystem_GroupHierarchy_NestedGroupsSurviveSessionsAndDamagedHierarchyIsRepaired**: A first session saves two
+repos (one in *Project*, one in *Home*), a hierarchy that registers *Client* with no repo in it and puts *Project*
+inside it, and a color for *Client*; a later session loads them and finds *Client*, *Home* and *Project* as existing
+groups, *Project* inside *Client*, *Home* at the top level and *Client* with its color, and the configuration directory
+holds the settings file and nothing else. A file written before groups nested loads with an empty hierarchy and its
+group as the only top-level group. Then a damaged file - two groups that are each other's parent, a group with an
+unknown parent and a setting after them - is loaded without failing: the cycle is cut at the group that sorts first, the
+unknown parent means top level, the setting after the damage is read, and saving what was loaded does not write the
+unknown parent back. This scenario is tested by
+`SettingsSubsystem_GroupHierarchy_NestedGroupsSurviveSessionsAndDamagedHierarchyIsRepaired`, covering
+`AgentControl-Settings-GroupHierarchy` (children: `AgentControl-SettingsStore-GroupParents`,
+`AgentControl-SettingsStore-GroupParentsDefaults`, `AgentControl-SettingsStore-InvalidGroupParentsRepaired` and
+`AgentControl-SettingsStore-RegisteredGroupKept`, whose unit tests are in `SettingsStoreGroupHierarchyTests.cs`, and the
+`AgentControl-RepoGroupHierarchy-*` requirements of the `RepoGroupHierarchy` unit, whose own tests are in its unit
+verification design).
 
 **SettingsSubsystem_BackgroundWriter_WritesNewestStateOffTheGuardedThread**: A `SettingsWriter` over the real
 `SettingsStore.Save`, on a clock the test moves: two changes are scheduled in quick succession on a thread guarded

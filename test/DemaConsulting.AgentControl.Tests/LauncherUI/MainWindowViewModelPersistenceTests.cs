@@ -959,6 +959,33 @@ public sealed class MainWindowViewModelPersistenceTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that saving the Settings window's settings keeps the hierarchy of the user's groups: the
+    ///     new settings carry no hierarchy of their own, so the live one is written with them and stays in
+    ///     memory once they are adopted.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_ApplySettingsAsync_GroupParents_KeptInMemoryAndWritten()
+    {
+        // Arrange: Client is a registered group with no repo, and Project is inside it
+        var fixture = CreateFixture(
+            new AppSettings { GroupParents = new() { ["Client"] = string.Empty, ["Project"] = "Client" } },
+            [("alpha", "Project")]);
+
+        // Act
+        await fixture.ViewModel.ApplySettingsAsync(new AppSettings { GitExecutablePath = "new-git" });
+        await fixture.ViewModel.FlushSettingsAsync();
+
+        // Assert
+        var saved = SettingsStore.Load(fixture.ConfigDirectory);
+        Assert.Multiple(
+            () => Assert.Equal("Client", fixture.ViewModel.Settings.GroupParents["Project"]),
+            () => Assert.Equal(string.Empty, fixture.ViewModel.Settings.GroupParents["Client"]),
+            () => Assert.Equal("new-git", saved.GitExecutablePath),
+            () => Assert.Equal("Client", saved.GroupParents["Project"]),
+            () => Assert.Equal(string.Empty, saved.GroupParents["Client"]));
+    }
+
+    /// <summary>
     ///     Test that a change made in the window while the Settings window's settings are being saved is
     ///     applied at once, kept when the new settings are adopted, and written together with them.
     /// </summary>

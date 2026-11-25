@@ -93,12 +93,28 @@ sections:
       - id: AgentControl-RepoGroupHeaderViewModel-RemoveGroupRequest
         title: >-
           The RepoGroupHeaderViewModel class shall request that its group be removed when the
-          user chooses the remove action of the header.
+          user chooses the remove action of the header, and shall explain in that action's tooltip
+          where the group's repos and subgroups go: into the group it is inside, or, for a top-level
+          group, the repos become ungrouped and the subgroups become top-level groups.
         justification: |
           Removing a group needs a confirmation that belongs to the window; the header only
-          reports what the user asked for.
+          reports what the user asked for and says what the action does before it is chosen.
         tests:
           - RepoGroupHeaderViewModel_RenameAndRemoveCommands_RaiseRequests
+          - RepoGroupHeaderViewModel_UpdateContents_OffersDeleteWithContentsOnlyForGroupsWithContents
+
+      - id: AgentControl-RepoGroupHeaderViewModel-RemoveGroupWithContentsRequest
+        title: >-
+          The RepoGroupHeaderViewModel class shall request that its group be deleted together with its
+          contents when the user chooses the delete-with-contents action of the header, offer that action
+          only while its owner says the group has a repo or a subgroup, and name the plain delete action
+          for a group with nothing in it differently from one that keeps contents.
+        justification: |
+          The confirmation belongs to the window; the header only reports what the user asked for, and a
+          group with nothing in it has no contents to delete or to keep.
+        tests:
+          - RepoGroupHeaderViewModel_UpdateContents_OffersDeleteWithContentsOnlyForGroupsWithContents
+          - RepoGroupHeaderViewModel_UpdateContents_FalseAfterTrue_RevertsTextAndCommand
 
       - id: AgentControl-RepoGroupHeaderViewModel-AddRepoRequest
         title: >-
@@ -109,6 +125,33 @@ sections:
           that the user wants to add a repo to this group.
         tests:
           - RepoGroupHeaderViewModel_AddRepoCommand_RaisesRequest
+
+      - id: AgentControl-RepoGroupHeaderViewModel-NewSubgroupRequest
+        title: >-
+          The RepoGroupHeaderViewModel class shall request that a new group be created inside its
+          group when the user chooses the new-subgroup action of the header.
+        justification: |
+          Asking for the name needs a dialog that belongs to the window; the header only reports
+          that the user wants a group inside this one.
+        tests:
+          - RepoGroupHeaderViewModel_NewSubgroupCommand_RaisesRequest
+
+      - id: AgentControl-RepoGroupHeaderViewModel-NestedPlace
+        title: >-
+          The RepoGroupHeaderViewModel class shall expose how many groups its group is inside, which
+          group that is directly, and the indent that depth gives (capped so a deep group stays in
+          view), shall name the group it is inside in its accessible name, and shall say, in the
+          tooltip of its count, how many of the repos are directly in the group when the count
+          includes the repos of groups inside it; a blank parent name means the group is not inside
+          any group, and the built-in sections are never inside a group.
+        justification: |
+          A tree needs to show where each group is in it, in words as well as by position, so nested
+          groups with the same count can be told apart by a person using assistive technology.
+        tests:
+          - RepoGroupHeaderViewModel_UpdatePlace_DescribesDepthParentIndentAndDirectCount
+          - RepoGroupHeaderViewModel_BlankParentName_IsNotNested
+          - RepoGroupHeaderViewModel_UpdatePlace_BuiltInSection_StaysTopLevel
+          - RepoGroupHeaderViewModel_UpdatePlace_BackToTopLevelAndNegativeDepth_AreNotIndented
 
       - id: AgentControl-RepoGroupHeaderViewModel-RequiresName
         title: >-
@@ -136,7 +179,8 @@ sections:
         title: >-
           The RepoGroupHeaderViewModel class shall request that its group be moved up or down when
           the user chooses Move up or Move down, offer each only while its owner says the move is
-          possible, explain an unavailable move with its owner's reason as the tooltip, and never
+          possible, explain an unavailable move with its owner's reason as the tooltip, say in the
+          tooltip of an available move that it moves the group among its sibling groups, and never
           offer a move for Favorites or Ungrouped.
         justification: |
           The order is the owner's state; the header only reports what the user asked for and shows
@@ -144,3 +188,17 @@ sections:
         tests:
           - RepoGroupHeaderViewModel_MoveCommands_RaiseRequestsAndFollowAvailability
           - RepoGroupHeaderViewModel_UpdateOrder_DisabledMoveExplainsWhy
+          - RepoGroupHeaderViewModel_UpdateOrderAndSort_BuiltInSection_NeverOffersMoveOrSort
+
+      - id: AgentControl-RepoGroupHeaderViewModel-SortByNameRequest
+        title: >-
+          The RepoGroupHeaderViewModel class shall request that the repos of its group be sorted by name
+          when the user chooses Sort by name, offer it only while its owner says sorting is possible,
+          explain an unavailable sort with its owner's reason as the tooltip, and never offer it for
+          Favorites or Ungrouped.
+        justification: |
+          The order of the repos is the owner's state; the header only reports what the user asked for
+          and shows why sorting is not offered.
+        tests:
+          - RepoGroupHeaderViewModel_UpdateSort_AvailabilityTooltipAndRequest
+          - RepoGroupHeaderViewModel_UpdateOrderAndSort_BuiltInSection_NeverOffersMoveOrSort

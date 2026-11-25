@@ -107,7 +107,8 @@ internal sealed class RecentRepo
     /// <remarks>
     ///     A user-specific organizing choice: it lives only in the per-user settings file, never in
     ///     the repository or its <c>.agentcontrol.json</c>, so it is never shared through git. A
-    ///     group has no entry of its own - it exists while at least one repo names it. Persisted
+    ///     group has no entry of its own - it exists while at least one repo names it, or while it is
+    ///     registered in <see cref="AppSettings.GroupParents"/>. Persisted
     ///     only when set; a stored value that is not a string reads as no group, and
     ///     <see cref="AppSettings.NormalizeNulls"/> repairs the text (see <see cref="RepoGroupName"/>),
     ///     so the value can never keep the application from starting.

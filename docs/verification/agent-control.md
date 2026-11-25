@@ -42,12 +42,17 @@ corresponding `LauncherUI` and `Settings` requirements say is verified one level
   state of every control is not measured, and the focus ring is not asserted; the contrast of the theme's text and
   graphic colors is verified in the `LauncherUI` subsystem tests.
 - Groups, card colors and favorites (`AgentControl-System-RepoGroups` and the requirements next to it,
-  `AgentControl-System-CardColor` and its two companions, `AgentControl-System-GroupColor` and
-  `AgentControl-System-GroupReorder`): the scenarios below name what is exercised. Renaming and
-  removing a group from its header and the keeping of the keyboard focus on the star are not exercised end to end;
-  they are verified in the headless window tests of the `LauncherUI` subsystem. For a group color the header accent,
-  the stored color and the accent after a restart are shown end to end; that the tiles of the group's repos follow it
-  is verified in the headless window tests, because a tile's automatic color may happen to equal the chosen one.
+  `AgentControl-System-CardColor` and its two companions, `AgentControl-System-GroupColor`,
+  `AgentControl-System-GroupReorder`, `AgentControl-System-NestedGroups`, `AgentControl-System-GroupSortByName`,
+  `AgentControl-System-GroupDelete`, `AgentControl-System-RepoMultiSelect` and
+  `AgentControl-System-RepoMultiSelectActions`): the scenarios below name what is exercised. Removing a group from its
+  header (both ways) is exercised end to end; renaming a group from its header and the keeping of the keyboard focus
+  on the star are not, and are verified in the headless window tests of the `LauncherUI` subsystem. For a group color
+  the header accent, the stored color and the accent after a restart are shown end to end; that the tiles of the
+  group's repos follow it is verified in the headless window tests, because a tile's automatic color may happen to
+  equal the chosen one. That a selected card is marked in a way that does not depend on color alone
+  (`AgentControl-LauncherUI-RepoMultiSelectHighlight`, a child of `AgentControl-System-RepoMultiSelect`) is verified
+  only in the `LauncherUI` subsystem tests.
 - About (`AgentControl-System-About`): the banner's name and tagline are shown end to end; the logo is hidden from UI
   Automation as decorative and is verified in the headless window tests of the `LauncherUI` subsystem.
 - A change that cannot be saved (`AgentControl-System-ListChangesKept`): a failing save cannot be provoked through
@@ -764,9 +769,102 @@ headless window tests of the `LauncherUI` subsystem.
 application, with more collapsed groups than the window shows, the first group's header is dragged with the real mouse
 to just above the list's bottom edge and the pointer is held perfectly still there for three seconds before the button
 is released: the group is stored after every group whose header was in view when the drag started, and it is still
-collapsed. This scenario is tested by
+collapsed. The pointer is held in the list's bottom auto-scroll zone while the rows move under it, so the drop is never
+a nest, whichever part of whichever header it ends over (the zone splits a header in halves). This scenario is tested by
 `windows@RepoList_DragGroupHeaderHeldStillAtBottomEdge_ScrollsAndDropsBeyondTheFirstView`, covering
 `AgentControl-System-GroupReorder`.
+
+**AgentControl_NestedGroups_NewSubgroupListsGroupInsideParentAndKeepsTreeAfterRestart**: With the test repo in the
+group Work and a second repo in no group, choosing "New subgroup..." in the Work header's menu opens the name prompt;
+typing `Phase 1` and confirming lists a group `Phase 1` with no repos inside Work (its header says
+`Phase 1, 0 repos, expanded, inside Work`), the hierarchy is found in the settings file and nothing is written into the
+repository. After the application is closed and started again the same tree is listed. This scenario is tested by
+`windows@GroupHeaderMenu_NewSubgroup_ListsGroupInsideParentStoresHierarchyInSettingsOnlyAndKeepsItAfterRestart`,
+covering `AgentControl-System-NestedGroups`.
+
+**AgentControl_NestedGroups_MoveIntoGroupAndMoveToTopLevelNestAndUnnestAndKeepTreeAfterRestart**: With the test repo in
+the group Work and a second repo in the group Play (listed Play, then Work), choosing "Move into group" and then `Play`
+in the Work header's menu lists Work inside Play (`Play, 2 repos, expanded` and
+`Work, 1 repo, expanded, inside Play`), the settings file names Work as inside Play and nothing is written into the
+repository. After the application is closed and started again the same tree is listed; choosing "Move into group" and
+then "Move to top level" in the nested Work header's menu lists both groups at the top level again and the settings no
+longer name Work as inside Play. This scenario is tested by
+`windows@GroupHeaderMenu_MoveIntoGroupAndMoveToTopLevel_NestsItThenMovesItBackAndKeepsTreeAfterRestart`, covering
+`AgentControl-System-NestedGroups`.
+
+**AgentControl_NestedGroups_DragGroupHeaderOntoMiddleOfAnotherNestsIt**: With the same two groups, the Work header is
+dragged with the real mouse and dropped on the middle of the Play header: Work is listed inside Play and the settings
+file names Work as inside Play. This scenario is tested by
+`windows@RepoList_DragGroupHeaderOntoMiddleOfAnother_NestsItInside`, covering `AgentControl-System-NestedGroups`. That
+the headers are indented by depth, that the other two zones of a header (above and below) reorder and un-nest a
+dragged group, that collapsing a nested group hides what is inside it, that moving a group among its siblings keeps
+the others in place and that a drop onto a group inside the dragged group is refused are verified in the headless
+window tests of the `LauncherUI` subsystem.
+
+**AgentControl_RepoMultiSelect_SelectSeveralCardsAndDeleteRemovesOnlyTheSelectedRepos**: With three repos in no group,
+the repo list reports through UI Automation that several items can be selected. Selecting the first repo and adding the
+third to the selection marks exactly those two items as selected and the second as not. Pressing the Delete key asks one
+question that says two repos go; answering No changes nothing (three cards are still listed), and after pressing Delete
+again and answering Yes only the second repo is listed, the settings file no longer names the first, and the folders of
+the two removed repos are still on disk. This scenario is tested by
+`windows@RepoList_SelectSeveralCardsAndPressDelete_ConfirmsOnceAndRemovesOnlyTheSelectedRepos`, covering
+`AgentControl-System-RepoMultiSelect` and `AgentControl-System-RepoMultiSelectActions` (the removal).
+
+**AgentControl_RepoMultiSelect_CtrlClickShiftClickAndCtrlASelectCardsInListOrderNeverHeadersOrHiddenCards**: With two
+repos in the group Work, one in no group and one in the collapsed group Hidden (the list shows the headers Hidden,
+Work and Ungrouped and three cards), the real mouse and keyboard are used on the window: a click selects only the
+clicked card, Ctrl+click on a second card adds it (the card between them stays unselected), Ctrl+click on the first
+card takes it out again, and a click followed by Shift+click on a card in another group selects the whole range of
+cards in list order, the "Ungrouped" header between them not selected. After a click on the middle card, Ctrl+A selects
+every shown card and no header, and Delete asks a question that says three repos go - not four, as the card in the
+collapsed group is not shown - which is answered No. This scenario is tested by
+`windows@RepoList_CtrlClickShiftClickAndCtrlA_SelectCardsInListOrderNeverHeadersOrHiddenCards`, covering
+`AgentControl-System-RepoMultiSelect`.
+
+**AgentControl_RepoMultiSelectActions_CardMenuRemovesAndMovesTheWholeSelection**: With three repos in no group, the
+first and the third selected through UI Automation, the "..." menu of the first card offers "Remove 2 selected repos
+from list"; choosing it asks one question that says two repos go and that nothing on disk is deleted, answering No
+changes nothing (the same two cards are still selected), and choosing it again and answering Yes lists only the second
+repo, the settings file no longer names the other two, and their folders are still on disk. In another run with a repo
+in the group Work and two repos in no group (both selected), the menu offers "Move 2 selected repos to group";
+choosing it and then `Work` lists a Work group of three repos, nothing ungrouped, the two moved cards still selected,
+the group stored for all three repos in the settings file, and nothing written into a repository. These scenarios are
+tested by `windows@CardMenu_RemoveOnSelectedCard_RemovesTheWholeSelectionAfterOneConfirmation` and
+`windows@CardMenu_MoveToGroupOnSelectedCard_MovesAllSelectedCardsAndStoresInSettings`, covering
+`AgentControl-System-RepoMultiSelectActions`.
+
+**AgentControl_RepoMultiSelectActions_DragSelectedCardMovesAllSelectedCardsOntoTheGroupHeader**: With a repo in the
+group Work and two repos in no group (both selected), one of the two selected cards is dragged with the real mouse and
+dropped on the Work header: Work holds all three repos, nothing is left ungrouped and the group is stored for all
+three. This scenario is tested by `windows@RepoList_DragSelectedCard_MovesAllSelectedCardsOntoTheGroupHeader`, covering
+`AgentControl-System-RepoMultiSelectActions`. Dropping a selection between cards or on the Favorites section, and the
+look of a selected card, are verified in the headless window tests of the `LauncherUI` subsystem.
+
+**AgentControl_GroupSortByName_MenuSortsRepoCardsAndKeepsOrderAfterRestart**: With three repos in the group Work stored
+in the order Charlie, Alpha, Bravo, choosing "Sort by name" in the Work header's menu lists the cards as Alpha, Bravo,
+Charlie. After the application is closed and started again the cards are listed in that order. This scenario is tested
+by `windows@GroupHeaderMenu_SortByName_ListsRepoCardsInNameOrderAndKeepsItAfterRestart`, covering
+`AgentControl-System-GroupSortByName`. That only the group's own repos are sorted, how names are compared and when the
+item is unavailable are verified in the unit tests of `MainWindowViewModel` and the headless window tests of the
+`LauncherUI` subsystem.
+
+**AgentControl_GroupDelete_KeepContentsAndWithContentsAfterConfirmation**: With two repos in the group Work and a third
+in no group (listed Alpha, Bravo, elsewhere), choosing "Delete group, keep contents" in the Work header's menu asks a
+question that says the two repos stay in the list, ungrouped, and that nothing on disk or in any repository is changed;
+answering No changes nothing (the Work header with two repos is still listed and the settings still name the group for
+both repos), and confirming lists no group header and all three repos by name, the ungrouped repo first and the group's
+two repos after it, and the settings no longer name the group. In another run with the groups Outer, Work inside it
+and Sub inside Work, one repo in each, deleting Work keeping its contents (the question says one subgroup moves) lists
+Outer with its three repos and Sub inside Outer, no Work any more, and the settings keep Sub inside Outer and no longer
+name Work. With the first settings, choosing "Delete group and its contents" asks a question that says two repos go and
+that nothing on disk or in any repository is deleted; answering No changes nothing, and confirming lists only the
+third repo, the settings file no longer names the group, and the two repo folders are still on disk. These scenarios
+are tested by `windows@GroupHeaderMenu_DeleteGroupKeepContents_RemovesTheHeaderAndKeepsAllRepos`,
+`windows@GroupHeaderMenu_DeleteNestedGroupKeepContents_RepoStaysInParentAndSubgroupMovesToParent` and
+`windows@GroupHeaderMenu_DeleteGroupAndItsContents_RemovesGroupAndReposFromTheListAndKeepsFoldersOnDisk`, covering
+`AgentControl-System-GroupDelete`. That favorites are handled, where a subgroup lands among the siblings of the
+deleted group, and the other wordings of the confirmations are verified in the unit tests of `MainWindowViewModel` and
+`RepoGroupHierarchy` and the headless window tests of the `LauncherUI` subsystem.
 
 **AgentControl_ListChangesKept_FavoriteCollapseColorsAndGroupOrderAreKept**: The favorite star, a section's
 collapse, a card color, a group color and the order of the groups are each changed in the real application and found

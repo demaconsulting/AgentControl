@@ -19,8 +19,14 @@ package AgentControl_LauncherUISubsystem {
         /*
          * Presentation layer: the main window with its user-ordered repo list (Move
          * items and drag and drop included, with the list scrolling while a drag is held near its
-         * edges, over the app bar or below it), user-colored groups in the user's own order (header
-         * menu and header drag), adding several repos at once (multi-select folder picker and
+         * edges, over the app bar or below it), user-colored groups in the user's own order, nested to
+         * any depth as a collapsible indented tree (header menu and header drag: new subgroup, move up
+         * and down, move into another group or to the top level, sort by name, the two deletes -
+         * keeping or together with the contents - and drops of cards and headers), several repo
+         * cards selected at once (Ctrl+click, Shift+click, Ctrl+A) to drag, move to a group (from
+         * the card's menu too, without dragging) or
+         * remove together,
+         * adding several repos at once (multi-select folder picker and
          * folders dropped from the file manager, Git repository roots only, checked off the UI
          * thread and saved once per batch, queued and cancelable, with a Retry/Discard question when
          * the save fails, one combined summary), the global progress strip under the app bar for
@@ -39,8 +45,9 @@ package AgentControl_LauncherUISubsystem {
          * BackgroundWorkRunner - the seam under the repo refresh queue that runs blocking file-system
          * and git reads off the UI thread - and the shared AppStyles.axaml theme resources). The pure display helpers - the value
          * converters (FavoriteIconConverter, AgentToolKindDisplayNameConverter,
-         * ThemePreferenceDisplayNameConverter) and the PathEllipsisText and ColorPalettePanel
-         * controls - are documented
+         * ThemePreferenceDisplayNameConverter, GroupIndentConverter) and the PathEllipsisText,
+         * ColorPalettePanel and RepoListBox
+         * (the repo list with multiple selection) controls - are documented
          * as supporting types of this subsystem rather than as units of their own: each is a
          * presentational adapter with no behavior of its own beyond formatting or measuring for
          * the view, verified through the subsystem's requirements and its own test files

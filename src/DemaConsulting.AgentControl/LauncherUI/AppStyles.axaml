@@ -18,6 +18,7 @@
                     <SolidColorBrush x:Key="RepoListBackground" Color="Transparent" />
                     <SolidColorBrush x:Key="RepoCardBackground" Color="#1E1E21" />
                     <SolidColorBrush x:Key="RepoCardBackgroundHover" Color="#26262A" />
+                    <SolidColorBrush x:Key="RepoCardBackgroundSelected" Color="#1D2D44" />
                     <SolidColorBrush x:Key="RepoCardBorder" Color="#34343A" />
                     <SolidColorBrush x:Key="RepoCardBorderHover" Color="#52525C" />
                     <SolidColorBrush x:Key="RepoCardBorderSelected" Color="{DynamicResource SystemAccentColor}" />
@@ -169,6 +170,7 @@
                     <SolidColorBrush x:Key="RepoListBackground" Color="Transparent" />
                     <SolidColorBrush x:Key="RepoCardBackground" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="RepoCardBackgroundHover" Color="#FBFBFD" />
+                    <SolidColorBrush x:Key="RepoCardBackgroundSelected" Color="#EBF3FD" />
                     <SolidColorBrush x:Key="RepoCardBorder" Color="#DCDCE2" />
                     <SolidColorBrush x:Key="RepoCardBorderHover" Color="#A9A9B8" />
                     <SolidColorBrush x:Key="RepoCardBorderSelected" Color="{DynamicResource SystemAccentColor}" />
@@ -198,9 +200,9 @@
                     <SolidColorBrush x:Key="LogoBackingBackground" Color="#FFFFFF" />
 
                     <SolidColorBrush x:Key="StatusAccentUpToDate" Color="#1A7F37" />
-                    <SolidColorBrush x:Key="StatusAccentUpgrade" Color="#BF8700" />
+                    <SolidColorBrush x:Key="StatusAccentUpgrade" Color="#A87400" />
                     <SolidColorBrush x:Key="StatusAccentProblem" Color="#CF222E" />
-                    <SolidColorBrush x:Key="StatusAccentNeutral" Color="#8C959F" />
+                    <SolidColorBrush x:Key="StatusAccentNeutral" Color="#78828C" />
 
                     <SolidColorBrush x:Key="ChipNeutralBackground" Color="#0F000000" />
                     <SolidColorBrush x:Key="ChipNeutralBorder" Color="#26000000" />
@@ -365,11 +367,16 @@
         <Setter Property="BoxShadow" Value="{DynamicResource RepoCardShadowHover}" />
         <Setter Property="RenderTransform" Value="translateY(-1px)" />
     </Style>
+    <!-- A selected card (one of several can be selected) is drawn with the accent border and a tinted
+         surface, so the selection is not carried by the border alone; the tint keeps every text color
+         legible in both themes (ThemeResourceTests). -->
     <Style Selector="ListBoxItem:selected Border.RepoCard">
+        <Setter Property="Background" Value="{DynamicResource RepoCardBackgroundSelected}" />
         <Setter Property="BorderBrush" Value="{DynamicResource RepoCardBorderSelected}" />
         <Setter Property="BoxShadow" Value="{DynamicResource RepoCardShadowSelected}" />
     </Style>
     <Style Selector="ListBoxItem:selected Border.RepoCard:pointerover">
+        <Setter Property="Background" Value="{DynamicResource RepoCardBackgroundSelected}" />
         <Setter Property="BorderBrush" Value="{DynamicResource RepoCardBorderSelected}" />
         <Setter Property="BoxShadow" Value="{DynamicResource RepoCardShadowSelected}" />
     </Style>

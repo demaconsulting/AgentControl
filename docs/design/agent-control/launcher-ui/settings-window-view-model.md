@@ -139,10 +139,11 @@ editable properties, invokes the `onSave` callback and awaits it.
   window does not close early. An exception the command catches outside the expected rejection is shown in
   `ErrorMessage` (redacted), never escaping to the UI thread.
 
-The returned `AppSettings.RecentRepos` is left as a fresh empty list and its `HasUserRepoOrder` marker is left at its
-default; callers (specifically `MainWindowViewModel.ApplySettingsAsync`) are responsible for preserving the
-authoritative recent-repos list - the user's repo order - and its marker, since this view model never owns or edits
-them.
+The returned `AppSettings.RecentRepos`, `CollapsedGroups`, `GroupColors`, `GroupOrder` and `GroupParents` are left as
+fresh empty collections and its `HasUserRepoOrder` marker is left at its default; callers (specifically
+`MainWindowViewModel.ApplySettingsAsync`) are responsible for preserving the authoritative recent-repos list - the
+user's repo order - and its marker, the collapsed sections, the group colors, the group order and the group hierarchy,
+since this view model never owns or edits them.
 
 **Dispose**: Cancels the folder checks still running and releases their cancellation source;
 the window calls it when it closes (`AgentControl-SettingsWindowViewModel-SourceList`).

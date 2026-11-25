@@ -73,6 +73,7 @@ input-files:
   - docs/design/agent-control/settings/settings-store.md
   - docs/design/agent-control/settings/settings-writer.md
   - docs/design/agent-control/settings/repo-group-name.md
+  - docs/design/agent-control/settings/repo-group-hierarchy.md
   - docs/design/agent-control/logging.md
   - docs/design/agent-control/startup.md
   - docs/design/agent-control/startup/startup-options.md

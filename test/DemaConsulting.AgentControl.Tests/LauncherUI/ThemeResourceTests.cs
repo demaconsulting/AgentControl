@@ -122,7 +122,8 @@ public class ThemeResourceTests
     ///     Test that every text color of the shared styles has at least AA contrast against the
     ///     surface it is drawn on, in both themes: chips, secondary and disabled buttons, ghost icon
     ///     buttons, validation, warning and success text, the empty-state tile and every avatar
-    ///     palette entry; and that status accents and the favorite star reach graphics contrast.
+    ///     palette entry; and that status accents and the favorite star reach graphics contrast on the
+    ///     card and on the hovered card.
     /// </summary>
     /// <param name="variantName">The theme variant to check.</param>
     [Theory]
@@ -210,6 +211,17 @@ public class ThemeResourceTests
             CheckText(graphic, Opaque(palette, graphic), card, GraphicContrast);
         }
 
+        // The status accents and the star must also stay visible on the hovered card
+        var hovered = Over(Brush(palette, "RepoCardBackgroundHover"), card);
+        foreach (var graphic in new[]
+                 {
+                     "StatusAccentUpToDate", "StatusAccentUpgrade", "StatusAccentProblem",
+                     "StatusAccentNeutral", "FavoriteStarForeground"
+                 })
+        {
+            CheckText($"{graphic} on hover", Opaque(palette, graphic), hovered, GraphicContrast);
+        }
+
         Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
     });
 
@@ -276,6 +288,59 @@ public class ThemeResourceTests
             Contrast(Opaque(palette, "MenuGroupHeaderForeground"), tinted) >= TextContrast,
             $"header chevron on the drop tint: {Contrast(Opaque(palette, "MenuGroupHeaderForeground"), tinted):F2}");
         Assert.NotEqual(page, tinted);
+    });
+
+    /// <summary>
+    ///     Test that a selected card is drawn with its own tinted surface in both themes - not the card's
+    ///     normal surface or the page's, so the selection is not carried by the border alone - and that
+    ///     the chips, buttons and icons on it keep AA text contrast, and the status accents and favorite star
+    ///     keep graphics contrast (3:1) on it, as on a normal card.
+    /// </summary>
+    /// <param name="variantName">The theme variant to check.</param>
+    [Theory]
+    [InlineData("Light")]
+    [InlineData("Dark")]
+    public void ThemeResources_SelectedCard_IsTintedAndStaysLegibleInLightAndDark(string variantName) => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var palette = LoadPalette(variantName == "Light" ? ThemeVariant.Light : ThemeVariant.Dark);
+        var selected = Opaque(palette, "RepoCardBackgroundSelected");
+        var card = Opaque(palette, "RepoCardBackground");
+        var page = Opaque(palette, "PageBackground");
+        var failures = new List<string>();
+
+        void Check(string label, Color foreground, Color background, double minimum)
+        {
+            var ratio = Contrast(foreground, background);
+            if (ratio < minimum)
+            {
+                failures.Add($"{label}: {ratio:F2} < {minimum}");
+            }
+        }
+
+        // Act: the chips over their tint over the selected surface, the buttons and icons, the graphics
+        foreach (var chip in new[] { "Neutral", "Grey", "Package", "Amber", "Red" })
+        {
+            Check($"Chip{chip}", Opaque(palette, $"Chip{chip}Foreground"), Over(Brush(palette, $"Chip{chip}Background"), selected), TextContrast);
+        }
+
+        Check("ButtonSecondary", Opaque(palette, "ButtonSecondaryForeground"), Over(Brush(palette, "ButtonSecondaryBackground"), selected), TextContrast);
+        Check("IconGhost", Opaque(palette, "IconGhostForeground"), selected, TextContrast);
+        Check("IconGhost hover", Opaque(palette, "IconGhostForegroundHover"), Over(Brush(palette, "IconGhostBackgroundHover"), selected), TextContrast);
+        foreach (var graphic in new[]
+                 {
+                     "StatusAccentUpToDate", "StatusAccentUpgrade", "StatusAccentProblem",
+                     "StatusAccentNeutral", "FavoriteStarForeground"
+                 })
+        {
+            Check(graphic, Opaque(palette, graphic), selected, GraphicContrast);
+        }
+
+        // Assert: its own surface, visibly different from the normal card, and the text keeps its contrast
+        Assert.NotEqual(card, selected);
+        Assert.NotEqual(page, selected);
+        Assert.True(Contrast(selected, card) >= 1.05, $"selected surface against the card: {Contrast(selected, card):F2}");
+        Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
     });
 
     /// <summary>

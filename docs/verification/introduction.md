@@ -42,7 +42,7 @@ This document covers the verification design for the following software items:
   - **GitIntegration** subsystem
     - **GitClient**, **CommittedAgentFilesCache**, **GitCredentialClient**, **GitRemoteClient**
   - **Settings** subsystem
-    - **SettingsStore**
+    - **SettingsStore**, **SettingsWriter**, **RepoGroupName**, **RepoGroupHierarchy**
   - **Logging** subsystem (no dedicated unit — indirect-only test coverage, disclosed below)
   - **Startup** subsystem
     - **StartupOptions**

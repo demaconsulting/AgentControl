@@ -20,6 +20,7 @@
 
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Automation;
@@ -107,17 +108,25 @@ internal sealed partial class MainWindow : Window
         _autoScrollTimer = new DispatcherTimer { Interval = AutoScrollInterval };
         _autoScrollTimer.Tick += (_, _) => AutoScrollTick();
         WireRepoListDragAndDrop();
+        WireRepoListSelection();
         DataContextChanged += OnDataContextChanged;
         Closing += MainWindow_Closing;
         Closed += (_, _) =>
         {
             StopAutoScroll();
+            DetachViewModel();
             (DataContext as MainWindowViewModel)?.Dispose();
         };
         // Remember which card's favorite star has the keyboard focus (see RestoreStarFocus)
         AddHandler(GotFocusEvent, OnAnyGotFocus, RoutingStrategies.Bubble);
         Deactivated += (_, _) => _focusedStarCard = null;
     }
+
+    /// <summary>
+    ///     The view model whose events this window handles (the data context it was last attached to), or
+    ///     <see langword="null"/> when it has none; kept so those subscriptions can be removed again.
+    /// </summary>
+    private MainWindowViewModel? _subscribedViewModel;
 
     /// <summary>
     ///     The card whose favorite star had the focus most recently, or <see langword="null"/> when the
@@ -248,28 +257,38 @@ internal sealed partial class MainWindow : Window
     ///     Wires up per-repo-card event subscriptions once the view model is attached, and keeps
     ///     them current as cards are added to <see cref="MainWindowViewModel.RepoCards"/>.
     /// </summary>
+    /// <remarks>
+    ///     A view model this window was attached to before is detached first (see
+    ///     <see cref="DetachViewModel"/>), so assigning a data context again - or none - never leaves the
+    ///     window handling the events of two view models, or of one twice.
+    /// </remarks>
     /// <param name="sender">This window (unused).</param>
     /// <param name="e">Event arguments (unused).</param>
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
+        DetachViewModel();
         if (DataContext is not MainWindowViewModel viewModel)
         {
             return;
         }
 
+        _subscribedViewModel = viewModel;
         foreach (var card in viewModel.RepoCards)
         {
             AttachCardHandlers(card);
         }
 
         viewModel.RepoCards.CollectionChanged += OnRepoCardsChanged;
+        viewModel.PropertyChanged += ViewModelPropertyChanged;
         // A change that could not be saved in the background is told once per failure streak; the
         // message box is not awaited, so the window keeps working behind it
-        viewModel.SettingsSaveFailed += (_, message) => new MessageBoxWindow(message).ShowDialog(this);
-        viewModel.GroupRenameRequested += async (_, name) => await ShowRenameGroupPrompt(viewModel, name);
-        viewModel.GroupRemoveRequested += async (_, name) => await ConfirmAndRemoveGroup(viewModel, name);
-        viewModel.GroupAddRepoRequested += async (_, name) => await ShowNoticeAsync(await AddRepoAsync(viewModel, name));
-        viewModel.AddSaveFailed += async (_, request) => await AskAddSaveRetryAsync(request);
+        viewModel.SettingsSaveFailed += OnSettingsSaveFailed;
+        viewModel.GroupRenameRequested += OnGroupRenameRequested;
+        viewModel.GroupRemoveRequested += OnGroupRemoveRequested;
+        viewModel.GroupRemoveWithContentsRequested += OnGroupRemoveWithContentsRequested;
+        viewModel.GroupAddRepoRequested += OnGroupAddRepoRequested;
+        viewModel.GroupNewSubgroupRequested += OnGroupNewSubgroupRequested;
+        viewModel.AddSaveFailed += OnAddSaveFailed;
 
         // The upgrade check reads package sources, which may be slow or unreachable, so it starts
         // in the background now that the window has its data rather than delaying the window
@@ -280,6 +299,125 @@ internal sealed partial class MainWindow : Window
         // posted back to it.
         viewModel.StartPeriodicUpgradeRecheck(action => Dispatcher.UIThread.Post(action));
     }
+
+    /// <summary>
+    ///     Unsubscribes this window from the view model it handles the events of, and from its cards, so
+    ///     it stops reacting to a view model it no longer shows (a data context that was replaced or
+    ///     cleared, or the window closing).
+    /// </summary>
+    private void DetachViewModel()
+    {
+        if (_subscribedViewModel is not { } viewModel)
+        {
+            return;
+        }
+
+        _subscribedViewModel = null;
+        viewModel.RepoCards.CollectionChanged -= OnRepoCardsChanged;
+        viewModel.PropertyChanged -= ViewModelPropertyChanged;
+        viewModel.SettingsSaveFailed -= OnSettingsSaveFailed;
+        viewModel.GroupRenameRequested -= OnGroupRenameRequested;
+        viewModel.GroupRemoveRequested -= OnGroupRemoveRequested;
+        viewModel.GroupRemoveWithContentsRequested -= OnGroupRemoveWithContentsRequested;
+        viewModel.GroupAddRepoRequested -= OnGroupAddRepoRequested;
+        viewModel.GroupNewSubgroupRequested -= OnGroupNewSubgroupRequested;
+        viewModel.AddSaveFailed -= OnAddSaveFailed;
+        DetachCardHandlers([.. _cardHandlerRemovers.Keys]);
+    }
+
+    /// <summary>
+    ///     Keeps the list's selection in step with the view model's selected cards.
+    /// </summary>
+    /// <param name="sender">The view model.</param>
+    /// <param name="args">Names the property that changed.</param>
+    private void ViewModelPropertyChanged(object? sender, PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName == nameof(MainWindowViewModel.SelectedCards) && sender is MainWindowViewModel viewModel)
+        {
+            SyncListSelectionFromViewModel(viewModel);
+        }
+    }
+
+    /// <summary>
+    ///     Tells the user that a change could not be saved, without waiting for the answer.
+    /// </summary>
+    /// <param name="sender">The view model (unused).</param>
+    /// <param name="message">What went wrong.</param>
+    private void OnSettingsSaveFailed(object? sender, string message) =>
+        _ = new MessageBoxWindow(message).ShowDialog(this);
+
+    /// <summary>
+    ///     Asks for the new name of a group whose header asked to be renamed.
+    /// </summary>
+    /// <param name="sender">The view model.</param>
+    /// <param name="name">The group.</param>
+    private async void OnGroupRenameRequested(object? sender, string name)
+    {
+        if (sender is MainWindowViewModel viewModel)
+        {
+            await ShowRenameGroupPrompt(viewModel, name);
+        }
+    }
+
+    /// <summary>
+    ///     Confirms and deletes a group, keeping its contents, whose header asked for it.
+    /// </summary>
+    /// <param name="sender">The view model.</param>
+    /// <param name="name">The group.</param>
+    private async void OnGroupRemoveRequested(object? sender, string name)
+    {
+        if (sender is MainWindowViewModel viewModel)
+        {
+            await ConfirmAndRemoveGroup(viewModel, name);
+        }
+    }
+
+    /// <summary>
+    ///     Confirms and deletes a group together with its contents, whose header asked for it.
+    /// </summary>
+    /// <param name="sender">The view model.</param>
+    /// <param name="name">The group.</param>
+    private async void OnGroupRemoveWithContentsRequested(object? sender, string name)
+    {
+        if (sender is MainWindowViewModel viewModel)
+        {
+            await ConfirmAndRemoveGroupWithContents(viewModel, name);
+        }
+    }
+
+    /// <summary>
+    ///     Asks for folders to add to a group whose header asked for it, and tells the outcome.
+    /// </summary>
+    /// <param name="sender">The view model.</param>
+    /// <param name="name">The group.</param>
+    private async void OnGroupAddRepoRequested(object? sender, string name)
+    {
+        if (sender is MainWindowViewModel viewModel)
+        {
+            await ShowNoticeAsync(await AddRepoAsync(viewModel, name));
+        }
+    }
+
+    /// <summary>
+    ///     Asks for the name of a new group inside a group whose header asked for it.
+    /// </summary>
+    /// <param name="sender">The view model.</param>
+    /// <param name="name">The parent group.</param>
+    private async void OnGroupNewSubgroupRequested(object? sender, string name)
+    {
+        if (sender is MainWindowViewModel viewModel)
+        {
+            await ShowNewSubgroupPrompt(viewModel, name);
+        }
+    }
+
+    /// <summary>
+    ///     Asks whether to retry or discard an add whose save failed.
+    /// </summary>
+    /// <param name="sender">The view model (unused).</param>
+    /// <param name="request">The failed save.</param>
+    private async void OnAddSaveFailed(object? sender, SettingsSaveRetryRequest request) =>
+        await AskAddSaveRetryAsync(request);
 
     /// <summary>
     ///     Attaches this window's error/release-notes handlers to newly-added repo cards.
@@ -514,13 +652,33 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
+    ///     Handles a card's request to be removed: when the card is one of several selected cards the
+    ///     request is for all of them (the menu item says how many), otherwise for the card alone. The
+    ///     user confirms first; see <see cref="ConfirmAndRemoveCards"/> and
+    ///     <see cref="ConfirmAndRemoveOneCard"/>.
+    /// </summary>
+    /// <param name="card">The card whose "Remove from list" item the user chose.</param>
+    private async Task ConfirmAndRemoveCard(RepoCardViewModel card)
+    {
+        if (DataContext is MainWindowViewModel viewModel &&
+            viewModel.SelectedCards.Count > 1 &&
+            viewModel.SelectedCards.Contains(card))
+        {
+            await ConfirmAndRemoveCards(viewModel, [.. viewModel.SelectedCards]);
+            return;
+        }
+
+        await ConfirmAndRemoveOneCard(card);
+    }
+
+    /// <summary>
     ///     Shows the <see cref="ConfirmationWindow"/> asking the user to confirm removing
     ///     <paramref name="card"/> from AgentControl's recent-repos list, and only calls
     ///     <see cref="MainWindowViewModel.RemoveRepo"/> if the user confirms. Never removes
     ///     anything from disk - the message text makes this explicit.
     /// </summary>
     /// <param name="card">The card the user asked to remove.</param>
-    private async Task ConfirmAndRemoveCard(RepoCardViewModel card)
+    private async Task ConfirmAndRemoveOneCard(RepoCardViewModel card)
     {
         if (DataContext is not MainWindowViewModel viewModel)
         {
@@ -735,8 +893,9 @@ internal sealed partial class MainWindow : Window
 
     /// <summary>
     ///     Fills the "Move to group" submenu of a card's "..." menu just before the menu opens: one
-    ///     entry per existing group (the repo's own group is marked), then "New group..." and, when
-    ///     the repo is in a group, "Remove from group".
+    ///     entry per existing group (the group the repo is in is marked), then "New group..." and, when
+    ///     the repo is in a group, "Remove from group". When the card is one of several selected cards
+    ///     the entries act on all the selected repos (as a drag of the card would).
     /// </summary>
     /// <remarks>
     ///     The entries depend on the groups that exist at that moment, which a XAML template cannot
@@ -762,12 +921,20 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
+        // The menu acts on the whole selection when this card is one of several selected cards, as a drag
+        // of it would; for any other card it acts on that card alone
+        var viewModel = TopLevel.GetTopLevel(flyout.Target)?.DataContext as MainWindowViewModel;
+        var cards = viewModel?.GetDragCards(card) ?? [card];
+        var several = cards.Count > 1;
+        var subject = several ? $"the {cards.Count} selected repos" : card.RepoName;
         var entries = new List<object>();
         var groups = card.GetExistingGroupNames();
         foreach (var group in groups)
         {
-            // The header is a TextBlock so an underscore in a group name is not taken as an access key
-            var isCurrent = RepoGroupName.Comparer.Equals(group, card.GroupName ?? string.Empty);
+            // The header is a TextBlock so an underscore in a group name is not taken as an access key;
+            // a nested group's tooltip gives its path so groups inside different groups are told apart
+            var isCurrent = cards.All(other => RepoGroupName.Comparer.Equals(group, other.GroupName ?? string.Empty));
+            var path = viewModel?.GetGroupPath(group) ?? group;
             var entry = new MenuItem
             {
                 Header = new TextBlock { Text = group },
@@ -775,10 +942,18 @@ internal sealed partial class MainWindow : Window
             };
             AutomationProperties.SetAutomationId(entry, "MoveToGroupItem");
             AutomationProperties.SetName(entry, group);
-            ToolTip.SetTip(
-                entry,
-                isCurrent ? $"{card.RepoName} is in the group {group}." : $"Move {card.RepoName} to the group {group}.");
-            entry.Click += (_, _) => card.MoveToGroup(group);
+            string tip;
+            if (isCurrent)
+            {
+                tip = several ? $"All of {subject} are in the group {path}." : $"{subject} is in the group {path}.";
+            }
+            else
+            {
+                tip = $"Move {subject} to the group {path}.";
+            }
+
+            ToolTip.SetTip(entry, tip);
+            entry.Click += (_, _) => MoveCardsToGroup(viewModel, card, cards, group);
             entries.Add(entry);
         }
 
@@ -794,25 +969,123 @@ internal sealed partial class MainWindow : Window
             Command = card.NewGroupCommand
         };
         AutomationProperties.SetAutomationId(newGroup, "NewGroupMenuItem");
-        ToolTip.SetTip(newGroup, $"Create a group and move {card.RepoName} into it");
+        ToolTip.SetTip(newGroup, $"Create a group and move {subject} into it");
         entries.Add(newGroup);
 
-        if (card.HasGroup)
+        if (cards.Any(other => other.HasGroup))
         {
             var remove = new MenuItem
             {
                 Header = "Remove from group",
-                Icon = new MaterialIcon { Kind = MaterialIconKind.FolderRemove },
-                Command = card.RemoveFromGroupCommand
+                Icon = new MaterialIcon { Kind = MaterialIconKind.FolderRemove }
             };
+            if (several)
+            {
+                remove.Click += (_, _) => MoveCardsToGroup(viewModel, card, cards, null);
+            }
+            else
+            {
+                remove.Command = card.RemoveFromGroupCommand;
+            }
+
             AutomationProperties.SetAutomationId(remove, "RemoveFromGroupMenuItem");
-            ToolTip.SetTip(remove, $"Take {card.RepoName} out of the group {card.GroupName}");
+            ToolTip.SetTip(
+                remove,
+                several
+                    ? $"Take {subject} out of their groups"
+                    : $"Take {card.RepoName} out of the group {card.GroupName}");
             entries.Add(remove);
         }
 
         submenu.Items.Clear();
         foreach (var entry in entries)
         {
+            submenu.Items.Add(entry);
+        }
+    }
+
+    /// <summary>
+    ///     Moves the cards a card's menu acts on into a group (or out of every group) when the item is
+    ///     clicked: the whole selection through the view model, a single card through the card itself.
+    /// </summary>
+    /// <param name="viewModel">The main view model, or <see langword="null"/> when the window has none.</param>
+    /// <param name="card">The card whose menu it is.</param>
+    /// <param name="cards">The cards the menu acts on; <paramref name="card"/> alone, or the selection.</param>
+    /// <param name="group">The group, or <see langword="null"/> to take the repos out of their groups.</param>
+    private static void MoveCardsToGroup(
+        MainWindowViewModel? viewModel,
+        RepoCardViewModel card,
+        IReadOnlyList<RepoCardViewModel> cards,
+        string? group)
+    {
+        if (viewModel is not null && cards.Count > 1)
+        {
+            viewModel.MoveCardsToGroup(cards, group);
+        }
+        else
+        {
+            card.MoveToGroup(group);
+        }
+    }
+
+    /// <summary>
+    ///     Fills the "Move into group" submenu of a group header's "..." menu just before the menu opens:
+    ///     "Move to top level" when the group is inside another group, then one entry per group it can be
+    ///     moved into; the item is disabled, with the reason as its tooltip, while the filter has text or
+    ///     when the group has nowhere to go.
+    /// </summary>
+    /// <remarks>
+    ///     Like the card's "Move to group" submenu the entries depend on the groups that exist at that
+    ///     moment, so the code-behind builds them from the view model, which also decides what is allowed
+    ///     (see <see cref="MainWindowViewModel.GetGroupMoveIntoTargets"/> and
+    ///     <see cref="MainWindowViewModel.GetGroupMoveIntoDisabledReason"/>) and does the move. The header is
+    ///     found through the flyout's placement target, whose data context is the header.
+    /// </remarks>
+    /// <param name="sender">The header's <see cref="MenuFlyout"/>.</param>
+    /// <param name="e">Event arguments (unused).</param>
+    private static void GroupMenu_Opening(object? sender, EventArgs e)
+    {
+        if (sender is not MenuFlyout { Target.DataContext: RepoGroupHeaderViewModel header } flyout ||
+            flyout.Items.OfType<MenuItem>().FirstOrDefault(item => item.Name == "GroupMoveIntoMenuItem") is not { } submenu)
+        {
+            return;
+        }
+
+        submenu.Items.Clear();
+        var viewModel = TopLevel.GetTopLevel(flyout.Target)?.DataContext as MainWindowViewModel;
+        var reason = viewModel is null ? "The groups cannot be moved now." : viewModel.GetGroupMoveIntoDisabledReason(header.Name);
+        submenu.IsEnabled = reason is null;
+        ToolTip.SetTip(
+            submenu,
+            reason ?? $"Put {header.Name} inside another group, or back at the top level, without dragging");
+        if (viewModel is null || reason is not null)
+        {
+            return;
+        }
+
+        if (viewModel.GetGroupParent(header.Name) is not null)
+        {
+            var top = new MenuItem
+            {
+                Header = "Move to top level",
+                Icon = new MaterialIcon { Kind = MaterialIconKind.FolderUpload }
+            };
+            AutomationProperties.SetAutomationId(top, "GroupMoveToTopLevelMenuItem");
+            ToolTip.SetTip(top, $"Take {header.Name} out of its parent group and make it a top-level group");
+            top.Click += (_, _) => viewModel.MoveGroupInto(header.Name, null);
+            submenu.Items.Add(top);
+            submenu.Items.Add(new Separator());
+        }
+
+        foreach (var target in viewModel.GetGroupMoveIntoTargets(header.Name))
+        {
+            // The header is a TextBlock so an underscore in a group name is not taken as an access key;
+            // the tooltip gives the path so groups inside different groups are told apart
+            var entry = new MenuItem { Header = new TextBlock { Text = target } };
+            AutomationProperties.SetAutomationId(entry, "GroupMoveIntoItem");
+            AutomationProperties.SetName(entry, target);
+            ToolTip.SetTip(entry, $"Put {header.Name} inside the group {viewModel.GetGroupPath(target)}");
+            entry.Click += (_, _) => viewModel.MoveGroupInto(header.Name, target);
             submenu.Items.Add(entry);
         }
     }
@@ -906,7 +1179,141 @@ internal sealed partial class MainWindow : Window
         MoveMenuItemClicked(sender, RepoMove.Bottom);
 
     /// <summary>
-    ///     The data format of a dragged repo card: one string item, the card's repo path.
+    ///     Whether the list's selection is being set from the view model, so the selection events that
+    ///     raises are not taken for the user's choice.
+    /// </summary>
+    private bool _isSyncingSelection;
+
+    /// <summary>
+    ///     Connects the repo list's selection: what the user selects (with Ctrl+click, Shift+click or
+    ///     Ctrl+A) is told to the view model, and the Delete key asks to remove the selected cards.
+    /// </summary>
+    private void WireRepoListSelection()
+    {
+        if (this.FindControl<ListBox>("RepoListBox") is not RepoListBox list)
+        {
+            return;
+        }
+
+        list.SelectionChanged += RepoList_SelectionChanged;
+        list.DeleteRequested += async (_, _) =>
+        {
+            if (DataContext is MainWindowViewModel { SelectedCards.Count: > 0 } viewModel)
+            {
+                await ConfirmAndRemoveCards(viewModel, [.. viewModel.SelectedCards]);
+            }
+        };
+    }
+
+    /// <summary>
+    ///     Tells the view model which cards are selected, after taking the section headers out of the
+    ///     selection (a range, a click on a header or a keyboard move can select one, but only cards are
+    ///     ever selected).
+    /// </summary>
+    /// <param name="sender">The list.</param>
+    /// <param name="e">The selection change (unused).</param>
+    private void RepoList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_isSyncingSelection || sender is not ListBox list || DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var headers = list.SelectedItems?.OfType<RepoGroupHeaderViewModel>().ToList() ?? [];
+        if (headers.Count > 0)
+        {
+            _isSyncingSelection = true;
+            try
+            {
+                foreach (var header in headers)
+                {
+                    list.SelectedItems!.Remove(header);
+                }
+            }
+            finally
+            {
+                _isSyncingSelection = false;
+            }
+        }
+
+        viewModel.SetSelectedCards(list.SelectedItems?.OfType<RepoCardViewModel>());
+    }
+
+    /// <summary>
+    ///     Brings the list's selection up to date with the view model's: the view model drops the cards it
+    ///     no longer shows from the selection, and the list deselects the rows it moved (after a drop, for
+    ///     one), so the cards that are still selected are selected again.
+    /// </summary>
+    /// <param name="viewModel">The window's view model.</param>
+    private void SyncListSelectionFromViewModel(MainWindowViewModel viewModel)
+    {
+        if (_isSyncingSelection || this.FindControl<ListBox>("RepoListBox") is not { } list)
+        {
+            return;
+        }
+
+        var wanted = viewModel.SelectedCards;
+        var current = list.SelectedItems!.Cast<object>().ToList();
+        if (current.Count == wanted.Count && wanted.All(card => current.Contains(card)))
+        {
+            return;
+        }
+
+        _isSyncingSelection = true;
+        list.Selection.BeginBatchUpdate();
+        try
+        {
+            list.Selection.Clear();
+            foreach (var card in wanted)
+            {
+                var index = list.Items.IndexOf(card);
+                if (index >= 0)
+                {
+                    list.Selection.Select(index);
+                }
+            }
+        }
+        finally
+        {
+            list.Selection.EndBatchUpdate();
+            _isSyncingSelection = false;
+        }
+    }
+
+    /// <summary>
+    ///     Shows the <see cref="ConfirmationWindow"/> asking the user to confirm removing the given cards
+    ///     from AgentControl's recent-repos list - for one card the question of
+    ///     <see cref="ConfirmAndRemoveCard"/>, for several a question that says how many - and removes them
+    ///     (in one change) only if the user confirms. Never removes anything from disk, which the message
+    ///     says.
+    /// </summary>
+    /// <param name="viewModel">The window's view model.</param>
+    /// <param name="cards">The cards the user asked to remove.</param>
+    private async Task ConfirmAndRemoveCards(MainWindowViewModel viewModel, IReadOnlyList<RepoCardViewModel> cards)
+    {
+        if (cards.Count == 1)
+        {
+            await ConfirmAndRemoveOneCard(cards[0]);
+            return;
+        }
+
+        var confirmed = await new ConfirmationWindow(
+                $"Remove {cards.Count} repos from AgentControl's recent-repos list?\n\n" +
+                "This only removes the repos from AgentControl's list - it does not delete or " +
+                "otherwise modify anything on disk.")
+            .ShowDialog<bool>(this);
+
+        if (confirmed)
+        {
+            // Applied at once and saved in the background; a failed save is reported once through
+            // SettingsSaveFailed
+            viewModel.RemoveRepos(cards);
+        }
+    }
+
+    /// <summary>
+    ///     The data format of a dragged repo card: one string item for each dragged card, its repo path (the
+    ///     card the drag started on first).
     /// </summary>
     internal static readonly DataFormat<string> RepoCardDataFormat =
         DataFormat.CreateStringApplicationFormat("DemaConsulting.AgentControl.RepoCard");
@@ -1144,17 +1551,34 @@ internal sealed partial class MainWindow : Window
 
     /// <summary>
     ///     Runs a drag of a card: dims the card, hands the card's path to the drag source and, when the
-    ///     drag ends however it ends, removes the dimming and any drop feedback.
+    ///     drag ends however it ends, removes the dimming and any drop feedback. When the card is one of
+    ///     several selected cards the drag carries all of them (one item each, the grabbed card first) and
+    ///     dims them all.
     /// </summary>
-    /// <param name="card">The dragged card.</param>
+    /// <param name="card">The card the drag started on.</param>
     /// <param name="container">The card's list row.</param>
     /// <param name="press">The press that started the drag.</param>
     /// <returns>A task that completes when the drag has ended.</returns>
     private async Task StartDragAsync(RepoCardViewModel card, ListBoxItem container, PointerPressedEventArgs press)
     {
+        // The selection stays as it is: the press that began this drag must not reduce it on release
+        var list = this.FindControl<ListBox>("RepoListBox");
+        (list as RepoListBox)?.CancelDeferredSelection();
+        var cards = DataContext is MainWindowViewModel viewModel ? viewModel.GetDragCards(card) : [card];
         var transfer = new DataTransfer();
         transfer.Add(DataTransferItem.Create(RepoCardDataFormat, card.RepoPath));
-        container.Classes.Add("dragging");
+        foreach (var other in cards.Where(other => !ReferenceEquals(other, card)))
+        {
+            transfer.Add(DataTransferItem.Create(RepoCardDataFormat, other.RepoPath));
+        }
+
+        var dimmed = cards.Select(other => ReferenceEquals(other, card) ? container : list?.ContainerFromItem(other))
+            .OfType<Control>().ToList();
+        foreach (var row in dimmed)
+        {
+            row.Classes.Add("dragging");
+        }
+
         try
         {
             var starter = DragStarter ?? DragDrop.DoDragDropAsync;
@@ -1162,7 +1586,11 @@ internal sealed partial class MainWindow : Window
         }
         finally
         {
-            container.Classes.Remove("dragging");
+            foreach (var row in dimmed)
+            {
+                row.Classes.Remove("dragging");
+            }
+
             ClearDropFeedback();
         }
     }
@@ -1201,27 +1629,50 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Gets the card that is being dragged over the list, from the data of the drag.
+    ///     Gets the cards that are being dragged over the list, from the data of the drag.
     /// </summary>
     /// <param name="data">The data of the drag.</param>
     /// <param name="viewModel">The window's view model.</param>
-    /// <param name="card">The dragged card when this returns <see langword="true"/>.</param>
-    /// <returns><see langword="true"/> when the drag carries a repo card that is in the list.</returns>
-    private bool TryGetDraggedCard(
+    /// <param name="cards">The dragged cards, the grabbed one first, when this returns
+    ///     <see langword="true"/>.</param>
+    /// <returns><see langword="true"/> when the drag carries at least one repo card that is in the list;
+    ///     a path that no card has any more is left out.</returns>
+    private bool TryGetDraggedCards(
         IDataTransfer data,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out MainWindowViewModel? viewModel,
-        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out RepoCardViewModel? card)
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IReadOnlyList<RepoCardViewModel>? cards)
     {
         viewModel = DataContext as MainWindowViewModel;
-        card = null;
-        if (viewModel is null || data.TryGetValue(RepoCardDataFormat) is not { } path)
+        cards = null;
+        if (viewModel is null)
         {
             return false;
         }
 
-        card = viewModel.RepoCards.FirstOrDefault(other => MainWindowViewModel.IsSameRepoPath(other.RepoPath, path));
-        return card is not null;
+        var found = new List<RepoCardViewModel>();
+        foreach (var path in data.TryGetValues(RepoCardDataFormat) ?? [])
+        {
+            var card = viewModel.RepoCards.FirstOrDefault(other => MainWindowViewModel.IsSameRepoPath(other.RepoPath, path));
+            if (card is not null && !found.Contains(card))
+            {
+                found.Add(card);
+            }
+        }
+
+        cards = found;
+        return found.Count > 0;
     }
+
+    /// <summary>
+    ///     Gets whether the dragged cards may be dropped at a place: one card by the rules for a single
+    ///     card, several by the rules for a selection.
+    /// </summary>
+    /// <param name="viewModel">The window's view model.</param>
+    /// <param name="cards">The dragged cards.</param>
+    /// <param name="target">The place.</param>
+    /// <returns><see langword="true"/> when the drop would be accepted.</returns>
+    private static bool CanDropCardsAt(MainWindowViewModel viewModel, IReadOnlyList<RepoCardViewModel> cards, RepoDropTarget target) =>
+        cards.Count == 1 ? viewModel.CanDrop(cards[0], target) : viewModel.CanDropCards(cards, target);
 
     /// <summary>
     ///     Gets the group whose header is being dragged over the list, from the data of the drag.
@@ -1313,9 +1764,15 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Works out where a drop at the pointer's position would put a dragged group: before or after
-    ///     the user's group whose header the pointer is over.
+    ///     Works out where a drop at the pointer's position would put a dragged group: next to the user's
+    ///     group whose header the pointer is over (before it over the upper third, after it over the
+    ///     lower third) or inside it (over the middle third) - except in an auto-scroll zone, where the
+    ///     row is split in halves and nothing nests.
     /// </summary>
+    /// <remarks>
+    ///     The feedback (the line or the tint) and the drop both use this, so what is shown is what a
+    ///     drop does.
+    /// </remarks>
     /// <param name="pointInWindow">The pointer's position, relative to this window.</param>
     /// <returns>The place and the header's row, or <see langword="null"/> when the pointer is not over
     ///     the header of one of the user's groups (a card, Favorites, Ungrouped or empty space).</returns>
@@ -1328,7 +1785,58 @@ internal sealed partial class MainWindow : Window
         }
 
         var y = GetYWithin(pointInWindow, container);
-        return (new GroupDropTarget(header.Name, IsUpperHalf(y, container.Bounds.Height)), container);
+        var (insertBefore, inside) = GetGroupDropZone(y, container.Bounds.Height, IsInAutoScrollZone(pointInWindow));
+        return (new GroupDropTarget(header.Name, insertBefore, inside), container);
+    }
+
+    /// <summary>
+    ///     Gets whether the pointer is in a zone where the list auto-scrolls and has something to scroll.
+    /// </summary>
+    /// <remarks>
+    ///     A list that fits its viewport never scrolls, so its edges are not scroll zones and nothing
+    ///     is taken away from the rows there. A list already scrolled to its end still counts: the
+    ///     pointer is held in the zone, and the row under it is the one the scrolling brought there.
+    /// </remarks>
+    /// <param name="pointInWindow">The pointer's position, relative to this window.</param>
+    /// <returns><see langword="true"/> when a held pointer here scrolls the list (or would, were the
+    ///     list not already at its end).</returns>
+    private bool IsInAutoScrollZone(Point pointInWindow) =>
+        GetRepoListScroller() is { } scroller &&
+        scroller.Extent.Height - scroller.Viewport.Height >= MinimumScrollDistance &&
+        Math.Abs(GetAutoScrollStep(scroller, pointInWindow)) >= MinimumScrollDistance;
+
+    /// <summary>
+    ///     Decides whether a group header is dropped before, after or inside the group header it is
+    ///     over, from the pointer's height within that header's row.
+    /// </summary>
+    /// <remarks>
+    ///     The row is split in thirds: the upper third is "before" and the lower third "after" (the two
+    ///     places the halves were before groups nested, so "upper" and "lower" keep their meaning), and
+    ///     the middle third puts the dragged group inside the header's group. In an auto-scroll zone the
+    ///     list moves under a pointer that is held still, so the row under it - and the part of the row -
+    ///     is not something the user can aim at: nesting is not offered and the row is split in halves
+    ///     (before, after) like the card rows. Pure.
+    /// </remarks>
+    /// <param name="y">The pointer's vertical position within the row.</param>
+    /// <param name="height">The row's height.</param>
+    /// <param name="inAutoScrollZone">Whether the pointer is in a zone where the list auto-scrolls.</param>
+    /// <returns><c>InsertBefore</c> for the upper third (the upper half in an auto-scroll zone) and
+    ///     <c>Inside</c> for the middle third (never in an auto-scroll zone); both
+    ///     <see langword="false"/> for the lower third (the lower half in an auto-scroll zone), which
+    ///     is insert after.</returns>
+    internal static (bool InsertBefore, bool Inside) GetGroupDropZone(double y, double height, bool inAutoScrollZone)
+    {
+        if (inAutoScrollZone)
+        {
+            return (y < height / 2, false);
+        }
+
+        if (y < height / 3)
+        {
+            return (true, false);
+        }
+
+        return y < height * 2 / 3 ? (false, true) : (false, false);
     }
 
     /// <summary>
@@ -1360,32 +1868,32 @@ internal sealed partial class MainWindow : Window
     /// <param name="e">The drag event.</param>
     private void CardDragOver(DragEventArgs e)
     {
-        if (!TryGetDraggedCard(e.DataTransfer, out var viewModel, out var card))
+        if (!TryGetDraggedCards(e.DataTransfer, out var viewModel, out var cards))
         {
             return;
         }
 
         e.Handled = true;
         var point = e.GetPosition(this);
-        e.DragEffects = ShowCardDropFeedback(viewModel, card, point) ? DragDropEffects.Move : DragDropEffects.None;
+        e.DragEffects = ShowCardDropFeedback(viewModel, cards, point) ? DragDropEffects.Move : DragDropEffects.None;
         UpdateAutoScroll(e.DataTransfer, point);
     }
 
     /// <summary>
-    ///     Shows where a dragged card would land at a point (the insertion line or the header tint), or
-    ///     hides the feedback when it cannot be dropped there.
+    ///     Shows where dragged cards would land at a point (the insertion line or the header tint), or
+    ///     hides the feedback when they cannot be dropped there.
     /// </summary>
     /// <param name="viewModel">The window's view model.</param>
-    /// <param name="card">The dragged card.</param>
+    /// <param name="cards">The dragged cards.</param>
     /// <param name="pointInWindow">The pointer's position, relative to this window.</param>
-    /// <returns><see langword="true"/> when the card can be dropped there.</returns>
-    private bool ShowCardDropFeedback(MainWindowViewModel viewModel, RepoCardViewModel card, Point pointInWindow)
+    /// <returns><see langword="true"/> when the cards can be dropped there.</returns>
+    private bool ShowCardDropFeedback(MainWindowViewModel viewModel, IReadOnlyList<RepoCardViewModel> cards, Point pointInWindow)
     {
         var found = GetDropTarget(pointInWindow);
-        var allowed = found is { } target && viewModel.CanDrop(card, target.Target);
+        var allowed = found is { } target && CanDropCardsAt(viewModel, cards, target.Target);
 
-        // Nothing is shown next to the dragged card itself: dropping it there changes nothing
-        if (allowed && found is { } shown && !ReferenceEquals(shown.Target.Anchor, card))
+        // Nothing is shown next to a dragged card itself: dropping it there changes nothing
+        if (allowed && found is { } shown && !cards.Any(card => ReferenceEquals(shown.Target.Anchor, card)))
         {
             ShowDropFeedback(shown.Container, shown.Target);
         }
@@ -1418,7 +1926,8 @@ internal sealed partial class MainWindow : Window
 
     /// <summary>
     ///     Shows where a dragged group header would land at a point (the line above or below another
-    ///     group's header), or hides the feedback when it cannot be dropped there.
+    ///     group's header, or the tint of the header it would go inside), or hides the feedback when it
+    ///     cannot be dropped there.
     /// </summary>
     /// <param name="viewModel">The window's view model.</param>
     /// <param name="groupName">The dragged group's name.</param>
@@ -1430,7 +1939,8 @@ internal sealed partial class MainWindow : Window
         var allowed = found is { } target && viewModel.CanDropGroup(groupName, target.Target);
         if (allowed && found is { } shown)
         {
-            ShowDropFeedback(shown.Container, shown.Target.InsertBefore ? "dropAbove" : "dropBelow");
+            var feedbackClass = shown.Target.InsertBefore ? "dropAbove" : "dropBelow";
+            ShowDropFeedback(shown.Container, shown.Target.Inside ? "dropHeader" : feedbackClass);
         }
         else
         {
@@ -1482,18 +1992,19 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Drops the dragged card where the pointer is, through the view model.
+    ///     Drops the dragged card, or cards, where the pointer is, through the view model.
     /// </summary>
     /// <param name="e">The drag event.</param>
     private void CardDrop(DragEventArgs e)
     {
-        if (!TryGetDraggedCard(e.DataTransfer, out var viewModel, out var card))
+        if (!TryGetDraggedCards(e.DataTransfer, out var viewModel, out var cards))
         {
             return;
         }
 
         e.Handled = true;
-        if (GetDropTarget(e.GetPosition(this)) is { } found && viewModel.DropCard(card, found.Target))
+        if (GetDropTarget(e.GetPosition(this)) is { } found &&
+            (cards.Count == 1 ? viewModel.DropCard(cards[0], found.Target) : viewModel.DropCards(cards, found.Target)))
         {
             e.DragEffects = DragDropEffects.Move;
         }
@@ -2051,9 +2562,9 @@ internal sealed partial class MainWindow : Window
             return;
         }
 
-        if (TryGetDraggedCard(data, out var viewModel, out var card))
+        if (TryGetDraggedCards(data, out var viewModel, out var cards))
         {
-            ShowCardDropFeedback(viewModel, card, pointInWindow);
+            ShowCardDropFeedback(viewModel, cards, pointInWindow);
         }
         else if (TryGetDraggedGroup(data, out viewModel, out var groupName))
         {
@@ -2198,21 +2709,60 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Shows the name prompt for a new group and, when a name is chosen, moves
-    ///     <paramref name="card"/>'s repo into that group.
+    ///     Shows the name prompt for a new group and, when a name is chosen, moves the repo of
+    ///     <paramref name="card"/> - or all the selected repos when the card is one of several selected -
+    ///     into that group.
     /// </summary>
     /// <param name="card">The card that asked for a new group.</param>
     private async Task ShowNewGroupPrompt(RepoCardViewModel card)
     {
+        var cards = DataContext is MainWindowViewModel viewModel ? viewModel.GetDragCards(card) : [card];
+        var subject = cards.Count > 1 ? $"the {cards.Count} selected repos" : $"\"{card.RepoName}\"";
         var prompt = new GroupNameViewModel(
             "New group",
-            $"Name of the new group for \"{card.RepoName}\":",
+            $"Name of the new group for {subject}:",
             "Create",
             card.GetExistingGroupNames());
         var name = await new GroupNameWindow(prompt).ShowDialog<string?>(this);
-        if (name is not null)
+        if (name is null)
+        {
+            return;
+        }
+
+        if (cards.Count > 1 && DataContext is MainWindowViewModel owner)
+        {
+            owner.MoveCardsToGroup(cards, name);
+        }
+        else
         {
             card.MoveToGroup(name);
+        }
+    }
+
+    /// <summary>
+    ///     Shows the name prompt for a group created inside another group and, when a name is chosen,
+    ///     creates it.
+    /// </summary>
+    /// <remarks>
+    ///     Group names are unique across the whole tree, so the prompt refuses the name of every existing
+    ///     group (an empty or nested one included) instead of letting the new group join it.
+    /// </remarks>
+    /// <param name="viewModel">The main view model that owns the groups.</param>
+    /// <param name="parentName">The group the new group is created inside.</param>
+    private async Task ShowNewSubgroupPrompt(MainWindowViewModel viewModel, string parentName)
+    {
+        var prompt = new GroupNameViewModel(
+            "New subgroup",
+            $"Name of the new group inside \"{parentName}\":",
+            "Create",
+            viewModel.GroupNames,
+            requireNewName: true);
+        var name = await new GroupNameWindow(prompt).ShowDialog<string?>(this);
+        if (name is not null)
+        {
+            // The prompt allows only a usable, unused name; the group is created at once and saved in
+            // the background
+            viewModel.CreateSubgroup(parentName, name);
         }
     }
 
@@ -2239,24 +2789,107 @@ internal sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    ///     Asks the user to confirm removing a group and, if confirmed, removes it (its repos become
-    ///     ungrouped). Nothing on disk or in any repository changes, which the message says.
+    ///     Asks the user to confirm deleting a group but keeping what is in it and, if confirmed, deletes
+    ///     it (its repos and subgroups go to the group it was inside; at the top level the repos become
+    ///     ungrouped and the subgroups become top-level groups). Nothing on disk or in any repository
+    ///     changes, which the message says.
     /// </summary>
+    /// <remarks>
+    ///     The message names the group as it is stored, counts what is directly in the group and leaves
+    ///     out the part of the sentence about repos or subgroups when the group has none, so it never
+    ///     reads "0 repo(s)". Favorites among its own repos are called out separately: they stay in
+    ///     Favorites, while the other repos go to the group it was inside or become ungrouped.
+    /// </remarks>
     /// <param name="viewModel">The main view model that owns the groups.</param>
-    /// <param name="groupName">The group to remove.</param>
+    /// <param name="groupName">The group to delete.</param>
     private async Task ConfirmAndRemoveGroup(MainWindowViewModel viewModel, string groupName)
     {
-        var members = viewModel.RepoCards.Count(card => RepoGroupName.Comparer.Equals(card.GroupName ?? string.Empty, groupName));
+        var contents = viewModel.GetGroupContents(groupName);
+        var parent = viewModel.GetGroupParent(contents.Name);
+        var message = $"Delete the group \"{contents.Name}\"?\n\n";
+        if (contents.IsEmpty)
+        {
+            message += "The group has no repos or subgroups.";
+        }
+        else
+        {
+            var sentences = new List<string>();
+            if (contents.DirectRepoCount > 0)
+            {
+                var where = parent is null ? "ungrouped" : $"in the group \"{parent}\"";
+                var favorites = contents.DirectFavoriteCount;
+                var others = contents.DirectRepoCount - favorites;
+                var repos = $"Its {contents.DirectRepoCount} repo(s) stay in AgentControl's list";
+                if (favorites == 0)
+                {
+                    sentences.Add($"{repos}, {where}.");
+                }
+                else if (others == 0)
+                {
+                    sentences.Add($"{repos}, all of them favorites that stay in Favorites.");
+                }
+                else
+                {
+                    sentences.Add($"{repos}: {others} {where}, and {favorites} favorite(s) stay in Favorites.");
+                }
+            }
+
+            if (contents.DirectSubgroupCount > 0)
+            {
+                var target = parent is null ? "to the top level" : $"into \"{parent}\"";
+                var also = contents.DirectRepoCount > 0 ? " too" : string.Empty;
+                sentences.Add($"Its {contents.DirectSubgroupCount} subgroup(s) move {target}{also}.");
+            }
+
+            sentences.Add("This only changes how AgentControl lists them - nothing on disk or in any repository is changed.");
+            message += string.Join(' ', sentences);
+        }
+
+        var confirmed = await new ConfirmationWindow(message).ShowDialog<bool>(this);
+        if (confirmed)
+        {
+            // Applied at once and saved in the background
+            viewModel.RemoveGroup(groupName);
+        }
+    }
+
+    /// <summary>
+    ///     Asks the user to confirm deleting a group together with everything in it - its repos, favorites
+    ///     included, and the groups inside it with theirs - saying how many go, and, if confirmed, deletes
+    ///     them from AgentControl's list. Nothing on disk or in any repository is deleted, which the message
+    ///     says.
+    /// </summary>
+    /// <remarks>
+    ///     The message names the group as it is stored and leaves out the part about repos or subgroups
+    ///     when there are none, so it never reads "0 repo(s)".
+    /// </remarks>
+    /// <param name="viewModel">The main view model that owns the groups.</param>
+    /// <param name="groupName">The group to delete with its contents.</param>
+    private async Task ConfirmAndRemoveGroupWithContents(MainWindowViewModel viewModel, string groupName)
+    {
+        var contents = viewModel.GetGroupContents(groupName);
+        var question = $"Delete the group \"{contents.Name}\"";
+        if (contents.SubgroupCount > 0)
+        {
+            question += $" and its {contents.SubgroupCount} subgroup(s)";
+        }
+
+        if (contents.RepoCount > 0)
+        {
+            var favorites = contents.FavoriteCount > 0 ? $" ({contents.FavoriteCount} of them favorites)" : string.Empty;
+            question += $" together with its {contents.RepoCount} repo(s){favorites}";
+        }
+
+        var removed = contents.RepoCount > 0 ? "The repos are removed from AgentControl's list." : "The groups are removed from AgentControl's list.";
         var confirmed = await new ConfirmationWindow(
-                $"Remove the group \"{groupName}\"?\n\n" +
-                $"Its {members} repo(s) stay in AgentControl's list, ungrouped. This only changes how AgentControl " +
-                "lists them - nothing on disk or in any repository is changed.")
+                $"{question}?\n\n{removed} This only removes them from AgentControl - nothing " +
+                "on disk or in any repository is deleted.")
             .ShowDialog<bool>(this);
 
         if (confirmed)
         {
             // Applied at once and saved in the background
-            viewModel.RemoveGroup(groupName);
+            viewModel.RemoveGroupWithContents(groupName);
         }
     }
 

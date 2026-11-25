@@ -4,14 +4,13 @@
 
 `SettingsStore` is verified with unit tests defined in `SettingsStoreTests.cs` and, for the user's own organizing
 choices (a repo's group and card color, the collapsed sections, the group colors and the group order),
-`SettingsStoreOrganizingTests.cs`, and for the user's
-own repo order (the stored sequence, the one-time arrangement of a file without it, a damaged marker),
-`SettingsStoreRepoOrderTests.cs`, and for tolerance of a briefly locked settings file `SettingsStoreLockTests.cs` (the
-file replace and the wait are replaced by test doubles, so no test depends on real timing; one test holds the real
-file open). Every test
-uses a real temporary configuration directory on disk, so load/save round-tripping, the
-no-file-yet default case, and directory-creation-on-save are exercised against genuine
-filesystem state.
+`SettingsStoreOrganizingTests.cs`, and for the hierarchy of nested groups (`GroupParents`)
+`SettingsStoreGroupHierarchyTests.cs`, and for the user's own repo order (the stored sequence, the one-time arrangement
+of a file without it, a damaged marker), `SettingsStoreRepoOrderTests.cs`, and for tolerance of a briefly locked
+settings file `SettingsStoreLockTests.cs` (the file replace and the wait are replaced by test doubles, so no test
+depends on real timing; one test holds the real file open). Every test uses a real temporary configuration directory on
+disk, so load/save round-tripping, the no-file-yet default case, and directory-creation-on-save are exercised against
+genuine filesystem state.
 
 #### Test Environment
 
@@ -35,8 +34,12 @@ N/A - standard test environment.
   `RepoGroupName` unit), and a card color name that is not a known color reads as the automatic color and is not
   saved back.
 - The group colors and the group order round-trip; a file without them loads with none; damaged entries, unknown
-  colors, built-in section names and entries of groups no repo is in are dropped without failing the load and are not
-  saved back.
+  colors, built-in section names and entries of groups no repo is in (and that are not in the hierarchy) are dropped
+  without failing the load and are not saved back.
+- The group hierarchy round-trips; a file without it loads with every group top level; a damaged one (wrong types,
+  unknown, self or cyclic parents, built-in section names) is repaired without failing the load and the load does not
+  rewrite the file (the repair is what a later save writes, and saving and loading again changes nothing); a group in
+  the hierarchy survives with no repo in it.
 - The theme round-trips by name, a settings file without a theme loads as the system default, and an unknown or
   invalid theme value reads as the system default without failing the load.
 - A save leaves only the settings file, holding the latest content.
@@ -208,11 +211,45 @@ in the file after the loaded settings are saved. This scenario is tested by
 `SettingsStore_Load_UnknownGroupColor_IsDroppedAndNotSavedBack`, covering
 `AgentControl-SettingsStore-InvalidGroupColorsAndOrderRepaired`.
 
-**SettingsStore_GroupColorsAndOrder_StaleEntriesAreDropped**: The color and the position of a group no repo is in, and
-of a built-in section's name, are dropped on load, while those of a group whose only repo is a favorite are kept (a
-favorite still counts as a member of its group). This scenario is tested by
+**SettingsStore_GroupColorsAndOrder_StaleEntriesAreDropped**: The color and the position of a group no repo is in and
+that is not part of the group hierarchy, and of a built-in section's name, are dropped on load, while those of a group
+whose only repo is a favorite are kept (a favorite still counts as a member of its group). This scenario is tested by
 `SettingsStore_Load_ColorAndOrderOfGroupWithoutRepos_AreDropped`, covering
 `AgentControl-SettingsStore-StaleGroupSettingsDropped`.
+
+**SettingsStore_GroupParents_RoundTripAndDefaults**: Tested by `SettingsStoreGroupHierarchyTests.cs` (temporary
+configuration directories, no UI). A hierarchy that puts one group inside a registered group with no repo survives a
+save and a load and is found by group name in another letter case; a file written before groups nested loads with an
+empty hierarchy, every group top level in its stored order, and saving it writes an empty hierarchy. This scenario is
+tested by `SettingsStore_SaveThenLoad_GroupParents_RoundTrip` and
+`SettingsStore_Load_FileWithoutGroupParents_ReadsEveryGroupAsTopLevel`, covering
+`AgentControl-SettingsStore-GroupParents` and `AgentControl-SettingsStore-GroupParentsDefaults`.
+
+**SettingsStore_GroupParents_DamagedValuesAreRepaired**: Parents that name an unknown group, a group that is its own
+parent or form a cycle load without failing, the cycle cut at the group that sorts first, and the load itself does not
+rewrite the file (`SettingsStore_Load_DamagedHierarchy_DoesNotRewriteTheFile`: the file is byte-for-byte and in its
+write time as it was; only the one-time seeding of the repo order of a file that does not mark it yet writes at
+load); a save of the repaired settings is what writes the repair; entries of the built-in section names or blank names
+are dropped and a built-in section as a parent means top level; a hierarchy that is null, a number, a string or an
+array reads as empty, and one with members that are numbers, arrays or objects keeps only the usable entries, the
+setting after it still being read; a hierarchy in another letter case is spelled like the groups. Six damaged shapes -
+a cycle of two, a cycle with a tail, a cycle whose names differ in letter case, duplicate keys in other letter case with
+different parents, a parent naming a group no repo is in and one that a repo spells in another letter case - are each
+repaired so that no group is lost and a second save, load and save writes the same text
+(`SettingsStore_Load_DamagedHierarchyShapes_AreRepairedAndAFurtherLoadSaveIsAFixedPoint`). This scenario is tested by
+`SettingsStore_Load_UnknownSelfAndCyclicParents_AreRepairedOnLoad`,
+`SettingsStore_Load_DamagedHierarchy_DoesNotRewriteTheFile`,
+`SettingsStore_Load_DamagedHierarchyShapes_AreRepairedAndAFurtherLoadSaveIsAFixedPoint`,
+`SettingsStore_Load_ReservedAndBlankNamesInGroupParents_AreDropped`,
+`SettingsStore_Load_DamagedGroupParents_KeepsOnlyUsableEntries` and
+`SettingsStore_Load_GroupParentsInOtherLetterCase_AreSpelledLikeTheGroups`, covering
+`AgentControl-SettingsStore-InvalidGroupParentsRepaired`.
+
+**SettingsStore_GroupParents_RegisteredGroupSurvivesWithoutRepos**: A group that is a key of the hierarchy with no repo
+in it still exists after a load, with its color and its place in the order and with its parent registered too, while a
+group that is neither in the hierarchy nor has a repo loses its color and place. This scenario is tested by
+`SettingsStore_Load_RegisteredGroupWithoutRepos_SurvivesButUnregisteredIsDropped`, covering
+`AgentControl-SettingsStore-RegisteredGroupKept`.
 
 **SettingsStore_RepoOrder_RoundTripsInTheStoredSequence**: Tested by `SettingsStoreRepoOrderTests.cs` (temporary
 configuration directories, no UI). Three repos whose sequence differs from favorites-first and from the launch order

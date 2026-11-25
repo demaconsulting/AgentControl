@@ -4,32 +4,33 @@
 
 `MainWindowViewModel` is verified with unit tests defined in `MainWindowViewModelTests.cs` (including adding one folder
 or several and the Git-repository check), `RepoGroupingTests.cs` (sections, collapse, filter, rename and removal of
-groups, group colors), `RepoOrderingTests.cs` (the user's own order: stability, new repos, the legacy seed, Move, drag
-and drop, filtering, persistence, and the order of the groups), `MainWindowViewModelPersistenceTests.cs` (every change
-the user makes when the settings file cannot be written, including the Retry/Discard question of a background add) and
-`MainWindowViewModelRecheckTests.cs` (the periodic upgrade re-check, on a fake clock). The background add and the
-background card refresh after a settings save are verified through the view model's two constructor seams rather than
-timing: `backgroundWork` takes a `GatedBackgroundWorkRunner` (a test helper that counts every piece of work and holds it
-until the test releases it), so a test asserts what holds while the folders are still being checked - the add has
-returned to its caller, nothing is added, the global progress shows the count - and `saveSettings` takes a delegate that
-counts saves, can hold them at a gate (or one write at a `TaskCompletionSource` of its own, released to succeed or to
-fail), records every write's start and end in order, and can fail on demand, so "one save per batch", Cancel, Retry,
-Discard, a change made while a save is held and the order of the close's write are deterministic. Every save runs
-through the view model's background settings writer
-on a worker thread, so a test that reads the settings file after a change first awaits `FlushSettingsAsync` (which
-writes what is waiting and completes when the writes have ended), or, after a close that did not wait,
-`CloseSettingsWrite`, and the persistence tests create their view model with
-no synchronization context current, so a failed background write is reported before that flush completes; two of them
-use a `FakeTimeProvider` so a change stays waiting until the test flushes. Tests that apply settings or add in the
-background await `PendingRefresh`, the apply's task or the add's task before asserting. Each test constructs a real
-`MainWindowViewModel` against a unique temporary configuration directory (via `SettingsStore`) and unique temporary repo
-directories, so tests are hermetic and can run in parallel with each other, subject to the `RealProcess` xUnit
-collection (which disables parallelization) since constructing a view model with recent repos starts background git
-reads through the shared refresh queue, which spawn real git subprocesses via `GitStub` or the system git executable.
-The temporary repo folders that tests add are made the top folder of a Git repository as far as the add is concerned by
-a `.git` folder whose `HEAD` names a branch (`ref: refs/heads/main`), so the real `GitClient.IsRepositoryRoot` accepts
-them and the branch is read without starting git; the tests of the Git check create folders without `.git`, with a
-`.git` file, and subfolders. No Avalonia `Window` is constructed; only the view-model class itself is under test.
+groups, group colors), `RepoGroupTreeTests.cs` (nested groups: the tree listing, creating, moving, dropping, renaming
+and removing a group inside another), `RepoOrderingTests.cs` (the user's own order: stability, new repos, the legacy
+seed, Move, drag and drop, filtering, persistence, and the order of the groups),
+`MainWindowViewModelPersistenceTests.cs` (every change the user makes when the settings file cannot be written,
+including the Retry/Discard question of a background add) and `MainWindowViewModelRecheckTests.cs` (the periodic upgrade
+re-check, on a fake clock). The background add and the background card refresh after a settings save are verified
+through the view model's two constructor seams rather than timing: `backgroundWork` takes a `GatedBackgroundWorkRunner`
+(a test helper that counts every piece of work and holds it until the test releases it), so a test asserts what holds
+while the folders are still being checked - the add has returned to its caller, nothing is added, the global progress
+shows the count - and `saveSettings` takes a delegate that counts saves, can hold them at a gate (or one write at a
+`TaskCompletionSource` of its own, released to succeed or to fail), records every write's start and end in order, and
+can fail on demand, so "one save per batch", Cancel, Retry, Discard, a change made while a save is held and the order of
+the close's write are deterministic. Every save runs through the view model's background settings writer on a worker
+thread, so a test that reads the settings file after a change first awaits `FlushSettingsAsync` (which writes what is
+waiting and completes when the writes have ended), or, after a close that did not wait, `CloseSettingsWrite`, and the
+persistence tests create their view model with no synchronization context current, so a failed background write is
+reported before that flush completes; two of them use a `FakeTimeProvider` so a change stays waiting until the test
+flushes. Tests that apply settings or add in the background await `PendingRefresh`, the apply's task or the add's task
+before asserting. Each test constructs a real `MainWindowViewModel` against a unique temporary configuration directory
+(via `SettingsStore`) and unique temporary repo directories, so tests are hermetic and can run in parallel with each
+other, subject to the `RealProcess` xUnit collection (which disables parallelization) since constructing a view model
+with recent repos starts background git reads through the shared refresh queue, which spawn real git subprocesses via
+`GitStub` or the system git executable. The temporary repo folders that tests add are made the top folder of a Git
+repository as far as the add is concerned by a `.git` folder whose `HEAD` names a branch (`ref: refs/heads/main`), so
+the real `GitClient.IsRepositoryRoot` accepts them and the branch is read without starting git; the tests of the Git
+check create folders without `.git`, with a `.git` file, and subfolders. No Avalonia `Window` is constructed; only the
+view-model class itself is under test.
 
 #### Test Environment
 
@@ -86,6 +87,10 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
 - Groups move up and down and are dropped before or after another group, the full order of the groups is stored and
   read by the next start, and a move or drop that does not apply (an end, a built-in section, a group without a
   section, the group itself, while the filter has text) is refused with its reason, changing nothing.
+- A group can be moved into another group, or to the top level, as the last subgroup, without dragging; only valid
+  targets are offered, and a move that does not apply is refused with its reason, changing nothing.
+- Several cards can be moved into a group, or out of their groups, in one saved change that changes only their
+  groups, with the same name rules as one card.
 - The group-name prompt validates as the user types and completes exactly once.
 - Every change the user makes (favorite, group, card color, group color, group order, recorded launch, collapse, group
   rename and removal,
@@ -379,6 +384,126 @@ while the filter has text, each with its reason, and the headers offer the moves
 (`MainWindowViewModel_GetGroupMoveDisabledReason_EndsBuiltInSectionsAndFilter`, covering
 `AgentControl-MainWindowViewModel-MoveGroupAvailability`).
 
+**MainWindowViewModel_MoveGroupInto_IntoAndOutOfGroupsAsLastChildAndSavesOnce**: Tested by `RepoGroupTreeTests.cs`.
+The groups offered for moving a group into are every group except the group itself, its descendants, the group it is
+inside already, *Favorites*, *Ungrouped* and names that are no group, in tree order
+(`MainWindowViewModel_GetGroupMoveIntoTargets_ExcludesSelfDescendantsCurrentParentAndBuiltIns`, covering
+`AgentControl-MainWindowViewModel-GroupMoveIntoTargets`). Moving Home into Alpha makes it Alpha's subgroup (listed
+before Alpha's own repo), moving it to the top level makes it the last top-level group, moving it into Client makes it
+the last of Client's subgroups, a subgroup with its own subgroup moves as a whole, and the stored hierarchy and order
+read back from the file hold the result
+(`MainWindowViewModel_MoveGroupInto_IntoAndOutOfGroupsAsLastChildAndSavesOnce`, covering
+`AgentControl-MainWindowViewModel-GroupMoveInto`). A move into the group itself or one of its descendants, into the
+group it is inside already, to the top level for a top-level group, of or into a group that does not exist or a
+built-in section, and any move while the filter has text, are refused and change nothing, with the reasons for the
+disabled item for *Favorites*, an unknown group and the filter
+(`MainWindowViewModel_MoveGroupInto_RefusedWhileFilteringOrForLoop`, covering `-GroupMoveInto`); a top-level group with
+no group to go into has the "nowhere to go" reason and a nested group has none, because it can go to the top level
+(`MainWindowViewModel_GetGroupMoveIntoDisabledReason_OnlyGroupHasNowhereToGo`, covering `-GroupMoveInto`).
+
+**MainWindowViewModel_SortGroupByName_SortsDirectReposOfOneGroupByName**: Tested by `RepoGroupSortTests.cs`. Sorting a
+group puts its direct repos in name order ignoring letter case, in the places its repos had in the stored list, so repos
+of other groups and ungrouped repos between them do not move, and the new order is the user's own
+(`MainWindowViewModel_SortGroupByName_SortsDirectReposIntoTheirOwnSlots`); the repos of a subgroup and the group's
+favorites keep their places and repos with the same name keep their order
+(`MainWindowViewModel_SortGroupByName_LeavesSubgroupsFavoritesAndEqualNamesAlone`); a name that starts with an A with an
+umlaut sorts between `alpha` and `Zeta` for the culture `en-US` and after `Zeta` for `sv-SE`
+(`MainWindowViewModel_SortGroupByName_FollowsTheCurrentCulture`, run for both); and a view model started from the saved
+settings has the sorted order (`MainWindowViewModel_SortGroupByName_SavesTheNewOrder`). These cover
+`AgentControl-MainWindowViewModel-GroupSortByName`. A group with fewer than two repos of its own (a favorite and a
+subgroup's repos do not count), a group in order already, *Favorites*, *Ungrouped* and an unknown group are refused,
+each with its reason, and change nothing
+(`MainWindowViewModel_SortGroupByName_NothingToSort_ExplainsAndChangesNothing`); an empty, blank or unknown name is
+refused with the "does not exist" reason, does not sort the ungrouped repos and saves nothing
+(`MainWindowViewModel_SortGroupByName_UnknownOrEmptyGroup_IsRefusedAndSavesNothing`); while the filter has text sorting
+is refused with the filter explanation and is available again after it is cleared
+(`MainWindowViewModel_SortGroupByName_WhileFiltering_IsRefusedUntilFilterCleared`); and the group header's command
+follows that availability, sorts the group when executed and then is unavailable
+(`MainWindowViewModel_GroupHeaderSortCommand_FollowsAvailabilityAndSorts`). These cover
+`AgentControl-MainWindowViewModel-GroupSortAvailability`.
+
+**MainWindowViewModel_RemoveGroupWithContents_DeletesTheSubtreeOnly**: Tested by `RepoGroupDeleteTests.cs`. Deleting a
+group with its contents removes the group, every group inside it and every repo in them - a favorite too - from the list
+and from the saved repo entries, forgets the color, collapsed state, order and hierarchy of every deleted group, and
+leaves the group next to it with its repo, its color and its collapsed state
+(`MainWindowViewModel_RemoveGroupWithContents_RemovesSubtreeReposAndForgetsItsSettings`); a view model started from the
+saved settings lists only what is left and every repo folder, with a file in it, is still on disk
+(`MainWindowViewModel_RemoveGroupWithContents_SavesAndLeavesFoldersOnDisk`); a removed card no longer raises its remove
+request, so it is stopped like a card removed alone
+(`MainWindowViewModel_RemoveGroupWithContents_RetiresTheRemovedCards`); and a group with nothing in it is deleted and
+nothing else changes (`MainWindowViewModel_RemoveGroupWithContents_EmptyGroup_IsDeletedAndNothingElseChanges`). These
+cover `AgentControl-MainWindowViewModel-GroupRemoveWithContents`. Favorites, Ungrouped and a group that does not exist
+are refused, with or without contents, and nothing changes
+(`MainWindowViewModel_RemoveGroupWithContents_BuiltInOrUnknown_IsRefused`, covering
+`AgentControl-MainWindowViewModel-GroupRemoveWithContentsRefusals`). What is in a group is counted for the
+confirmation - its repos directly and how many of those are favorites, its repos in all and how many of those are
+favorites, its subgroups directly and in all, and its name as
+stored whatever letter case was asked for (`MainWindowViewModel_GetGroupContents_CountsReposAndSubgroups`, covering
+`AgentControl-MainWindowViewModel-GroupContentsCounted`). The header's delete commands follow whether the group has
+contents and raise the requests of the view model with the group's name
+(`MainWindowViewModel_GroupHeader_DeleteCommands_FollowContentsAndRaiseRequests`, covering
+`AgentControl-MainWindowViewModel-GroupHeaderRequests`). Deleting a group but keeping its contents makes the repos of a
+top-level group ungrouped at the end of Ungrouped, keeps its favorite where it was among the favorites and forgets the
+group's settings (`MainWindowViewModel_RemoveGroup_TopLevel_MovesReposToTheEndOfUngroupedAndForgetsTheGroup`), and for a
+nested group moves the repos into the parent and puts its subgroups, in their own order, into the group's place
+(`MainWindowViewModel_RemoveGroup_Nested_KeepsReposInTheParentAndSubgroupsTakeTheGroupsPlace`, covering
+`AgentControl-MainWindowViewModel-GroupRemove` and `-NestedGroupRemoveKeepsContents`); a group that was never dragged
+hands its subgroups its displayed place, nested and at the top level
+(`MainWindowViewModel_RemoveGroup_NeverDraggedGroup_SubgroupsTakeItsDisplayedPlace`, covering
+`-NestedGroupRemoveKeepsContents`); the repos listed directly under the group move as one block behind the repos its
+parent lists directly, whatever sits between them in the stored order
+(`MainWindowViewModel_RemoveGroup_ReposGoAsOneBlockToTheEndOfTheParentsOwnRepos`), its favorite stays in its place in
+Favorites and is not part of the block (`MainWindowViewModel_RemoveGroup_FavoritesOfTheGroupKeepTheirPlaceInFavorites`),
+and a delete whose repos already sit at the end leaves the repo order and its "chosen by the user" marker as they were
+(`MainWindowViewModel_RemoveGroup_OrderAlreadyAtEnd_DoesNotMarkUserOrder`) - covering
+`AgentControl-MainWindowViewModel-GroupRemoveRepoBlock`.
+
+**MainWindowViewModel_RepoSelection_OrderPruneAndDragCards**: Tested by `RepoMultiSelectTests.cs`, with a list that has
+a favorite, the group Client with two subgroups (Alpha and Project) and a repo of its own, the group Home and two
+ungrouped repos. Cards given in any order, one of them twice, are selected in the order the list shows them: the
+favorite, the subgroup Alpha's repo, then Client's own repo, then the ungrouped one
+(`MainWindowViewModel_SetSelectedCards_KeepsVisualOrderAcrossNestedGroups`, covering
+`AgentControl-MainWindowViewModel-RepoSelection`). Collapsing Client takes the repo of its subgroup out of the selection
+and leaves the others, a card that is not shown cannot be selected, and a filter that hides the last selected card
+empties the selection (`MainWindowViewModel_SelectedCards_CollapseAndFilterPruneTheSelection`, covering
+`AgentControl-MainWindowViewModel-RepoSelectionPruned`). The cards a drag moves are the whole selection when the grabbed
+card is selected and the grabbed card alone when it is not
+(`MainWindowViewModel_GetDragCards_SelectedCardMovesTheSelectionUnselectedCardMovesAlone`, covering
+`AgentControl-MainWindowViewModel-DragCards`).
+
+**MainWindowViewModel_DropCards_MovesTheSelectionInOneChange**: Tested by `RepoMultiSelectTests.cs`. Dropping a
+favorite, a repo of Home and an ungrouped repo on the header of the nested group Project puts all three at the end of
+Project in the order the list showed them, none is a favorite and all are in Project, they stay selected, and the
+settings file read back holds the same order and groups - the saved order matches the list - from the one change
+(`MainWindowViewModel_DropCards_OnNestedGroupHeader_MovesAllInVisualOrderAndSavesOnce`, covering
+`AgentControl-MainWindowViewModel-DropCards`). Dropping two ungrouped repos before a third puts them together before it
+in list order, and a drop next to one of the dragged repos is refused and changes nothing
+(`MainWindowViewModel_DropCards_OnCard_InsertsTogetherAndRefusesAnchorInTheSet`, covering `-DropCards` and
+`-DropCardsRefused`). Dropping a group repo and an ungrouped repo on the Favorites header makes both favorites (the
+group repo keeps its group and shows its group chip), and dropping two favorites on the Ungrouped header makes them
+non-favorites with no group, after the repos already there
+(`MainWindowViewModel_DropCards_OnFavoritesAndUngrouped_ChangeEveryCard`, covering `-DropCards`). In a flat list a drop
+into the other tier is refused as a whole, and with filter text nothing can be dropped and an empty set of cards is
+refused (`MainWindowViewModel_DropCards_FilterOrFlatListOtherTier_IsRefused`, covering `-DropCardsRefused`).
+
+**MainWindowViewModel_MoveCardsToGroup_MovesTheSelectionInOneChange**: Tested by `RepoMultiSelectTests.cs`. Moving an
+ungrouped repo, a favorite of Home and a repo of Home to the group `project` (another letter case) puts all three in
+Project under its own spelling, the favorite stays a favorite, the stored order of the repos is as before, the cards
+stay selected, and the settings file read back holds the same groups, order and favorite flag from the one change;
+taking them out of their groups clears the groups and leaves the favorite; a new name with extra white space makes a
+group under the cleaned name, and the same name in another letter case changes nothing
+(`MainWindowViewModel_MoveCardsToGroup_MovesAllSelectedKeepsFavoritesAndOrderAndSavesOnce`, covering
+`AgentControl-MainWindowViewModel-MoveCardsToGroup`). The names *Favorites* and *ungrouped* (any letter case), a name of
+41 characters, no card, and a card that is not in the list are refused and change nothing, and a null list of cards
+throws (`MainWindowViewModel_MoveCardsToGroup_InvalidNameChangesNothing`, covering `-MoveCardsToGroup`).
+
+**MainWindowViewModel_RemoveRepos_RemovesOnlyTheGivenCardsAndSaves**: Tested by `RepoMultiSelectTests.cs`. Removing a
+repo of a group, a favorite and an ungrouped repo (one of them given twice) removes exactly those three cards, reports
+3, leaves the others in their order, saves the same list, leaves the card that was selected and not removed as the only
+selected card, stops the removed cards (their remove command raises no request), leaves every repo folder on disk, and
+removing nothing returns 0 (`MainWindowViewModel_RemoveRepos_RemovesOnlyTheGivenCardsAndSaves`, covering
+`AgentControl-MainWindowViewModel-RemoveRepos`).
+
 **MainWindowViewModel_DropGroup_BeforeOrAfterAnotherGroup**: Dropping a group header before or after another group's
 header puts the group there, a collapsed group stays collapsed and the order is saved
 (`MainWindowViewModel_DropGroup_BeforeOrAfterAnotherGroup_Reorders`); a drop on the group's own header, on *Favorites*
@@ -583,7 +708,8 @@ five requirements) and `MainWindowViewModel_FilterText_NoMatch_ShowsNothing` (co
 and the collapsed entry and is persisted (`AgentControl-MainWindowViewModel-GroupManagement`), accepts a change of
 letter case only, and is refused for an unknown group, a blank, reserved or overlong name and another group's name
 (`AgentControl-MainWindowViewModel-GroupRenameRules`); both are tested by
-`MainWindowViewModel_RenameGroup_MovesMembersAndRefusesBadNames`. Removing a group leaves its repos ungrouped and
+`MainWindowViewModel_RenameGroup_MovesMembersAndRefusesBadNames`. Removing a group moves its repos out of it (ungrouped
+for a top-level group) and
 forgets its collapsed entry (`MainWindowViewModel_RemoveGroup_LeavesMembersUngrouped`, covering
 `AgentControl-MainWindowViewModel-GroupRemove`). A header's rename and remove commands raise the view model's requests
 with the group's name and change nothing by themselves
@@ -617,8 +743,60 @@ name starts without them (`MainWindowViewModel_RemoveGroup_ForgetsColorAndPositi
 leaves it forgets both like a removed group (`MainWindowViewModel_LastRepoLeavesGroup_ForgetsColorAndPosition`). These
 cover `AgentControl-MainWindowViewModel-GroupSettingsFollowRenameAndRemove`. Applying new settings as the Settings
 window builds them keeps the group colors and the group order
-(`MainWindowViewModel_ApplySettings_KeepsGroupColorsAndOrder`, covering
+(`MainWindowViewModel_ApplySettings_KeepsGroupColorsAndOrder`, and the group hierarchy
+(`MainWindowViewModel_ApplySettingsAsync_GroupParents_KeptInMemoryAndWritten`), covering
 `AgentControl-MainWindowViewModel-GroupSettingsKeptOnApplySettings`).
+
+**MainWindowViewModel_NestedGroups_ListedAsATree**: Tested by `RepoGroupTreeTests.cs` (real view models over temporary
+repo folders, no window). A group with two subgroups, a repo of its own and a repo in each subgroup is listed depth
+first - the subgroups in alphabetical order before the group's own repo - with the header of the top group counting the
+three repos of its subtree and naming the one directly in it, each header and card knowing its depth and parent
+(`MainWindowViewModel_DisplayedItems_NestedGroups_ListedDepthFirstSubgroupsBeforeOwnRepos`); collapsing the top group
+hides its whole subtree, and a filter for a repo deep in the tree lists only that repo under the headers of the groups
+that hold it, with the count of matches
+(`MainWindowViewModel_DisplayedItems_CollapsedGroup_HidesSubtreeAndFilterShowsAncestors`) - covering
+`AgentControl-MainWindowViewModel-NestedGroupTree`. With no hierarchy in the settings the groups are shown as
+before: every header top level (depth 0, no parent), the same sections and counts, no hierarchy stored; moving a group
+among top-level groups by Move or by a drop does not create a hierarchy
+(`MainWindowViewModel_DisplayedItems_NoHierarchy_FlatGroupsShownAsBefore` and
+`MainWindowViewModel_MoveGroup_FlatGroups_DoesNotCreateAHierarchy`, covering
+`AgentControl-MainWindowViewModel-NestedGroupFlatListUnchanged`). A group created inside another is listed with a count
+of 0, stays when a repo is moved into it and out again, is hidden while a filter has text and is gone once removed
+(`MainWindowViewModel_RegisteredEmptyGroup_StaysUntilRemoved`), and a nested group whose only repo is a favorite is
+listed with no repos while the favorite is under Favorites with its chip
+(`MainWindowViewModel_DisplayedItems_NestedGroupWithOnlyFavorite_StaysListedWithNoRepos`) - covering
+`AgentControl-MainWindowViewModel-NestedGroupEmptyListed`. The names the card menu offers include the empty and nested
+groups, and a repo can be moved into an empty group by a name in another letter case
+(`MainWindowViewModel_GroupNames_IncludeEmptyAndNestedGroups`, covering
+`AgentControl-MainWindowViewModel-GroupNamesIncludeEmptyGroups`).
+
+**MainWindowViewModel_CreateSubgroup_AddsRegisteredEmptyGroup**: Creating groups inside a nested group and inside an
+ordinary group lists them with no repos, expands the collapsed groups they are inside, and, after a flush, the settings
+file holds the new groups and every group they are inside as registered
+(`MainWindowViewModel_CreateSubgroup_ListsEmptyGroupRegistersAncestorsAndSaves`); a name that any group already has (in
+another letter case, or a nested group's), Favorites, Ungrouped, a blank name, a name over the limit and a parent that
+does not exist or is a built-in section are refused and change nothing
+(`MainWindowViewModel_CreateSubgroup_RefusesTakenInvalidAndUnknownParent`) - covering
+`AgentControl-MainWindowViewModel-NestedGroupCreate`.
+
+**MainWindowViewModel_NestedGroups_ReorderDropRenameAndRemove**: Move up and Move down swap a nested group only with
+the other groups inside its parent, the reasons for a disabled move name the parent group for a nested group and keep
+the top-level wording, and Move leaves the other levels alone
+(`MainWindowViewModel_MoveGroup_NestedGroups_SwapWithinTheirParent`, covering
+`AgentControl-MainWindowViewModel-NestedGroupReorder`). Dropping a header inside another group makes it that group's
+last subgroup, before a nested group puts it first in that group, and after a group puts it next to that group in the
+group's parent (taking it out of the group it was in); one save holds the hierarchy and the order
+(`MainWindowViewModel_DropGroup_NestsReordersAndLeavesTheOldParent`); dropping a group on itself, inside or next to
+one of its own subgroups, on Favorites or Ungrouped, on an unknown group or while the filter has text is refused and
+changes nothing (`MainWindowViewModel_DropGroup_RefusesLoopsBuiltInSectionsAndFilter`) - covering
+`AgentControl-MainWindowViewModel-NestedGroupDrop`. Renaming a group keeps it where it was in the hierarchy as a group
+and as a parent, and its color (`MainWindowViewModel_RenameGroup_KeepsTheHierarchy`, covering
+`AgentControl-MainWindowViewModel-NestedGroupRename`). Removing a nested group moves its repo to the group it was
+inside (behind that group's own repos), and removing the top-level group makes its repos ungrouped (behind the
+ungrouped repos there already were) and its subgroup a top-level group, with the
+stored hierarchy and order forgetting the removed groups
+(`MainWindowViewModel_RemoveGroup_NestedGroups_KeepsRepoAndSubgroupsInTheParent`, covering
+`AgentControl-MainWindowViewModel-NestedGroupRemoveKeepsContents`).
 
 **MainWindowViewModel_ChangesThatSave_AreAppliedAndWritten**: A favorite, a group and a card color chosen on a card
 are applied and, after a flush, read back from the settings file in the stored (canonical) spelling, and no failure is

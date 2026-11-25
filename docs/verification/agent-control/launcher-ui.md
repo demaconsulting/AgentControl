@@ -28,7 +28,9 @@ session). The windows themselves are exercised by headless Avalonia tests
 and key input, the "Check again" menu item, the up-to-date check mark, the narrow card, the Settings sections, the
 keyboard behavior of the dialogs, the About version row, the order of the AGENTS.md question and the release
 notes and the keep-or-update and launch-anyway questions about a repo's agent files,
-`RepoGroupWindowTests.cs` for the group headers, the card menu's
+`RepoGroupWindowTests.cs` for the group headers (including that a window whose data context is cleared and assigned
+again handles each header request once, and stops handling a view model that another one replaced:
+`MainWindow_DataContextAssignedAgain_HandlesEachRequestOnceAndOnlyForTheCurrentViewModel`), the card menu's
 "Move to group" submenu, the group-name prompt, the card and group color palette pop-ups (and the shared
 `ColorPalettePanel`), and adding several folders from the picker,
 `RepoReorderWindowTests.cs` for the user's own repo order (cards that stay put, the card menu's Reorder submenu, drag
@@ -173,7 +175,8 @@ refresh queue, which spawn real subprocesses via `GitStub` or the system git exe
   the group header offer moving, renaming and removing groups, a chosen card color is shown on the tile only, and
   the letters on every palette color have at least 4.5:1 contrast in both themes.
 - A theme chosen in Settings takes effect on the running application and every text color of the shared styles has at
-  least 4.5:1 contrast, and the status bars and the favorite star at least 3:1, in both themes; the contrast of every
+  least 4.5:1 contrast, and the status bars and the favorite star at least 3:1, in both themes (on the normal, the
+  hovered and the selected card surface); the contrast of every
   state of every control and the drawn keyboard focus ring are not asserted (the focus-visible state of the focused
   control is).
 - A change the user makes is applied only when it was saved; when the save fails nothing changes and the user is told,
@@ -214,6 +217,9 @@ refresh queue, which spawn real subprocesses via `GitStub` or the system git exe
 - The groups are listed in the user's order (alphabetically until ordered) between Favorites and Ungrouped, are moved
   with the header menu's Move items (disabled with a reason at the ends and while filtering) and by dragging a header
   above or below another group's header (refused elsewhere and while filtering), and the order survives a restart.
+- Nesting a group, and bringing it back to the top level, can be done from the header menu (Move into group, Move to
+  top level) as well as by dragging, and moving the selected cards to a group can be done from the card menu as well as
+  by dragging; the menu entries say how many cards they move and are disabled with a reason where they do not apply.
 - The picker accepts several folders and folders dropped from the file manager are added (into the group dropped on,
   otherwise ungrouped, with copy feedback that is cleared); only top folders of Git repositories are added, and one
   message says which folders were not added and why.
@@ -496,6 +502,15 @@ disabled while the filter has text (`MainWindow_HeaderMenu_MoveUpDown_ReorderGro
 holds the items in the documented order (`MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator`). These
 cover `AgentControl-LauncherUI-GroupMoveMenu` (children `AgentControl-MainWindowViewModel-MoveGroup`,
 `-MoveGroupAvailability` and `AgentControl-RepoGroupHeaderViewModel-MoveRequests`).
+
+**LauncherUI_GroupSortByName_MenuSortsDirectReposAndExplainsWhenUnavailable**: A group header's menu has a **Sort by
+name** item with a tooltip; choosing it on a group whose repos are out of order lists them in name order, and the item
+is then disabled with a tooltip saying the repos are already sorted
+(`MainWindow_HeaderMenu_SortByName_SortsGroupThenIsUnavailable`); the menu holds the item after Move into group
+(`MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator`). These cover `AgentControl-LauncherUI-GroupSortByName`
+(children `AgentControl-MainWindowViewModel-GroupSortByName`, `-GroupSortAvailability` and
+`AgentControl-RepoGroupHeaderViewModel-SortByNameRequest`). Which repos are sorted, how names are compared and when
+sorting is refused are verified in the unit tests of `MainWindowViewModel` (`RepoGroupSortTests.cs`).
 
 **LauncherUI_GroupDragReorder_HeaderDraggedAboveOrBelowAnotherGroup**: A group header's toggle is pressed and moved far
 enough to start a drag through the window's `DragStarter` seam: the section is not collapsed or expanded by the press,
@@ -1200,8 +1215,126 @@ name. The requirements are split by behavior; each is covered by the tests that 
   `MainWindow_NewGroupMenuItem_PromptsForNameAndCreatesGroup`.
 - `AgentControl-LauncherUI-GroupNamePrompt` (the prompt validates the typed name and can be canceled):
   `GroupNameWindow_ValidatesWhileTyping_AndAccepts` and `MainWindow_NewGroupPrompt_Canceled_ChangesNothing`.
-- `AgentControl-LauncherUI-RepoGroupManagement` (rename and remove from the header):
-  `MainWindow_HeaderMenu_RenameAndRemoveGroup`.
+- `AgentControl-LauncherUI-RepoGroupManagement` (rename from the header):
+  `MainWindow_HeaderMenu_RenameGroup_AsksForTheNameAndRenames` (the prompt starts with the group's name, canceling it
+  changes nothing, accepting renames the group and its repos).
+- `AgentControl-LauncherUI-GroupDeleteKeepContents` (deleting a group but keeping what is in it):
+  `MainWindow_HeaderMenu_RenameAndRemoveGroup` (a flat group is confirmed, declined and confirmed again; its repos are
+  still listed, ungrouped, and no header is left) and
+  `MainWindow_HeaderMenu_DeleteGroupKeepContents_ConfirmationSaysWhereContentsGo`: deleting a group that is inside
+  another asks a question that names the group, says its repos stay in AgentControl's list in the parent group and that
+  nothing on disk changes, and answering Yes moves the repos into the parent.
+  `MainWindow_HeaderMenu_DeleteGroupKeepContents_ConfirmationOmitsZeroParts`: the question for a group with only a
+  subgroup says where the subgroup goes and never "0 repo(s)", and the question for a group with only a repo never says
+  "0 subgroup(s)". `MainWindow_HeaderMenu_DeleteGroupKeepContents_ConfirmationCallsOutFavorites`: for a top-level group,
+  a nested group and a group whose repos are all favorites, the question says how many repos stay ungrouped or in the
+  parent group and that the favorites stay in Favorites, and never reads "0 ".
+  `MainWindow_HeaderMenu_DeleteEmptyGroup_OffersOnlyPlainDelete`: a group with nothing in it offers only **Delete
+  group**, whose question says it has no repos or subgroups.
+- `AgentControl-LauncherUI-GroupDeleteWithContents` (deleting a group together with its repos and subgroups):
+  `MainWindow_HeaderMenu_DeleteGroupWithContents_ConfirmationSaysCountsAndYesDeletesNoKeeps`: the question names the
+  group and says how many repos and subgroups go and that nothing on disk is deleted; answering No leaves the list and
+  the groups as they were; answering Yes leaves only the repo that was in no group, listed without a header, while every
+  repo folder is still on disk. `MainWindow_HeaderMenu_DeleteWithContents_ConfirmationOmitsZeroParts`: the question
+  leaves out the part about repos for a group with only a subgroup and the part about subgroups for a group with only a
+  repo. `MainWindow_HeaderMenu_DeleteEmptyGroup_OffersOnlyPlainDelete`: the item that deletes
+  the contents is hidden for a group with nothing in it and shown for a group with contents.
+  `MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator` holds both items in the documented place and with
+  tooltips. What each deletion changes in the settings (colors, order, collapsed state, hierarchy) is verified in the
+  unit tests of `MainWindowViewModel` (`RepoGroupDeleteTests.cs`).
+- `AgentControl-LauncherUI-NestedGroupTree` (groups containing groups, listed as a tree):
+  `MainWindow_NestedGroups_ListSubgroupsBeforeOwnReposAndCollapseHidesSubtree` (`RepoGroupTreeWindowTests.cs`): a group
+  with two subgroups and a repo of its own is listed with the subgroups first, in order, and its own repo after them,
+  each header's accessible name saying which group it is inside and counting its whole subtree, and collapsing the top
+  group hides its subgroups and their repos, the header saying it is collapsed; and
+  `MainWindow_NestedGroups_RowsAreIndentedByDepth`: a group three levels deep has headers indented by one level more
+  each time (with the unchanged top margin) and a repo is as far in as its group's header. The behaviors of the tree
+  that are
+  observable only in the view-model layer (the same list without a hierarchy, a group created empty, creating, moving,
+  dropping, renaming and removing a group) are covered by the view-model tests of the units that realize them, cited at
+  this level as the subsystem's convention: `RepoGroupTreeTests.cs` for `MainWindowViewModel`
+  (`AgentControl-MainWindowViewModel-NestedGroupTree` through `-NestedGroupRemoveKeepsContents`),
+  `RepoGroupHeaderViewModelTests.cs` and `RepoCardColorTests.cs`.
+- `AgentControl-LauncherUI-NestedGroupCreate` (a group created inside another from its header's menu):
+  `MainWindow_HeaderMenu_NewSubgroup_PromptsAndCreatesGroupInside`: "New subgroup..." opens the prompt titled *New
+  subgroup*; canceled, nothing changes; the name of another group in another letter case is refused (an error, no
+  note that the group would be joined, accept unavailable); a new name creates the group, whose header appears with
+  no repos and the words `inside Project`. `MainWindow_CardMenu_MoveToGroup_ListsEmptyAndNestedGroupsWithPath`: the
+  submenu lists a group with no repo and a nested group, the nested group's tooltip giving its path, and choosing the
+  empty group moves the repo into it.
+- `AgentControl-LauncherUI-GroupMoveInto` (moving a group into another from its header's menu, without dragging):
+  `MainWindow_HeaderMenu_MoveInto_ListsValidTargetsAndMovesGroup`: the "Move into group" submenu of Alpha (inside
+  Client) starts with "Move to top level" and lists the groups Project and Home - not Alpha, not Client, which is its
+  parent (replaced by "Move to top level") - with the path as the tooltip; choosing Home puts Alpha inside Home (its
+  header says `inside Home`, the settings hold the parent). `MainWindow_HeaderMenu_MoveInto_NestedGroupOffersTopLevel`:
+  the item of Client, which has nowhere to go (everything else is inside it), is disabled with that reason as its
+  tooltip and no entries; choosing "Move to top level" for Alpha makes it a top-level group again; while the filter has
+  text the item is   disabled and its tooltip says to clear the filter. The menu holds the item after Move down
+  (`MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator`).
+- `AgentControl-LauncherUI-NestedGroupDrag` (dragging a group header into, out of and among groups):
+  `MainWindow_DragGroupHeader_ThreeZones_NestBeforeAndAfter`: a top-level group is dragged over the middle of another
+  group's header (the header is tinted, no line) and dropped inside it, over the upper third of a nested group's header
+  (the line above it) and dropped before it, and over the lower third of the parent's own header (the line below) and
+  dropped after it, leaving the parent; and `MainWindow_DragGroupHeader_OntoOwnDescendant_IsRefused`: a group dragged
+  over each third of a group inside it shows nothing and the drop changes nothing. In an auto-scroll edge zone the
+  thirds do not apply: `MainWindow_GetGroupDropZone_ThirdsOrHalvesInAutoScrollZone_NestsOnlyOutsideTheZone` checks the
+  pure zone function with exact heights - thirds (before, inside, after) outside the zone, halves (before, after, never
+  inside) in it; `MainWindow_DragGroupHeaderInAutoScrollZone_NeverNestsAndReorders` drops a header over the middle of
+  another's header in the middle of the list (nested, tinted) and then, with the groups collapsed and the list scrolled
+  to its end and to its start (so the pointer's row stays put while the timer ticks), over what would be the middle
+  third of the last and of the first header, in the bottom and top zones - the line is shown (below, above), no row is
+  tinted and the drop reorders instead of nesting; and `MainWindow_DragGroupHeaderAtEdgeOfListThatFits_StillNests`: in a
+  list that fits its viewport the edges are no zones and a drop over the middle of the first header still nests. The
+  windows' held-still drop at the bottom edge is verified end to end in
+  `AgentControl_GroupReorder_DragHeaderHeldStillAtBottomEdge_ScrollsAndDropsBeyondTheFirstView` of the system
+  verification.
+- `AgentControl-LauncherUI-NestedGroupRemembered`: `MainWindow_NestedGroups_TreeSurvivesAWindowRestart`: a group
+  created inside another and a group dropped into it are written; a new window over the saved settings lists the same
+  tree.
+- `AgentControl-LauncherUI-RepoMultiSelect` (selecting several cards; `RepoMultiSelectWindowTests.cs`):
+  `MainWindow_RepoList_CtrlAndShiftClick_SelectCardsOnlyAcrossGroups`: real pointer presses with and without Ctrl and
+  Shift select cards - Ctrl+click adds and removes one, Shift+click selects the range from the last clicked card across
+  a group boundary in the order of the list - and no section header is ever in the selection or selected in the list.
+  `MainWindow_RepoList_CtrlA_SelectsShownCardsOnly`: Ctrl+A selects every card that is shown and no header, and after a
+  group is collapsed the selected rows are the cards that are still shown.
+  `MainWindow_RepoList_PressOnSelectedCard_KeepsSelectionUntilReleaseWithoutDrag`: with three cards selected, a press on
+  one of them leaves the selection as it is, releasing the button without moving reduces it to that card, and a plain
+  click on a card that is not selected selects it alone. The behavior of the plain list that this replaces - the press
+  reduces the selection at once - was confirmed with a spike on Avalonia 12.2.0 (the same presses on a plain
+  multiple-selection list), and the Ctrl+A of the plain list was seen to select the headers too, which is why the
+  window's list is its own type.
+- `AgentControl-LauncherUI-RepoMultiSelectHighlight` (the selected look and what assistive technology sees):
+  `ThemeResources_SelectedCard_IsTintedAndStaysLegibleInLightAndDark` (`ThemeResourceTests.cs`): in the light and the
+  dark theme the selected card's surface is neither the normal card's nor the page's, differs from the card's by at
+  least 5% in luminance ratio, and the chips, secondary button, ghost icon buttons keep AA text contrast on it and the
+  status accents and the favorite star at least 3:1 (the same threshold as on a normal card; the hovered card is
+  checked for the accents and the star in `AppStyles_TextAndGraphicColors_MeetContrastInBothThemes`).
+  `MainWindow_RepoList_SelectedCard_UsesSelectedSurfaceInLightAndDark`: with the theme set to light and to dark a
+  selected card is drawn with the selected surface resource of that theme and an unselected one with the normal card
+  surface. `MainWindow_RepoList_SelectedCards_AreExposedThroughTheRowAndTheAutomationPeers`: the selected rows report
+  they are selected, the automation peer of a selected row answers `IsSelected` true through the selection-item pattern
+  and that of another row false, and the list's peer says several items can be selected.
+- `AgentControl-LauncherUI-RepoMultiDrag` (dragging the selection):
+  `MainWindow_RepoList_DragSelectedCard_CarriesAllSelectedAndDropsThemInTheGroup`: with two cards selected, grabbing one
+  starts a drag whose data holds both repo paths, the grabbed card first; releasing does not reduce the selection;
+  dropping on a group header moves both into the group after its repos, in the order of the list, and they are still
+  selected and shown selected. `MainWindow_RepoList_DragUnselectedCard_MovesOnlyThatCard`: grabbing a card that is not
+  selected carries it alone and selects it alone. `MainWindow_RepoList_DragSelection_DropNextToOwnCard_IsRefused`: over
+  a dragged card's own row no insertion line is shown, and the drop changes nothing.
+- `AgentControl-LauncherUI-RepoMultiRemove` (removing the selection):
+  `MainWindow_RepoList_DeleteKey_ConfirmsWithTheCountAndRemovesTheSelection`: the Delete key with three cards selected
+  asks one question that says `Remove 3 repos` and that nothing on disk is deleted or modified, No changes nothing and
+  keeps the selection, Yes removes exactly those cards; with one card selected the question is that card's.
+  `MainWindow_CardMenu_RemoveOnSelectedCard_RemovesTheWholeSelection`: the item of a card that is one of two selected
+  cards reads `Remove 2 selected repos from list` and removes both after one question, and the item of a card that is
+  not selected reads `Remove from list` and removes that card alone.
+- `AgentControl-LauncherUI-RepoMultiMoveToGroup` (moving the selection to a group without dragging):
+  `MainWindow_CardMenu_MoveToGroupOnSelectedCard_MovesTheWholeSelection`: the "Move to group" item of a card that is one
+  of two selected cards reads `Move 2 selected repos to group`, its group entries say `the 2 selected repos` in their
+  tooltips and no "Remove from group" is offered while none is in a group; choosing the group Work moves both and keeps
+  them selected; "New group..." asks for one name in a prompt that names the 2 selected repos and puts both in the new
+  group; "Remove from group" takes both out; and the item of a card that is not selected reads `Move to group` and
+  moves that card alone.
 - `AgentControl-LauncherUI-RepoGroupCollapse` (collapse and expand from the header):
   `MainWindow_HeaderToggle_CollapsesAndExpandsSection`.
 

@@ -278,6 +278,107 @@ public sealed class RepoGroupWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that a window whose data context is cleared and assigned again handles each request of the
+    ///     view model once (not once per assignment), keeps the list's selection in step, and stops
+    ///     handling a view model that another one replaced.
+    /// </summary>
+    [Fact]
+    public void MainWindow_DataContextAssignedAgain_HandlesEachRequestOnceAndOnlyForTheCurrentViewModel() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, viewModel) = CreateWindow(("a", "Work", false), ("b", "Work", false));
+        MainWindowViewModel? other = null;
+
+        try
+        {
+            var header = viewModel.DisplayedItems.OfType<RepoGroupHeaderViewModel>().Single(item => item.Name == "Work");
+
+            // Act: the same view model is assigned again, then asks to delete the group
+            window.DataContext = null;
+            window.DataContext = viewModel;
+            Dispatcher.UIThread.RunJobs();
+            viewModel.SetSelectedCards(viewModel.RepoCards);
+            var selected = window.FindControl<ListBox>("RepoListBox")!.SelectedItems!.Count;
+            header.RemoveGroupCommand.Execute(null);
+            Dispatcher.UIThread.RunJobs();
+            var questions = window.OwnedWindows.OfType<ConfirmationWindow>().ToList();
+            foreach (var question in questions)
+            {
+                DialogWindowTests.Click(question, "ConfirmationNoButton");
+            }
+
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: one question, and the selection followed
+            Assert.Single(questions);
+            Assert.Equal(2, selected);
+
+            // Act: another view model replaces it, and the old header asks again
+            other = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory());
+            window.DataContext = other;
+            Dispatcher.UIThread.RunJobs();
+            header.RemoveGroupCommand.Execute(null);
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: the window no longer handles the old view model, nor tracks its cards
+            Assert.Empty(window.OwnedWindows.OfType<ConfirmationWindow>());
+            Assert.Equal(0, window.TrackedCardCount);
+        }
+        finally
+        {
+            window.Close();
+            viewModel.Dispose();
+            other?.Dispose();
+        }
+    });
+
+    /// <summary>
+    ///     Test that the header's "..." menu renames a group through the prompt, which starts with the
+    ///     group's own name, and that canceling the prompt changes nothing.
+    /// </summary>
+    [Fact]
+    public void MainWindow_HeaderMenu_RenameGroup_AsksForTheNameAndRenames() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, viewModel) = CreateWindow(("a", "Work", false), ("b", "Work", false));
+
+        try
+        {
+            // Act: Rename group..., canceled
+            var menuButton = window.GetVisualDescendantsOf<Button>("GroupHeaderMenuButton").Single(button => button.IsVisible);
+            var menu = OpenMenu(menuButton);
+            FindMenuItem(menu, "RenameGroupMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+            var prompt = Assert.Single(window.OwnedWindows.OfType<GroupNameWindow>());
+            Assert.Equal("Work", ((GroupNameViewModel)prompt.DataContext!).Text);
+            ((GroupNameViewModel)prompt.DataContext).Cancel();
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert
+            Assert.Equal(["Work"], viewModel.GroupNames);
+
+            // Act: Rename group..., accepted with a new name
+            menu = OpenMenu(window.GetVisualDescendantsOf<Button>("GroupHeaderMenuButton").Single(button => button.IsVisible));
+            FindMenuItem(menu, "RenameGroupMenuItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+            prompt = Assert.Single(window.OwnedWindows.OfType<GroupNameWindow>());
+            ((GroupNameViewModel)prompt.DataContext!).Text = "Office";
+            DialogWindowTests.Click(prompt, "GroupNameAcceptButton");
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert
+            Assert.Equal(["Office"], viewModel.GroupNames);
+            Assert.All(viewModel.RepoCards, card => Assert.Equal("Office", card.GroupName));
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that the header's "..." menu renames a group through the prompt and removes it after a
     ///     confirmation, leaving its repos ungrouped.
     /// </summary>
@@ -340,9 +441,50 @@ public sealed class RepoGroupWindowTests : IDisposable
     });
 
     /// <summary>
-    ///     Test that the header's "..." menu starts with "Add repository..." (with an AutomationId and
-    ///     a tooltip), followed by a separator, the Move up, Move down and Group color items, another
-    ///     separator and then the rename and remove items - each item identified and explained.
+    ///     Test that the header's "..." menu sorts the group's repos by name, and that the "Sort by name"
+    ///     item is then unavailable, explaining in its tooltip that the repos are already sorted.
+    /// </summary>
+    [Fact]
+    public void MainWindow_HeaderMenu_SortByName_SortsGroupThenIsUnavailable() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange
+        var (window, viewModel) = CreateWindow(("b", "Work", false), ("c", "Work", false), ("a", "Work", false));
+
+        try
+        {
+            var menuButton = window.GetVisualDescendantsOf<Button>("GroupHeaderMenuButton").Single(button => button.IsVisible);
+            var menu = OpenMenu(menuButton);
+            var item = FindMenuItem(menu, "GroupSortByNameMenuItem");
+            Assert.True(item.IsEffectivelyEnabled);
+            Assert.False(string.IsNullOrEmpty(ToolTip.GetTip(item)?.ToString()));
+
+            // Act
+            item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            menu.Hide();
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: sorted, shown in that order, and the item explains why it is unavailable now
+            Assert.Equal(["a", "b", "c"], viewModel.RepoCards.Select(card => card.RepoName));
+            Assert.Equal(["a", "b", "c"], RepoReorderWindowTests.RowNames(window));
+            menuButton = window.GetVisualDescendantsOf<Button>("GroupHeaderMenuButton").Single(button => button.IsVisible);
+            menu = OpenMenu(menuButton);
+            item = FindMenuItem(menu, "GroupSortByNameMenuItem");
+            Assert.False(item.IsEffectivelyEnabled);
+            Assert.Contains("already sorted", ToolTip.GetTip(item)?.ToString());
+            menu.Hide();
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that the header's "..." menu starts with "Add repository..." and "New subgroup..." (each with
+    ///     an AutomationId and a tooltip), followed by a separator, the Move up, Move down, Move into group, Sort by
+    ///     name and Group color items, another separator and then the rename and the two delete items - each item
+    ///     identified and explained, the item that deletes the group with its contents only for a group that has
+    ///     contents.
     /// </summary>
     [Fact]
     public void MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator() => HeadlessTestApp.Run(() =>
@@ -358,18 +500,23 @@ public sealed class RepoGroupWindowTests : IDisposable
             var menu = OpenMenu(menuButton);
             var items = menu.Items.OfType<Control>().ToList();
 
-            // Assert: Add repository..., separator, Move up, Move down, Group color..., separator,
-            // Rename group..., Remove group
-            Assert.Equal(8, items.Count);
+            // Assert: Add repository..., New subgroup..., separator, Move up, Move down, Move into group,
+            // Sort by name, Group color..., separator, Rename group..., Delete group (keep contents),
+            // Delete group and its contents
+            Assert.Equal(12, items.Count);
             var add = Assert.IsType<MenuItem>(items[0]);
             Assert.Equal("GroupAddRepoMenuItem", AutomationProperties.GetAutomationId(add));
             Assert.Equal("Add repository...", add.Header);
-            Assert.IsType<Separator>(items[1]);
-            Assert.IsType<Separator>(items[5]);
+            var subgroup = Assert.IsType<MenuItem>(items[1]);
+            Assert.Equal("GroupNewSubgroupMenuItem", AutomationProperties.GetAutomationId(subgroup));
+            Assert.Equal("New subgroup...", subgroup.Header);
+            Assert.IsType<Separator>(items[2]);
+            Assert.IsType<Separator>(items[8]);
             Assert.Equal(
                 [
-                    "GroupAddRepoMenuItem", "MoveGroupUpMenuItem", "MoveGroupDownMenuItem", "GroupColorMenuItem",
-                    "RenameGroupMenuItem", "RemoveGroupMenuItem"
+                    "GroupAddRepoMenuItem", "GroupNewSubgroupMenuItem", "MoveGroupUpMenuItem", "MoveGroupDownMenuItem",
+                    "GroupMoveIntoMenuItem", "GroupSortByNameMenuItem", "GroupColorMenuItem", "RenameGroupMenuItem",
+                    "RemoveGroupMenuItem", "RemoveGroupWithContentsMenuItem"
                 ],
                 items.OfType<MenuItem>().Select(AutomationProperties.GetAutomationId));
             Assert.All(items.OfType<MenuItem>(), item => Assert.False(string.IsNullOrEmpty(ToolTip.GetTip(item)?.ToString())));

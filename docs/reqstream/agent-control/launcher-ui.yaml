@@ -310,6 +310,77 @@ sections:
           - MainWindow_FavoriteInGroup_ShowsGroupChip
           - MainWindow_GroupOrder_StoredOrderThenAlphabeticalBetweenFavoritesAndUngrouped
 
+      - id: AgentControl-LauncherUI-NestedGroupTree
+        title: >-
+          The LauncherUI subsystem shall let a group contain other groups, listing them as a tree - each
+          group's header followed by its subgroups and then by its own repos, every header saying which
+          group it is inside and counting the repos of its whole subtree, and every header and repo drawn
+          as far in as the groups it is inside - with a collapsed group hiding its whole subtree, a group
+          that was created inside another listed even when no repo is in it, and a list without any
+          nested group looking exactly as it did.
+        justification: |
+          A flat list of groups cannot express customer and then project; a tree scales to a large
+          collection of repos and matches how developers organize their work.
+        children:
+          - AgentControl-MainWindowViewModel-NestedGroupTree
+          - AgentControl-MainWindowViewModel-NestedGroupFlatListUnchanged
+          - AgentControl-MainWindowViewModel-NestedGroupEmptyListed
+          - AgentControl-RepoGroupHeaderViewModel-NestedPlace
+          - AgentControl-RepoCardViewModel-GroupDepthIndent
+        tests:
+          - MainWindow_NestedGroups_ListSubgroupsBeforeOwnReposAndCollapseHidesSubtree
+          - MainWindow_NestedGroups_RowsAreIndentedByDepth
+
+      - id: AgentControl-LauncherUI-NestedGroupCreate
+        title: >-
+          The LauncherUI subsystem shall offer "New subgroup..." in the menu of each of the user's group
+          headers, which asks for the new group's name in a prompt that refuses the name of any existing
+          group and can be canceled without changing anything, and which creates the group inside the
+          header's group, listed with no repos; the card menu's "Move to group" shall offer the groups
+          that have no repo and the nested ones too, a nested group's path in its tooltip.
+        justification: |
+          A group is created inside another where the user already sees it; names are unique across the
+          whole tree, so the prompt cannot let the new group join an existing one, and a repo can only
+          be moved into a group that is offered.
+        children:
+          - AgentControl-MainWindowViewModel-NestedGroupCreate
+          - AgentControl-RepoGroupHeaderViewModel-NewSubgroupRequest
+          - AgentControl-GroupNameViewModel-NewSubgroup
+        tests:
+          - MainWindow_HeaderMenu_NewSubgroup_PromptsAndCreatesGroupInside
+          - MainWindow_CardMenu_MoveToGroup_ListsEmptyAndNestedGroupsWithPath
+
+      - id: AgentControl-LauncherUI-NestedGroupDrag
+        title: >-
+          The LauncherUI subsystem shall let the user drag a group's header onto another of the user's
+          group headers and drop it before that group (upper third), inside it as its last subgroup
+          (middle third, the header tinted) or after it (lower third, a line shown), a group dropped next
+          to a nested group leaving the group it was in, except that in an auto-scroll edge zone of the
+          list the header is split in halves (before, after) and nothing nests, and shall refuse a drop
+          onto a group inside the dragged group, showing nothing there.
+        justification: |
+          Dragging is the direct way to nest a group and to take it out again; a group inside itself
+          would be a loop, so no place inside the dragged group may look like a target. A held pointer
+          in an edge zone has the list moving under it, so the part of a row it is over cannot be aimed
+          at and must not nest a group by chance.
+        children:
+          - AgentControl-MainWindowViewModel-NestedGroupDrop
+        tests:
+          - MainWindow_DragGroupHeader_ThreeZones_NestBeforeAndAfter
+          - MainWindow_DragGroupHeader_OntoOwnDescendant_IsRefused
+          - MainWindow_GetGroupDropZone_ThirdsOrHalvesInAutoScrollZone_NestsOnlyOutsideTheZone
+          - MainWindow_DragGroupHeaderInAutoScrollZone_NeverNestsAndReorders
+          - MainWindow_DragGroupHeaderAtEdgeOfListThatFits_StillNests
+
+      - id: AgentControl-LauncherUI-NestedGroupRemembered
+        title: >-
+          The LauncherUI subsystem shall save the tree of the user's groups in the settings when it
+          changes and show the saved tree when the window is created again.
+        justification: |
+          A tree that is lost at the next start is not the user's tree.
+        tests:
+          - MainWindow_NestedGroups_TreeSurvivesAWindowRestart
+
       - id: AgentControl-LauncherUI-GroupAddRepository
         title: >-
           The LauncherUI subsystem shall offer "Add repository..." as the first item of the menu of
@@ -352,6 +423,7 @@ sections:
           - AgentControl-RepoCardViewModel-GroupNameRules
           - AgentControl-RepoCardViewModel-GroupList
           - AgentControl-RepoCardViewModel-NewGroupPrompt
+          - AgentControl-MainWindowViewModel-GroupNamesIncludeEmptyGroups
         tests:
           - MainWindow_CardMenu_MoveToGroupSubmenu_ListsChoicesAndMovesRepo
           - MainWindow_NewGroupMenuItem_PromptsForNameAndCreatesGroup
@@ -382,23 +454,174 @@ sections:
 
       - id: AgentControl-LauncherUI-RepoGroupManagement
         title: >-
-          The LauncherUI subsystem shall offer, in a group's header, renaming and removing the
-          group, the repos of a removed group becoming ungrouped.
+          The LauncherUI subsystem shall offer, in a group's header, renaming the group.
         justification: |
           Groups change over time; the header is where the user sees the group, so it is where the
           group is managed.
         children:
           - AgentControl-MainWindowViewModel-GroupManagement
           - AgentControl-MainWindowViewModel-GroupRenameRules
-          - AgentControl-MainWindowViewModel-GroupRemove
           - AgentControl-MainWindowViewModel-GroupHeaderRequests
+          - AgentControl-MainWindowViewModel-NestedGroupRename
           - AgentControl-RepoGroupHeaderViewModel-GroupActions
-          - AgentControl-RepoGroupHeaderViewModel-RemoveGroupRequest
           - AgentControl-GroupNameViewModel-Rename
           - AgentControl-GroupNameViewModel-RenameStartsWithCurrentName
           - AgentControl-GroupNameViewModel-RenameAcceptsCaseChange
         tests:
+          - MainWindow_HeaderMenu_RenameGroup_AsksForTheNameAndRenames
+
+      - id: AgentControl-LauncherUI-GroupDeleteKeepContents
+        title: >-
+          The LauncherUI subsystem shall offer "Delete group, keep contents" in the menu of each of the
+          user's group headers (plain "Delete group" for a group with nothing in it), which asks for a
+          confirmation that says where the group's repos and subgroups go, which of its repos are
+          favorites and stay in Favorites, leaving out what the group has
+          none of, and that nothing on disk or in any repository changes, and then deletes the group:
+          its repos stay in the list in the group it was inside, or become ungrouped for a top-level
+          group, at the end of that group's own repos (the end of Ungrouped), and its subgroups move into
+          that group, or become top-level groups, taking the group's place among its siblings; answering
+          No changes nothing.
+        justification: |
+          Deleting a group must not lose the repos in it, and the user is told where they go before
+          anything changes; the contents appear where the group was, not scattered.
+        children:
+          - AgentControl-MainWindowViewModel-GroupRemove
+          - AgentControl-MainWindowViewModel-GroupRemoveRepoBlock
+          - AgentControl-MainWindowViewModel-NestedGroupRemoveKeepsContents
+          - AgentControl-MainWindowViewModel-GroupContentsCounted
+          - AgentControl-RepoGroupHeaderViewModel-RemoveGroupRequest
+        tests:
           - MainWindow_HeaderMenu_RenameAndRemoveGroup
+          - MainWindow_HeaderMenu_DeleteGroupKeepContents_ConfirmationSaysWhereContentsGo
+          - MainWindow_HeaderMenu_DeleteGroupKeepContents_ConfirmationOmitsZeroParts
+          - MainWindow_HeaderMenu_DeleteGroupKeepContents_ConfirmationCallsOutFavorites
+          - MainWindow_HeaderMenu_DeleteEmptyGroup_OffersOnlyPlainDelete
+
+      - id: AgentControl-LauncherUI-GroupDeleteWithContents
+        title: >-
+          The LauncherUI subsystem shall offer "Delete group and its contents" in the menu of each of the
+          user's group headers that has a repo or a subgroup (and not for a group with nothing in it),
+          which asks for a confirmation that names the group and says how many repos - favorites
+          included - and how many subgroups go (leaving out what the group has none of) and that nothing
+          on disk is deleted, and then removes the group, the groups inside it and all their repos from
+          the list; answering No changes nothing.
+        justification: |
+          Retiring a group should take one action, but removing repos must be confirmed with the numbers
+          in front of the user and must never delete anything on disk.
+        children:
+          - AgentControl-MainWindowViewModel-GroupRemoveWithContents
+          - AgentControl-MainWindowViewModel-GroupContentsCounted
+          - AgentControl-MainWindowViewModel-GroupRemoveWithContentsRefusals
+          - AgentControl-RepoGroupHeaderViewModel-RemoveGroupWithContentsRequest
+        tests:
+          - MainWindow_HeaderMenu_DeleteGroupWithContents_ConfirmationSaysCountsAndYesDeletesNoKeeps
+          - MainWindow_HeaderMenu_DeleteWithContents_ConfirmationOmitsZeroParts
+          - MainWindow_HeaderMenu_DeleteEmptyGroup_OffersOnlyPlainDelete
+          - MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator
+
+      - id: AgentControl-LauncherUI-RepoMultiSelect
+        title: >-
+          The LauncherUI subsystem shall let the user select several repo cards in the list - Ctrl+click adds
+          or removes a card, Shift+click selects the cards from the last clicked one to the one clicked in
+          the order the list shows them (also across the groups), Ctrl+A selects every card that is shown, a
+          plain click selects one card - and shall never select a section header, a card hidden by a
+          collapsed group or by the filter, or a card that was removed; pressing a card that is already one
+          of several selected cards keeps the selection for a drag and reduces it to that card only when the
+          button is released without one.
+        justification: |
+          The selection is what mass drag and mass remove act on, so it must hold exactly the cards the user
+          can see and chose, in the order the user sees them, and it must survive grabbing one of the cards.
+        children:
+          - AgentControl-MainWindowViewModel-RepoSelection
+          - AgentControl-MainWindowViewModel-RepoSelectionPruned
+        tests:
+          - MainWindow_RepoList_CtrlAndShiftClick_SelectCardsOnlyAcrossGroups
+          - MainWindow_RepoList_CtrlA_SelectsShownCardsOnly
+          - MainWindow_RepoList_PressOnSelectedCard_KeepsSelectionUntilReleaseWithoutDrag
+
+      - id: AgentControl-LauncherUI-RepoMultiSelectHighlight
+        title: >-
+          The LauncherUI subsystem shall make a selected card distinguishable from an unselected one without
+          relying on color alone and keep it, and the text and status graphics on it, legible in the light and
+          the dark theme (status accents and the favorite star at least 3:1, text at least 4.5:1), and shall
+          expose each card's selected state, and that the list allows several selected items, to assistive
+          technology.
+        justification: |
+          A selection that cannot be seen against both themes, or that only a mouse user can read, is not a
+          selection; the status graphics on the selected surface must meet the same contrast as on any other
+          card surface.
+        tests:
+          - ThemeResources_SelectedCard_IsTintedAndStaysLegibleInLightAndDark
+          - MainWindow_RepoList_SelectedCard_UsesSelectedSurfaceInLightAndDark
+          - MainWindow_RepoList_SelectedCards_AreExposedThroughTheRowAndTheAutomationPeers
+
+      - id: AgentControl-LauncherUI-RepoMultiDrag
+        title: >-
+          The LauncherUI subsystem shall start a drag of all the selected cards when one of them is dragged
+          (and of the dragged card alone when it is not selected), carrying every card, drop them together at
+          the place under the pointer in the order the list shows them - into another group, Favorites,
+          Ungrouped or next to a card - keep them selected, and refuse a drop next to one of the dragged cards
+          without showing any feedback.
+        justification: |
+          Dragging the selection is the direct way to reorganize many repos at once, and a drop that cannot
+          be made must look as it is.
+        children:
+          - AgentControl-MainWindowViewModel-DragCards
+          - AgentControl-MainWindowViewModel-DropCards
+          - AgentControl-MainWindowViewModel-DropCardsRefused
+        tests:
+          - MainWindow_RepoList_DragSelectedCard_CarriesAllSelectedAndDropsThemInTheGroup
+          - MainWindow_RepoList_DragUnselectedCard_MovesOnlyThatCard
+          - MainWindow_RepoList_DragSelection_DropNextToOwnCard_IsRefused
+
+      - id: AgentControl-LauncherUI-RepoMultiRemove
+        title: >-
+          The LauncherUI subsystem shall remove the selected cards with the Delete key, or with the
+          "Remove from list" item of a card that is one of several selected cards (which says how many it
+          removes), after one confirmation that says how many repos go and that nothing on disk is deleted;
+          answering No changes nothing, and the item of a card that is not selected removes that card alone.
+        justification: |
+          Removing many repos is destructive to the list, so the number is always in the question and the
+          wider action is never silent.
+        children:
+          - AgentControl-MainWindowViewModel-RemoveRepos
+          - AgentControl-RepoCardViewModel-RemoveMenuText
+        tests:
+          - MainWindow_RepoList_DeleteKey_ConfirmsWithTheCountAndRemovesTheSelection
+          - MainWindow_CardMenu_RemoveOnSelectedCard_RemovesTheWholeSelection
+
+      - id: AgentControl-LauncherUI-RepoMultiMoveToGroup
+        title: >-
+          The LauncherUI subsystem shall let the user move the selected cards to a group without dragging:
+          the "Move to group" item of a card that is one of several selected cards (which says how many it
+          moves) and the "New group..." and "Remove from group" items in its submenu act on all the selected
+          cards, and the item of a card that is not selected acts on that card alone.
+        justification: |
+          Dragging the selection is not possible for everybody, so the same move must be available in the
+          menu (WCAG 2.2 SC 2.5.7 Dragging Movements); the card menu already removes the whole selection.
+        children:
+          - AgentControl-MainWindowViewModel-MoveCardsToGroup
+          - AgentControl-RepoCardViewModel-MoveToGroupMenuText
+        tests:
+          - MainWindow_CardMenu_MoveToGroupOnSelectedCard_MovesTheWholeSelection
+
+      - id: AgentControl-LauncherUI-GroupSortByName
+        title: >-
+          The LauncherUI subsystem shall offer "Sort by name" in the menu of each of the user's group
+          headers, which puts the repos listed directly in that group in name order and, when the repos
+          are in that order already, when the group has fewer than two of its own or while the filter has
+          text, is disabled with a tooltip that says why.
+        justification: |
+          A group's repos stay in the order they were added or dragged; sorting them by name in one
+          action makes a large group easy to scan, and an action that would change nothing must say so
+          instead of silently doing nothing.
+        children:
+          - AgentControl-MainWindowViewModel-GroupSortByName
+          - AgentControl-MainWindowViewModel-GroupSortAvailability
+          - AgentControl-RepoGroupHeaderViewModel-SortByNameRequest
+        tests:
+          - MainWindow_HeaderMenu_SortByName_SortsGroupThenIsUnavailable
+          - MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator
 
       - id: AgentControl-LauncherUI-RepoGroupCollapse
         title: >-
@@ -527,8 +750,8 @@ sections:
           order when the group is renamed, forget them when the group is removed or its last repo
           leaves it, and keep them when settings are applied from the Settings window.
         justification: |
-          A group exists only while a repo is in it; a color or a place left behind for a group
-          that is gone would come back unexpectedly on a new group of the same name, and a rename or
+          A group exists only while a repo is in it or it is registered in the hierarchy; a color or
+          a place left behind for a group that is gone would come back unexpectedly on a new group of the same name, and a rename or
           a change in the Settings window must not lose what the user chose.
         children:
           - AgentControl-MainWindowViewModel-GroupSettingsFollowRenameAndRemove
@@ -1218,10 +1441,28 @@ sections:
         children:
           - AgentControl-MainWindowViewModel-MoveGroup
           - AgentControl-MainWindowViewModel-MoveGroupAvailability
+          - AgentControl-MainWindowViewModel-NestedGroupReorder
           - AgentControl-RepoGroupHeaderViewModel-MoveRequests
         tests:
           - MainWindow_HeaderMenu_MoveUpDown_ReorderGroupsAndDisableAtTheEnds
           - MainWindow_HeaderMenu_AddRepositoryIsFirstItemBeforeSeparator
+
+      - id: AgentControl-LauncherUI-GroupMoveInto
+        title: >-
+          The LauncherUI subsystem shall offer "Move into group" in the menu of each of the user's group
+          headers - "Move to top level" first for a nested group, then every group it can go into, each
+          with its path as the tooltip - which puts the group, with its repos and subgroups, inside the
+          chosen group as its last subgroup (or at the end of the top level), and is disabled with a tooltip
+          that says why while the filter has text or when the group has nowhere to go.
+        justification: |
+          Dragging a header is not possible for everybody, so nesting a group and bringing it back to the top
+          level must also be possible from the menu (WCAG 2.2 SC 2.5.7 Dragging Movements).
+        children:
+          - AgentControl-MainWindowViewModel-GroupMoveIntoTargets
+          - AgentControl-MainWindowViewModel-GroupMoveInto
+        tests:
+          - MainWindow_HeaderMenu_MoveInto_ListsValidTargetsAndMovesGroup
+          - MainWindow_HeaderMenu_MoveInto_NestedGroupOffersTopLevel
 
       - id: AgentControl-LauncherUI-GroupDragReorder
         title: >-

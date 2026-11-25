@@ -155,6 +155,122 @@ public class RepoGroupHeaderViewModelTests
     }
 
     /// <summary>
+    ///     Test that the new-subgroup command only raises its request.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHeaderViewModel_NewSubgroupCommand_RaisesRequest()
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Work");
+        var requests = 0;
+        header.NewSubgroupRequested += (_, _) => requests++;
+
+        // Act
+        header.NewSubgroupCommand.Execute(null);
+
+        // Assert
+        Assert.Equal(1, requests);
+    }
+
+    /// <summary>
+    ///     Test that a nested group knows its depth, parent and indent (capped so a deep group stays in
+    ///     view), says which group it is inside in its accessible name, and that a count that includes
+    ///     subgroups says how many repos are directly in the group.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHeaderViewModel_UpdatePlace_DescribesDepthParentIndentAndDirectCount()
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Project");
+        header.Update(count: 3, isCollapsed: false, isToggleEnabled: true, directCount: 1);
+
+        // Assert: a top-level group
+        Assert.Multiple(
+            () => Assert.Equal(0, header.Depth),
+            () => Assert.False(header.HasParent),
+            () => Assert.Equal(0, header.IndentWidth),
+            () => Assert.Equal("Project, 3 repos, expanded", header.AccessibleName),
+            () => Assert.Equal("3 repos (1 directly in this group)", header.CountTooltip));
+
+        // Act
+        header.UpdatePlace(depth: 2, parentName: "Client");
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal(2, header.Depth),
+            () => Assert.Equal("Client", header.ParentName),
+            () => Assert.True(header.HasParent),
+            () => Assert.Equal(2 * RepoGroupHeaderViewModel.IndentPerLevel, header.IndentWidth),
+            () => Assert.Equal("Project, 3 repos, expanded, inside Client", header.AccessibleName));
+
+        // Act: deeper than the indent goes
+        header.UpdatePlace(depth: 40, parentName: "Deep");
+
+        // Assert
+        Assert.Equal(
+            RepoGroupHeaderViewModel.MaxIndentedDepth * RepoGroupHeaderViewModel.IndentPerLevel, header.IndentWidth);
+        Assert.Equal(40, header.Depth);
+    }
+
+    /// <summary>
+    ///     Test that a blank or missing parent name means a top-level group - it is not "inside" anything
+    ///     and its accessible name does not end in "inside" - and that going back to the top level clears a
+    ///     parent that was set.
+    /// </summary>
+    /// <param name="parentName">The blank parent name.</param>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void RepoGroupHeaderViewModel_BlankParentName_IsNotNested(string? parentName)
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Project");
+        header.Update(count: 1, isCollapsed: false, isToggleEnabled: true);
+        header.UpdatePlace(depth: 1, parentName: "Client");
+
+        // Act
+        header.UpdatePlace(depth: 0, parentName: parentName);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.False(header.HasParent),
+            () => Assert.Null(header.ParentName),
+            () => Assert.Equal("Project, 1 repo, expanded", header.AccessibleName));
+
+        // Act: a blank parent given directly is read the same way
+        var other = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Other");
+        other.UpdatePlace(depth: 2, parentName: parentName);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.False(other.HasParent),
+            () => Assert.DoesNotContain("inside", other.AccessibleName));
+    }
+
+    /// <summary>
+    ///     Test that the built-in sections are never inside a group and so ignore the place they are given.
+    /// </summary>
+    /// <param name="kindName">The name of the kind of built-in section.</param>
+    [Theory]
+    [InlineData(nameof(RepoGroupKind.Favorites))]
+    [InlineData(nameof(RepoGroupKind.Ungrouped))]
+    public void RepoGroupHeaderViewModel_UpdatePlace_BuiltInSection_StaysTopLevel(string kindName)
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(Enum.Parse<RepoGroupKind>(kindName), "Section");
+
+        // Act
+        header.UpdatePlace(depth: 3, parentName: "Client");
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal(0, header.Depth),
+            () => Assert.Null(header.ParentName),
+            () => Assert.Equal(0, header.IndentWidth));
+    }
+
+    /// <summary>
     ///     Test that the header's text form is its accessible name, which names the hosting list item
     ///     for assistive technology instead of the type name.
     /// </summary>
@@ -295,10 +411,186 @@ public class RepoGroupHeaderViewModelTests
 
         // Assert
         Assert.Equal("This group is already the first group.", header.MoveUpTooltip);
-        Assert.Equal("Move this group one place down in the list", header.MoveDownTooltip);
+        Assert.Equal("Move this group one place down among its sibling groups", header.MoveDownTooltip);
         Assert.Contains(nameof(RepoGroupHeaderViewModel.MoveUpTooltip), changed);
         Assert.False(favorites.MoveUpCommand.CanExecute(null));
         Assert.False(favorites.MoveDownCommand.CanExecute(null));
         Assert.False(string.IsNullOrWhiteSpace(favorites.MoveUpTooltip));
+    }
+
+    /// <summary>
+    ///     Test that "Sort by name" is unavailable until the owner says the group can be sorted, raises its
+    ///     request when executed, explains why it is unavailable in its tooltip, and is never offered for
+    ///     Favorites or Ungrouped.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHeaderViewModel_UpdateSort_AvailabilityTooltipAndRequest()
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Work");
+        var ungrouped = new RepoGroupHeaderViewModel(RepoGroupKind.Ungrouped, "Ungrouped");
+        var requests = 0;
+        header.SortByNameRequested += (_, _) => requests++;
+        var changed = new List<string?>();
+        header.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        // Assert: unavailable until the owner says where the group stands
+        Assert.False(header.SortByNameCommand.CanExecute(null));
+
+        // Act: available
+        header.UpdateSort(null);
+        header.SortByNameCommand.Execute(null);
+
+        // Assert
+        Assert.Equal(1, requests);
+        Assert.True(header.SortByNameCommand.CanExecute(null));
+        Assert.Contains("alphabetically", header.SortByNameTooltip);
+
+        // Act: unavailable with a reason; the built-in section ignores an "available" answer
+        header.UpdateSort("Already sorted.");
+        ungrouped.UpdateSort(null);
+
+        // Assert
+        Assert.False(header.SortByNameCommand.CanExecute(null));
+        Assert.Equal("Already sorted.", header.SortByNameTooltip);
+        Assert.Contains(nameof(RepoGroupHeaderViewModel.SortByNameTooltip), changed);
+        Assert.False(ungrouped.SortByNameCommand.CanExecute(null));
+        Assert.False(string.IsNullOrWhiteSpace(ungrouped.SortByNameTooltip));
+    }
+
+    /// <summary>
+    ///     Test that "Delete group and its contents" can be chosen only while the owner says the group has
+    ///     contents, that choosing it raises its own request (not the plain delete's), that the plain delete
+    ///     is named "Delete group" for a group with nothing in it and "Delete group, keep contents"
+    ///     otherwise, and that Favorites never has contents.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHeaderViewModel_UpdateContents_OffersDeleteWithContentsOnlyForGroupsWithContents()
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Work");
+        var favorites = new RepoGroupHeaderViewModel(RepoGroupKind.Favorites, "Favorites");
+        var plain = 0;
+        var withContents = 0;
+        header.RemoveGroupRequested += (_, _) => plain++;
+        header.RemoveGroupWithContentsRequested += (_, _) => withContents++;
+        var changed = new List<string?>();
+        header.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        // Assert: nothing is known yet, so the group is treated as empty
+        Assert.False(header.HasContents);
+        Assert.False(header.RemoveGroupWithContentsCommand.CanExecute(null));
+        Assert.Equal("Delete group", header.RemoveGroupText);
+
+        // Act: the owner says the group has contents
+        header.UpdateContents(true);
+        favorites.UpdateContents(true);
+        header.RemoveGroupWithContentsCommand.Execute(null);
+        header.RemoveGroupCommand.Execute(null);
+
+        // Assert
+        Assert.True(header.HasContents);
+        Assert.True(header.RemoveGroupWithContentsCommand.CanExecute(null));
+        Assert.Equal("Delete group, keep contents", header.RemoveGroupText);
+        Assert.Contains("keep its repos and subgroups", header.RemoveGroupTooltip);
+        Assert.Contains("ungrouped", header.RemoveGroupTooltip);
+        Assert.Contains("top-level groups", header.RemoveGroupTooltip);
+        Assert.Equal((1, 1), (plain, withContents));
+        Assert.Contains(nameof(RepoGroupHeaderViewModel.RemoveGroupText), changed);
+        Assert.False(favorites.HasContents);
+
+        // Act: the group is inside another one
+        changed.Clear();
+        header.UpdatePlace(1, "Client");
+
+        // Assert: the tooltip says they stay in the group this one is inside, and says so when it changes
+        Assert.Contains("in the group this one is inside", header.RemoveGroupTooltip);
+        Assert.DoesNotContain("ungrouped", header.RemoveGroupTooltip);
+        Assert.Contains(nameof(RepoGroupHeaderViewModel.RemoveGroupTooltip), changed);
+    }
+
+    /// <summary>
+    ///     Test that the owner saying a group has no contents any more takes the delete-with-contents item
+    ///     away again, brings back the plain wording and announces the change.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHeaderViewModel_UpdateContents_FalseAfterTrue_RevertsTextAndCommand()
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Work");
+        header.UpdateContents(true);
+        var changed = new List<string?>();
+        header.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        // Act
+        header.UpdateContents(false);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.False(header.HasContents),
+            () => Assert.False(header.RemoveGroupWithContentsCommand.CanExecute(null)),
+            () => Assert.Equal("Delete group", header.RemoveGroupText),
+            () => Assert.Contains(nameof(RepoGroupHeaderViewModel.HasContents), changed),
+            () => Assert.Contains(nameof(RepoGroupHeaderViewModel.RemoveGroupText), changed));
+    }
+
+    /// <summary>
+    ///     Test that a nested group is returned to the top level by giving it no parent: its depth, parent and
+    ///     indent are cleared and its accessible name no longer says it is inside a group; and that a negative
+    ///     depth reads as 0, so it is not indented.
+    /// </summary>
+    [Fact]
+    public void RepoGroupHeaderViewModel_UpdatePlace_BackToTopLevelAndNegativeDepth_AreNotIndented()
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(RepoGroupKind.Group, "Project");
+        header.Update(count: 2, isCollapsed: false, isToggleEnabled: true);
+        header.UpdatePlace(depth: 2, parentName: "Client");
+
+        // Act
+        header.UpdatePlace(depth: 0, parentName: null);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal(0, header.Depth),
+            () => Assert.Null(header.ParentName),
+            () => Assert.False(header.HasParent),
+            () => Assert.Equal(0, header.IndentWidth),
+            () => Assert.Equal("Project, 2 repos, expanded", header.AccessibleName));
+
+        // Act: a negative depth
+        header.UpdatePlace(depth: -4, parentName: "Client");
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.Equal(0, header.Depth),
+            () => Assert.Equal(0, header.IndentWidth));
+    }
+
+    /// <summary>
+    ///     Test that Favorites and Ungrouped, whichever of them it is, never offer Move up, Move down or Sort by
+    ///     name, whatever the owner says, each with an explanation as its tooltip.
+    /// </summary>
+    /// <param name="kindName">The name of the kind of built-in section.</param>
+    [Theory]
+    [InlineData(nameof(RepoGroupKind.Favorites))]
+    [InlineData(nameof(RepoGroupKind.Ungrouped))]
+    public void RepoGroupHeaderViewModel_UpdateOrderAndSort_BuiltInSection_NeverOffersMoveOrSort(string kindName)
+    {
+        // Arrange
+        var header = new RepoGroupHeaderViewModel(Enum.Parse<RepoGroupKind>(kindName), "Section");
+
+        // Act
+        header.UpdateOrder(null, null);
+        header.UpdateSort(null);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.False(header.MoveUpCommand.CanExecute(null)),
+            () => Assert.False(header.MoveDownCommand.CanExecute(null)),
+            () => Assert.False(header.SortByNameCommand.CanExecute(null)),
+            () => Assert.False(string.IsNullOrWhiteSpace(header.MoveUpTooltip)),
+            () => Assert.False(string.IsNullOrWhiteSpace(header.MoveDownTooltip)),
+            () => Assert.False(string.IsNullOrWhiteSpace(header.SortByNameTooltip)));
     }
 }

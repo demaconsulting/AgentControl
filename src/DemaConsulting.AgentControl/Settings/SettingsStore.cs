@@ -110,6 +110,10 @@ internal static class SettingsStore
     /// </summary>
     /// <param name="configDirectory">Configuration directory to read from. Pass
     ///     <see langword="null"/> to use <see cref="GetDefaultConfigDirectory"/>.</param>
+    /// <param name="replaceFile">Test seam: moves a temporary file over the settings file when the
+    ///     load writes the seeded repo order back; <see langword="null"/> for the real move.</param>
+    /// <param name="delay">Test seam: waits between replace attempts; <see langword="null"/> to
+    ///     really sleep.</param>
     /// <returns>
     ///     The persisted settings, or a fresh default <see cref="AppSettings"/> instance if no
     ///     settings file exists yet (first run) — this is expected, not an error. A legacy
@@ -120,12 +124,11 @@ internal static class SettingsStore
     ///     back to the file at once, so it happens only once (a failed write is logged, never fails
     ///     the load, and is retried on the next load). Explicit JSON <c>null</c>
     ///     values for the source list, the recent-repos list or a source's package IDs are
-    ///     normalized to empty collections.
+    ///     normalized to empty collections. A file without <c>GroupParents</c> (every file written
+    ///     before groups nested) loads with an empty hierarchy, so every group is top level, and a
+    ///     damaged hierarchy is repaired in memory (see <see cref="AppSettings.RepairGroupSettings"/>);
+    ///     the repair is written back by the next save (or by the one-time repo-order write-back).
     /// </returns>
-    /// <param name="replaceFile">Test seam: moves a temporary file over the settings file when the
-    ///     load writes the seeded repo order back; <see langword="null"/> for the real move.</param>
-    /// <param name="delay">Test seam: waits between replace attempts; <see langword="null"/> to
-    ///     really sleep.</param>
     /// <exception cref="InvalidOperationException">Thrown when the settings file exists but
     ///     cannot be read or contains invalid JSON.</exception>
     public static AppSettings Load(
@@ -262,7 +265,6 @@ internal static class SettingsStore
         Action<string, string>? replaceFile,
         Action<TimeSpan>? delay)
     {
-
         // Refuse before anything is written: a source location that embeds a credential must
         // never reach the settings file
         foreach (var source in settings.GetEffectiveSources())

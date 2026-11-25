@@ -71,6 +71,100 @@ internal static class DialogInputProbe
     private static extern IntPtr GetForegroundWindow();
 
     /// <summary>
+    ///     Win32 <c>SetForegroundWindow</c>.
+    /// </summary>
+    /// <param name="window">The window handle.</param>
+    /// <returns><see langword="true"/> when the window was brought to the foreground.</returns>
+    [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr window);
+
+    /// <summary>
+    ///     Win32 <c>BringWindowToTop</c>.
+    /// </summary>
+    /// <param name="window">The window handle.</param>
+    /// <returns><see langword="true"/> when the call succeeded.</returns>
+    [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool BringWindowToTop(IntPtr window);
+
+    /// <summary>
+    ///     Win32 <c>SwitchToThisWindow</c>: the shell's "alt-tab" switch to a window.
+    /// </summary>
+    /// <param name="window">The window handle.</param>
+    /// <param name="altTab">Whether the switch is made as if by Alt+Tab.</param>
+    [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern void SwitchToThisWindow(IntPtr window, [MarshalAs(UnmanagedType.Bool)] bool altTab);
+
+    /// <summary>
+    ///     Win32 <c>GetWindowThreadProcessId</c>.
+    /// </summary>
+    /// <param name="window">The window handle.</param>
+    /// <param name="processId">Receives the process id (unused).</param>
+    /// <returns>The id of the thread that created the window.</returns>
+    [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern uint GetWindowThreadProcessId(IntPtr window, IntPtr processId);
+
+    /// <summary>
+    ///     Win32 <c>AttachThreadInput</c>.
+    /// </summary>
+    /// <param name="attach">The thread to attach.</param>
+    /// <param name="attachTo">The thread to attach to.</param>
+    /// <param name="doAttach">Whether to attach or detach.</param>
+    /// <returns><see langword="true"/> when the call succeeded.</returns>
+    [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AttachThreadInput(uint attach, uint attachTo, [MarshalAs(UnmanagedType.Bool)] bool doAttach);
+
+    /// <summary>
+    ///     Win32 <c>GetCurrentThreadId</c>.
+    /// </summary>
+    /// <returns>The calling thread's id.</returns>
+    [DllImport("kernel32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern uint GetCurrentThreadId();
+
+    /// <summary>
+    ///     Taps the Alt key (down and up) so that this process counts as the one that last had input,
+    ///     which lets it take the foreground. The tap changes nothing in the window that receives it.
+    /// </summary>
+    private static void TapAlt()
+    {
+        Keyboard.Press(VirtualKeyShort.ALT);
+        Keyboard.Release(VirtualKeyShort.ALT);
+    }
+
+    /// <summary>
+    ///     Brings a window to the foreground by sharing the input queue of the current foreground
+    ///     window's thread for the duration of the call.
+    /// </summary>
+    /// <param name="handle">The window to bring forward.</param>
+    private static void ForceForeground(IntPtr handle)
+    {
+        var current = GetCurrentThreadId();
+        var foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);
+        var attached = foregroundThread != 0 && foregroundThread != current &&
+                       AttachThreadInput(current, foregroundThread, true);
+        try
+        {
+            BringWindowToTop(handle);
+            SetForegroundWindow(handle);
+        }
+        finally
+        {
+            if (attached)
+            {
+                AttachThreadInput(current, foregroundThread, false);
+            }
+        }
+    }
+
+    /// <summary>
     ///     Tells whether a window accepts input; a window that owns an open modal dialog does not.
     /// </summary>
     /// <param name="window">The window to test.</param>
@@ -103,10 +197,33 @@ internal static class DialogInputProbe
     public static bool BringToForeground(Window window)
     {
         var handle = HandleOf(window);
+        var attempt = 0;
         return Retry.WhileFalse(
             () =>
             {
+                if (GetForegroundWindow() == handle)
+                {
+                    return true;
+                }
+
+                // Windows refuses SetForegroundWindow to a process that did not receive the last input
+                // (the foreground lock). A synthetic Alt key tap makes this process the last to have had
+                // input; attaching to the foreground window's thread and asking the shell to switch to the
+                // window cover the cases where that is not enough. Each retry tries one more way.
+                attempt++;
                 window.SetForeground();
+                if (GetForegroundWindow() == handle)
+                {
+                    return true;
+                }
+
+                TapAlt();
+                ForceForeground(handle);
+                if (attempt > 1)
+                {
+                    SwitchToThisWindow(handle, true);
+                }
+
                 return GetForegroundWindow() == handle;
             },
             SettleTimeout,
@@ -208,6 +325,32 @@ internal static class DialogInputProbe
         Assert.Equal(context.App!.ProcessId, hit.Properties.ProcessId.Value);
 
         Mouse.Click(point);
+        Thread.Sleep(300);
+    }
+
+    /// <summary>
+    ///     Brings the main window to the foreground, presses the left mouse button at a point, moves to
+    ///     another point in small steps (an operating-system drag needs a moving pointer) and releases it
+    ///     there.
+    /// </summary>
+    /// <param name="window">The window, which must be in front so the real input reaches it.</param>
+    /// <param name="from">Where to press.</param>
+    /// <param name="to">Where to release.</param>
+    public static void Drag(Window window, Point from, Point to)
+    {
+        Assert.True(BringToForeground(window));
+        Mouse.MoveTo(from);
+        Mouse.Down(MouseButton.Left);
+        Thread.Sleep(150);
+        const int steps = 12;
+        for (var step = 1; step <= steps; step++)
+        {
+            Mouse.MoveTo(new Point(from.X + ((to.X - from.X) * step / steps), from.Y + ((to.Y - from.Y) * step / steps)));
+            Thread.Sleep(40);
+        }
+
+        Thread.Sleep(150);
+        Mouse.Up(MouseButton.Left);
         Thread.Sleep(300);
     }
 

@@ -1,0 +1,338 @@
+---
+# Software Unit Requirements for the RepoGroupHierarchy Class
+#
+# RepoGroupHierarchy holds the rules for how the user's repo groups nest: which group is inside which,
+# in what order the groups of one level are listed, which moves keep the tree a tree, what deleting a
+# group with its contents kept does to the tree, and how stored parents are repaired. The rules are one
+# shared, pure unit that the settings loader and the main window's view model agree on. Each requirement
+# states one observable behavior.
+
+sections:
+  - title: RepoGroupHierarchy Unit Requirements
+    requirements:
+      # ---- Ordering the groups of one level ----
+      - id: AgentControl-RepoGroupHierarchy-ArrangeLevel
+        title: >-
+          The RepoGroupHierarchy class shall list the groups of one level in the user's stored
+          order, followed by the groups that have no stored place alphabetically, ignoring letter
+          case and skipping stored names that match no group.
+        justification: |
+          The user's order of the groups must be kept whatever else changes, and a stored place for
+          a group that is gone must not disturb the others.
+        tests:
+          - RepoGroupHierarchy_ArrangeGroups_StoredOrderThenAlphabetical
+
+      - id: AgentControl-RepoGroupHierarchy-FlatListIsTopLevel
+        title: >-
+          The RepoGroupHierarchy class shall treat every group as a top-level group, in the stored
+          order, when no group has a parent, and when no parents or no order are given at all.
+        justification: |
+          A settings file written before groups nested holds no hierarchy and must keep showing
+          its groups as the flat list they always were.
+        tests:
+          - RepoGroupHierarchy_GetTreeOrder_NoParents_EveryGroupIsTopLevelInStoredOrder
+          - RepoGroupHierarchy_Constructor_GroupNamesSanitizedAndNullParentsAndOrderAreFlat
+
+      - id: AgentControl-RepoGroupHierarchy-GroupNamesSanitized
+        title: >-
+          The RepoGroupHierarchy class shall take the groups that exist by their names cleaned of
+          surrounding white space and shall ignore a blank name, a built-in section name and a name
+          that repeats another in a different letter case.
+        justification: |
+          A damaged or hand-edited settings file must not produce a group that the window cannot name,
+          nor two spellings of one group.
+        tests:
+          - RepoGroupHierarchy_Constructor_GroupNamesSanitizedAndNullParentsAndOrderAreFlat
+
+      - id: AgentControl-RepoGroupHierarchy-RefusesNullInputs
+        title: >-
+          The RepoGroupHierarchy class shall refuse a null list of group names given to its constructor
+          and a null list of repo group names given to the repair of stored parents.
+        justification: |
+          A caller that has no groups to give has a defect that must not be mistaken for an empty
+          hierarchy and silently repair everything away.
+        tests:
+          - RepoGroupHierarchy_NullGroupNames_AreRefused
+
+      # ---- Walking the tree ----
+      - id: AgentControl-RepoGroupHierarchy-TreeOrder
+        title: >-
+          The RepoGroupHierarchy class shall list the groups depth first, each group followed by its
+          subtree, with the groups of every level in their order and each group's parent and depth.
+        justification: |
+          The window shows the groups as a tree, so it needs one answer to which group comes next
+          and how far to indent it.
+        tests:
+          - RepoGroupHierarchy_GetTreeOrder_NestedGroups_ListsDepthFirstInSiblingOrder
+
+      - id: AgentControl-RepoGroupHierarchy-NavigationParent
+        title: >-
+          The RepoGroupHierarchy class shall answer the parent of a group found by name ignoring letter
+          case, or nothing for a top-level group.
+        justification: |
+          Showing and moving a group depends on knowing what it is inside.
+        tests:
+          - RepoGroupHierarchy_Navigation_Parent_IgnoresLetterCaseAndIsNullAtTopLevel
+
+      - id: AgentControl-RepoGroupHierarchy-NavigationChildren
+        title: >-
+          The RepoGroupHierarchy class shall answer the groups directly inside a group, or at the top
+          level, in their listing order.
+        justification: |
+          The level a group is moved within, and the subgroups a deleted group hands on, are its
+          children.
+        tests:
+          - RepoGroupHierarchy_Navigation_Children_ListsTheGroupsDirectlyInside
+
+      - id: AgentControl-RepoGroupHierarchy-NavigationDescendants
+        title: >-
+          The RepoGroupHierarchy class shall answer every group anywhere inside a group, depth first.
+        justification: |
+          Everything inside a group is what moves with it and what deleting it with its contents
+          removes.
+        tests:
+          - RepoGroupHierarchy_Navigation_Descendants_ListsEveryGroupInsideDepthFirst
+
+      - id: AgentControl-RepoGroupHierarchy-NavigationSubtree
+        title: >-
+          The RepoGroupHierarchy class shall answer a group together with every group inside it, the
+          group first.
+        justification: |
+          Deleting a group with its contents removes exactly its subtree.
+        tests:
+          - RepoGroupHierarchy_Navigation_Subtree_ListsTheGroupThenItsDescendants
+
+      - id: AgentControl-RepoGroupHierarchy-NavigationAncestors
+        title: >-
+          The RepoGroupHierarchy class shall answer the groups a group is inside, nearest first.
+        justification: |
+          The path shown for a nested group and the groups a move registers are its ancestors.
+        tests:
+          - RepoGroupHierarchy_Navigation_Ancestors_ListsTheGroupsItIsInsideNearestFirst
+
+      - id: AgentControl-RepoGroupHierarchy-NavigationDepth
+        title: >-
+          The RepoGroupHierarchy class shall answer how many groups a group is inside.
+        justification: |
+          The indent of a header and of the cards in it is its depth.
+        tests:
+          - RepoGroupHierarchy_Navigation_Depth_CountsTheGroupsItIsInside
+
+      - id: AgentControl-RepoGroupHierarchy-NavigationRegistered
+        title: >-
+          The RepoGroupHierarchy class shall answer whether a group exists and whether it is registered,
+          that is, takes part in the hierarchy and so exists until it is deleted.
+        justification: |
+          A registered group must stay when its last repo leaves; any other group exists only while a
+          repo names it.
+        tests:
+          - RepoGroupHierarchy_Navigation_Registered_TellsGroupsInTheHierarchyFromOthers
+
+      - id: AgentControl-RepoGroupHierarchy-NavigationSameOrDescendant
+        title: >-
+          The RepoGroupHierarchy class shall answer whether a group is another group or is anywhere
+          inside it, ignoring letter case.
+        justification: |
+          A move must be refused when the new parent is the group or one of its descendants, and this is
+          how that is found.
+        tests:
+          - RepoGroupHierarchy_Navigation_IsSameOrDescendant_TellsSelfDescendantsAndOthersApart
+
+      - id: AgentControl-RepoGroupHierarchy-NavigationSpelling
+        title: >-
+          The RepoGroupHierarchy class shall answer the spelling a group has in the tree for a name in
+          any letter case.
+        justification: |
+          Group names are matched ignoring letter case but shown and stored in one spelling.
+        tests:
+          - RepoGroupHierarchy_Navigation_Name_GivesTheGroupsOwnSpelling
+
+      - id: AgentControl-RepoGroupHierarchy-NavigationUnknownName
+        title: >-
+          The RepoGroupHierarchy class shall answer nothing - no name, an empty list, depth 0 or false -
+          for a name that is no group or for no name at all, without failing.
+        justification: |
+          A stale name from a drag, a menu or a damaged file must never crash the window.
+        tests:
+          - RepoGroupHierarchy_Navigation_UnknownName_AnswersNothingAndNeverFails
+
+      - id: AgentControl-RepoGroupHierarchy-AnyDepth
+        title: >-
+          The RepoGroupHierarchy class shall handle groups nested to any depth, at least 5000 levels
+          included - listing, navigating, repairing, moving into and deleting - without failing.
+        justification: |
+          A hand-edited or damaged file must never be able to crash the window, however deep it
+          claims the groups are nested.
+        tests:
+          - RepoGroupHierarchy_DeepTree_WalkedIteratively
+          - RepoGroupHierarchy_DeepTree_RepairPutInsideAndPopWork
+
+      # ---- Moving a group ----
+      - id: AgentControl-RepoGroupHierarchy-RefusesLoops
+        title: >-
+          The RepoGroupHierarchy class shall refuse to put a group inside itself or inside one of its
+          own descendants.
+        justification: |
+          A group inside itself would be a loop that no list could show.
+        tests:
+          - RepoGroupHierarchy_CanMove_RefusesSelfAndDescendants
+
+      - id: AgentControl-RepoGroupHierarchy-RefusesUnknownGroups
+        title: >-
+          The RepoGroupHierarchy class shall refuse to move a group that does not exist or into one that
+          does not exist, the built-in sections never being groups.
+        justification: |
+          The built-in sections stay where they are, and a stale name must not create a group.
+        tests:
+          - RepoGroupHierarchy_CanMove_RefusesUnknownGroupsAndBuiltInSections
+
+      - id: AgentControl-RepoGroupHierarchy-AllowsTopLevelAndOtherGroups
+        title: >-
+          The RepoGroupHierarchy class shall allow a group to go to the top level or inside any other
+          group that is neither the group nor one of its descendants.
+        justification: |
+          The refusals must not take away a move that makes a tree.
+        tests:
+          - RepoGroupHierarchy_CanMove_AllowsTopLevelAndOtherGroups
+
+      - id: AgentControl-RepoGroupHierarchy-PutInsideRegistersMovedGroupAndAncestors
+        title: >-
+          The RepoGroupHierarchy class shall, when a group is put inside another group, register the
+          moved group and every group it is now inside so that they exist until they are deleted.
+        justification: |
+          A group the user placed in the hierarchy must not vanish when its last repo leaves it, and
+          neither must the groups it sits in.
+        tests:
+          - RepoGroupHierarchy_PutInside_RegistersMovedGroupAndItsNewAncestors
+          - RepoGroupHierarchy_PutInside_IntoUnregisteredGroup_RegistersIt
+
+      - id: AgentControl-RepoGroupHierarchy-PutInsideTopLevelKeepsRegistration
+        title: >-
+          The RepoGroupHierarchy class shall, when a group is put at the top level, keep it registered
+          if it was and leave it unregistered if it was not.
+        justification: |
+          An ordinary top-level group that is only reordered must behave exactly as before.
+        tests:
+          - RepoGroupHierarchy_PutInside_TopLevelUnregisteredGroup_StaysUnregistered
+          - RepoGroupHierarchy_PutInside_TopLevelRegisteredGroup_StaysRegistered
+
+      # ---- Deleting a group but keeping what is in it ----
+      - id: AgentControl-RepoGroupHierarchy-PopKeepsSubgroups
+        title: >-
+          The RepoGroupHierarchy class shall, when a group is deleted with its contents kept, move
+          its subgroups to the group's parent (or the top level) in their own order and in the
+          group's displayed place among its siblings, whether or not the group had a place of its
+          own in the stored order, and leave the order of every other level as it was.
+        justification: |
+          Deleting a group must not lose the groups inside it or shuffle them among their new
+          siblings: they appear where the group was, also for a group that was never dragged.
+        tests:
+          - RepoGroupHierarchy_Pop_SubgroupsGoToTheParentInTheGroupsPlace
+          - RepoGroupHierarchy_Pop_GroupWithoutStoredPlace_NestedSubgroupsTakeItsDisplayedPlace
+          - RepoGroupHierarchy_Pop_TopLevelGroupWithoutStoredPlace_SubgroupsTakeItsDisplayedPlaceAmongTopLevelGroups
+          - RepoGroupHierarchy_Pop_DeeperNestedGroup_SubgroupsGoToTheirGrandparentInPlace
+
+      - id: AgentControl-RepoGroupHierarchy-PopForgetsGroup
+        title: >-
+          The RepoGroupHierarchy class shall, when a group is deleted with its contents kept, leave
+          no stored entry that names the group, in any letter case or more than once, and name each
+          of its subgroups once in the stored order.
+        justification: |
+          A deleted group must not come back through a stale entry, and a repeated entry must not
+          give a group two places.
+        tests:
+          - RepoGroupHierarchy_Pop_DuplicateStoredLater_IsDropped
+          - RepoGroupHierarchy_Pop_LeafGroup_OnlyForgetsTheGroup
+
+      - id: AgentControl-RepoGroupHierarchy-PopUnknownGroupRefused
+        title: >-
+          The RepoGroupHierarchy class shall refuse to delete a group that does not exist, the
+          built-in sections included.
+        justification: |
+          Deleting a name that is no group is a defect of the caller that must not silently rewrite the
+          stored order.
+        tests:
+          - RepoGroupHierarchy_Pop_UnknownGroup_IsRefused
+
+      # ---- Repairing stored parents ----
+      - id: AgentControl-RepoGroupHierarchy-RepairDropsBlankAndReservedKeys
+        title: >-
+          The RepoGroupHierarchy class shall repair stored parents by dropping an entry whose group
+          name is blank or one of the built-in section names.
+        justification: |
+          A settings file that was edited by hand or damaged must never keep the application from
+          starting, nor leave the tree in a state the window cannot show.
+        tests:
+          - RepoGroupHierarchy_RepairParents_DropsBlankAndReservedKeys
+
+      - id: AgentControl-RepoGroupHierarchy-RepairKeepsFirstCaseVariant
+        title: >-
+          The RepoGroupHierarchy class shall repair stored parents by keeping, of entries whose
+          group names differ only in letter case, the first.
+        justification: |
+          Two spellings of one group would split it in two; the choice must not depend on anything but
+          the stored order.
+        tests:
+          - RepoGroupHierarchy_RepairParents_KeepsTheFirstOfNamesDifferingInLetterCase
+
+      - id: AgentControl-RepoGroupHierarchy-RepairSpellsLikeRepos
+        title: >-
+          The RepoGroupHierarchy class shall repair stored parents by spelling a group the way its
+          repos spell it.
+        justification: |
+          The repos are what makes a group exist, so their spelling is the one the user sees.
+        tests:
+          - RepoGroupHierarchy_RepairParents_SpellsAGroupLikeItsRepos
+
+      - id: AgentControl-RepoGroupHierarchy-RepairReadsBadParentAsTopLevel
+        title: >-
+          The RepoGroupHierarchy class shall repair stored parents by reading a missing, blank,
+          reserved, unknown or self parent as the top level.
+        justification: |
+          A group whose parent cannot be found must stay visible rather than vanish with it.
+        tests:
+          - RepoGroupHierarchy_RepairParents_ReadsABadParentAsTopLevel
+
+      - id: AgentControl-RepoGroupHierarchy-RepairRegistersParents
+        title: >-
+          The RepoGroupHierarchy class shall register the parent of a registered group, also when
+          the parent is only named by a repo, so every group a registered group is inside exists
+          while it does.
+        justification: |
+          A registered group could not be shown if the group it is inside were allowed to vanish.
+        tests:
+          - RepoGroupHierarchy_RepairParents_ParentNamedByRepo_IsRegisteredAsTopLevel
+          - RepoGroupHierarchy_Constructor_ParentOfRegisteredGroup_IsRegistered
+
+      - id: AgentControl-RepoGroupHierarchy-RepairCutsCycles
+        title: >-
+          The RepoGroupHierarchy class shall cut every cycle of parents - a cycle of two, of five, several
+          separate ones, and one that a chain leads into - by making the member that sorts first,
+          ignoring letter case, a top-level group, leaving the other members inside each other.
+        justification: |
+          A cycle of groups inside each other has no top, so none of them could be shown.
+        tests:
+          - RepoGroupHierarchy_RepairParents_Cycle_CutAtFirstMemberOfTheCycle
+          - RepoGroupHierarchy_RepairParents_DisjointLongAndDeepCycles_EachCutAtItsFirstMember
+          - RepoGroupHierarchy_Constructor_CycleWithMixedLetterCase_CutAtFirstMember
+
+      - id: AgentControl-RepoGroupHierarchy-RepairIsDeterministicAndIdempotent
+        title: >-
+          The RepoGroupHierarchy class shall cut a cycle of parents the same way whatever order and
+          letter case the entries are stored in, and shall change nothing when a repaired result is
+          repaired again.
+        justification: |
+          Cutting a cycle the same way every time keeps the saved file stable.
+        tests:
+          - RepoGroupHierarchy_RepairParents_Cycle_IsDeterministicAndIdempotent
+          - RepoGroupHierarchy_Constructor_CycleWithMixedLetterCase_CutAtFirstMember
+
+      - id: AgentControl-RepoGroupHierarchy-DamagedTreeStillListsEveryGroup
+        title: >-
+          The RepoGroupHierarchy class shall still list every group that exists when it is given a
+          damaged hierarchy - a cycle, an unknown or self parent, an entry about a group that does
+          not exist.
+        justification: |
+          A damaged file must never leave a repo's group out of the list.
+        tests:
+          - RepoGroupHierarchy_Constructor_DamagedParents_StillListsEveryGroup

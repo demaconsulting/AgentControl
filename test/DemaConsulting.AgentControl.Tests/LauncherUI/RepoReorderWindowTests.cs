@@ -1408,6 +1408,219 @@ public sealed class RepoReorderWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that the drop zone of a group header is worked out in thirds (before, inside, after) and,
+    ///     in an auto-scroll zone, in halves that never nest (before, after).
+    /// </summary>
+    /// <param name="y">The pointer's height within the row.</param>
+    /// <param name="inAutoScrollZone">Whether the pointer is in an auto-scroll zone.</param>
+    /// <param name="insertBefore">The expected "before" answer.</param>
+    /// <param name="inside">The expected "inside" answer.</param>
+    [Theory]
+    [InlineData(0.0, false, true, false)]
+    [InlineData(19.0, false, true, false)]
+    [InlineData(21.0, false, false, true)]
+    [InlineData(40.0, false, false, true)]
+    [InlineData(42.0, false, false, false)]
+    [InlineData(61.0, false, false, false)]
+    [InlineData(0.0, true, true, false)]
+    [InlineData(25.0, true, true, false)]
+    [InlineData(31.0, true, true, false)]
+    [InlineData(31.5, true, false, false)]
+    [InlineData(40.0, true, false, false)]
+    [InlineData(61.0, true, false, false)]
+    public void MainWindow_GetGroupDropZone_ThirdsOrHalvesInAutoScrollZone_NestsOnlyOutsideTheZone(
+        double y, bool inAutoScrollZone, bool insertBefore, bool inside)
+    {
+        // Act
+        var zone = MainWindow.GetGroupDropZone(y, 63.0, inAutoScrollZone);
+
+        // Assert
+        Assert.Equal((insertBefore, inside), zone);
+    }
+
+    /// <summary>
+    ///     Test that a group header dropped over the middle of another group's header nests inside it
+    ///     in the middle of the list, but never in an auto-scroll zone at the bottom or the top edge of a
+    ///     list that scrolls: there the header is split in halves, the feedback shows a line instead of
+    ///     the tint and the drop reorders. The groups are collapsed, so the list ends in a header and
+    ///     starts with one, and the pointer held at an end of the list stays over it.
+    /// </summary>
+    [Fact]
+    public void MainWindow_DragGroupHeaderInAutoScrollZone_NeverNestsAndReorders() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a short window over many collapsed groups
+        var (window, viewModel, _) = CreateShortWindow(12, grouped: true);
+
+        try
+        {
+            for (var index = 0; index < 12; index++)
+            {
+                viewModel.ToggleGroupCollapsed($"g{index:00}");
+            }
+
+            Dispatcher.UIThread.RunJobs();
+            var scroller = ListScroller(window);
+
+            // Act: g00 over the middle of g05's header, with g05 in the middle of the list
+            var drag = BeginGroupDrag(window, "g00");
+            var row = ScrollHeaderTo(window, "g05", 0.5, scroller.Viewport.Height / 2);
+            var point = PointIn(window, row, 0.5);
+            Raise(window, drag, RawDragEventType.DragEnter, point);
+            Raise(window, drag, RawDragEventType.DragOver, point);
+
+            // Assert: not in an auto-scroll zone, so the header is tinted, no line shows, and the drop nests
+            Assert.False(window.IsAutoScrolling);
+            Assert.Contains("dropHeader", row.Classes);
+            Assert.False(IsVisible(row, "GroupDropIndicatorAbove"));
+            Assert.False(IsVisible(row, "GroupDropIndicatorBelow"));
+            Raise(window, drag, RawDragEventType.Drop, point);
+            await drag.CompleteAsync();
+            Assert.Equal("g05", viewModel.GetGroupParent("g00"));
+
+            // Act: g01 over what would be the middle third of the last header (its lower half), at the end of the
+            // list, in the bottom auto-scroll zone
+            ScrollHeaderTo(window, "g01", 0.5, scroller.Viewport.Height / 2);
+            drag = BeginGroupDrag(window, "g01");
+            scroller.Offset = new Vector(0, scroller.Extent.Height);
+            scroller.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            HoldOverHeaderInAutoScrollZone(window, drag, "g11", 0.62, expectLineBelow: true);
+            await drag.CompleteAsync();
+
+            // Assert: g01 is the last group, not inside g11
+            Assert.Null(viewModel.GetGroupParent("g01"));
+            Assert.Null(viewModel.GetGroupParent("g11"));
+            var order = GroupOrder(viewModel);
+            Assert.Equal("g01", order[order.IndexOf("g11") + 1]);
+
+            // Act: g10 over what would be the middle third of the first header (its upper half), at the start of the
+            // list, in the top auto-scroll zone
+            ScrollHeaderTo(window, "g10", 0.5, scroller.Viewport.Height / 2);
+            drag = BeginGroupDrag(window, "g10");
+            scroller.Offset = new Vector(0, 0);
+            scroller.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            HoldOverHeaderInAutoScrollZone(window, drag, order[0], 0.4, expectLineBelow: false);
+            await drag.CompleteAsync();
+
+            // Assert: g10 is the first group
+            Assert.Null(viewModel.GetGroupParent("g10"));
+            Assert.Equal("g10", GroupOrder(viewModel)[0]);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+    /// <summary>
+    ///     Test that a list that fits its window has no auto-scroll zones, so a group header dropped over
+    ///     the middle of a header at the list's edge still nests.
+    /// </summary>
+    [Fact]
+    public void MainWindow_DragGroupHeaderAtEdgeOfListThatFits_StillNests() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: two groups in a window that shows them all
+        var (window, viewModel, _) = CreateWindow(Spec("r00", "g00"), Spec("r01", "g01"));
+
+        try
+        {
+            var scroller = ListScroller(window);
+            Assert.True(scroller.Extent.Height <= scroller.Viewport.Height, "the list should fit");
+            var drag = BeginGroupDrag(window, "g01");
+            var row = FindHeaderRow(window, "g00");
+
+            // Act: g01 over the middle of g00's header, which is at the top edge of the list
+            var point = PointIn(window, row, 0.5);
+            Assert.InRange(window.TranslatePoint(point, scroller)!.Value.Y, 0, 31);
+            Raise(window, drag, RawDragEventType.DragEnter, point);
+            Raise(window, drag, RawDragEventType.DragOver, point);
+
+            // Assert: the header is tinted and the drop nests
+            Assert.Contains("dropHeader", row.Classes);
+            Raise(window, drag, RawDragEventType.Drop, point);
+            await drag.CompleteAsync();
+            Assert.Equal("g00", viewModel.GetGroupParent("g01"));
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Holds a dragged group header over another group's header at an end of the list, where it is in
+    ///     an auto-scroll zone, checks the feedback (the line of the half the pointer is in, never the tint
+    ///     of nesting) and drops it there.
+    /// </summary>
+    /// <remarks>
+    ///     The list is at the end the pointer is held at, so a tick of the auto-scroll cannot move the
+    ///     row under the pointer: the feedback and the drop are those of the place the test arranged.
+    /// </remarks>
+    /// <param name="window">The main window.</param>
+    /// <param name="drag">The drag of a group's header.</param>
+    /// <param name="target">The group whose header is at the end of the list.</param>
+    /// <param name="fraction">The fraction of the target header's row height the pointer is at.</param>
+    /// <param name="expectLineBelow">Whether the pointer is in the lower half, so the line is below.</param>
+    private static void HoldOverHeaderInAutoScrollZone(
+        MainWindow window, DragSession drag, string target, double fraction, bool expectLineBelow)
+    {
+        var scroller = ListScroller(window);
+        var row = FindHeaderRow(window, target);
+        var point = PointIn(window, row, fraction);
+
+        // The pointer is in a zone that scrolls
+        var inScroller = window.TranslatePoint(point, scroller)!.Value.Y;
+        Assert.NotEqual(0.0, MainWindow.ComputeAutoScrollStep(inScroller, scroller.Viewport.Height));
+        Raise(window, drag, RawDragEventType.DragEnter, point);
+        Raise(window, drag, RawDragEventType.DragOver, point);
+
+        // The feedback is a line, and no row is tinted as the place to nest
+        Assert.DoesNotContain(
+            window.FindControl<ListBox>("RepoListBox")!.GetVisualDescendants().OfType<ListBoxItem>(),
+            item => item.Classes.Contains("dropHeader"));
+        Assert.Equal(expectLineBelow, IsVisible(row, "GroupDropIndicatorBelow"));
+        Assert.Equal(!expectLineBelow, IsVisible(row, "GroupDropIndicatorAbove"));
+
+        // Dropped there
+        Raise(window, drag, RawDragEventType.Drop, point);
+        Assert.False(window.IsAutoScrolling);
+    }
+    /// <summary>
+    ///     Scrolls the list so that a point of a group's header is at a height of the list's viewport.
+    /// </summary>
+    /// <param name="window">The main window.</param>
+    /// <param name="sectionName">The group's name.</param>
+    /// <param name="fraction">The fraction of the header row's height, from its top.</param>
+    /// <param name="viewportY">The wanted height, from the top of the list's viewport.</param>
+    /// <returns>The header's row.</returns>
+    private static ListBoxItem ScrollHeaderTo(MainWindow window, string sectionName, double fraction, double viewportY)
+    {
+        var scroller = ListScroller(window);
+
+        // Rows are realized as they scroll into view: look for the header from the top
+        for (var offset = 0.0; offset <= scroller.Extent.Height; offset += 100)
+        {
+            scroller.Offset = new Vector(0, offset);
+            scroller.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            var row = window.FindControl<ListBox>("RepoListBox")!.GetVisualDescendants().OfType<ListBoxItem>()
+                .SingleOrDefault(item => item.DataContext is RepoGroupHeaderViewModel header && header.Name == sectionName);
+            if (row is null)
+            {
+                continue;
+            }
+
+            var current = row.TranslatePoint(new Point(0, row.Bounds.Height * fraction), scroller)!.Value.Y;
+            scroller.Offset = new Vector(0, Math.Max(0, scroller.Offset.Y + current - viewportY));
+            scroller.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            return FindHeaderRow(window, sectionName);
+        }
+
+        throw new InvalidOperationException($"The header of {sectionName} was not found.");
+    }
+
+    /// <summary>
     ///     Test that folders from the file manager held near the bottom edge of the list scroll it, and
     ///     that dropping them stops the scroll (and adds them).
     /// </summary>

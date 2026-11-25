@@ -178,16 +178,17 @@
 
             <!-- The shared card, chip, button and avatar styles live in RepoCardStyles.axaml (included
                  by App.axaml), with every color in its Light/Dark theme dictionaries. -->
-            <ListBox Name="RepoListBox"
+            <vm:RepoListBox Name="RepoListBox"
                       AutomationProperties.AutomationId="RepoListBox"
                       Classes="repoList"
+                      SelectionMode="Multiple"
                       DragDrop.AllowDrop="True"
                       Margin="-8,0,-8,0"
                       IsVisible="{Binding !HasNoDisplayedRepos}"
                       ItemsSource="{Binding DisplayedItems}">
             <!-- The list holds two kinds of rows: a section header (when repos are grouped) and a
                  repo card. Each has its own template, chosen by the row's type. -->
-            <ListBox.DataTemplates>
+            <vm:RepoListBox.DataTemplates>
                 <DataTemplate DataType="vm:RepoGroupHeaderViewModel" x:DataType="vm:RepoGroupHeaderViewModel">
                     <!-- Section header: one flat button (chevron, icon, name, count) collapses or
                          expands the section; a user's own group also has a color accent (when it has
@@ -196,7 +197,8 @@
                          group header can be dragged above or below another group's header; the two
                          lines show where it would land. -->
                     <Panel>
-                        <Grid Name="GroupHeader" ColumnDefinitions="Auto,*,Auto" Margin="0,8,0,0">
+                        <Grid Name="GroupHeader" ColumnDefinitions="Auto,*,Auto"
+                               Margin="{Binding IndentWidth, Converter={x:Static vm:GroupIndentConverter.Instance}, ConverterParameter=8}">
                             <!-- Group color accent: a fixed-width slot, so headers stay aligned whether or
                                  not the group has a color. Named in words by its tooltip and accessible
                                  name (never color alone). -->
@@ -262,10 +264,10 @@
                                      Classes="iconGhost"
                                      Margin="0,0,15,0"
                                      IsVisible="{Binding IsUserGroup}"
-                                     ToolTip.Tip="Add a repository to this group, or move, color, rename or remove the group">
+                                     ToolTip.Tip="Add a repository to this group, or move, sort, color, rename or delete the group">
                                 <materialIcons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
                                 <Button.Flyout>
-                                    <MenuFlyout>
+                                    <MenuFlyout Opening="GroupMenu_Opening">
                                         <MenuItem Name="GroupAddRepoMenuItem"
                                                    AutomationProperties.AutomationId="GroupAddRepoMenuItem"
                                                    Header="Add repository..."
@@ -273,6 +275,15 @@
                                                    Command="{Binding AddRepoCommand}">
                                             <MenuItem.Icon>
                                                 <materialIcons:MaterialIcon Kind="FolderPlus" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Name="GroupNewSubgroupMenuItem"
+                                                   AutomationProperties.AutomationId="GroupNewSubgroupMenuItem"
+                                                   Header="New subgroup..."
+                                                   ToolTip.Tip="Create a new group inside this group"
+                                                   Command="{Binding NewSubgroupCommand}">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="FolderPlusOutline" />
                                             </MenuItem.Icon>
                                         </MenuItem>
                                         <Separator />
@@ -298,6 +309,29 @@
                                                 <materialIcons:MaterialIcon Kind="ArrowDown" />
                                             </MenuItem.Icon>
                                         </MenuItem>
+                                        <!-- Move into group: the submenu (Move to top level, then one entry per
+                                             group it can go into) is filled in when the menu opens - see
+                                             GroupMenu_Opening; the item is disabled, with the reason as its
+                                             tooltip, while the filter has text and when no group is a target -->
+                                        <MenuItem Name="GroupMoveIntoMenuItem"
+                                                   AutomationProperties.AutomationId="GroupMoveIntoMenuItem"
+                                                   Header="Move into group"
+                                                   ToolTip.Tip="Put this group inside another group, or back at the top level, without dragging"
+                                                   ToolTip.ShowOnDisabled="True">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="FolderMove" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Name="GroupSortByNameMenuItem"
+                                                   AutomationProperties.AutomationId="GroupSortByNameMenuItem"
+                                                   Header="Sort by name"
+                                                   ToolTip.Tip="{Binding SortByNameTooltip}"
+                                                   ToolTip.ShowOnDisabled="True"
+                                                   Command="{Binding SortByNameCommand}">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="SortAlphabeticalAscending" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
                                         <MenuItem Name="GroupColorMenuItem"
                                                    AutomationProperties.AutomationId="GroupColorMenuItem"
                                                    Header="Group color..."
@@ -319,11 +353,21 @@
                                         </MenuItem>
                                         <MenuItem Name="RemoveGroupMenuItem"
                                                    AutomationProperties.AutomationId="RemoveGroupMenuItem"
-                                                   Header="Remove group"
-                                                   ToolTip.Tip="Remove this group; its repos stay in the list, ungrouped"
+                                                   Header="{Binding RemoveGroupText}"
+                                                   ToolTip.Tip="{Binding RemoveGroupTooltip}"
                                                    Command="{Binding RemoveGroupCommand}">
                                             <MenuItem.Icon>
                                                 <materialIcons:MaterialIcon Kind="FolderRemove" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+                                        <MenuItem Name="RemoveGroupWithContentsMenuItem"
+                                                   AutomationProperties.AutomationId="RemoveGroupWithContentsMenuItem"
+                                                   Header="Delete group and its contents"
+                                                   ToolTip.Tip="Delete this group together with all its repos and subgroups: they are removed from AgentControl's list (nothing on disk is deleted)"
+                                                   IsVisible="{Binding HasContents}"
+                                                   Command="{Binding RemoveGroupWithContentsCommand}">
+                                            <MenuItem.Icon>
+                                                <materialIcons:MaterialIcon Kind="DeleteForever" />
                                             </MenuItem.Icon>
                                         </MenuItem>
                                     </MenuFlyout>
@@ -355,6 +399,7 @@
                 </DataTemplate>
                 <DataTemplate DataType="vm:RepoCardViewModel" x:DataType="vm:RepoCardViewModel">
                     <Border Classes="RepoCard"
+                             Margin="{Binding IndentWidth, Converter={x:Static vm:GroupIndentConverter.Instance}}"
                              AttachedToVisualTree="RepoCard_AttachedToVisualTree">
                         <Panel>
                         <!-- Accent bar (overall status) | card body -->
@@ -514,8 +559,8 @@
                                                  are filled in when the menu opens: see CardMenu_Opening -->
                                             <MenuItem Name="MoveToGroupMenuItem"
                                                        AutomationProperties.AutomationId="MoveToGroupMenuItem"
-                                                       Header="Move to group"
-                                                       ToolTip.Tip="Put this repo in one of your groups, or start a new group (stored only in your AgentControl settings, never in the repository)">
+                                                       Header="{Binding MoveToGroupMenuText}"
+                                                       ToolTip.Tip="{Binding MoveToGroupMenuTooltip}">
                                                 <MenuItem.Icon>
                                                     <materialIcons:MaterialIcon Kind="FolderMultipleOutline" />
                                                 </MenuItem.Icon>
@@ -586,8 +631,8 @@
                                             <Separator />
                                             <MenuItem Name="RemoveMenuItem"
                                                        AutomationProperties.AutomationId="RemoveMenuItem"
-                                                       Header="Remove from list"
-                                                       ToolTip.Tip="Remove this repo from AgentControl's recent-repos list (does not delete it from disk)"
+                                                       Header="{Binding RemoveMenuText}"
+                                                       ToolTip.Tip="{Binding RemoveMenuTooltip}"
                                                        Click="RemoveMenuItem_Click">
                                                 <MenuItem.Icon>
                                                     <materialIcons:MaterialIcon Kind="TrashCan" />
@@ -940,8 +985,8 @@
                         </Panel>
                     </Border>
                 </DataTemplate>
-            </ListBox.DataTemplates>
-            </ListBox>
+            </vm:RepoListBox.DataTemplates>
+            </vm:RepoListBox>
 
             <!-- Shown while folders dragged from the file manager would be added ungrouped -->
             <Border Name="ExternalDropOverlay"

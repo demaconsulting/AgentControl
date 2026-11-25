@@ -40,7 +40,9 @@ single package-folder path to a `Default` zip source when no sources are configu
 (`AgentControl-SettingsStore-LegacySourceMigration`); a configured source list wins over a legacy
 path.
 
-- *Parameters*: `string? configDirectory = null` (defaults to `GetDefaultConfigDirectory`).
+- *Parameters*: `string? configDirectory = null` (defaults to `GetDefaultConfigDirectory`) and the two optional test
+  seams of `Save` (`Action<string,string>? replaceFile`, `Action<TimeSpan>? delay`), which `Load` only passes on to the
+  write-back of the seeded repo order.
 - *Returns*: `AppSettings`, with the repo list in the user's order.
 - *Postconditions*: Returns a fresh default `AppSettings` instance if no settings file exists yet — first run is
   expected, not an error (`AgentControl-SettingsStore-Load`). An explicit JSON `null` for the source list, the
@@ -85,7 +87,14 @@ path.
   the end of the group-name repair of `NormalizeNulls`) drops unusable or reserved names, colors the palette does not
   know and case duplicates (the first wins, respelled as the group is spelled on its repos), so a later `Save` does not
   write them back (`AgentControl-SettingsStore-InvalidGroupColorsAndOrderRepaired`), and drops the color and position
-  of a group that no repo is in (`AgentControl-SettingsStore-StaleGroupSettingsDropped`). The rules are described in
+  of a group that no repo is in and that is not part of the group hierarchy
+  (`AgentControl-SettingsStore-StaleGroupSettingsDropped`). `AppSettings.GroupParents` (child group to parent group, the
+  empty string for a top-level group) is always written and read back (`AgentControl-SettingsStore-GroupParents`); a
+  file without it loads as no hierarchy, every group top level (`-GroupParentsDefaults`). It is read as tolerantly as
+  the group colors and repaired by the same `RepairGroupSettings` through `RepoGroupHierarchy.RepairParents`: unusable
+  names are dropped, an unknown, self or built-in-section parent means top level, a cycle is cut, and the groups are
+  spelled as they are (`-InvalidGroupParentsRepaired`); a group in the hierarchy survives the load with no repo in it
+  (`-RegisteredGroupKept`). The rules are described in
   the *Settings* subsystem design.
 
 **Save**: Saves `AppSettings` to a configuration directory, creating the directory if needed.
@@ -151,6 +160,8 @@ programming error for a failed save) and writes nothing.
   legacy-migration and persisted-copy members and the repair of the group colors and group order.
 - **RecentRepo** (same subsystem) — the per-repo group and card-color values, and the list of known card colors.
 - **RepoGroupName** (same subsystem, its own unit) — the rules that repair stored group names.
+- **RepoGroupHierarchy** (same subsystem, its own unit) — repairs the stored group tree on load (through
+  `AppSettings.RepairGroupSettings`); `SettingsStore` itself only reads and writes the values.
 - **PackageSourceDefinition** (`AgentPackageManagement` subsystem) — the source data type held in
   `AppSettings.Sources`.
 - **.NET BCL** — `System.Text.Json`, `Environment.GetFolderPath`, `File.Move`, `Thread.Sleep` (the defaults of the
