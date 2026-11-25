@@ -70,7 +70,8 @@ continuations of their background work, which resume on the UI thread); it is no
 
 #### Key Methods
 
-**Begin(text, cancel = null, cancelDescription = null)**: Starts showing an operation, indeterminate, with the given text.
+**Begin(text, cancel = null, cancelDescription = null)**: Starts showing an operation, indeterminate, with the given
+text.
 
 - *Parameters*: `string text` (not null, `ArgumentNullException`), `Action? cancel` - what the strip's Cancel button
   does for this operation, run on the UI thread at most once, or `null` for an operation that cannot be canceled;
@@ -128,5 +129,5 @@ caught: the owner's cancel action (`MainWindowViewModel.CancelAddRepos`) only si
   repositories {completed} of {total}...`), and disposes them when the work ends; it also begins the cancelable,
   indeterminate operation of a clone with its own cancel description.
 - **MainWindow** (view) - binds the strip (`GlobalProgressStrip`), its bar (`GlobalProgressBar`), its text
-  (`GlobalProgressText`) and its Cancel button (`GlobalProgressCancelButton`, whose accessible name and tooltip are bound
-  to `CancelAccessibleName` and `CancelToolTip`) to the properties and `CancelCommand`.
+  (`GlobalProgressText`) and its Cancel button (`GlobalProgressCancelButton`, whose accessible name and tooltip are
+  bound to `CancelAccessibleName` and `CancelToolTip`) to the properties and `CancelCommand`.

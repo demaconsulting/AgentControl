@@ -143,8 +143,8 @@ them.
   `AgentControl-GitClient-ListBranches`, `AgentControl-GitClient-ListBranchesRemoteDistinct`,
   `AgentControl-GitClient-ListBranchesDetached`, `AgentControl-GitClient-SwitchBranch`,
   `AgentControl-GitClient-SwitchRefusalReported`).
-- *Constraints*: A switch never forces, discards, merges or stashes (`AgentControl-GitClient-SwitchNeverForces`); a blank
-  or option-like name is refused with `ArgumentException` before git runs; `GetBranches` throws
+- *Constraints*: A switch never forces, discards, merges or stashes (`AgentControl-GitClient-SwitchNeverForces`); a
+  blank or option-like name is refused with `ArgumentException` before git runs; `GetBranches` throws
   `InvalidOperationException` when git cannot list the refs.
 
 **GitClient.Clone / CheckCloneUrl / CheckCloneDestination**: Clones a repository into a new or empty folder, and

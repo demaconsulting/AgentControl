@@ -2,23 +2,21 @@
 
 ### Verification Approach
 
-The `GitIntegration` subsystem is verified indirectly through its constituent units' test
-suites (`GitClientTests.cs`, `GitClientRealRepositoryTests.cs`, `CommittedAgentFilesCacheTests.cs`, `GitCredentialClientTests.cs` /
-`GitCredentialClientIntegrationTests.cs` and `GitRemoteClientTests.cs` /
-`GitRemoteClientIntegrationTests.cs`), each documented in its
-own unit-level verification design, plus `GitIntegrationSubsystemTests.cs`, which drives the saved-sign-in capability
-through its contract with the real git and a throw-away credential helper, and the remote Git capability
-(`GitRemoteClient`) the way the Git package source uses it: against a real local repository with the user's git
-configuration replaced by an isolated one (and, for the sign-in test, against `GitHttpsServer.cs`, a private Git server
-of the test), or against `GitRemoteStub`, a fake git executable that records its arguments and environment. The
+The `GitIntegration` subsystem is verified indirectly through its constituent units' test suites (`GitClientTests.cs`,
+`GitClientRealRepositoryTests.cs`, `CommittedAgentFilesCacheTests.cs`, `GitCredentialClientTests.cs` /
+`GitCredentialClientIntegrationTests.cs` and `GitRemoteClientTests.cs` / `GitRemoteClientIntegrationTests.cs`), each
+documented in its own unit-level verification design, plus `GitIntegrationSubsystemTests.cs`, which drives the
+saved-sign-in capability through its contract with the real git and a throw-away credential helper, and the remote Git
+capability (`GitRemoteClient`) the way the Git package source uses it: against a real local repository with the user's
+git configuration replaced by an isolated one (and, for the sign-in test, against `GitHttpsServer.cs`, a private Git
+server of the test), or against `GitRemoteStub`, a fake git executable that records its arguments and environment. The
 subsystem test class reuses `GitRepositoryFixture` of the `AgentPackageManagement` test folder, a deliberate
 cross-hierarchy dependency of test code only (the fixture builds real local repositories with the user's git
-configuration isolated; nothing in the shipped code depends on it). `GitClientTests` uses `GitStub`,
-a fake git executable
-script that records its invocation arguments and returns configured output/exit codes, so
-tests never depend on a real git installation or a real repository's actual history. The credential tests use
-`GitCredentialStub`, a similar fake that also records the environment, working folder and standard input, and -
-separately - run the real git against a throw-away credential helper in a temporary folder.
+configuration isolated; nothing in the shipped code depends on it). `GitClientTests` uses `GitStub`, a fake git
+executable script that records its invocation arguments and returns configured output/exit codes, so tests never depend
+on a real git installation or a real repository's actual history. The credential tests use `GitCredentialStub`, a
+similar fake that also records the environment, working folder and standard input, and - separately - run the real git
+against a throw-away credential helper in a temporary folder.
 
 ### Test Environment
 
@@ -214,12 +212,12 @@ with `GitClient_Clone_Canceled_RemovesDestinationItCreated`, cited at the subsys
 `AgentControl-GitClient-ListBranches`, `-ListBranchesRemoteDistinct`, `-ListBranchesDetached`, `-SwitchBranch`,
 `-SwitchNeverForces`, `-SwitchRefusalReported`, `-Clone`, `-CloneDestinationRules` and `-CloneCancelStopsGit`).
 
-**GitIntegration_CloneSafety_UnitTestsCoverAddressDataCleanupAndRedaction**: An address that git could read as an
-option or a remote helper is refused before git starts (`GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit`,
+**GitIntegration_CloneSafety_UnitTestsCoverAddressDataCleanupAndRedaction**: An address that git could read as an option
+or a remote helper is refused before git starts (`GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit`,
 covering `AgentControl-GitIntegration-CloneUrlIsData`, child `AgentControl-GitClient-CloneRefusesOptionLikeUrl`); a
 canceled clone into an existing empty folder keeps the folder and a failed clone deletes nothing
-(`GitClient_Clone_CanceledIntoExistingEmptyFolder_RemovesContentsKeepsFolder` and `GitClient_Clone_Fails_LeavesFolderAlone`,
-covering `AgentControl-GitIntegration-CloneRemovesOnlyWhatItCreated`, child
+(`GitClient_Clone_CanceledIntoExistingEmptyFolder_RemovesContentsKeepsFolder` and
+`GitClient_Clone_Fails_LeavesFolderAlone`, covering `AgentControl-GitIntegration-CloneRemovesOnlyWhatItCreated`, child
 `AgentControl-GitClient-CloneRemovesOnlyWhatItCreated`); and an address with a password never puts the password into a
 log message or a result: with a stub whose clone fails and echoes the address, the subsystem test searches the log and
 the result for the password. That scenario is tested by

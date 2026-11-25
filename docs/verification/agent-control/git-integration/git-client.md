@@ -174,16 +174,17 @@ with `main`, `feature/x` and `other`, the list holds local `main` and remote `or
 `GitClient_SwitchBranch_RealRepo_FromDetachedHead_Works`, covering `AgentControl-GitClient-ListBranches`,
 `AgentControl-GitClient-ListBranchesRemoteDistinct` and `AgentControl-GitClient-ListBranchesDetached`.
 
-**GitClient_SwitchBranch_RunsSafeCommandsAndReportsRefusals**: The stub's argument log shows `switch -- feature/x` for
-a local branch and `switch --track -- origin/feature/y` for a remote one, and the only options ever present are `--`
-and `--track`; a blank, `-f`, `--detach` or multi-line name is refused with `ArgumentException` and the stub is never
+**GitClient_SwitchBranch_RunsSafeCommandsAndReportsRefusals**: The stub's argument log shows `switch -- feature/x` for a
+local branch and `switch --track -- origin/feature/y` for a remote one, and the only options ever present are `--` and
+`--track`; a blank, `-f`, `--detach` or multi-line name is refused with `ArgumentException` and the stub is never
 started; a stub whose `switch` takes two seconds completes under a one-second local limit (the switch limit applies); a
 stub whose `switch` fails with "would be overwritten" is returned as a result, not thrown. In real repositories a switch
 to a remote branch creates a local tracking branch (`branch.feature/x.remote` is `origin`) and changes the files, a
 switch back works, a switch that would overwrite an edited file or an untracked file is refused with git's text naming
 the file, the current branch stays and the file content is intact. This scenario is tested by
 `GitClient_SwitchBranch_Local_RunsSwitchWithDoubleDash`, `GitClient_SwitchBranch_Remote_RunsSwitchTrackWithRemoteName`,
-`GitClient_SwitchBranch_NeverPassesForceOrDiscardOptions`, `GitClient_SwitchBranch_BlankOrOptionLikeName_ThrowsArgumentException`,
+`GitClient_SwitchBranch_NeverPassesForceOrDiscardOptions`,
+`GitClient_SwitchBranch_BlankOrOptionLikeName_ThrowsArgumentException`,
 `GitClient_SwitchBranch_UsesSwitchTimeoutNotLocalTimeout`,
 `GitClient_SwitchBranch_Refused_ReturnsGitsMessageWithoutThrowing`,
 `GitClient_SwitchBranch_RealRepo_LocalAndRemoteCreatesTrackingBranch`,
@@ -196,12 +197,13 @@ the file, the current branch stays and the file content is intact. This scenario
 `clone -- <trimmed url> <destination>`; an address that starts with a dash, is blank, spans two lines or uses `ext::`,
 `EXT::` or `fd::` is refused with `ArgumentException` and the stub is never started, while ordinary https, ssh, scp-like
 and path addresses are accepted by `CheckCloneUrl`; a destination that is a non-empty folder (whose file stays intact),
-has a missing parent, is relative or is a file is refused with a reason; a new or an empty folder is accepted; a
-stub whose `clone` takes two seconds completes under a one-second local limit (the clone limit applies); on a guarded
-thread the branch list, the switch, the clone and the destination check are each refused with
+has a missing parent, is relative or is a file is refused with a reason; a new or an empty folder is accepted; a stub
+whose `clone` takes two seconds completes under a one-second local limit (the clone limit applies); on a guarded thread
+the branch list, the switch, the clone and the destination check are each refused with
 `BlockingCallOnGuardedThreadException`. A real clone of a local bare repository works into a new folder and into an
 existing empty folder (a repository root on `main` with the committed file), and a clone of a path that is not a
-repository is a failed result. This scenario is tested by `GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList`,
+repository is a failed result. This scenario is tested by
+`GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList`,
 `GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit`, `GitClient_CheckCloneUrl_UsualAddress_ReturnsNull`,
 `GitClient_Clone_DestinationExistsNotEmpty_ThrowsArgumentExceptionAndTouchesNothing`,
 `GitClient_Clone_ParentMissingRelativeOrFile_ThrowsArgumentException`,
@@ -213,15 +215,15 @@ repository is a failed result. This scenario is tested by `GitClient_Clone_Succe
 `AgentControl-GitClient-CloneRefusesOptionLikeUrl` and `AgentControl-GitClient-CloneDestinationRules`.
 
 **GitClient_Clone_StopsAndCleansUpOnlyWhatItCreated**: A stub whose `clone` creates its destination (with a read-only
-pack file) and then hangs is canceled after the file exists: the call throws `OperationCanceledException`, the stub never
-finishes, and the destination - which the call created - is gone while its parent remains; with an existing empty
+pack file) and then hangs is canceled after the file exists: the call throws `OperationCanceledException`, the stub
+never finishes, and the destination - which the call created - is gone while its parent remains; with an existing empty
 destination the folder stays and is empty afterwards; with a one-second clone limit the same stub is stopped and
 reported as `GitCommandTimeoutException` naming `git clone` and the limit, and the destination is removed; a stub whose
 `clone` leaves its destination and exits with an error is returned as a failed result and the destination is left alone.
 This scenario is tested by `GitClient_Clone_Canceled_RemovesDestinationItCreated`,
 `GitClient_Clone_CanceledIntoExistingEmptyFolder_RemovesContentsKeepsFolder`,
-`GitClient_Clone_TimesOut_StopsGitAndRemovesDestinationItCreated` and `GitClient_Clone_Fails_LeavesFolderAlone`
-(and, for a folder with content, `GitClient_Clone_DestinationExistsNotEmpty_ThrowsArgumentExceptionAndTouchesNothing`),
+`GitClient_Clone_TimesOut_StopsGitAndRemovesDestinationItCreated` and `GitClient_Clone_Fails_LeavesFolderAlone` (and,
+for a folder with content, `GitClient_Clone_DestinationExistsNotEmpty_ThrowsArgumentExceptionAndTouchesNothing`),
 covering `AgentControl-GitClient-CloneRemovesOnlyWhatItCreated` and `AgentControl-GitClient-CloneCancelStopsGit`.
 
 **GitClient_Clone_NeverLogsTheAddressPassword**: With an address `https://alice:<password>@example.com/...`, a stub
