@@ -233,7 +233,8 @@ sections:
           name rules, so that a loaded group name is always a usable name and names that differ
           only in letter case are one group.
         justification: |
-          A group exists only as the name stored on its repos, so a hand-edited or damaged file
+          A group exists as the name stored on its repos (or as a name registered in the hierarchy),
+          so a hand-edited or damaged file
           must never produce an unusable group or two look-alike groups; what a usable name is
           is decided by the repo group name rules, which the store only applies.
         tests:
@@ -342,7 +343,8 @@ sections:
           group that no repo is in and that is not part of the group hierarchy, and of a built-in
           section's name.
         justification: |
-          A group exists only while a repo is in it; a choice left behind for a group that is gone
+          A group exists only while a repo is in it or it is registered in the hierarchy; a choice left
+          behind for a group that is gone
           must not come back on a new group of the same name.
         tests:
           - SettingsStore_Load_ColorAndOrderOfGroupWithoutRepos_AreDropped

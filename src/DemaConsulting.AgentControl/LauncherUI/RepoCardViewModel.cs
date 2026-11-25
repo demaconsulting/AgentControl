@@ -621,8 +621,9 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public double IndentWidth => RepoGroupHeaderViewModel.GetIndentWidth(Depth);
 
     /// <summary>
-    ///     Gets the names of the groups that exist now (the groups of all repos in the settings),
-    ///     sorted, for the "Move to group" submenu.
+    ///     Gets the names of the groups that exist now - the groups the repos in the settings are in plus the
+    ///     registered groups of the hierarchy (a group created empty or moved within the tree), see
+    ///     <see cref="AppSettings.GetGroupNames"/> - sorted, for the "Move to group" submenu.
     /// </summary>
     /// <returns>The distinct group names, alphabetically.</returns>
     public IReadOnlyList<string> GetExistingGroupNames() => _getSettings().GetGroupNames();

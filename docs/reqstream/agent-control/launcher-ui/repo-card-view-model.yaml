@@ -952,7 +952,8 @@ sections:
 
       - id: AgentControl-RepoCardViewModel-GroupList
         title: >-
-          The RepoCardViewModel class shall list the existing groups of all the repos.
+          The RepoCardViewModel class shall list the existing groups: those of all the repos and the
+          registered ones.
         justification: |
           The card's menu offers the groups a repo can be moved to.
         tests:

@@ -378,16 +378,16 @@ the events that need a dialog.
 background, so the window never waits for the settings file, which another program (a virus scanner, an indexer, a sync
 client) can hold for up to a second (`AgentControl-LauncherUI-ChangeAppliedWhenSaved`).
 `MainWindowViewModel.CommitSettingsChange` applies the change to the live settings, runs
-`AppSettings.RepairGroupSettings` (which drops the color and position of a group that no repo is in any more,
-`AgentControl-LauncherUI-GroupSettingsKeptInStep`), and hands a snapshot of the live settings
-(`AppSettings.CreateSnapshot`) to the `Settings` subsystem's `SettingsWriter`, which writes the newest snapshot on a
-worker thread a moment after the last change, one write at a time; then the list is refreshed. A change made on a card -
-`IsFavorite`, `MoveToGroup`, `SetCardColor`, and the launch timestamp - reaches this through the card's `commitChange`
-callback (`MainWindowViewModel.CommitRepoChange`), which applies it and returns `true`. When a write fails, the change
-stays in effect - the settings in memory, the cards and the list - and is written with the next change or when the
-window closes (`AgentControl-LauncherUI-FailedSaveChangesNothing`); the writer reports the first failure of a streak,
-and the main view-model raises `SettingsSaveFailed` with a message saying why and that the changes stay in effect, which
-`MainWindow` shows in a message box it does not wait for - once per failure streak, not for every click
+`AppSettings.RepairGroupSettings` (which drops the color and position of a group that no repo is in any more and that is
+not registered in the hierarchy, `AgentControl-LauncherUI-GroupSettingsKeptInStep`), and hands a snapshot of the live
+settings (`AppSettings.CreateSnapshot`) to the `Settings` subsystem's `SettingsWriter`, which writes the newest snapshot
+on a worker thread a moment after the last change, one write at a time; then the list is refreshed. A change made on a
+card - `IsFavorite`, `MoveToGroup`, `SetCardColor`, and the launch timestamp - reaches this through the card's
+`commitChange` callback (`MainWindowViewModel.CommitRepoChange`), which applies it and returns `true`. When a write
+fails, the change stays in effect - the settings in memory, the cards and the list - and is written with the next change
+or when the window closes (`AgentControl-LauncherUI-FailedSaveChangesNothing`); the writer reports the first failure of
+a streak, and the main view-model raises `SettingsSaveFailed` with a message saying why and that the changes stay in
+effect, which `MainWindow` shows in a message box it does not wait for - once per failure streak, not for every click
 (`AgentControl-LauncherUI-FailedSaveReported`). The changes that must be on disk before they are applied - an add, and
 the Settings window's values (`ApplySettingsAsync`) - are confirmed saves of the same writer, made on a worker thread:
 they are applied only once written, and a failure changes nothing and reaches their caller - `AddRepos` reports every

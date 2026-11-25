@@ -373,7 +373,7 @@ file, once: a list that has no user order yet is arranged favorites first, then 
 arrangement is written by the next save of any kind (`AgentControl-MainWindowViewModel-LegacyOrderSeeded`); a list
 that already has a user order is kept whatever the launch times are (`-OrderKept`). It then calls
 `AppSettings.RepairGroupSettings`, so settings built in memory have the group colors and order a load would leave
-(only known colors, only groups some repo is in).
+(only known colors, only groups that exist: some repo is in them or they are registered in the hierarchy).
 
 - *Parameters*: `AppSettings settings`, `StartupOptions? startupOptions = null`,
   `string? configDirectory = null`, `PackageCredentialContext? credentials = null`,

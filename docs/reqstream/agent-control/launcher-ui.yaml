@@ -742,8 +742,8 @@ sections:
           order when the group is renamed, forget them when the group is removed or its last repo
           leaves it, and keep them when settings are applied from the Settings window.
         justification: |
-          A group exists only while a repo is in it; a color or a place left behind for a group
-          that is gone would come back unexpectedly on a new group of the same name, and a rename or
+          A group exists only while a repo is in it or it is registered in the hierarchy; a color or
+          a place left behind for a group that is gone would come back unexpectedly on a new group of the same name, and a rename or
           a change in the Settings window must not lose what the user chose.
         children:
           - AgentControl-MainWindowViewModel-GroupSettingsFollowRenameAndRemove
