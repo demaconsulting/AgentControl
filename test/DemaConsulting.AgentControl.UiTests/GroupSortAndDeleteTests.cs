@@ -98,6 +98,7 @@ public sealed class GroupSortAndDeleteTests
         var question = context.WaitForWindowWithDescendant("ConfirmationYesButton", TimeSpan.FromSeconds(15));
         Assert.NotNull(question);
         Assert.Contains("2 repo(s)", Find(question, "ConfirmationMessageText").Name, StringComparison.Ordinal);
+        Assert.Contains("nothing on disk or in any repository is deleted", Find(question, "ConfirmationMessageText").Name, StringComparison.Ordinal);
         Find(question, "ConfirmationNoButton").AsButton().Invoke();
 
         // Assert: nothing changed
@@ -125,8 +126,10 @@ public sealed class GroupSortAndDeleteTests
     }
 
     /// <summary>
-    ///     Choosing "Delete group, keep contents" in a group header's menu and confirming removes the group
-    ///     header but leaves all the repos in the list (ungrouped).
+    ///     Choosing "Delete group, keep contents" in a group header's menu and declining changes nothing (the
+    ///     group is still listed and still stored); confirming removes the group header and the group from the
+    ///     settings but leaves all the repos in the list (ungrouped), the group's repos after the repo that was
+    ///     already ungrouped.
     /// </summary>
     [Fact]
     public void GroupHeaderMenu_DeleteGroupKeepContents_RemovesTheHeaderAndKeepsAllRepos()
@@ -141,21 +144,135 @@ public sealed class GroupSortAndDeleteTests
         using var context = new AgentControlTestContext(customizeSettings: SeedWorkGroupWithTwoRepos);
         var mainWindow = context.Launch();
         mainWindow.SetForeground();
+        Assert.Equal(["Alpha", "Bravo", "elsewhere"], RepoNames(mainWindow));
 
-        // Act: ... on the Work header > Delete group, keep contents, confirmed
+        // Act: ... on the Work header > Delete group, keep contents, declined first
         Find(mainWindow, "GroupHeaderMenuButton").AsButton().Invoke();
         Find(mainWindow, "RemoveGroupMenuItem").AsMenuItem().Invoke();
         var question = context.WaitForWindowWithDescendant("ConfirmationYesButton", TimeSpan.FromSeconds(15));
         Assert.NotNull(question);
+        var keepMessage = Find(question, "ConfirmationMessageText").Name;
+        Assert.Contains("Its 2 repo(s) stay in AgentControl's list, ungrouped.", keepMessage, StringComparison.Ordinal);
+        Assert.Contains("nothing on disk or in any repository is changed", keepMessage, StringComparison.Ordinal);
+        Find(question, "ConfirmationNoButton").AsButton().Invoke();
+
+        // Assert: nothing changed - the group is still listed and still stored for its two repos
+        Assert.Equal(["Work, 2 repos, expanded", "Ungrouped, 1 repo, expanded"], HeaderNames(mainWindow));
+        Assert.Equal(["Alpha", "Bravo", "elsewhere"], RepoNames(mainWindow));
+        Assert.Equal(3, ReadSettings(context).Split("\"Work\"").Length);
+
+        // Act: confirm
+        Find(mainWindow, "GroupHeaderMenuButton").AsButton().Invoke();
+        Find(mainWindow, "RemoveGroupMenuItem").AsMenuItem().Invoke();
+        question = context.WaitForWindowWithDescendant("ConfirmationYesButton", TimeSpan.FromSeconds(15));
+        Assert.NotNull(question);
         Find(question, "ConfirmationYesButton").AsButton().Invoke();
 
-        // Assert: no group header any more, all three repos still listed
+        // Assert: no group header any more, all three repos still listed by name, the repo that was ungrouped
+        // first and the group's repos after it
         Assert.True(Retry.WhileFalse(
             () => mainWindow.FindAllDescendants(cf => cf.ByAutomationId("GroupHeaderToggleButton")).Length == 0 &&
-                  RepoNames(mainWindow).Count == 3,
+                  RepoNames(mainWindow).SequenceEqual(["elsewhere", "Alpha", "Bravo"]),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+
+        // Assert: the settings no longer name the group, and the folders are still on disk
+        Assert.True(Retry.WhileFalse(
+            () => !ReadSettings(context).Contains("\"Work\"", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.True(Directory.Exists(Path.Combine(context.RootDirectory, "Alpha")));
+        Assert.True(Directory.Exists(Path.Combine(context.RootDirectory, "Bravo")));
+    }
+
+    /// <summary>
+    ///     Choosing "Delete group, keep contents" for a group that is inside another group and has a group
+    ///     inside it keeps the repos in the outer group and moves the inner group into the outer group, and
+    ///     the settings no longer name the deleted group.
+    /// </summary>
+    [Fact]
+    public void GroupHeaderMenu_DeleteNestedGroupKeepContents_RepoStaysInParentAndSubgroupMovesToParent()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: Gamma in "Outer", Alpha in "Work" (inside Outer), Bravo in "Sub" (inside Work)
+        using var context = new AgentControlTestContext(customizeSettings: SeedThreeLevelGroups);
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+        Assert.True(Retry.WhileFalse(
+            () => HeaderNames(mainWindow).SequenceEqual(
+            [
+                "Outer, 3 repos, expanded",
+                "Work, 2 repos, expanded, inside Outer",
+                "Sub, 1 repo, expanded, inside Work"
+            ]),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+
+        // Act: ... on the Work header > Delete group, keep contents, confirmed
+        Find(
+            mainWindow,
+            "GroupHeaderMenuButton",
+            candidate => candidate.Name == "Actions for group Work").AsButton().Invoke();
+        Find(mainWindow, "RemoveGroupMenuItem").AsMenuItem().Invoke();
+        var question = context.WaitForWindowWithDescendant("ConfirmationYesButton", TimeSpan.FromSeconds(15));
+        Assert.NotNull(question);
+        Assert.Contains(
+            "Its 1 subgroup(s) move",
+            Find(question, "ConfirmationMessageText").Name,
+            StringComparison.Ordinal);
+        Find(question, "ConfirmationYesButton").AsButton().Invoke();
+
+        // Assert: Sub is now inside Outer, Alpha stays in Outer; no Work any more
+        Assert.True(Retry.WhileFalse(
+            () => HeaderNames(mainWindow).SequenceEqual(
+                ["Outer, 3 repos, expanded", "Sub, 1 repo, expanded, inside Outer"]),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.Equal(3, RepoNames(mainWindow).Count);
+        Assert.Contains("Alpha", RepoNames(mainWindow));
+
+        // Assert: the settings no longer name the deleted group, and keep the subgroup inside Outer
+        Assert.True(Retry.WhileFalse(
+            () => !ReadSettings(context).Contains("\"Work\"", StringComparison.Ordinal) &&
+                  ReadSettings(context).Contains("\"Sub\": \"Outer\"", StringComparison.Ordinal),
             TimeSpan.FromSeconds(10),
             TimeSpan.FromMilliseconds(200)).Result);
     }
+
+    /// <summary>
+    ///     Seeds the settings with the groups "Outer", "Work" inside it and "Sub" inside Work, one repo in each.
+    /// </summary>
+    /// <param name="settings">The settings dictionary to edit.</param>
+    /// <param name="context">The test context.</param>
+    private static void SeedThreeLevelGroups(Dictionary<string, object?> settings, AgentControlTestContext context)
+    {
+        var repos = new[] { ("Gamma", "Outer"), ("Alpha", "Work"), ("Bravo", "Sub") }
+            .Select(entry => (Path: Path.Combine(context.RootDirectory, entry.Item1), Group: entry.Item2))
+            .ToList();
+        foreach (var repo in repos)
+        {
+            Directory.CreateDirectory(repo.Path);
+        }
+
+        settings["HasUserRepoOrder"] = true;
+        settings["RecentRepos"] = repos.Select(repo => (object)new { repo.Path, GroupName = repo.Group }).ToArray();
+        settings["GroupParents"] = new Dictionary<string, string?> { ["Work"] = "Outer", ["Sub"] = "Work" };
+    }
+
+    /// <summary>
+    ///     Lists the names of the section headers currently shown, in order.
+    /// </summary>
+    /// <param name="mainWindow">The main window.</param>
+    /// <returns>The name of each <c>GroupHeaderToggleButton</c>.</returns>
+    private static List<string> HeaderNames(Window mainWindow) =>
+        [.. mainWindow.FindAllDescendants(cf => cf.ByAutomationId("GroupHeaderToggleButton"))
+            .OrderBy(element => element.BoundingRectangle.Top).Select(element => element.Name)];
+
 
     /// <summary>
     ///     Seeds the settings with two repos in the group "Work" and a third repo in no group.
@@ -225,11 +342,14 @@ public sealed class GroupSortAndDeleteTests
     /// </summary>
     /// <param name="parent">The window or element to search under.</param>
     /// <param name="automationId">The AutomationId to find.</param>
+    /// <param name="filter">An extra condition the element has to meet, or <see langword="null"/> for none.</param>
     /// <returns>The element.</returns>
-    private static AutomationElement Find(AutomationElement parent, string automationId)
+    private static AutomationElement Find(
+        AutomationElement parent, string automationId, Func<AutomationElement, bool>? filter = null)
     {
         var element = Retry.WhileNull(
-            () => parent.FindFirstDescendant(cf => cf.ByAutomationId(automationId)),
+            () => parent.FindAllDescendants(cf => cf.ByAutomationId(automationId))
+                .FirstOrDefault(candidate => filter is null || filter(candidate)),
             TimeSpan.FromSeconds(10),
             TimeSpan.FromMilliseconds(200)).Result;
         Assert.NotNull(element);

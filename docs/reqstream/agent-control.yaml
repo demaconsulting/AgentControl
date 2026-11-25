@@ -406,14 +406,15 @@ sections:
       - id: AgentControl-System-NestedGroups
         title: >-
           The tool shall let the user nest groups - create a group inside another group from its
-          header's menu and move a group into, out of and among other groups by dragging its header or
-          with "Move into group" in its menu - listing the nested groups as a collapsible tree, and shall
-          remember the tree.
+          header's menu, and move a group into or out of another group by dragging its header or with
+          "Move into group" and "Move to top level" in its menu - listing a nested group under its parent
+          with a header that says which group it is inside, and shall remember the tree.
         tags: [system]
         justification: |
           Developers who work for several customers, each with several projects, need groups inside
           groups to keep a large collection of repos organized; a menu choice is there for everybody who
-          cannot or does not want to drag (WCAG 2.2 SC 2.5.7).
+          cannot or does not want to drag (WCAG 2.2 SC 2.5.7). Collapsing a nested group and moving a
+          group among its siblings are verified one level down (the LauncherUI subsystem).
         children:
           - AgentControl-LauncherUI-NestedGroupTree
           - AgentControl-LauncherUI-NestedGroupCreate
@@ -422,6 +423,8 @@ sections:
           - AgentControl-LauncherUI-NestedGroupRemembered
         tests:
           - windows@GroupHeaderMenu_NewSubgroup_ListsGroupInsideParentStoresHierarchyInSettingsOnlyAndKeepsItAfterRestart
+          - windows@GroupHeaderMenu_MoveIntoGroupAndMoveToTopLevel_NestsItThenMovesItBackAndKeepsTreeAfterRestart
+          - windows@RepoList_DragGroupHeaderOntoMiddleOfAnother_NestsItInside
 
       - id: AgentControl-System-RepoGroupCollapseRemembered
         title: >-
@@ -528,57 +531,65 @@ sections:
           The tool shall let the user delete a group from its header's menu in two ways - keeping what is
           in it, so that its repos stay in the group it was inside (or become ungrouped for a top-level
           group), at the end of that group's own repos, and its subgroups move into that group (or become
-          top-level groups) taking the deleted group's place among its siblings, or together with its repos
-          and the groups inside it, removing them from the list - each after a confirmation that says how
-          many repos and groups are affected and that nothing on disk is deleted, and shall change nothing
-          when the user cancels.
+          top-level groups), or together with its repos and the groups inside it, removing them from the
+          list - each after a confirmation that says how many repos and groups are affected and that
+          nothing on disk is deleted, and shall change nothing when the user cancels.
         tags: [system]
         justification: |
           Retiring a group should not need removing its repos one by one, yet deleting repos must never
           happen by accident or touch the repos on disk; the user chooses what happens to the contents
-          and is told the numbers before anything changes.
+          and is told the numbers before anything changes. Where a subgroup lands among the siblings of
+          the deleted group is verified one level down (the LauncherUI subsystem).
         children:
           - AgentControl-LauncherUI-GroupDeleteKeepContents
           - AgentControl-LauncherUI-GroupDeleteWithContents
         tests:
           - windows@GroupHeaderMenu_DeleteGroupKeepContents_RemovesTheHeaderAndKeepsAllRepos
+          - windows@GroupHeaderMenu_DeleteNestedGroupKeepContents_RepoStaysInParentAndSubgroupMovesToParent
           - windows@GroupHeaderMenu_DeleteGroupAndItsContents_RemovesGroupAndReposFromTheListAndKeepsFoldersOnDisk
 
       - id: AgentControl-System-RepoMultiSelect
         title: >-
           The tool shall let the user select several repo cards of the list - with Ctrl+click, with
-          Shift+click for a range, with Ctrl+A for every card, and through assistive technology - show the
-          selected cards in a way that does not depend on color alone, and never select a section header or
-          a card that is not shown.
+          Shift+click for a range, with Ctrl+A for every card, and through assistive technology - and never
+          select a section header or a card that is not shown.
         tags: [system]
         justification: |
           Reorganizing or cleaning up many repos needs a way to name several of them at once; the selection
           must be the same for a person using the keyboard, the mouse or a screen reader, and it must never
-          include something the user cannot see.
+          include something the user cannot see. That the selected cards are marked in a way that does not
+          depend on color alone is verified one level down (the LauncherUI subsystem), because a screenshot
+          is needed to see it.
         children:
           - AgentControl-LauncherUI-RepoMultiSelect
           - AgentControl-LauncherUI-RepoMultiSelectHighlight
         tests:
           - windows@RepoList_SelectSeveralCardsAndPressDelete_ConfirmsOnceAndRemovesOnlyTheSelectedRepos
+          - windows@RepoList_CtrlClickShiftClickAndCtrlA_SelectCardsInListOrderNeverHeadersOrHiddenCards
 
       - id: AgentControl-System-RepoMultiSelectActions
         title: >-
-          The tool shall let the user drag any selected repo card to move all the selected cards together to
-          the place it is dropped, or choose "Move to group" in the menu of any selected card to move them
-          together to a group, and remove all the selected cards from the list with the Delete key or the
-          card menu after one confirmation that says how many repos go and that nothing on disk is deleted,
-          changing nothing when the user declines.
+          The tool shall let the user drag any selected repo card onto a group's header to move all the
+          selected cards into that group together, or choose "Move to group" in the menu of any selected
+          card to move them together to a group, and remove all the selected cards from the list with the
+          Delete key or the card menu after one confirmation that says how many repos go and that nothing
+          on disk is deleted, changing nothing when the user declines.
         tags: [system]
         justification: |
           Moving and removing many repos one at a time is the tedious work this saves; removal must never
           happen by accident or touch the repos on disk, so the user is told the number first. The menu way
-          to move is there for everybody who cannot or does not want to drag (WCAG 2.2 SC 2.5.7).
+          to move is there for everybody who cannot or does not want to drag (WCAG 2.2 SC 2.5.7). Dropping
+          the selection at other places (between cards, on the Favorites section) is verified one level
+          down (the LauncherUI subsystem).
         children:
           - AgentControl-LauncherUI-RepoMultiDrag
           - AgentControl-LauncherUI-RepoMultiMoveToGroup
           - AgentControl-LauncherUI-RepoMultiRemove
         tests:
           - windows@RepoList_SelectSeveralCardsAndPressDelete_ConfirmsOnceAndRemovesOnlyTheSelectedRepos
+          - windows@CardMenu_RemoveOnSelectedCard_RemovesTheWholeSelectionAfterOneConfirmation
+          - windows@CardMenu_MoveToGroupOnSelectedCard_MovesAllSelectedCardsAndStoresInSettings
+          - windows@RepoList_DragSelectedCard_MovesAllSelectedCardsOntoTheGroupHeader
 
       - id: AgentControl-System-GroupSortByName
         title: >-

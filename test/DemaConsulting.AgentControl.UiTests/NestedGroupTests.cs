@@ -25,7 +25,8 @@ namespace DemaConsulting.AgentControl.UiTests;
 
 /// <summary>
 ///     End-to-end tests of nested groups in the real application: creating a group inside another from
-///     the header's menu, seeing it listed inside its parent, and keeping the tree after a restart. The
+///     the header's menu, moving a group into another and back to the top level from the menu or by
+///     dragging its header, seeing it listed inside its parent, and keeping the tree after a restart. The
 ///     hierarchy is checked to be stored in AgentControl's settings only, never in the repository.
 /// </summary>
 public sealed class NestedGroupTests
@@ -87,6 +88,162 @@ public sealed class NestedGroupTests
     }
 
     /// <summary>
+    ///     Choosing "Move into group" in a group header's menu and then another group puts the group inside
+    ///     that group (its header says so), stores the hierarchy in the settings file only and shows the same
+    ///     tree after a restart; choosing "Move to top level" in the nested group's menu takes it out again.
+    ///     This is the menu way to nest groups, which needs no dragging.
+    /// </summary>
+    [Fact]
+    public void GroupHeaderMenu_MoveIntoGroupAndMoveToTopLevel_NestsItThenMovesItBackAndKeepsTreeAfterRestart()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: the repo is in the group "Work", another repo is in the group "Play"
+        using var context = new AgentControlTestContext(customizeSettings: SeedWorkAndPlayGroups);
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+        Assert.True(Retry.WhileFalse(
+            () => HeaderNames(mainWindow).SequenceEqual(["Play, 1 repo, expanded", "Work, 1 repo, expanded"]),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+
+        // Act: ... on the Work header > Move into group > Play
+        ExpandMenuItem(OpenGroupMenuItem(mainWindow, "Work", "GroupMoveIntoMenuItem"));
+        Find(mainWindow, "GroupMoveIntoItem", candidate => candidate.Name == "Play").AsMenuItem().Invoke();
+
+        // Assert: Work is listed inside Play, with Play counting the repos of both groups
+        Assert.True(Retry.WhileFalse(
+            () => HeaderNames(mainWindow).SequenceEqual(
+                ["Play, 2 repos, expanded", "Work, 1 repo, expanded, inside Play"]),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+
+        // Assert: the hierarchy is stored in the settings, and nothing was written into the repository
+        Assert.True(Retry.WhileFalse(
+            () => ReadSettings(context).Contains("\"Work\": \"Play\"", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(context.RepoPath));
+
+        // Act: restart the application against the same settings
+        context.CloseApplication();
+        var restarted = context.Launch();
+        restarted.SetForeground();
+
+        // Assert: the same tree
+        Assert.True(Retry.WhileFalse(
+            () => HeaderNames(restarted).SequenceEqual(
+                ["Play, 2 repos, expanded", "Work, 1 repo, expanded, inside Play"]),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+
+        // Act: ... on the nested Work header > Move into group > Move to top level
+        ExpandMenuItem(OpenGroupMenuItem(restarted, "Work", "GroupMoveIntoMenuItem"));
+        Find(restarted, "GroupMoveToTopLevelMenuItem").AsMenuItem().Invoke();
+
+        // Assert: both groups are top-level again, and the settings no longer nest Work
+        Assert.True(Retry.WhileFalse(
+            () => HeaderNames(restarted).SequenceEqual(["Play, 1 repo, expanded", "Work, 1 repo, expanded"]),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.True(Retry.WhileFalse(
+            () => !ReadSettings(context).Contains("\"Work\": \"Play\"", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+    }
+
+    /// <summary>
+    ///     Dragging a group's header with the real mouse and dropping it on the middle of another group's
+    ///     header puts the dragged group inside the other one (its header says so), and stores the hierarchy
+    ///     in the settings.
+    /// </summary>
+    [Fact]
+    public void RepoList_DragGroupHeaderOntoMiddleOfAnother_NestsItInside()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: wait until the cards have been read, so the progress strip no longer moves the list under
+        // the drag; the repo is in the group "Work", another repo is in the group "Play"
+        using var context = new AgentControlTestContext(customizeSettings: SeedWorkAndPlayGroups);
+        var mainWindow = context.Launch();
+        mainWindow.SetForeground();
+        Assert.True(CardRefreshWait.WaitUntilCardsAreRead(mainWindow, TimeSpan.FromSeconds(60)));
+        Assert.Equal(["Play, 1 repo, expanded", "Work, 1 repo, expanded"], HeaderNames(mainWindow));
+
+        // Act: grab the Work header and drop it on the middle of the Play header
+        var work = Find(mainWindow, "GroupHeaderToggleButton", candidate => candidate.Name.StartsWith("Work", StringComparison.Ordinal));
+        var play = Find(mainWindow, "GroupHeaderToggleButton", candidate => candidate.Name.StartsWith("Play", StringComparison.Ordinal));
+        DialogInputProbe.Drag(mainWindow, DialogInputProbe.CenterOf(work), DialogInputProbe.CenterOf(play));
+
+        // Assert: Work is listed inside Play, and the hierarchy is stored
+        Assert.True(Retry.WhileFalse(
+            () => HeaderNames(mainWindow).SequenceEqual(
+                ["Play, 2 repos, expanded", "Work, 1 repo, expanded, inside Play"]),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.True(Retry.WhileFalse(
+            () => ReadSettings(context).Contains("\"Work\": \"Play\"", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(200)).Result);
+    }
+
+    /// <summary>
+    ///     Seeds the settings with the repo in the group "Work" and a second repo in the group "Play".
+    /// </summary>
+    /// <param name="settings">The settings dictionary to edit.</param>
+    /// <param name="context">The test context, whose repo is the first one.</param>
+    private static void SeedWorkAndPlayGroups(
+        Dictionary<string, object?> settings, AgentControlTestContext context)
+    {
+        var other = Path.Combine(context.RootDirectory, "elsewhere");
+        Directory.CreateDirectory(other);
+        settings["RecentRepos"] = new object[]
+        {
+            new { Path = context.RepoPath, GroupName = "Work" },
+            new { Path = other, GroupName = "Play" }
+        };
+    }
+
+    /// <summary>
+    ///     Opens the "..." menu of one group header and finds one of its items.
+    /// </summary>
+    /// <param name="mainWindow">The main window.</param>
+    /// <param name="group">The group's name.</param>
+    /// <param name="menuItemAutomationId">The AutomationId of the wanted item.</param>
+    /// <returns>The menu item.</returns>
+    private static AutomationElement OpenGroupMenuItem(Window mainWindow, string group, string menuItemAutomationId)
+    {
+        Find(mainWindow, "GroupHeaderMenuButton", candidate => candidate.Name == $"Actions for group {group}")
+            .AsButton().Invoke();
+        return Find(mainWindow, menuItemAutomationId);
+    }
+
+    /// <summary>
+    ///     Opens a menu item that has a submenu (or clicks it when it does not expose the expand pattern).
+    /// </summary>
+    /// <param name="item">The menu item.</param>
+    private static void ExpandMenuItem(AutomationElement item)
+    {
+        var expand = item.Patterns.ExpandCollapse.PatternOrDefault;
+        if (expand is not null)
+        {
+            expand.Expand();
+        }
+        else
+        {
+            item.AsMenuItem().Invoke();
+        }
+    }
+
+    /// <summary>
     ///     Seeds the settings with the repo in the group "Work" and a second repo in no group.
     /// </summary>
     /// <param name="settings">The settings dictionary to edit.</param>
@@ -129,11 +286,14 @@ public sealed class NestedGroupTests
     /// </summary>
     /// <param name="parent">The window or element to search under.</param>
     /// <param name="automationId">The AutomationId to find.</param>
+    /// <param name="filter">An extra condition the element has to meet, or <see langword="null"/> for none.</param>
     /// <returns>The element.</returns>
-    private static AutomationElement Find(AutomationElement parent, string automationId)
+    private static AutomationElement Find(
+        AutomationElement parent, string automationId, Func<AutomationElement, bool>? filter = null)
     {
         var element = Retry.WhileNull(
-            () => parent.FindFirstDescendant(cf => cf.ByAutomationId(automationId)),
+            () => parent.FindAllDescendants(cf => cf.ByAutomationId(automationId))
+                .FirstOrDefault(candidate => filter is null || filter(candidate)),
             TimeSpan.FromSeconds(10),
             TimeSpan.FromMilliseconds(200)).Result;
         Assert.NotNull(element);
