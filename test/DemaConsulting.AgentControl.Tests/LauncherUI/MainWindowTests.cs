@@ -297,6 +297,104 @@ public sealed class MainWindowTests : IDisposable
     });
 
     /// <summary>
+    ///     Test that the card menu's Repository group lists "Switch branch..." right after Git Pull and
+    ///     before Refresh.
+    /// </summary>
+    [Fact]
+    public void MainWindow_CardMenu_SwitchBranchItemInRepositoryGroupAfterPull() => HeadlessTestApp.Run(() =>
+    {
+        // Arrange: a window with one card
+        var window = CreateWindow(out var viewModel);
+        window.Show();
+        viewModel.AddRepo(CreateRepoDirectory());
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            // Act: open the card's menu
+            var button = window.GetVisualDescendants().OfType<Button>().Single(candidate => candidate.Name == "MoreActionsButton");
+            var menu = Assert.IsType<MenuFlyout>(button.Flyout);
+            menu.ShowAt(button);
+            Dispatcher.UIThread.RunJobs();
+            try
+            {
+                var named = menu.Items.OfType<MenuItem>().Where(item => item.Name is not null).ToList();
+
+                // Assert: the order, the text and a tooltip
+                Assert.Equal(["PullButton", "SwitchBranchMenuItem", "RefreshMenuItem"], named.Take(3).Select(item => item.Name));
+                var item = named[1];
+                Assert.Equal("Switch branch...", item.Header);
+                Assert.False(string.IsNullOrWhiteSpace(ToolTip.GetTip(item)?.ToString()));
+                Assert.Equal("SwitchBranchMenuItem", AutomationProperties.GetAutomationId(item));
+            }
+            finally
+            {
+                menu.Hide();
+            }
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that "Switch branch..." from a real repository's card menu opens the dialog owned by the
+    ///     main window, lists the repo's branches, and that choosing a remote branch switches the repo to
+    ///     it, the card showing the new branch and the switch's outcome.
+    /// </summary>
+    [Fact]
+    public void MainWindow_SwitchBranchMenuItem_OpensDialogAndSwitchesToChosenBranch() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: a clone of a remote with main and feature, shown as a card
+        using var fixture = Tests.AgentPackageManagement.GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(new Dictionary<string, string> { ["branch.txt"] = "main" }, "Initial");
+        fixture.Git(fixture.WorkPath, "switch", "-q", "-c", "feature");
+        fixture.Commit(new Dictionary<string, string> { ["branch.txt"] = "feature" }, "Feature");
+        fixture.Git(fixture.WorkPath, "switch", "-q", "main");
+        fixture.Git(fixture.WorkPath, "push", "-q", fixture.RemotePath, "main", "feature");
+        fixture.Git(fixture.RemotePath, "symbolic-ref", "HEAD", "refs/heads/main");
+        var clone = Path.Combine(fixture.Root, "clone");
+        fixture.Git(fixture.Root, "clone", "-q", "-b", "main", fixture.RemotePath, clone);
+        var viewModel = new MainWindowViewModel(
+            new AppSettings { RecentRepos = [new RecentRepo { Path = clone }] }, configDirectory: CreateTempDirectory());
+        var window = new MainWindow { DataContext = viewModel };
+        window.Show();
+
+        try
+        {
+            await viewModel.WhenRepoStateSettledAsync();
+            Dispatcher.UIThread.RunJobs();
+            var card = Assert.Single(viewModel.RepoCards);
+            Assert.Equal("main", card.CurrentBranch);
+
+            // Act: choose "Switch branch..." from the card's menu
+            ClickCardMenuItem(window, "SwitchBranchMenuItem");
+            var dialog = Assert.Single(window.OwnedWindows.OfType<SwitchBranchWindow>());
+            var dialogViewModel = Assert.IsType<SwitchBranchViewModel>(dialog.DataContext);
+            await WaitUntilAsync(() => !dialogViewModel.IsLoading);
+
+            // Assert: the dialog lists what git knows
+            Assert.Equal(["main", "feature"], dialogViewModel.Items.Select(item => item.Name));
+            Assert.Equal("Currently on main", dialogViewModel.CurrentText);
+
+            // Act: choose the remote branch and switch
+            dialogViewModel.SelectedItem = dialogViewModel.Items.Single(item => item.IsRemote);
+            DialogWindowTests.Click(dialog, "SwitchBranchAcceptButton");
+            await WaitUntilAsync(() => card.CurrentBranch == "feature" && !card.IsBusy);
+
+            // Assert: the dialog closed, the repo is on the branch and the card says so
+            Assert.Empty(window.OwnedWindows.OfType<SwitchBranchWindow>());
+            Assert.Equal("Switched to branch 'feature'.", card.StatusMessage);
+            Assert.Equal("feature", await File.ReadAllTextAsync(Path.Combine(clone, "branch.txt"), TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
     ///     Test that the button handlers do nothing when no view model is bound.
     /// </summary>
     [Fact]

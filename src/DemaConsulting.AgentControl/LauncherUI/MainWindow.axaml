@@ -488,7 +488,7 @@
                                          ToolTip.Tip="More actions">
                                     <materialIcons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
                                     <Button.Flyout>
-                                        <!-- Grouped menu: Repository (Git Pull, Refresh), Agent files (Select
+                                        <!-- Grouped menu: Repository (Git Pull, Switch branch, Refresh), Agent files (Select
                                              Package or Upgrade, whichever applies), Organize (Move to group,
                                              Reorder > Move to top/up/down/bottom, Card color), then Remove. The group
                                              headers are disabled items (not interactive, skipped by the
@@ -504,6 +504,16 @@
                                                        Command="{Binding PullCommand}">
                                                 <MenuItem.Icon>
                                                     <materialIcons:MaterialIcon Kind="SourcePull" />
+                                                </MenuItem.Icon>
+                                            </MenuItem>
+                                            <MenuItem Name="SwitchBranchMenuItem"
+                                                       AutomationProperties.AutomationId="SwitchBranchMenuItem"
+                                                       Header="Switch branch..."
+                                                       ToolTip.Tip="Switch this repo to another branch (nothing is discarded; Git refuses a switch that would overwrite your changes)"
+                                                       ToolTip.ShowOnDisabled="True"
+                                                       Command="{Binding SwitchBranchCommand}">
+                                                <MenuItem.Icon>
+                                                    <materialIcons:MaterialIcon Kind="SourceBranch" />
                                                 </MenuItem.Icon>
                                             </MenuItem>
                                             <MenuItem Name="RefreshMenuItem"

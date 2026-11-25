@@ -2,88 +2,72 @@
 
 ### Verification Approach
 
-The `LauncherUI` subsystem is verified by the combined unit tests of its eleven units
-(`MainWindowViewModelTests.cs` and `RepoGroupingTests.cs`, `RepoCardViewModelTests.cs`,
-`RepoCardLaunchVerificationTests.cs` (the checks of a repo's agent files before launch),
-`RepoCardServerSourceTests.cs`
-and `RepoCardImageTests.cs`,
-`SelectPackageWindowViewModelTests.cs` and `SelectPackageRetryTests.cs`,
-`SettingsWindowViewModelTests.cs`, `SettingsWindowGitSourceTests.cs`, `SourceEditorViewModelTests.cs`,
-`SourceEditorServerViewModelTests.cs`, `SourceEditorSignatureViewModelTests.cs` and `SourceEditorGitViewModelTests.cs`,
-`RepoCardGitAwarenessTests.cs` (the Git icon, tooltip, refresh and Change package of the card) and
-`PackageSourceGitPresentationTests.cs` (the Git icon and names, and how a source row classifies a remote Git source),
-`PackageSourceStatusPresentationTests.cs` (the "Online source" status, the folder statuses and the "Signed only"
-badge of a source row, with the Settings window showing it),
-`CredentialPromptViewModelTests.cs`, `RepoImageLocatorTests.cs`, `RepoGroupHeaderViewModelTests.cs`,
-`GroupNameViewModelTests.cs`, `DialogBehaviorTests.cs` and `GlobalProgressViewModelTests.cs`, the last five units each
-with its own verification
-document), plus
-`AsyncRelayCommandTests.cs` for the shared asynchronous
-command, which together
-exercise the full recent-repos/card/select-package/settings/sign-in interaction surface without ever
+The `LauncherUI` subsystem is verified by the combined unit tests of its eleven units (`MainWindowViewModelTests.cs` and
+`RepoGroupingTests.cs`, `RepoCardViewModelTests.cs`, `RepoCardLaunchVerificationTests.cs` (the checks of a repo's agent
+files before launch), `RepoCardServerSourceTests.cs` and `RepoCardImageTests.cs`, `SelectPackageWindowViewModelTests.cs`
+and `SelectPackageRetryTests.cs`, `SettingsWindowViewModelTests.cs`, `SettingsWindowGitSourceTests.cs`,
+`SourceEditorViewModelTests.cs`, `SourceEditorServerViewModelTests.cs`, `SourceEditorSignatureViewModelTests.cs` and
+`SourceEditorGitViewModelTests.cs`, `RepoCardGitAwarenessTests.cs` (the Git icon, tooltip, refresh and Change package of
+the card) and `PackageSourceGitPresentationTests.cs` (the Git icon and names, and how a source row classifies a remote
+Git source), `PackageSourceStatusPresentationTests.cs` (the "Online source" status, the folder statuses and the "Signed
+only" badge of a source row, with the Settings window showing it), `CredentialPromptViewModelTests.cs`,
+`RepoImageLocatorTests.cs`, `RepoGroupHeaderViewModelTests.cs`, `GroupNameViewModelTests.cs`,
+`SwitchBranchViewModelTests.cs`, `DialogBehaviorTests.cs` and `GlobalProgressViewModelTests.cs`, the last six units each
+with its own verification document), plus `AsyncRelayCommandTests.cs` for the shared asynchronous command, which
+together exercise the full recent-repos/card/select-package/settings/sign-in interaction surface without ever
 constructing an Avalonia `Window` (apart from the picture decoder and `DialogBehavior`, which need Avalonia's headless
-session). The windows themselves are exercised by headless Avalonia tests
-(`DialogWindowTests.cs` - including the confirmation window's custom button labels -, `MainWindowTests.cs`,
-`UsabilityWindowTests.cs` for the favorite star with real pointer
-and key input, the "Check again" menu item, the up-to-date check mark, the narrow card, the Settings sections, the
-keyboard behavior of the dialogs, the About version row, the order of the AGENTS.md question and the release
-notes and the keep-or-update and launch-anyway questions about a repo's agent files,
-`RepoGroupWindowTests.cs` for the group headers (including that a window whose data context is cleared and assigned
-again handles each header request once, and stops handling a view model that another one replaced:
-`MainWindow_DataContextAssignedAgain_HandlesEachRequestOnceAndOnlyForTheCurrentViewModel`), the card menu's
-"Move to group" submenu, the group-name prompt, the card and group color palette pop-ups (and the shared
-`ColorPalettePanel`), and adding several folders from the picker,
-`RepoReorderWindowTests.cs` for the user's own repo order (cards that stay put, the card menu's Reorder submenu, drag
-and drop through the window's drag-source seam and the platform's drop events, the insertion line and header tint,
-reordering turned off by the filter, the order after a restart; the real operating-system drag is covered only by the
-FlaUI tests), the user's order of the groups (the header menu's Move items and header drags through the same
-`DragStarter` seam, pressing the header's toggle) and that a group's color and place follow a rename (through the name
-prompt), are forgotten when the group is removed or its last repo leaves it, and are kept when the Settings window is
-saved, that the user's organizing choices made through the window (a group, a card color, a group color, the group
-order and a collapsed section) are written to the settings file only, never into a repo folder, and folders dropped
-from the file manager (a `DataTransfer` of
-`DataTransferItem.CreateFile` items for storage items obtained from the window's `StorageProvider` -
-`TryGetFolderFromPathAsync` / `TryGetFileFromPathAsync`, since user code cannot implement `IStorageItem` - raised with
-`window.DragDrop` offering Copy, Move and Link), `RepoOrderingTests.cs` for the view model's rules behind them,
-`SettingsWindowServerSourceTests.cs` for the Settings
+session). The windows themselves are exercised by headless Avalonia tests (`DialogWindowTests.cs` - including the
+confirmation window's custom button labels -, `MainWindowTests.cs`, `SwitchBranchWindowTests.cs` (the branch dialog),
+`UsabilityWindowTests.cs` for the favorite star with real pointer and key input, the "Check again" menu item, the
+up-to-date check mark, the narrow card, the Settings sections, the keyboard behavior of the dialogs, the About version
+row, the order of the AGENTS.md question and the release notes and the keep-or-update and launch-anyway questions about
+a repo's agent files, `RepoGroupWindowTests.cs` for the group headers (including that a window whose data context is
+cleared and assigned again handles each header request once, and stops handling a view model that another one replaced:
+`MainWindow_DataContextAssignedAgain_HandlesEachRequestOnceAndOnlyForTheCurrentViewModel`), the card menu's "Move to
+group" submenu, the group-name prompt, the card and group color palette pop-ups (and the shared `ColorPalettePanel`),
+and adding several folders from the picker, `RepoReorderWindowTests.cs` for the user's own repo order (cards that stay
+put, the card menu's Reorder submenu, drag and drop through the window's drag-source seam and the platform's drop
+events, the insertion line and header tint, reordering turned off by the filter, the order after a restart; the real
+operating-system drag is covered only by the FlaUI tests), the user's order of the groups (the header menu's Move items
+and header drags through the same `DragStarter` seam, pressing the header's toggle) and that a group's color and place
+follow a rename (through the name prompt), are forgotten when the group is removed or its last repo leaves it, and are
+kept when the Settings window is saved, that the user's organizing choices made through the window (a group, a card
+color, a group color, the group order and a collapsed section) are written to the settings file only, never into a repo
+folder, and folders dropped from the file manager (a `DataTransfer` of `DataTransferItem.CreateFile` items for storage
+items obtained from the window's `StorageProvider` - `TryGetFolderFromPathAsync` / `TryGetFileFromPathAsync`, since user
+code cannot implement `IStorageItem` - raised with `window.DragDrop` offering Copy, Move and Link),
+`RepoOrderingTests.cs` for the view model's rules behind them, `SettingsWindowServerSourceTests.cs` for the Settings
 window, the source editor window and its connection test, `SourceEditorSignatureWindowTests.cs` for the signature
-section and "Forget saved sign-in" of the source editor, `SourceEditorGitWindowTests.cs` for the Git editor's
-sections, tag pattern error, tag preview and Save (against a `FakeGitSourceProvider`, so no git or network is needed),
-`RepoCardSignatureTests.cs` for the signature shield in the
-main window's package chip, and `CredentialPromptWindowTests.cs` for the sign-in
-dialog, its "Remember on this computer" option and `AvaloniaCredentialPrompt`), and the end-to-end flows -
-adding a zip and a
-NuGet folder source through the dialogs, adding a NuGet server and testing its connection with a typed
-sign-in, selecting a package from the NuGet sources, a source that requires signed packages refusing an unsigned
-upgrade, and the
-chips on a repo card - by the FlaUI `DemaConsulting.AgentControl.UiTests` project. At the
-subsystem boundary, collaborating subsystems
-(`AgentPackageManagement`, `RepoSync`, `RepoConfig`, `GitIntegration`, `AgentToolLauncher`,
-`Settings`) are exercised through their real implementations against real temporary
-directories and package-zip fixtures, and git is substituted with a stub script (`GitStub`,
-shared with `GitClientTests`) so no test depends on a real git installation. The About
-command's dependency-list data source has direct unit coverage
-(`ThirdPartyDependenciesTests.cs`), since it is a plain static data source independent of any
-Avalonia control; the About dialog itself still has no dedicated view-model class, so its
-end-to-end rendering (opening the window and showing the tagline, version, copyright, license,
-and a non-empty dependency list) is verified via the FlaUI
-`DemaConsulting.AgentControl.UiTests` project, while its banner (logo, name and tagline above the details) and its
-layout (600 wide, limited height, the banner and Close outside the one scrolling region that holds every detail) are
-verified by headless tests in `DialogWindowTests.cs`, and the legibility of the banner text by `ThemeResourceTests`.
-The logo image itself is not asserted beyond its presence in the banner (it has no bound text content to check) and
-remains a visual-inspection-only element. The temporary repo folders the window tests add carry a `.git` folder whose
-`HEAD` names a branch, so the Git-repository check accepts them; the tests of that check use folders without one.
-`FavoriteIconConverter`, the favorite-star glyph's shape converter (its color is the theme resource
-`FavoriteStarForeground`, checked for contrast by `ThemeResourceTests`), is likewise a visual-only value converter
-with no bound text content to assert and remains a visual-inspection-only element;
-`RepoCardViewModel.IsFavorite` itself
-(the state it renders) is covered indirectly by the sort-order scenario below. The pure display helpers
-(`AgentToolKindDisplayNameConverter`, `ThemePreferenceDisplayNameConverter` and the `PathEllipsisText` control) are
-supporting types of the subsystem with their own test files (`AgentToolKindDisplayNameConverterTests.cs`,
-`ThemePreferenceDisplayNameConverterTests.cs`, `PathEllipsisTextTests.cs`), as are `App` and the shared
-`AppStyles.axaml` theme resources (`ThemeResourceTests.cs`); each is a presentational adapter with no behavior of its
-own beyond formatting, measuring or applying a theme for the view, so no unit requirement exists for it and the
-subsystem requirements cite its tests directly.
+section and "Forget saved sign-in" of the source editor, `SourceEditorGitWindowTests.cs` for the Git editor's sections,
+tag pattern error, tag preview and Save (against a `FakeGitSourceProvider`, so no git or network is needed),
+`RepoCardSignatureTests.cs` for the signature shield in the main window's package chip, and
+`CredentialPromptWindowTests.cs` for the sign-in dialog, its "Remember on this computer" option and
+`AvaloniaCredentialPrompt`), and the end-to-end flows - adding a zip and a NuGet folder source through the dialogs,
+adding a NuGet server and testing its connection with a typed sign-in, selecting a package from the NuGet sources, a
+source that requires signed packages refusing an unsigned upgrade, and the chips on a repo card - by the FlaUI
+`DemaConsulting.AgentControl.UiTests` project. At the subsystem boundary, collaborating subsystems
+(`AgentPackageManagement`, `RepoSync`, `RepoConfig`, `GitIntegration`, `AgentToolLauncher`, `Settings`) are exercised
+through their real implementations against real temporary directories and package-zip fixtures, and git is substituted
+with a stub script (`GitStub`, shared with `GitClientTests`) so no test depends on a real git installation. The About
+command's dependency-list data source has direct unit coverage (`ThirdPartyDependenciesTests.cs`), since it is a plain
+static data source independent of any Avalonia control; the About dialog itself still has no dedicated view-model class,
+so its end-to-end rendering (opening the window and showing the tagline, version, copyright, license, and a non-empty
+dependency list) is verified via the FlaUI `DemaConsulting.AgentControl.UiTests` project, while its banner (logo, name
+and tagline above the details) and its layout (600 wide, limited height, the banner and Close outside the one scrolling
+region that holds every detail) are verified by headless tests in `DialogWindowTests.cs`, and the legibility of the
+banner text by `ThemeResourceTests`. The logo image itself is not asserted beyond its presence in the banner (it has no
+bound text content to check) and remains a visual-inspection-only element. The temporary repo folders the window tests
+add carry a `.git` folder whose `HEAD` names a branch, so the Git-repository check accepts them; the tests of that check
+use folders without one. `FavoriteIconConverter`, the favorite-star glyph's shape converter (its color is the theme
+resource `FavoriteStarForeground`, checked for contrast by `ThemeResourceTests`), is likewise a visual-only value
+converter with no bound text content to assert and remains a visual-inspection-only element;
+`RepoCardViewModel.IsFavorite` itself (the state it renders) is covered indirectly by the sort-order scenario below. The
+pure display helpers (`AgentToolKindDisplayNameConverter`, `ThemePreferenceDisplayNameConverter` and the
+`PathEllipsisText` control) are supporting types of the subsystem with their own test files
+(`AgentToolKindDisplayNameConverterTests.cs`, `ThemePreferenceDisplayNameConverterTests.cs`,
+`PathEllipsisTextTests.cs`), as are `App` and the shared `AppStyles.axaml` theme resources (`ThemeResourceTests.cs`);
+each is a presentational adapter with no behavior of its own beyond formatting, measuring or applying a theme for the
+view, so no unit requirement exists for it and the subsystem requirements cite its tests directly.
 
 The evidence of a subsystem requirement is, in order of preference, a headless window test (the main window, the
 dialogs, the shared styles), a test of a supporting type listed above, and - where a behavior is observable only in
@@ -1215,6 +1199,24 @@ name. The requirements are split by behavior; each is covered by the tests that 
   `MainWindow_NewGroupMenuItem_PromptsForNameAndCreatesGroup`.
 - `AgentControl-LauncherUI-GroupNamePrompt` (the prompt validates the typed name and can be canceled):
   `GroupNameWindow_ValidatesWhileTyping_AndAccepts` and `MainWindow_NewGroupPrompt_Canceled_ChangesNothing`.
+- `AgentControl-LauncherUI-SwitchBranch` (switching a repo to another branch from the card's menu):
+  `MainWindow_CardMenu_SwitchBranchItemInRepositoryGroupAfterPull` (the menu's Repository group lists **Switch
+  branch...** right after Git Pull and before Refresh, with its text, tooltip and `SwitchBranchMenuItem` automation
+  identifier) and `MainWindow_SwitchBranchMenuItem_OpensDialogAndSwitchesToChosenBranch` (a real clone of a repository
+  with a `main` and a `feature` branch: choosing the item opens the dialog owned by the main window, it lists the
+  branches git knows, choosing the remote branch and Switch closes it, the repo is on `feature` with its files, and the
+  card says `Switched to branch 'feature'.`). What the switch does to the card - the pin following the branch, a refusal
+  shown in git's words, git off the UI thread - is verified by the `RepoCardViewModel` unit tests
+  (`RepoCardSwitchBranchTests.cs`), whose requirements are its children.
+- `AgentControl-LauncherUI-SwitchBranchDialog` (the dialog that chooses the branch):
+  `SwitchBranchWindow_Opened_ListsBranchesAndFocusesFilterBox`,
+  `SwitchBranchWindow_FilterThenEnter_ChoosesTheOnlyMatchingBranch`,
+  `SwitchBranchWindow_SwitchClicked_ReturnsTheSelectedBranch`, `SwitchBranchWindow_DoubleClickOnBranch_ReturnsIt`,
+  `SwitchBranchWindow_EscapeAndCancel_ReturnNull`, `SwitchBranchWindow_ClosedWhileLoading_ReturnsNullAndStopsTheRead`
+  and `SwitchBranchWindow_ReadFails_ShowsErrorAndDisablesSwitch` (`SwitchBranchWindowTests.cs`, on a canned list of
+  branches): the list, the current branch and the hint, the focus in the filter box, Switch disabled for the current
+  branch, the filter, choosing by button, Enter and double-click, Escape and Cancel, the read stopped when the window
+  closes and a failed read shown as text. The rules behind them are verified by the `SwitchBranchViewModel` unit tests.
 - `AgentControl-LauncherUI-RepoGroupManagement` (rename from the header):
   `MainWindow_HeaderMenu_RenameGroup_AsksForTheNameAndRenames` (the prompt starts with the group's name, canceling it
   changes nothing, accepting renames the group and its repos).

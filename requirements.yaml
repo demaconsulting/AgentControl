@@ -21,6 +21,7 @@ includes:
   - docs/reqstream/agent-control/launcher-ui/repo-image-locator.yaml
   - docs/reqstream/agent-control/launcher-ui/repo-group-header-view-model.yaml
   - docs/reqstream/agent-control/launcher-ui/group-name-view-model.yaml
+  - docs/reqstream/agent-control/launcher-ui/switch-branch-view-model.yaml
   - docs/reqstream/agent-control/launcher-ui/dialog-behavior.yaml
   - docs/reqstream/agent-control/launcher-ui/global-progress-view-model.yaml
   - docs/reqstream/agent-control/launcher-ui/repo-refresh-queue.yaml

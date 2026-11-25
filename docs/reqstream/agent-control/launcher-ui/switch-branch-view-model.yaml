@@ -1,0 +1,102 @@
+---
+# Software Unit Requirements for the SwitchBranchViewModel Class
+#
+# SwitchBranchViewModel backs the "Switch branch" dialog opened from a repo card's menu: it lists the
+# branches the repo already knows (local first, then remote-tracking), lets the user filter them and
+# choose one, reads them off the UI thread and completes with the choice. Each requirement states one
+# observable behavior of the dialog. Making the switch is the RepoCardViewModel unit's.
+
+sections:
+  - title: SwitchBranchViewModel Unit Requirements
+    requirements:
+      - id: AgentControl-SwitchBranchViewModel-ListsLocalAndRemote
+        title: >-
+          The SwitchBranchViewModel class shall list the branches git reported - the local branches
+          first, then the remote-tracking branches, each remote one captioned with its remote and
+          carrying its remote-qualified name - once they have been read.
+        justification: |
+          The user chooses among all the branches the repo knows, and must be able to tell a remote
+          branch (for which a local branch will be created) from a local one.
+        tests:
+          - SwitchBranchViewModel_Load_ListsLocalThenRemoteAndMarksCurrent
+          - RepoCardViewModel_CreateSwitchBranchViewModel_ListsTheBranchesGitReports
+
+      - id: AgentControl-SwitchBranchViewModel-MarksCurrent
+        title: >-
+          The SwitchBranchViewModel class shall mark the checked-out branch in the list, say where the
+          repo is ("Currently on main"), and not allow the checked-out branch to be chosen.
+        justification: |
+          Switching to the branch the repo is already on does nothing; offering it would invite a
+          pointless action and hide which branch is current.
+        tests:
+          - SwitchBranchViewModel_Load_ListsLocalThenRemoteAndMarksCurrent
+          - SwitchBranchViewModel_CurrentBranchSelected_CannotSwitch
+
+      - id: AgentControl-SwitchBranchViewModel-DetachedHead
+        title: >-
+          The SwitchBranchViewModel class shall, for a repo whose HEAD is detached, say so with the
+          commit it is at ("Detached HEAD at 1a2b3c4") and allow any branch to be chosen.
+        justification: |
+          A detached HEAD is a normal state after checking out a tag or a commit; the user must see
+          that no branch is current and must be able to get back onto one.
+        tests:
+          - SwitchBranchViewModel_DetachedHead_ShowsDetachedTextAndAllowsSwitch
+          - SwitchBranchViewModel_NoBranches_SaysSo
+
+      - id: AgentControl-SwitchBranchViewModel-Filter
+        title: >-
+          The SwitchBranchViewModel class shall list only the branches whose name contains the filter
+          text, ignoring letter case, say when none matches, drop a selection that was filtered out and
+          select the only branch that can be chosen when a filter leaves just one.
+        justification: |
+          Repos have many branches; typing a few letters and pressing Enter must be enough to choose
+          one.
+        tests:
+          - SwitchBranchViewModel_Filter_MatchesCaseInsensitiveSubstring
+          - SwitchBranchViewModel_Filter_OneBranchLeft_SelectsItAndDropsFilteredOutSelection
+
+      - id: AgentControl-SwitchBranchViewModel-ConfirmChoice
+        title: >-
+          The SwitchBranchViewModel class shall complete exactly once with the chosen branch - its
+          display name, its name for git and whether it is remote - when the switch command runs or a
+          row is confirmed (a double-click), and shall do nothing when no branch that can be chosen is
+          selected.
+        justification: |
+          The card needs to know exactly which branch to switch to, and a dialog that reported its
+          answer twice would switch twice.
+        tests:
+          - SwitchBranchViewModel_Switch_CompletesOnceWithChoice
+          - SwitchBranchViewModel_Confirm_SelectsRowAndCompletes
+
+      - id: AgentControl-SwitchBranchViewModel-LoadsInBackground
+        title: >-
+          The SwitchBranchViewModel class shall read the branches through the background work runner
+          rather than on the calling (UI) thread, show that it is loading meanwhile, and stop the read
+          when the dialog is closed.
+        justification: |
+          Asking git for the branches of a repo on a network share or a huge tree can take long; the
+          window must stay usable and the read must not outlive the dialog.
+        tests:
+          - SwitchBranchViewModel_Load_RunsOffTheUiThread
+          - SwitchBranchViewModel_Load_Canceled_ThrowsCanceledWithoutShowingAnError
+
+      - id: AgentControl-SwitchBranchViewModel-LoadFailureShown
+        title: >-
+          The SwitchBranchViewModel class shall report a read that failed as text, with credentials
+          removed, and not allow a switch while it is shown.
+        justification: |
+          A repo that git cannot read (not a repository, git missing, a timeout) must be explained in
+          the dialog rather than shown as a repo with no branches.
+        tests:
+          - SwitchBranchViewModel_Load_Fails_ShowsErrorAndCannotSwitch
+
+      - id: AgentControl-SwitchBranchViewModel-CancelCompletesWithNone
+        title: >-
+          The SwitchBranchViewModel class shall complete with no branch, once, when the dialog is
+          canceled or closed, and not complete again afterwards.
+        justification: |
+          Canceling must leave the repo alone, and the window closes by several routes (Cancel, Escape,
+          the title bar) that must not each report an answer.
+        tests:
+          - SwitchBranchViewModel_Cancel_CompletesWithNone
+          - SwitchBranchViewModel_Switch_CompletesOnceWithChoice

@@ -1586,6 +1586,57 @@ sections:
           - RepoCardViewModel_Refresh_DirtyWorkingTree_SetsCanPullFalse
           - RepoCardViewModel_PullCommand_SuccessfulPull_UpdatesStatusMessage
 
+      - id: AgentControl-LauncherUI-SwitchBranch
+        title: >-
+          The LauncherUI subsystem shall let the user switch a repo card's repo to another branch
+          from the card's menu (the Repository group, after Git Pull), unavailable while the card's
+          state is unread, its folder is missing or another operation of the card runs, show the new
+          branch and the package state of the branch on the card afterwards, and, when git refuses the
+          switch, show git's reason on the card and in a message with nothing changed.
+        justification: |
+          Developers move between branches of the repos they launch agents in, and the branch decides
+          which agent package version the repo is pinned to; the card must therefore follow the
+          switch, and a refused switch (uncommitted work would be overwritten) must be explained in
+          git's words so the developer can decide what to do with their changes.
+        children:
+          - AgentControl-RepoCardViewModel-SwitchBranchRequest
+          - AgentControl-RepoCardViewModel-SwitchBranch
+          - AgentControl-RepoCardViewModel-SwitchBranchRefused
+          - AgentControl-RepoCardViewModel-SwitchBranchFollowsPin
+          - AgentControl-RepoCardViewModel-SwitchBranchInBackground
+        tests:
+          - MainWindow_CardMenu_SwitchBranchItemInRepositoryGroupAfterPull
+          - MainWindow_SwitchBranchMenuItem_OpensDialogAndSwitchesToChosenBranch
+
+      - id: AgentControl-LauncherUI-SwitchBranchDialog
+        title: >-
+          The LauncherUI subsystem shall show a modal dialog that lists the branches the repo already
+          knows - local first, then remote - with the current one marked or, for a detached HEAD, the
+          commit it is at, lets the user filter the list as they type and choose a branch other than the
+          current one by button, Enter or double-click, reads the branches without blocking the window
+          and shows a failure as text, and closes without a branch on Cancel or Escape.
+        justification: |
+          Choosing a branch among many needs a list that can be filtered and used from the keyboard; the
+          list comes from git, which may be slow or fail, so it is read in the background and a failure
+          is explained in the dialog instead of freezing or silently closing it.
+        children:
+          - AgentControl-SwitchBranchViewModel-ListsLocalAndRemote
+          - AgentControl-SwitchBranchViewModel-MarksCurrent
+          - AgentControl-SwitchBranchViewModel-DetachedHead
+          - AgentControl-SwitchBranchViewModel-Filter
+          - AgentControl-SwitchBranchViewModel-ConfirmChoice
+          - AgentControl-SwitchBranchViewModel-LoadsInBackground
+          - AgentControl-SwitchBranchViewModel-LoadFailureShown
+          - AgentControl-SwitchBranchViewModel-CancelCompletesWithNone
+        tests:
+          - SwitchBranchWindow_Opened_ListsBranchesAndFocusesFilterBox
+          - SwitchBranchWindow_FilterThenEnter_ChoosesTheOnlyMatchingBranch
+          - SwitchBranchWindow_SwitchClicked_ReturnsTheSelectedBranch
+          - SwitchBranchWindow_DoubleClickOnBranch_ReturnsIt
+          - SwitchBranchWindow_EscapeAndCancel_ReturnNull
+          - SwitchBranchWindow_ClosedWhileLoading_ReturnsNullAndStopsTheRead
+          - SwitchBranchWindow_ReadFails_ShowsErrorAndDisablesSwitch
+
       - id: AgentControl-LauncherUI-SelectPackage
         title: >-
           The LauncherUI subsystem shall let the user choose a configured package source, then

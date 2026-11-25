@@ -486,6 +486,7 @@ internal sealed partial class MainWindow : Window
             await ShowReleaseNotesAsync(card, releaseNotes);
         async void OnRemoveRequested(object? sender, EventArgs e) => await ConfirmAndRemoveCard(card);
         async void OnSelectPackageRequested(object? sender, EventArgs e) => await ShowSelectPackageDialog(card);
+        async void OnSwitchBranchRequested(object? sender, EventArgs e) => await ShowSwitchBranchDialog(card);
         async void OnNewGroupRequested(object? sender, EventArgs e) => await ShowNewGroupPrompt(card);
         async void OnTemplateOfferRequested(object? sender, string templateContent)
         {
@@ -518,6 +519,7 @@ internal sealed partial class MainWindow : Window
         card.ReleaseNotesReady += OnReleaseNotesReady;
         card.RemoveRequested += OnRemoveRequested;
         card.SelectPackageRequested += OnSelectPackageRequested;
+        card.SwitchBranchRequested += OnSwitchBranchRequested;
         card.NewGroupRequested += OnNewGroupRequested;
         card.AgentsMdTemplateOfferRequested += OnTemplateOfferRequested;
         card.ContentChangeConfirmationRequested += OnContentChangeConfirmationRequested;
@@ -531,6 +533,7 @@ internal sealed partial class MainWindow : Window
             card.ReleaseNotesReady -= OnReleaseNotesReady;
             card.RemoveRequested -= OnRemoveRequested;
             card.SelectPackageRequested -= OnSelectPackageRequested;
+            card.SwitchBranchRequested -= OnSwitchBranchRequested;
             card.NewGroupRequested -= OnNewGroupRequested;
             card.AgentsMdTemplateOfferRequested -= OnTemplateOfferRequested;
             card.ContentChangeConfirmationRequested -= OnContentChangeConfirmationRequested;
@@ -648,6 +651,26 @@ internal sealed partial class MainWindow : Window
         if (result is not null)
         {
             await card.ApplySelectedPackageAsync(result);
+        }
+    }
+
+    /// <summary>
+    ///     Shows the modal <see cref="SwitchBranchWindow"/> for <paramref name="card"/>, and, if the
+    ///     user chose a branch, switches the repo to it with <see cref="RepoCardViewModel.SwitchBranchAsync"/>.
+    /// </summary>
+    /// <remarks>
+    ///     The dialog only chooses and closes first; the switch then runs as an operation of the card
+    ///     (busy row, git on a worker thread, outcome as the card's status), so no git runs on the UI
+    ///     thread and the dialog never has to stay open while git works.
+    /// </remarks>
+    /// <param name="card">The card that requested the branch dialog.</param>
+    private async Task ShowSwitchBranchDialog(RepoCardViewModel card)
+    {
+        var viewModel = card.CreateSwitchBranchViewModel();
+        var choice = await new SwitchBranchWindow(viewModel).ShowDialog<BranchChoice?>(this);
+        if (choice is not null)
+        {
+            await card.SwitchBranchAsync(choice);
         }
     }
 

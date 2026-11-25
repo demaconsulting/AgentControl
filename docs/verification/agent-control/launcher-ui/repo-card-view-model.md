@@ -10,32 +10,34 @@ and tooltip, the refresh that lists tags again, Change package and the git versi
 package to a repo whose agent folders are tracked by git `RepoCardCommittedFilesTests.cs`, for the verification of a
 repo's agent files before a launch (the keep-or-update and launch-anyway-or-cancel questions, the silent install, the
 check without package access and the launch command's answer to each) `RepoCardLaunchVerificationTests.cs` and, for the
-repo picture, `RepoCardImageTests.cs`. Every test substitutes a stub script for the git executable (via `GitStub`,
-mirroring `GitClientTests`) and uses real temporary directories/zip fixtures for package-source and pin-file checks, so
-these tests never depend on a real git installation, a real repository, or a real package source. The exception is
-`RepoCardCommittedFilesTests.cs`, which builds a real temporary git repository (`GitRepositoryFixture`; skipped where
-git is not installed and failed when the environment variable `CI` is set), so that what git tracks before and after is
-observed rather than assumed, and serves its packages from an in-memory source that counts how often a package is
-acquired, so "before anything is downloaded" is checked directly; the question to the user is answered by a handler
-subscribed to the card's event. `RepoCardLaunchVerificationTests.cs` works the same way: it builds real repo trees from
-real zip, NuGet-folder and (where git is available, via `GitRepositoryFixture.CreateOrSkip`) Git packages, applies the
-package through the card so the pin records its real identity, then damages the tree (deletes half the files, changes a
-byte, adds a file, makes a managed folder a junction or symbolic link) and calls the launch check with a handler that
-answers the `AgentFilesChoiceRequest` and a source-registry factory that counts, or throws on, any package access. The
-tests that must control exactly when a package source answers (stale and retired upgrade checks, the busy guard) give
-the card an in-memory source whose answer a test releases, or that signals when it is read and then never answers, so no
-timing assumption is needed. The background cheap refresh and the background working-tree check are verified the
-same way: the card is given a `GatedBackgroundWorkRunner` (a test helper of the `LauncherUI` tests) through its
-`backgroundWork` constructor parameter, which holds the read until the test releases it, so a test asserts the state
-while the read is outstanding and after it ran, and whether a superseded or retired read applies anything. One test
-gives the card an owner callback that accepts the first change and refuses the
-rest; the other tests build cards without an owner. The server-source tests start the in-process `MockNuGetFeed`
-(Kestrel, plain HTTP on a fresh loopback port, optionally requiring a Basic sign-in) and a `FakeCredentialPrompt`, with
-the NuGet HTTP cache isolated per test process (`HttpCacheIsolation`). Apart from the picture tests
-(`RepoCardImageTests.cs`), which show a card in a headless Avalonia window (using the `RepoImageLocator` unit with small
-generated PNG files or an injected decoder, and checking that replaced, cleared and overtaken bitmaps are disposed), no
-Avalonia `Window` is constructed; only the view-model class itself is under test. The `RepoImageLocator` unit has its
-own verification document.
+repo picture, `RepoCardImageTests.cs`, and for switching branches `RepoCardSwitchBranchTests.cs` (a stub git for the
+commands, the refusal and the guard against blocking calls; a real clone, built by `GitRepositoryFixture`, for what only
+git can show - the pin file following the branch, a switch that git refuses because an edit would be overwritten, a
+detached HEAD). Every test substitutes a stub script for the git executable (via `GitStub`, mirroring `GitClientTests`)
+and uses real temporary directories/zip fixtures for package-source and pin-file checks, so these tests never depend on
+a real git installation, a real repository, or a real package source. The exception is `RepoCardCommittedFilesTests.cs`,
+which builds a real temporary git repository (`GitRepositoryFixture`; skipped where git is not installed and failed when
+the environment variable `CI` is set), so that what git tracks before and after is observed rather than assumed, and
+serves its packages from an in-memory source that counts how often a package is acquired, so "before anything is
+downloaded" is checked directly; the question to the user is answered by a handler subscribed to the card's event.
+`RepoCardLaunchVerificationTests.cs` works the same way: it builds real repo trees from real zip, NuGet-folder and
+(where git is available, via `GitRepositoryFixture.CreateOrSkip`) Git packages, applies the package through the card so
+the pin records its real identity, then damages the tree (deletes half the files, changes a byte, adds a file, makes a
+managed folder a junction or symbolic link) and calls the launch check with a handler that answers the
+`AgentFilesChoiceRequest` and a source-registry factory that counts, or throws on, any package access. The tests that
+must control exactly when a package source answers (stale and retired upgrade checks, the busy guard) give the card an
+in-memory source whose answer a test releases, or that signals when it is read and then never answers, so no timing
+assumption is needed. The background cheap refresh and the background working-tree check are verified the same way: the
+card is given a `GatedBackgroundWorkRunner` (a test helper of the `LauncherUI` tests) through its `backgroundWork`
+constructor parameter, which holds the read until the test releases it, so a test asserts the state while the read is
+outstanding and after it ran, and whether a superseded or retired read applies anything. One test gives the card an
+owner callback that accepts the first change and refuses the rest; the other tests build cards without an owner. The
+server-source tests start the in-process `MockNuGetFeed` (Kestrel, plain HTTP on a fresh loopback port, optionally
+requiring a Basic sign-in) and a `FakeCredentialPrompt`, with the NuGet HTTP cache isolated per test process
+(`HttpCacheIsolation`). Apart from the picture tests (`RepoCardImageTests.cs`), which show a card in a headless Avalonia
+window (using the `RepoImageLocator` unit with small generated PNG files or an injected decoder, and checking that
+replaced, cleared and overtaken bitmaps are disposed), no Avalonia `Window` is constructed; only the view-model class
+itself is under test. The `RepoImageLocator` unit has its own verification document.
 
 #### Test Environment
 
@@ -49,6 +51,10 @@ on, and the tests that reach no launch assert that the starter was not called.
 #### Acceptance Criteria
 
 - All unit tests pass with zero failures.
+- A switch of the repo to another branch is made on a worker thread, tells the user it was made and then shows the new
+  branch and the pin of the new branch on the card; a switch that git refuses shows git's reason (with the sentence that
+  nothing was changed) on the card and in a message, marks the card as failed and leaves the branch and the user's
+  changes as they were; nothing is ever forced.
 - Display fields, badges, and gating conditions reflect the correct underlying pin/git/source
   state for every tested input.
 - Launch is never blocked by the outcome of the pre-launch check of the agent files, except that the user can cancel
@@ -327,6 +333,35 @@ tested by `RepoCardViewModel_PullCommand_SuccessfulPull_UpdatesStatusMessage`,
 `RepoCardViewModel_PullCommand_CardRetiredDuringUpgradeCheck_KeepsPullOutcomeAndChecksNothingMore`, covering
 `AgentControl-RepoCardViewModel-Pull`. The real-git tests are skipped on a machine without git (and fail when the
 `CI` environment variable is set), as for the other real-git tests.
+
+**RepoCardViewModel_SwitchBranch_RequestsDialogThenSwitchesAndRefreshes**: `SwitchBranchCommand` is not executable
+before the card's state has been read, for a missing folder or while the card runs another operation, and is
+executable otherwise; executing it only raises `SwitchBranchRequested`. `SwitchBranchAsync` against a stub git runs
+`git switch --track -- origin/feature/x` for a remote branch, sets the status `Switched to branch 'feature/x'.`, leaves
+the card idle and not failed, and, started from a guarded thread, makes no blocking call there while the card is busy
+(git runs on a worker). A git that cannot be started is reported through `ErrorOccurred` as `Failed to switch branch:`.
+Against a real clone whose `main` pins 1.0.0 and whose remote `feature` branch pins 2.0.0, switching to
+`origin/feature` makes the card show the branch `feature` and the pin 2.0.0 with the switch's status message and an
+unset failure flag, switching back shows `main` and 1.0.0, and a switch from a detached HEAD onto `main` works. This
+scenario is tested by `RepoCardViewModel_SwitchBranchCommand_RepoMissingOrBusy_CannotExecute`,
+`RepoCardViewModel_SwitchBranchCommand_Executes_RaisesRequestForTheDialog`,
+`RepoCardViewModel_SwitchBranchAsync_Success_RunsSwitchAndSetsStatusMessage`,
+`RepoCardViewModel_SwitchBranchAsync_GitCannotBeStarted_ReportsErrorWithoutThrowing`,
+`RepoCardViewModel_SwitchBranchAsync_RealRepoWithOtherPin_PinChipFollowsTheNewBranch`,
+`RepoCardViewModel_SwitchBranchAsync_DetachedHead_ShowsDetachedAndSwitchesToBranch`,
+`RepoCardViewModel_SwitchBranchAsync_RunsGitOffTheUiThread` and
+`RepoCardViewModel_CreateSwitchBranchViewModel_ListsTheBranchesGitReports`, covering
+`AgentControl-RepoCardViewModel-SwitchBranchRequest`, `AgentControl-RepoCardViewModel-SwitchBranch`,
+`AgentControl-RepoCardViewModel-SwitchBranchFollowsPin` and `AgentControl-RepoCardViewModel-SwitchBranchInBackground`.
+
+**RepoCardViewModel_SwitchBranchRefused_ShowsGitReasonAndChangesNothing**: A stub git that refuses the switch with
+"Your local changes ... would be overwritten" makes the card's status message `Could not switch to 'other': ...
+Nothing was changed.`, carrying git's text including the file name, raises the same text through `ErrorOccurred` once,
+marks the card's last action as failed and leaves the card idle. Against a real clone with an edited pin file that the
+other branch also changes, the refusal names the file, the card stays on `main` and the edit is intact. This scenario is
+tested by `RepoCardViewModel_SwitchBranchAsync_Refused_ShowsGitsReasonAndMarksTheCardFailed` and
+`RepoCardViewModel_SwitchBranchAsync_Blocked_ShowsGitReasonAndKeepsBranch`, covering
+`AgentControl-RepoCardViewModel-SwitchBranchRefused`.
 
 **RepoCardViewModel_Launch_RecordsTimestampOrRaisesErrorWhenUnconfigured**: `LaunchCommand`
 succeeds and records the launch timestamp (raising `LaunchRecorded`) when a command is

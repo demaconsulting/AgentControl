@@ -4,29 +4,30 @@
 
 ### Overview
 
-The `LauncherUI` subsystem is the Avalonia-based user interface a developer interacts with
-directly. It spans the recent-repos main window, per-repo cards, the package-selection
-window, the settings window, the package-source editor window and the sign-in dialog
-(`MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`, `SettingsWindowViewModel`,
-`SourceEditorViewModel` (one class in two files: `SourceEditorViewModel.cs` and, for a Git repository source,
-`SourceEditorViewModel.Git.cs`), `CredentialPromptViewModel`), plus their `.axaml` Views (`MainWindow`,
-`AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`, `SettingsWindow`,
-`SourceEditorWindow`, `CredentialPromptWindow`, `GroupNameWindow`) and shared MVVM support types (`RelayCommand`,
-`AsyncRelayCommand`, `ViewModelBase`, `PackageSourceIcons`, `PackageSourceItemViewModel`,
+The `LauncherUI` subsystem is the Avalonia-based user interface a developer interacts with directly. It spans the
+recent-repos main window, per-repo cards, the package-selection window, the settings window, the package-source editor
+window and the sign-in dialog (`MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`,
+`SettingsWindowViewModel`, `SourceEditorViewModel` (one class in two files: `SourceEditorViewModel.cs` and, for a Git
+repository source, `SourceEditorViewModel.Git.cs`), `CredentialPromptViewModel`), plus their `.axaml` Views
+(`MainWindow`, `AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`, `SettingsWindow`,
+`SourceEditorWindow`, `CredentialPromptWindow`, `GroupNameWindow`, `SwitchBranchWindow`) and shared MVVM support types
+(`RelayCommand`, `AsyncRelayCommand`, `ViewModelBase`, `PackageSourceIcons`, `PackageSourceItemViewModel`,
 `SelectPackageSourceViewModel`, `AvaloniaCredentialPrompt`, `ConnectionTestResultKind`, `RepoCardStatus`,
-`CardColorPalette`, `ThirdPartyDependencies`, `ColorPalettePanel`), the shared theme resources and styles
-(`AppStyles.axaml`, included by `App.axaml`). The subsystem contains twelve units: the six
-view-model units `MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`,
-`SettingsWindowViewModel`, `SourceEditorViewModel` and `CredentialPromptViewModel`, and six further
-independently testable classes with behavior of their own, each with its own requirements, design, verification
-document and review set: `RepoImageLocator` (finds and decodes a repo's untrusted picture; security-relevant),
-`RepoGroupHeaderViewModel` (with `RepoGroupKind`; the header row of a repo-list section), `GroupNameViewModel` (the
-validating view model of the group-name prompt), `DialogBehavior` (the keyboard behavior every dialog shares) and
-`GlobalProgressViewModel` (with `GlobalProgressOperation`; the progress strip under the app bar that shows bulk work -
-adding repositories, and refreshing the cards at start-up and after Settings are saved - with Cancel for an add) and
-`RepoRefreshQueue` (the one queue every lazy read of a repo's state goes through - the cards' start-up reads, the
-folder checks of an add, the cards' refresh after a settings save, the working-tree checks of the cards shown, and the
-reads of Refresh, Pull and the card actions - so at most two run at once across all of them).
+`CardColorPalette`, `ThirdPartyDependencies`, `ColorPalettePanel`, `BranchItemViewModel`, `BranchChoice`), the shared
+theme resources and styles (`AppStyles.axaml`, included by `App.axaml`). The subsystem contains thirteen units: the six
+view-model units `MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`, `SettingsWindowViewModel`,
+`SourceEditorViewModel` and `CredentialPromptViewModel`, and seven further independently testable classes with behavior
+of their own, each with its own requirements, design, verification document and review set: `RepoImageLocator` (finds
+and decodes a repo's untrusted picture; security-relevant), `RepoGroupHeaderViewModel` (with `RepoGroupKind`; the header
+row of a repo-list section), `GroupNameViewModel` (the validating view model of the group-name prompt),
+`SwitchBranchViewModel` (the view model of the "Switch branch" dialog: the branches a repo knows, the filter and the
+choice; its rows `BranchItemViewModel` and its answer `BranchChoice` are in the same file), `DialogBehavior` (the
+keyboard behavior every dialog shares) and `GlobalProgressViewModel` (with `GlobalProgressOperation`; the progress strip
+under the app bar that shows bulk work - adding repositories, and refreshing the cards at start-up and after Settings
+are saved - with Cancel for an add) and `RepoRefreshQueue` (the one queue every lazy read of a repo's state goes
+through - the cards' start-up reads, the folder checks of an add, the cards' refresh after a settings save, the
+working-tree checks of the cards shown, and the reads of Refresh, Pull and the card actions - so at most two run at once
+across all of them).
 
 **Supporting types.** The remaining types are documented here, as supporting types of the subsystem, rather than as
 units: the `RelayCommand`/`ViewModelBase`/`PackageSourceItemViewModel`-style MVVM plumbing and the `.axaml` Views are
@@ -348,11 +349,22 @@ the events that need a dialog.
   validates the card's `MoveToGroup` and repairs stored names, so the prompt, the card and the settings file agree on
   what a group name is) and raises `Completed` exactly once - with the accepted name, or `null` for Cancel - which
   closes the window; the code-behind then calls `RepoCardViewModel.MoveToGroup` or `MainWindowViewModel.RenameGroup`.
+- *`SwitchBranchViewModel` and `SwitchBranchWindow`*: the card does not show the dialog; the window's code-behind does,
+  when `RepoCardViewModel` raises `SwitchBranchRequested` (from the card menu's **Switch branch...**, the
+  `SwitchBranchCommand`): it builds the dialog's view model with `RepoCardViewModel.CreateSwitchBranchViewModel()` - so
+  the window never builds a git client; which git executable and time limits apply is the card's business - and shows
+  `SwitchBranchWindow` modally. `SwitchBranchViewModel.LoadAsync`, run when the window opens and stopped when it closes,
+  reads the branches (`GitClient.GetBranches`, no fetch) through the `IBackgroundWorkRunner`, so git never runs on the
+  UI thread, and lists them (local first, then remote, the current one marked or the detached commit named); a failure
+  is shown as text. The filter, the choice by button, Enter and double-click, and Cancel/Escape end in one `Completed`
+  event
+  - with a `BranchChoice` or `null` - which closes the window. The dialog only chooses: the code-behind then calls
+  `RepoCardViewModel.SwitchBranchAsync`, which runs the switch as an operation of the card (see *Switching branches*).
 - *`DialogBehavior`*: a stateless helper that every dialog window's code-behind calls once from its constructor
   (`DialogBehavior.Apply(window, initial-focus control, cancel action)`): `SettingsWindow`, `SourceEditorWindow`,
-  `CredentialPromptWindow`, `SelectPackageWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `AboutWindow` and
-  `GroupNameWindow`. It knows no view-model; a window that has a view-model passes its `Cancel` as the cancel
-  action. The release-notes window is the only window that does not apply it.
+  `CredentialPromptWindow`, `SelectPackageWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `AboutWindow`,
+  `GroupNameWindow` and `SwitchBranchWindow`. It knows no view-model; a window that has a view-model passes its `Cancel`
+  as the cancel action. The release-notes window is the only window that does not apply it.
 - *Resizable `SettingsWindow` and `SourceEditorWindow`*: both are `CanResize` with a `MinWidth` of 500 and a
   `MinHeight` of 360 and no maximum width, and keep their default opening size (800 and 640 wide, `SizeToContent`
   `Height`, centered on the owner); when the user resizes them Avalonia ends the automatic height, so nothing fights
@@ -816,12 +828,31 @@ tile, left-aligned under the star and as tall as the chip row plus the path row,
 path. The tile shows the repo's own `icon.png`/`logo.png` when it has one (see `RepoCardViewModel`), otherwise
 the repo name's initials on a color chosen by a deterministic hash of the repo path, otherwise a folder glyph.
 The **...** menu is grouped: *Repository* (**Git Pull**, with its enablement rules and its explanatory tooltip
-shown even while it is disabled, and **Refresh**), *Agent files* (**Select Package...** when no package is pinned,
+shown even while it is disabled, **Switch branch...**, enabled once the card's state is read, its folder exists and no
+other operation runs, and **Refresh**), *Agent files* (**Select Package...** when no package is pinned,
 **Change package...** when one is, and **Upgrade to x.y.z** when a newer version exists; the group is hidden when
 none applies) and *Organize* (**Move to group**, then **Reorder**, a submenu holding **Move to top**, **Move up**,
 **Move down** and **Move to bottom**, and **Card color...**) and **Remove from list**. The upgrade
 chip is a button that runs the same `UpgradeCommand` as the menu's Upgrade item
 (`AgentControl-RepoCardViewModel-UpgradeFromChip`).
+
+**Switching branches.** *Switch branch...* (`SwitchBranchMenuItem`, bound to `SwitchBranchCommand`) opens the modal
+`SwitchBranchWindow` (`AgentControl-LauncherUI-SwitchBranchDialog`): a line saying where the repo is (`Currently on
+main` or `Detached HEAD at 1a2b3c4`), a filter box, an indeterminate bar while git is asked, the list - local branches
+first, then the remote-tracking ones with their remote as a caption, the current one marked and not selectable - the
+inline error when git cannot list the branches, the hint *Remote branches are the ones Git already knows about. Use Git
+Pull to update them.* (the dialog never fetches, so it opens fast and never asks for a sign-in), and Cancel and Switch
+buttons. Typing narrows the list (a single remaining choice is selected, so typing and Enter is enough); Enter or a
+double-click on a row chooses it; Escape cancels. The dialog only chooses. `RepoCardViewModel.SwitchBranchAsync` then
+makes the switch as an operation of the card (`AgentControl-LauncherUI-SwitchBranch`): the busy row says `Switching to
+x...`, `GitClient.SwitchBranch` runs on a worker thread (`git switch`, or `git switch --track` for a remote branch;
+never forced, nothing stashed or discarded), and on success the card's status says `Switched to branch 'x'.` and the
+card is refreshed in full exactly as after a Pull - the branch chip, the pin (each branch can pin another package or
+version; the launch re-sync rules read the pin at launch, so they follow with no further work), the committed-files
+badge and the working-tree state - without replacing the switch's status message. When git refuses (typically because
+uncommitted changes would be overwritten) nothing was changed: the status message and a message box carry git's own
+explanation followed by *Nothing was changed.*, and the card is marked as failed. Git that cannot be started or does not
+finish within the switch limit is reported as an error of the card.
 
 **Repo groups and card colors (user-specific).** Both are personal organizing choices stored only in the user's own
 settings file (on the repo's `RecentRepo`, and the collapsed section names, the group colors and the group order in

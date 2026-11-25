@@ -716,6 +716,8 @@ sections:
         children:
           - AgentControl-GitIntegration-ListBranches
           - AgentControl-GitIntegration-SwitchBranch
+          - AgentControl-LauncherUI-SwitchBranch
+          - AgentControl-LauncherUI-SwitchBranchDialog
 
       - id: AgentControl-System-CloneRepository
         title: >-

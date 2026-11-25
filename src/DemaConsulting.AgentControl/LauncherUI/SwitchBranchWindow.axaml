@@ -1,0 +1,130 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:DemaConsulting.AgentControl.LauncherUI"
+        xmlns:materialIcons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+        mc:Ignorable="d"
+        d:DesignWidth="480" d:DesignHeight="460"
+        x:Class="DemaConsulting.AgentControl.LauncherUI.SwitchBranchWindow"
+        x:DataType="vm:SwitchBranchViewModel"
+        Name="SwitchBranchRoot"
+        Title="{Binding Title}"
+        Width="480" Height="460"
+        MinWidth="380" MinHeight="320"
+        WindowStartupLocation="CenterOwner">
+    <!-- Choose the branch to switch a repo to: the branches git already knows (local first, then the
+         remote ones), filtered as the user types. Enter or a double-click on a branch switches to it,
+         Escape cancels. The switch itself is made by the repo's card after the dialog closes. -->
+    <Grid Margin="16" RowDefinitions="Auto,Auto,Auto,*,Auto,Auto" RowSpacing="8">
+
+        <TextBlock Grid.Row="0"
+                    Name="SwitchBranchCurrentText"
+                    AutomationProperties.AutomationId="SwitchBranchCurrentText"
+                    Text="{Binding CurrentText}"
+                    FontWeight="SemiBold"
+                    TextWrapping="Wrap" />
+
+        <TextBox Grid.Row="1"
+                  Name="SwitchBranchFilterTextBox"
+                  AutomationProperties.AutomationId="SwitchBranchFilterTextBox"
+                  AutomationProperties.Name="Filter branches"
+                  ToolTip.Tip="Type to list only the branches whose name contains the text"
+                  PlaceholderText="Filter branches"
+                  Text="{Binding FilterText, Mode=TwoWay}">
+            <TextBox.KeyBindings>
+                <KeyBinding Gesture="Enter" Command="{Binding SwitchCommand}" />
+            </TextBox.KeyBindings>
+        </TextBox>
+
+        <!-- Indeterminate progress while git is asked for the branches; the window stays usable -->
+        <ProgressBar Grid.Row="2"
+                      Name="SwitchBranchProgress"
+                      AutomationProperties.AutomationId="SwitchBranchProgress"
+                      AutomationProperties.Name="Reading the branches"
+                      IsIndeterminate="True"
+                      Height="4"
+                      IsVisible="{Binding IsLoading}" />
+
+        <Grid Grid.Row="3">
+            <ListBox Name="SwitchBranchList"
+                      AutomationProperties.AutomationId="SwitchBranchList"
+                      AutomationProperties.Name="Branches"
+                      ItemsSource="{Binding Items}"
+                      SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                      DoubleTapped="BranchList_DoubleTapped">
+                <ListBox.KeyBindings>
+                    <KeyBinding Gesture="Enter" Command="{Binding SwitchCommand}" />
+                </ListBox.KeyBindings>
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:BranchItemViewModel">
+                        <Grid ColumnDefinitions="Auto,*,Auto"
+                               AutomationProperties.Name="{Binding AccessibleText}"
+                               ToolTip.Tip="{Binding FullName}">
+                            <materialIcons:MaterialIcon Grid.Column="0"
+                                                          Kind="SourceBranch"
+                                                          Width="18" Height="18"
+                                                          Margin="0,0,8,0"
+                                                          VerticalAlignment="Center"
+                                                          IsVisible="{Binding !IsRemote}" />
+                            <materialIcons:MaterialIcon Grid.Column="0"
+                                                          Kind="CloudOutline"
+                                                          Width="18" Height="18"
+                                                          Margin="0,0,8,0"
+                                                          VerticalAlignment="Center"
+                                                          IsVisible="{Binding IsRemote}" />
+                            <TextBlock Grid.Column="1"
+                                        Text="{Binding Name}"
+                                        TextTrimming="CharacterEllipsis"
+                                        VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="2"
+                                        Text="{Binding Caption}"
+                                        IsVisible="{Binding HasCaption}"
+                                        FontSize="11" Opacity="0.65"
+                                        Margin="8,0,0,0"
+                                        VerticalAlignment="Center" />
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            <TextBlock Name="SwitchBranchEmptyText"
+                        AutomationProperties.AutomationId="SwitchBranchEmptyText"
+                        IsVisible="{Binding HasEmptyText}"
+                        Text="{Binding EmptyText}"
+                        Opacity="0.65" TextWrapping="Wrap" Margin="8"
+                        VerticalAlignment="Top" />
+        </Grid>
+
+        <TextBlock Grid.Row="4"
+                    Name="SwitchBranchErrorText"
+                    AutomationProperties.AutomationId="SwitchBranchErrorText"
+                    IsVisible="{Binding HasError}"
+                    Text="{Binding ErrorText}"
+                    Foreground="{DynamicResource ErrorForeground}"
+                    TextWrapping="Wrap" />
+
+        <Grid Grid.Row="5" ColumnDefinitions="*,Auto" ColumnSpacing="12">
+            <TextBlock Grid.Column="0"
+                        Name="SwitchBranchHintText"
+                        AutomationProperties.AutomationId="SwitchBranchHintText"
+                        Text="{Binding HintText}"
+                        FontSize="12" Opacity="0.8"
+                        TextWrapping="Wrap"
+                        VerticalAlignment="Center" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                <Button Name="SwitchBranchCancelButton"
+                         AutomationProperties.AutomationId="SwitchBranchCancelButton"
+                         ToolTip.Tip="Close without switching branches"
+                         Content="Cancel"
+                         Command="{Binding CancelCommand}" />
+                <Button Name="SwitchBranchAcceptButton"
+                         AutomationProperties.AutomationId="SwitchBranchAcceptButton"
+                         ToolTip.Tip="Switch to the selected branch (choose a branch other than the current one first)"
+                         ToolTip.ShowOnDisabled="True"
+                         Classes="accent"
+                         Content="Switch"
+                         Command="{Binding SwitchCommand}" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

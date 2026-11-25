@@ -4,19 +4,17 @@
 
 #### Purpose
 
-`RepoCardViewModel` backs a single card in the main window's recent-repos list: it tracks the
-repo's pin, git status, and upgrade availability, and drives Launch/Pull/Upgrade/Select-Package/Favorite/Remove
-actions for that repo. All business logic (upgrade detection, launch
-orchestration, pull-eligibility checks) is implemented here or delegated to `GitClient`,
-`PackageSourceRegistry`, `PackageContentExtractor`, `RepoPinStore`, and `AgentToolLauncher`
-rather than in any view code-behind, so this class is fully unit-testable without an Avalonia
-window, and every change to the user's own settings entry (favorite, group, card color, launch time) is made
-through the owner (see *Changes go through the owner* below). A repo's pin names no package source (sources and their
-aliases are each user's own configuration), so every package-source operation is resolved from the user's own configured
-sources: they are asked which offer the pinned package and version, and the one whose files have the identity the pin
-recorded supplies them (see *Portable pins* below; `AgentControl-RepoCardViewModel-SourceAwareness`), and the card
-shows whether the source that supplies the package requires signed
-packages (`AgentControl-RepoCardViewModel-SignatureIndicator`).
+`RepoCardViewModel` backs a single card in the main window's recent-repos list: it tracks the repo's pin, git status,
+and upgrade availability, and drives Launch/Pull/Switch-branch/Upgrade/Select-Package/Favorite/Remove actions for that
+repo. All business logic (upgrade detection, launch orchestration, pull-eligibility checks) is implemented here or
+delegated to `GitClient`, `PackageSourceRegistry`, `PackageContentExtractor`, `RepoPinStore`, and `AgentToolLauncher`
+rather than in any view code-behind, so this class is fully unit-testable without an Avalonia window, and every change
+to the user's own settings entry (favorite, group, card color, launch time) is made through the owner (see *Changes go
+through the owner* below). A repo's pin names no package source (sources and their aliases are each user's own
+configuration), so every package-source operation is resolved from the user's own configured sources: they are asked
+which offer the pinned package and version, and the one whose files have the identity the pin recorded supplies them
+(see *Portable pins* below; `AgentControl-RepoCardViewModel-SourceAwareness`), and the card shows whether the source
+that supplies the package requires signed packages (`AgentControl-RepoCardViewModel-SignatureIndicator`).
 
 #### Data Model
 
@@ -537,9 +535,9 @@ operation (`CancelOperation`; the operation ends cancelled, which is never repor
 `_retiredCancellation` so its reads still waiting in the refresh queue are given up (and shuts down a private queue,
 stopping its running git), sets every event of the card (`ErrorOccurred`, `ReleaseNotesReady`,
 `AgentsMdTemplateOfferRequested`, `FavoriteChanged`, `GroupChanged`, `CardColorChanged`, `LaunchRecorded`,
-`NewGroupRequested`, `RemoveRequested`, `SelectPackageRequested`, `ContentChangeConfirmationRequested`,
-`CommittedFilesConversionRequested`, `AgentFilesChoiceRequested`) to `null` so that nothing it still does can show an
-error box, release notes or a prompt, and clears the picture, which disposes it
+`NewGroupRequested`, `RemoveRequested`, `SelectPackageRequested`, `SwitchBranchRequested`,
+`ContentChangeConfirmationRequested`, `CommittedFilesConversionRequested`, `AgentFilesChoiceRequested`) to `null` so
+that nothing it still does can show an error box, release notes or a prompt, and clears the picture, which disposes it
 (`AgentControl-RepoCardViewModel-RetiredCardReportsNothing`, `-RetireCancelsRunningWork`). A retired card ignores
 `RefreshCheap` and `RefreshUpgradeStatusAsync` (`-RetiredCardChecksNothing`), is never reused, and `Retire` is
 idempotent; adding the repo again creates a new card.
@@ -958,6 +956,38 @@ the view layer after the user answers "No".
   file. This flag is never reset back to `false` by any code path in this class, per the feature's
   explicit scope — on failure, raises `ErrorOccurred` rather than throwing.
 
+**SwitchBranch request** (bound to `SwitchBranchCommand`, a `RelayCommand`, executable while `!IsMissing && !IsBusy &&
+HasRepoState`; its `CanExecuteChanged` is raised wherever those change): raises `SwitchBranchRequested` for the view
+layer to show the branch dialog and does nothing else - never reads git or the disk
+(`AgentControl-RepoCardViewModel-SwitchBranchRequest`). `SwitchBranchRequested` is cleared by `Retire` like the other
+requests.
+
+**CreateSwitchBranchViewModel** (internal): Builds the `SwitchBranchViewModel` of the dialog for this repo: the repo's
+name, a function that reads the branches with this card's `GitClient` (`GetBranches`, so the git executable and time
+limits are the card's) and the card's `IBackgroundWorkRunner`, so the read runs off the UI thread when the dialog loads
+and the window never builds a git client (`AgentControl-RepoCardViewModel-SwitchBranchInBackground`).
+
+**SwitchBranchAsync** (public, `BranchChoice`, `CancellationToken`): Switches the repo to the chosen branch as an
+operation of the card: `RunOperationAsync("Switching to {name}...", cancelable: false, ..., NoFurtherStateCheck)`, so it
+holds `IsBusy`, waits for the card's pending state reads first and does nothing for a missing folder, and an unexpected
+failure is reported through `ReportUnexpectedFailure` rather than thrown into the window's fire-and-forget handler.
+The core (`SwitchBranchCoreAsync`) mirrors `PullCoreAsync`: (1) `GitClient.SwitchBranch(path, choice.FullName,
+choice.IsRemote)` runs on a worker thread (`Task.Run`; `git switch` never forced, `--track` for a remote branch)
+(`AgentControl-RepoCardViewModel-SwitchBranch`, `-SwitchBranchInBackground`); (2) when git **refused**, nothing was
+changed: the text `Could not switch to 'x': {git's message, credentials removed} Nothing was changed.` becomes the
+`StatusMessage` and is raised through `ErrorOccurred` (which marks the card as failed and shows the message box), and no
+refresh runs (`AgentControl-RepoCardViewModel-SwitchBranchRefused`); (3) when it **succeeded**, the status is `Switched
+to branch 'x'.` and `RefreshCoreAsync` runs inside the same busy operation - the repo state through the shared queue at
+user-action priority (branch, pin file, `HEAD`, committed agent files, working tree) and the upgrade check - so the
+branch chip, the pin chip (a branch can pin another package version; the launch re-sync reads the pin at launch, so it
+follows) and the badges show the new branch (`AgentControl-RepoCardViewModel-SwitchBranchFollowsPin`); a refresh that is
+canceled (the card was retired, or the caller gave up) does not turn the outcome into "The operation was canceled."
+
+- the branch and working tree are still read, except for a retired card - and the refresh never replaces the switch's
+status message (a failure to read the new branch's pin file is appended to it); (4) git that cannot be started or does
+not finish within the switch limit (`InvalidOperationException`, including `GitCommandTimeoutException`) is reported
+through `ErrorOccurred` as `Failed to switch branch: ...`, with credentials removed.
+
 **SelectPackage** (private, bound to `SelectPackageCommand`): Validates at least one package source is configured,
 then raises
 `SelectPackageRequested` (a plain event) for the view layer to show the dialog, which starts on
@@ -1176,6 +1206,8 @@ a retired card raises nothing.
 - **MainWindow** (code-behind) — the first time a card's row is attached to the visual tree, promotes its waiting reads
   (`PrioritizeRepoState(Visible)`) and starts its working-tree check (`RefreshRepoStateAsync(Visible, workingTree)`),
   and subscribes to `RemoveRequested` (`AgentControl-RepoCardViewModel-RemoveRequest`), `SelectPackageRequested`,
+  `SwitchBranchRequested` (it shows the branch dialog, built with `CreateSwitchBranchViewModel`, and passes the chosen
+  branch to `SwitchBranchAsync`),
   `NewGroupRequested`, `ReleaseNotesReady`, `AgentsMdTemplateOfferRequested`, `ContentChangeConfirmationRequested`,
   `CommittedFilesConversionRequested` (answered through a modal `ConfirmationWindow`), `AgentFilesChoiceRequested`
   (answered through a modal `ConfirmationWindow` with the request's own button labels), and `ErrorOccurred` to drive

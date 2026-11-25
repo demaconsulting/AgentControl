@@ -47,37 +47,36 @@ The following topics are out of scope:
 
 ## Software Structure
 
-The software structure is modeled in SysML2 under `docs/sysml2/` and rendered to the diagram
-below by SysML2Tools as part of the build pipeline. AI agents should query the SysML2 model
-directly (see the `sysml2tools-query` skill) rather than parsing this diagram or the prose
-elsewhere in this document. The model captures the shipped system's runtime composition only;
-the OTS items that ship inside the application (Avalonia, Serilog, and NuGetCaching) are modeled
-as OTS parts in `docs/sysml2/model/ots.sysml`, while the remaining OTS items in Scope above are
-build-time/pipeline tooling, documented separately (see `docs/design/ots.md`) without SysML2
-parts. The system has eleven subsystems: `LauncherUI`, `AgentPackageManagement`,
-`PackageCredentials` (credentials for package servers), `RepoSync`, `RepoConfig`, `AgentToolLauncher`,
-`GitIntegration`, `Settings`, `Logging`, `Startup` and `Utilities`, plus the top-level `Program` unit. Of
-the units, `GitCredentialClient` (in `GitIntegration`) and `SignatureVerificationSupport` (in
-`AgentPackageManagement`) belong to the package-authenticity and saved-sign-in features, and
+The software structure is modeled in SysML2 under `docs/sysml2/` and rendered to the diagram below by SysML2Tools as
+part of the build pipeline. AI agents should query the SysML2 model directly (see the `sysml2tools-query` skill) rather
+than parsing this diagram or the prose elsewhere in this document. The model captures the shipped system's runtime
+composition only; the OTS items that ship inside the application (Avalonia, Serilog, and NuGetCaching) are modeled as
+OTS parts in `docs/sysml2/model/ots.sysml`, while the remaining OTS items in Scope above are build-time/pipeline
+tooling, documented separately (see `docs/design/ots.md`) without SysML2 parts. The system has eleven subsystems:
+`LauncherUI`, `AgentPackageManagement`, `PackageCredentials` (credentials for package servers), `RepoSync`,
+`RepoConfig`, `AgentToolLauncher`, `GitIntegration`, `Settings`, `Logging`, `Startup` and `Utilities`, plus the
+top-level `Program` unit. Of the units, `GitCredentialClient` (in `GitIntegration`) and `SignatureVerificationSupport`
+(in `AgentPackageManagement`) belong to the package-authenticity and saved-sign-in features, and
 `PackageContentIdentity` (in `AgentPackageManagement`) to the package-content-integrity feature. `GitSourceProvider`,
 `GitRepositoryAddress` and `GitTagPattern` (in `AgentPackageManagement`) and `GitRemoteClient` (in `GitIntegration`)
-belong to the Git repository source feature. `RepoGroupName` (in
-`Settings`) is the unit holding the rules for the names of the user's repo groups, `RepoGroupHierarchy` (in `Settings`)
-the unit holding the rules for how those groups nest (which group is inside which, the order within a level, which
-moves keep the tree a tree and how a stored tree is repaired), and `RepoImageLocator`,
-`RepoGroupHeaderViewModel`, `GroupNameViewModel` and `DialogBehavior` (in `LauncherUI`) belong to the repo-picture,
-repo-group and dialog features; `GlobalProgressViewModel` (in `LauncherUI`) backs the progress strip under the app bar
-that shows bulk work (adding repositories, refreshing the cards at start-up and after Settings are saved);
-`RepoRefreshQueue` (in `LauncherUI`) is the one queue every lazy read of a repo's state goes through, two at a time;
-`SettingsWriter` (in `Settings`) writes the settings in the background, so the window never waits for the settings file;
-`BlockingCallGuard` (in `Utilities`) lets the tests refuse a git or disk call made on the UI thread;
-`BackgroundPackageSourceProvider` is a documented supporting type of the `PackageSourceRegistry` unit (in
-`AgentPackageManagement`), not a unit: the registry wraps every built-in package source in it so that listing and
-acquiring a package, and hashing what was delivered, run on the thread pool; `PathEllipsisText`,
-`ColorPalettePanel` (the shared content of the card and group color pop-ups), `ThemePreferenceDisplayNameConverter`,
-`GroupIndentConverter` (turns a nesting depth into the indentation of a header or card), `RepoListBox` (the repo list
-control that keeps a multi-selection while a selected card is pressed to start a drag) and `BackgroundWorkRunner` (the
-seam that runs file-system and git reads off the UI thread) are documented supporting types of `LauncherUI`, not units.
+belong to the Git repository source feature. `RepoGroupName` (in `Settings`) is the unit holding the rules for the names
+of the user's repo groups, `RepoGroupHierarchy` (in `Settings`) the unit holding the rules for how those groups nest
+(which group is inside which, the order within a level, which moves keep the tree a tree and how a stored tree is
+repaired), and `RepoImageLocator`, `RepoGroupHeaderViewModel`, `GroupNameViewModel` and `DialogBehavior` (in
+`LauncherUI`) belong to the repo-picture, repo-group and dialog features; `SwitchBranchViewModel` (in `LauncherUI`, with
+its `SwitchBranchWindow` view, a supporting type) is the view model of the dialog in which the user chooses the branch a
+repo card is switched to; `GlobalProgressViewModel` (in `LauncherUI`) backs the progress strip under the app bar that
+shows bulk work (adding repositories, refreshing the cards at start-up and after Settings are saved); `RepoRefreshQueue`
+(in `LauncherUI`) is the one queue every lazy read of a repo's state goes through, two at a time; `SettingsWriter` (in
+`Settings`) writes the settings in the background, so the window never waits for the settings file; `BlockingCallGuard`
+(in `Utilities`) lets the tests refuse a git or disk call made on the UI thread; `BackgroundPackageSourceProvider` is a
+documented supporting type of the `PackageSourceRegistry` unit (in `AgentPackageManagement`), not a unit: the registry
+wraps every built-in package source in it so that listing and acquiring a package, and hashing what was delivered, run
+on the thread pool; `PathEllipsisText`, `ColorPalettePanel` (the shared content of the card and group color pop-ups),
+`ThemePreferenceDisplayNameConverter`, `GroupIndentConverter` (turns a nesting depth into the indentation of a header or
+card), `RepoListBox` (the repo list control that keeps a multi-selection while a selected card is pressed to start a
+drag) and `BackgroundWorkRunner` (the seam that runs file-system and git reads off the UI thread) are documented
+supporting types of `LauncherUI`, not units.
 
 ![Software Structure](SoftwareStructureView.svg)
 
@@ -101,7 +100,8 @@ Settings, Logging, Startup and Utilities](architecture.svg)
       selection of several repo cards to move or remove together, adding several repos at once (multi-select picker and
       folders dropped from the file manager, checked in the background, with progress and Cancel in the global progress
       strip under the app bar, `GlobalProgressViewModel`, and a Retry/Discard question when the add cannot be saved),
-      the shared repo refresh queue (`RepoRefreshQueue`), the background-work seam (`BackgroundWorkRunner`) and the
+      the shared repo refresh queue (`RepoRefreshQueue`), the background-work seam (`BackgroundWorkRunner`), the branch
+      dialog of a card (`SwitchBranchViewModel`, `SwitchBranchWindow`) and the
       About window with its banner
     - **AgentPackageManagement/** - package source model, source providers (zip folder, NuGet
       folder and server, Git repository) and registry (which wraps each built-in provider in
@@ -116,7 +116,8 @@ Settings, Logging, Startup and Utilities](architecture.svg)
     - **RepoConfig/** - per-repo pin file persistence (package, version and the content identity of the files; no
       package source and no Git commit)
     - **AgentToolLauncher/** - shell detection and agent-tool process launching
-    - **GitIntegration/** - git status/pull/branch queries, the repository-root check, the user's Git credential helper
+    - **GitIntegration/** - git status/pull/branch queries, switching branches and cloning a repository, the
+      repository-root check, the user's Git credential helper
       (saved package-feed sign-ins) and hardened git against remote repositories (the Git package source)
     - **Settings/** - application-wide settings persistence (including the package sources and the user's repo
       groups and their hierarchy, card colors, group colors, group order and theme; `SettingsStore`, which repairs
