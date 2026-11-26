@@ -21,7 +21,8 @@ tests use the shared headless Avalonia session (`HeadlessTestApp`).
 
 - Clone is disabled until the address, the parent folder and the folder name are filled in, and an empty field shows no
   error.
-- An address that starts with a dash (also after leading white space), uses any `name::address` remote-helper syntax or
+- An address that starts with a dash (also after leading white space), contains `::` before its first `/` (outside a
+  bracketed IPv6 literal, so any `name::address` remote-helper syntax and more) or
   has more than one line is refused with a message,
   as is a parent folder that is not an absolute path, and Clone stays disabled.
 - The folder name follows the address (last segment, without `.git`, for URLs, scp-like addresses and local paths) until
@@ -48,11 +49,14 @@ address box, the parent folder is the one given, Clone is disabled until an addr
 
 **CloneRepositoryViewModel_UrlOptionRefused**: The addresses `-u=evil`, `--upload-pack=calc.exe`, `ext::sh -c ...`,
 `fd::17/repo` and two lines of text are each refused with a message and Clone stays unavailable, and so is any text of
-the form `name::address` (`foo::bar`, `a+b.c::x`) and an address whose dash follows leading white space (`  -x`); a
+the form `name::address` (`foo::bar`, `a+b.c::x`, `foo_bar::x`, `a b::x`, `ext::sh -c x`, `fd::0`) and an address whose
+dash follows leading white space (`  -x`); an address whose colons are not a helper (`https://[::1]/r.git`,
+`ssh://git@[::1]:22/r.git`, `C:\repos\r`, `git@host:org/r.git`) is accepted, by the same `GitClient.CheckCloneUrl`; a
 relative parent
 folder is refused with a message naming the absolute path. This scenario is tested by
 `CloneRepositoryViewModel_UrlStartingWithDashOrHelperOrMultiline_IsRefused`,
 `CloneRepositoryViewModel_Url_GenericHelperPrefixOrDashAfterWhitespace_IsRefused`,
+`CloneRepositoryViewModel_Url_ColonsThatAreNotAHelper_AreAccepted`,
 `CloneRepositoryViewModel_RelativeParentFolder_IsRefused` and, in the window,
 `CloneRepositoryWindow_UrlLooksLikeAnOption_ShowsErrorAndDisablesClone` (the message is visible under the fields),
 covering `AgentControl-CloneRepositoryViewModel-UrlOptionRefused`.
@@ -108,8 +112,11 @@ parent folder, the folder name or the group, for a destination that exists (the 
 refusal) and for one that does not (it would have been an acceptance), and the gate opens: checking ends, no error is
 shown, the dialog does not complete and Clone is available. Pressing Clone again checks the input the dialog holds now:
 a changed address, parent folder or folder name is checked as the new destination, while a changed group for an
-existing destination is refused for that destination, and an acceptance carries the new group. This scenario is tested
-by `CloneRepositoryViewModel_Accept_InputEditedWhileChecking_DiscardsTheStaleResult`, covering
+existing destination is refused for that destination, and an acceptance carries the new group. A change of the group
+also clears a finding shown by an earlier check (the error text and the has-error flag are raised and Clone is
+available), like a change of any other field. This scenario is tested
+by `CloneRepositoryViewModel_Accept_InputEditedWhileChecking_DiscardsTheStaleResult` and
+`CloneRepositoryViewModel_SelectedGroup_Changed_ClearsDestinationFindingAndRaisesError`, covering
 `AgentControl-CloneRepositoryViewModel-StaleCheckDiscarded`.
 
 **CloneRepositoryViewModel_CheckFailureReported**: A check that fails with an `IOException` whose message carries an

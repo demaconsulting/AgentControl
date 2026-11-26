@@ -172,9 +172,14 @@ accepts only `KnownAgentFolders` (same argument checks as `UntrackAgentFolders`)
   '<parent>': ...", exit code 1) and a clone that cannot be moved into place.
 - *Algorithm*: (1) ask the blocking-call guard; (2) `CheckCloneUrl` and `CheckCloneDestination`, each refusal an
   `ArgumentException` whose message is a reason the user can read, before git starts; (3) create the working folder
-  `.agentcontrol-clone-<guid>` in the destination's parent folder (`CreateCloneWorkFolder`: a name that does not exist
-  yet, `Directory.CreateDirectory`, hidden on Windows as a best effort) - the call's own folder, so a deletion of it can
-  never reach anybody else's data; (4) run `git clone -- <url> <working folder>` - the address trimmed of surrounding
+  `.agentcontrol-clone-<guid>` in the destination's parent folder (`CreateCloneWorkFolder`: the name is claimed with
+  `TryCreateFolderExclusively`, an operating-system create that fails when anything - folder, file or link, dangling or
+  not - already exists under it: `CreateDirectoryW` on Windows, failing with `ERROR_ALREADY_EXISTS`, and `mkdir` from
+  libc on Linux and macOS, failing with `EEXIST`; on a collision another GUID is tried, up to five times, and a name
+  under which something exists is never used, changed or deleted; `Directory.CreateDirectory` is not used because it
+  succeeds on an existing folder and so proves nothing; then hidden on Windows as a best effort) - the call's own
+  folder, so a deletion of it can never reach anybody else's data; (4) run `git clone -- <url> <working folder>` - the
+  address trimmed of surrounding
   white space, the text `CheckCloneUrl` judged - with the destination's parent folder as working directory (a clone
   needs an existing one), under the `CloneRepository` limit (`AgentControl-GitClient-CloneTimeLimit`), with the
   environment policy and `GIT_ALLOW_PROTOCOL=file:git:http:https:ssh` (`AgentControl-GitClient-CloneNeverPrompts`); (5)
@@ -185,15 +190,25 @@ accepts only `KnownAgentFolders` (same argument checks as `UntrackAgentFolders`)
   retried a few times because a process git started may hold a file for a moment; a leftover that cannot be removed is
   logged and named in the text of a timeout exception; (6) a **failed** clone (non-zero exit code) also removes the
   working folder and returns git's redacted result, with the leftover sentence appended when the removal failed; (7) on
-  success `MoveCloneIntoPlace` renames the working folder to the destination with `Directory.Move` - a rename inside one
-  folder, which on Windows is atomic and never replaces anything - and clears the hidden attribute. An `IOException` or
-  `UnauthorizedAccessException` means the destination appeared meanwhile (or could not be written): the working folder
-  is removed and a failed result (exit code 1) says "The folder '<destination>' was created while the repository was
-  being cloned, so the clone was not moved there. Nothing in that folder was changed."
+  success `MoveCloneIntoPlace` renames the working folder to the destination with a rename that fails instead of
+  replacing anything (`MoveFolderWithoutReplacing`), on every platform, and clears the hidden attribute: `MoveFileExW`
+  with no flags on Windows (without `MOVEFILE_REPLACE_EXISTING` it fails with `ERROR_ALREADY_EXISTS`, which
+  `Directory.Move` also relies on, but the call is explicit so that the guarantee does not depend on the framework),
+  `renameat2` with `RENAME_NOREPLACE` (`1`) on Linux and `renamex_np` with `RENAME_EXCL` (`0x4`) on macOS, both failing
+  with `EEXIST` when the name is taken - a plain Unix `rename` would replace an *empty* folder that appeared in the
+  meantime. When the platform has no such call (`ENOSYS`, `EINVAL` or `ENOTSUP`/`EOPNOTSUPP` from an old kernel or a
+  volume, or a C library without the function) the clone is **not** completed and there is no fall back to a replacing
+  rename: the working folder is removed and a failed result (exit code 1) says "This computer cannot rename a folder
+  without the risk of replacing one that appeared meanwhile, so the clone was not moved to '<destination>'." When the
+  destination appeared meanwhile - even as an empty folder - the working folder is removed and a failed result (exit
+  code 1) says "The folder '<destination>' was created while the repository was being cloned, so the clone was not moved
+  there. Nothing in that folder was changed."; any other `IOException` or `UnauthorizedAccessException` is reported as
+  "The clone could not be moved to '<destination>': ..." with the same cleanup
   (`AgentControl-GitClient-CloneIntoFreshFolder`, `-CloneCleansUpOnlyItsOwnFolder`,
-  `-CloneDestinationAppearedMeanwhile`, `-CloneCancelStopsGit`). On Unix a `rename` could replace an *empty* folder that
-  appeared in the instant between `Directory.Move`'s own check and the call; the product is Windows-only and the window
-  is that small.
+  `-CloneDestinationAppearedMeanwhile`, `-CloneCancelStopsGit`). The two native calls are P/Invoked with
+  `LibraryImport` (source generated); the working-folder name source and the rename are `internal` seams
+  (`CloneWorkFolderNameSource`, `NoReplaceMove`) that tests replace to force a name collision or a platform without the
+  rename.
 - *Postconditions*: the address is data (`--` separates it from the options, `-CloneUrlSeparatedFromOptions`) and never
   appears in a log or exception message with its credentials (`AgentControl-GitClient-CloneRedactsCredentials`). A
   process killed together with the application leaves the hidden working folder behind: nothing deletes it
@@ -201,10 +216,15 @@ accepts only `KnownAgentFolders` (same argument checks as `UntrackAgentFolders`)
 
 **CheckCloneUrl** (static, pure): Returns the reason an address cannot be cloned, or `null`. Refuses a blank address,
 one that spans lines or has control characters, one that starts with `-` (git would read an option, for example
-`--upload-pack=`) and one that uses git's remote-helper syntax `<name>::<address>` (`ext::` runs a command, `fd::` reads
-an open file) or an `ssh://` address whose host - the text after the `//` and any user name, up to the next `/` - starts
-with `-` (ssh would read an option) (`AgentControl-GitClient-CloneUrlRefused`). Whether the repository
-exists is for git to say.
+`--upload-pack=`), one that contains `::` before its first `/` once the colons of a bracketed IPv6 literal are set aside
+(`ContainsHelperSeparator`) and an `ssh://` address whose host - the text after the `//` and any user name, up to the
+next `/` - starts with `-` (ssh would read an option) (`AgentControl-GitClient-CloneUrlRefused`). The `::` rule covers
+git's remote-helper syntax `<name>::<address>` (`ext::` runs a command, `fd::` reads an open file) and is deliberately
+wider than git's own (which only reads `<name>::` as a helper when the name is a letter followed by letters, digits,
+`+`, `.` or `-`, so `foo_bar::x` is not one): it does not depend on git's version. `https://[::1]/r.git`,
+`ssh://git@[::1]:22/r.git`, `[::1]:repo`, `C:\repos\r` and `git@host:org/r.git` stay accepted; a bracket that is not a
+complete IPv6 literal is not set aside. The clone dialog uses this same method, so the dialog and `Clone` can never
+disagree. Whether the repository exists is for git to say.
 
 **CheckCloneDestination** (static): Returns the reason a folder cannot be a clone destination, or `null`: it must be
 an absolute path, its parent folder must exist, and nothing may exist at the destination - not a folder (even an

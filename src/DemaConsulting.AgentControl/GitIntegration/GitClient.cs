@@ -20,6 +20,7 @@
 
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using DemaConsulting.AgentControl.Logging;
 using DemaConsulting.AgentControl.PackageCredentials;
@@ -182,8 +183,26 @@ internal sealed record GitCommandResult(int ExitCode, string StandardOutput, str
 ///     method blocks its calling thread until git answers, so it must be called off the UI thread; a
 ///     call on a thread guarded by <see cref="BlockingCallGuard"/> is refused before git starts.
 /// </remarks>
-internal sealed class GitClient
+internal sealed partial class GitClient
 {
+    /// <summary>
+    ///     How a no-replace rename of a folder ended when it did not throw.
+    /// </summary>
+    internal enum NoReplaceMoveOutcome
+    {
+        /// <summary>The folder now has its new name.</summary>
+        Moved,
+
+        /// <summary>Something already exists at the new name; nothing was changed.</summary>
+        DestinationExists,
+
+        /// <summary>
+        ///     The platform or file system cannot rename without possibly replacing; nothing was
+        ///     changed.
+        /// </summary>
+        Unsupported
+    }
+
     /// <summary>
     ///     Wall-clock duration threshold above which <see cref="RunGit"/> logs a warning that the
     ///     git process took unexpectedly long to exit, to help distinguish a hung process from a
@@ -197,6 +216,13 @@ internal sealed class GitClient
     ///     any character, and git writes them as UTF-8 whatever the console code page is.
     /// </summary>
     private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
+
+    /// <summary>
+    ///     The characters an IPv6 literal in brackets may hold (hex digits, the colons, the dots of an
+    ///     embedded IPv4 address and the <c>%</c> of a zone); see <see cref="ContainsHelperSeparator"/>.
+    /// </summary>
+    private static readonly System.Buffers.SearchValues<char> Ipv6LiteralCharacters =
+        System.Buffers.SearchValues.Create("0123456789abcdefABCDEF:.%");
 
     /// <summary>
     ///     The environment variable that limits how far up git looks for a repository; removed by
@@ -215,6 +241,78 @@ internal sealed class GitClient
     ///     The name prefix of the hidden folder a clone is made in, next to its destination.
     /// </summary>
     private const string CloneWorkFolderPrefix = ".agentcontrol-clone-";
+
+    /// <summary>
+    ///     How many names <see cref="CreateCloneWorkFolder"/> tries before it gives up; a try fails only
+    ///     when something already exists under the name it picked.
+    /// </summary>
+    private const int CloneWorkFolderAttempts = 5;
+
+    /// <summary>The Windows error "the file exists" (<c>ERROR_FILE_EXISTS</c>).</summary>
+    private const int ErrorFileExists = 80;
+
+    /// <summary>The Windows error "cannot create a file when that file already exists"
+    ///     (<c>ERROR_ALREADY_EXISTS</c>), which <c>CreateDirectoryW</c> and <c>MoveFileExW</c> report for
+    ///     an existing name.</summary>
+    private const int ErrorAlreadyExists = 183;
+
+    /// <summary>The Unix error "file exists" (<c>EEXIST</c>; the same number on Linux and macOS).</summary>
+    private const int PosixFileExists = 17;
+
+    /// <summary>The Unix error "invalid argument" (<c>EINVAL</c>), which an old kernel or a file system
+    ///     gives for a rename flag it does not know.</summary>
+    private const int PosixInvalidArgument = 22;
+
+    /// <summary>The Linux error "function not implemented" (<c>ENOSYS</c>): a kernel without
+    ///     <c>renameat2</c>.</summary>
+    private const int LinuxFunctionNotImplemented = 38;
+
+    /// <summary>The Linux error "directory not empty" (<c>ENOTEMPTY</c>).</summary>
+    private const int LinuxDirectoryNotEmpty = 39;
+
+    /// <summary>The Linux error "operation not supported" (<c>EOPNOTSUPP</c>, also <c>ENOTSUP</c>): a
+    ///     file system that does not support <c>RENAME_NOREPLACE</c>.</summary>
+    private const int LinuxOperationNotSupported = 95;
+
+    /// <summary>The macOS error "operation not supported" (<c>ENOTSUP</c>): a volume that does not
+    ///     support <c>RENAME_EXCL</c>.</summary>
+    private const int MacOperationNotSupported = 45;
+
+    /// <summary>The macOS error "directory not empty" (<c>ENOTEMPTY</c>).</summary>
+    private const int MacDirectoryNotEmpty = 66;
+
+    /// <summary>The Linux directory descriptor that means "relative to the current directory"
+    ///     (<c>AT_FDCWD</c>); the paths passed are absolute, so it is never consulted.</summary>
+    private const int LinuxCurrentDirectory = -100;
+
+    /// <summary>The Linux <c>renameat2</c> flag that makes the rename fail with <c>EEXIST</c> instead of
+    ///     replacing an existing destination (<c>RENAME_NOREPLACE</c>, <c>1 &lt;&lt; 0</c>).</summary>
+    private const uint LinuxRenameNoReplace = 1;
+
+    /// <summary>The macOS <c>renamex_np</c> flag that makes the rename fail with <c>EEXIST</c> instead of
+    ///     replacing an existing destination (<c>RENAME_EXCL</c>, <c>0x00000004</c> in
+    ///     <c>sys/stdio.h</c>).</summary>
+    private const uint MacRenameExclusive = 4;
+
+    /// <summary>The permissions <c>mkdir</c> is asked for: <c>0777</c>, narrowed by the user's umask
+    ///     like every folder the platform creates by default.</summary>
+    private const uint PosixFolderMode = 511;
+
+    /// <summary>
+    ///     Gets the source of the unique part of a clone's working folder name, which
+    ///     <see cref="CreateCloneWorkFolder"/> asks for once per attempt. Exists so tests can make a name
+    ///     collide; the application uses a new GUID each time.
+    /// </summary>
+    internal Func<string> CloneWorkFolderNameSource { get; init; } = static () => Guid.NewGuid().ToString("N");
+
+    /// <summary>
+    ///     Gets the operation that renames a finished clone's working folder to the destination without
+    ///     ever replacing anything there. Exists so tests can simulate a platform that has no such
+    ///     operation; the application uses the operating system's own (see
+    ///     <see cref="MoveFolderWithoutReplacing"/>).
+    /// </summary>
+    internal Func<string, string, NoReplaceMoveOutcome> NoReplaceMove { get; init; } = MoveFolderWithoutReplacing;
+
 
     /// <summary>
     ///     Path (or bare command name, resolved via <c>PATH</c>) to the git executable this
@@ -893,11 +991,12 @@ internal sealed class GitClient
     ///     <para>
     ///     The destination is never written to by git. The call creates a fresh, hidden folder next to
     ///     it (<c>.agentcontrol-clone-&lt;guid&gt;</c> in the destination's parent folder; the folder is
-    ///     this call's own, nobody else has a name like it), runs
+    ///     this call's own because it is created with a call that fails when the name is taken, and a
+    ///     name that is taken is never used or deleted), runs
     ///     <c>git clone -- &lt;url&gt; &lt;working folder&gt;</c> there through an argument list, never a
-    ///     shell, and renames the working folder to the destination only when git succeeded
-    ///     (<see cref="Directory.Move(string, string)"/>, a rename on one volume that on Windows is atomic
-    ///     and never replaces anything). Like every command it runs under the environment policy (see
+    ///     shell, and renames the working folder to the destination only when git succeeded, with an
+    ///     operating-system rename that fails instead of replacing anything (see
+    ///     <see cref="MoveFolderWithoutReplacing"/>). Like every command it runs under the environment policy (see
     ///     <see cref="ApplyBaseEnvironment"/>: <c>GIT_TERMINAL_PROMPT=0</c> because there is no terminal
     ///     to ask in; a credential helper such as Git Credential Manager still shows its own sign-in
     ///     window), and in addition <c>GIT_ALLOW_PROTOCOL</c> limits the transports to local paths,
@@ -918,11 +1017,12 @@ internal sealed class GitClient
     ///     folder without proof that it is ours is exactly what this design avoids.
     ///     </para>
     ///     <para>
-    ///     If something appears at the destination while git is cloning, the move is refused (on
-    ///     Windows it is atomic and cannot replace; on Unix a rename could replace an <em>empty</em>
-    ///     folder that appeared meanwhile, and <see cref="Directory.Move(string, string)"/> itself checks
-    ///     only that nothing exists at that moment) and reported as a failed result; what appeared is
-    ///     not touched.
+    ///     If something appears at the destination while git is cloning - even an empty folder - the
+    ///     move is refused and reported as a failed result; what appeared is not touched. The rename is
+    ///     <c>MoveFileExW</c> without <c>MOVEFILE_REPLACE_EXISTING</c> on Windows, <c>renameat2</c> with
+    ///     <c>RENAME_NOREPLACE</c> on Linux and <c>renamex_np</c> with <c>RENAME_EXCL</c> on macOS; where
+    ///     the platform has no such call the clone is not completed (a plain Unix <c>rename</c> would
+    ///     replace an empty folder) and the working folder is removed.
     ///     </para>
     /// </remarks>
     /// <exception cref="ArgumentException">Thrown when the URL or the destination is refused; the
@@ -1010,28 +1110,34 @@ internal sealed class GitClient
     }
 
     /// <summary>
-    ///     Creates the hidden folder a clone is made in: a fresh, unused name next to the destination.
+    ///     Creates the hidden folder a clone is made in: a fresh name next to the destination, claimed
+    ///     with a create that fails when anything already exists under the name.
     /// </summary>
     /// <param name="parent">The destination's parent folder, which exists.</param>
     /// <param name="failure">When the folder could not be created, the failed result to return;
     ///     otherwise <see langword="null"/>.</param>
     /// <returns>The path of the new, empty folder, or <see langword="null"/> when it could not be
     ///     created.</returns>
+    /// <remarks>
+    ///     Checking that a name is free and then creating it is not a claim: <c>Directory.CreateDirectory</c>
+    ///     succeeds on a folder that exists, so a folder somebody else made under the same name would be
+    ///     taken for ours and later deleted. Only <see cref="TryCreateFolderExclusively"/> proves that this
+    ///     call made the folder, and a name under which something exists is never used or touched.
+    /// </remarks>
     private string? CreateCloneWorkFolder(string parent, out GitCommandResult? failure)
     {
         failure = null;
         try
         {
-            // A name nobody has used: pick another one if, against all odds, it exists already
-            for (var attempt = 0; attempt < 5; attempt++)
+            // A name nobody has used: pick another one if, against all odds, something exists under it
+            for (var attempt = 0; attempt < CloneWorkFolderAttempts; attempt++)
             {
-                var candidate = Path.Combine(parent, CloneWorkFolderPrefix + Guid.NewGuid().ToString("N"));
-                if (PathEntryExists(candidate, out _))
+                var candidate = Path.Combine(parent, CloneWorkFolderPrefix + CloneWorkFolderNameSource());
+                if (!TryCreateFolderExclusively(candidate))
                 {
                     continue;
                 }
 
-                Directory.CreateDirectory(candidate);
                 HideBestEffort(candidate);
                 return candidate;
             }
@@ -1054,8 +1160,8 @@ internal sealed class GitClient
     }
 
     /// <summary>
-    ///     Makes the finished clone the destination by renaming its working folder, and makes it
-    ///     visible again.
+    ///     Makes the finished clone the destination by renaming its working folder without ever replacing
+    ///     anything, and makes it visible again.
     /// </summary>
     /// <param name="workFolder">The working folder holding the finished clone.</param>
     /// <param name="destination">The destination, which did not exist when the clone started.</param>
@@ -1064,18 +1170,34 @@ internal sealed class GitClient
     ///     that says why. The working folder is removed when it could not be moved.</returns>
     private GitCommandResult MoveCloneIntoPlace(string workFolder, string destination, GitCommandResult succeeded)
     {
+        string? refusal = null;
         try
         {
-            Directory.Move(workFolder, destination);
+            switch (NoReplaceMove(workFolder, destination))
+            {
+                case NoReplaceMoveOutcome.Moved:
+                    break;
+                case NoReplaceMoveOutcome.DestinationExists:
+                    refusal = DestinationAppearedMessage(destination);
+                    break;
+                default:
+                    // Never fall back to a rename that could replace what the user put there
+                    refusal = "This computer cannot rename a folder without the risk of replacing one that " +
+                              $"appeared meanwhile, so the clone was not moved to '{destination}'.";
+                    break;
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            var leftover = RemoveCloneWorkFolder(workFolder);
-            var reason = PathEntryExists(destination, out _)
-                ? $"The folder '{destination}' was created while the repository was being cloned, so the clone was " +
-                  "not moved there. Nothing in that folder was changed."
+            refusal = PathEntryExists(destination, out _)
+                ? DestinationAppearedMessage(destination)
                 : $"The clone could not be moved to '{destination}': {SecretRedactor.Redact(ex.Message)}";
-            return new GitCommandResult(1, succeeded.StandardOutput, leftover is null ? reason : $"{reason} {leftover}");
+        }
+
+        if (refusal is not null)
+        {
+            var leftover = RemoveCloneWorkFolder(workFolder);
+            return new GitCommandResult(1, succeeded.StandardOutput, leftover is null ? refusal : $"{refusal} {leftover}");
         }
 
         // The working folder was hidden; the destination is an ordinary folder
@@ -1097,6 +1219,201 @@ internal sealed class GitClient
 
         return succeeded;
     }
+
+    /// <summary>
+    ///     Words the failure of a clone whose destination appeared while git was working.
+    /// </summary>
+    /// <param name="destination">The destination.</param>
+    /// <returns>The sentence for the failed result.</returns>
+    private static string DestinationAppearedMessage(string destination) =>
+        $"The folder '{destination}' was created while the repository was being cloned, so the clone was " +
+        "not moved there. Nothing in that folder was changed.";
+
+    /// <summary>
+    ///     Creates a folder only when nothing exists under its name, in one step.
+    /// </summary>
+    /// <param name="path">The full path of the folder; its parent exists.</param>
+    /// <returns><see langword="true"/> when this call created the folder (so it is this call's own);
+    ///     <see langword="false"/> when something - a folder, a file or a link, dangling or not -
+    ///     already exists under the name, and nothing was changed.</returns>
+    /// <exception cref="IOException">Thrown when the folder could not be created for another reason.</exception>
+    /// <remarks>
+    ///     <c>CreateDirectoryW</c> on Windows and <c>mkdir</c> on Linux and macOS both fail when the
+    ///     name is taken (<c>ERROR_ALREADY_EXISTS</c>, <c>EEXIST</c>) and never follow a link at the
+    ///     name; <see cref="Directory.CreateDirectory(string)"/> succeeds on an existing folder and so
+    ///     proves nothing.
+    /// </remarks>
+    private static bool TryCreateFolderExclusively(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            if (CreateDirectory(ToExtendedPath(path), IntPtr.Zero))
+            {
+                return true;
+            }
+
+            var windowsError = Marshal.GetLastPInvokeError();
+            return windowsError is ErrorAlreadyExists or ErrorFileExists
+                ? false
+                : throw new IOException($"The folder '{path}' could not be created: {new Win32Exception(windowsError).Message}");
+        }
+
+        if (MakeDirectory(path, PosixFolderMode) == 0)
+        {
+            return true;
+        }
+
+        var error = Marshal.GetLastPInvokeError();
+        return error == PosixFileExists
+            ? false
+            : throw new IOException($"The folder '{path}' could not be created: {new Win32Exception(error).Message}");
+    }
+
+    /// <summary>
+    ///     Renames a folder to a name under which nothing exists, and fails instead of replacing
+    ///     anything that is there.
+    /// </summary>
+    /// <param name="source">The folder to rename.</param>
+    /// <param name="destination">The new full path, in the same parent folder.</param>
+    /// <returns>How the rename ended; an outcome other than <see cref="NoReplaceMoveOutcome.Moved"/>
+    ///     means nothing was changed.</returns>
+    /// <exception cref="IOException">Thrown when the rename failed for any other reason.</exception>
+    /// <remarks>
+    ///     Windows: <c>MoveFileExW</c> with no flags - without <c>MOVEFILE_REPLACE_EXISTING</c> it fails
+    ///     with <c>ERROR_ALREADY_EXISTS</c> when the name is taken, and without
+    ///     <c>MOVEFILE_COPY_ALLOWED</c> it is a single rename. Linux: <c>renameat2</c> with
+    ///     <c>RENAME_NOREPLACE</c>. macOS: <c>renamex_np</c> with <c>RENAME_EXCL</c>. A plain
+    ///     <c>rename</c> on Unix would replace an <em>empty</em> folder that appeared meanwhile, so when
+    ///     the call does not exist (an old C library, kernel or volume) the answer is
+    ///     <see cref="NoReplaceMoveOutcome.Unsupported"/> and never a fall back to it.
+    /// </remarks>
+    private static NoReplaceMoveOutcome MoveFolderWithoutReplacing(string source, string destination)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            if (MoveFileEx(ToExtendedPath(source), ToExtendedPath(destination), 0))
+            {
+                return NoReplaceMoveOutcome.Moved;
+            }
+
+            var windowsError = Marshal.GetLastPInvokeError();
+            return windowsError is ErrorAlreadyExists or ErrorFileExists
+                ? NoReplaceMoveOutcome.DestinationExists
+                : throw new IOException($"The folder could not be renamed: {new Win32Exception(windowsError).Message}");
+        }
+
+        var isLinux = OperatingSystem.IsLinux();
+        if (!isLinux && !OperatingSystem.IsMacOS())
+        {
+            return NoReplaceMoveOutcome.Unsupported;
+        }
+
+        int result;
+        try
+        {
+            result = isLinux
+                ? RenameAt2(LinuxCurrentDirectory, source, LinuxCurrentDirectory, destination, LinuxRenameNoReplace)
+                : RenameExclusive(source, destination, MacRenameExclusive);
+        }
+        catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException)
+        {
+            // A C library without the call
+            return NoReplaceMoveOutcome.Unsupported;
+        }
+
+        if (result == 0)
+        {
+            return NoReplaceMoveOutcome.Moved;
+        }
+
+        var error = Marshal.GetLastPInvokeError();
+        var directoryNotEmpty = isLinux ? LinuxDirectoryNotEmpty : MacDirectoryNotEmpty;
+        var notSupported = isLinux ? LinuxOperationNotSupported : MacOperationNotSupported;
+        if (error == PosixFileExists || error == directoryNotEmpty)
+        {
+            return NoReplaceMoveOutcome.DestinationExists;
+        }
+
+        if (error == PosixInvalidArgument || error == notSupported || (isLinux && error == LinuxFunctionNotImplemented))
+        {
+            return NoReplaceMoveOutcome.Unsupported;
+        }
+
+        throw new IOException($"The folder could not be renamed: {new Win32Exception(error).Message}");
+    }
+
+    /// <summary>
+    ///     Gives a long Windows path the <c>\\?\</c> prefix the native calls need beyond the classic
+    ///     limit, which <see cref="Directory"/> adds by itself.
+    /// </summary>
+    /// <param name="path">A full path.</param>
+    /// <returns>The path to pass to the native call.</returns>
+    private static string ToExtendedPath(string path)
+    {
+        const int ClassicLimit = 240;
+        if (path.Length < ClassicLimit || path.StartsWith(@"\\?\", StringComparison.Ordinal))
+        {
+            return path;
+        }
+
+        return path.StartsWith(@"\\", StringComparison.Ordinal)
+            ? @"\\?\UNC\" + path[2..]
+            : @"\\?\" + path;
+    }
+
+    /// <summary>
+    ///     Calls the Windows <c>CreateDirectoryW</c>: creates a folder, failing when the name exists.
+    /// </summary>
+    /// <param name="path">The path.</param>
+    /// <param name="securityAttributes">Unused; zero for the default.</param>
+    /// <returns><see langword="true"/> when the folder was created.</returns>
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateDirectoryW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool CreateDirectory(string path, IntPtr securityAttributes);
+
+    /// <summary>
+    ///     Calls the Windows <c>MoveFileExW</c>.
+    /// </summary>
+    /// <param name="existingFileName">The path to rename.</param>
+    /// <param name="newFileName">The new path.</param>
+    /// <param name="flags">The flags; zero means neither replace nor copy.</param>
+    /// <returns><see langword="true"/> when the rename happened.</returns>
+    [LibraryImport("kernel32.dll", EntryPoint = "MoveFileExW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool MoveFileEx(string existingFileName, string newFileName, uint flags);
+
+    /// <summary>
+    ///     Calls the POSIX <c>mkdir</c>: creates a folder, failing with <c>EEXIST</c> when the name
+    ///     exists.
+    /// </summary>
+    /// <param name="path">The path.</param>
+    /// <param name="mode">The permissions.</param>
+    /// <returns>Zero on success, otherwise -1.</returns>
+    [LibraryImport("libc", EntryPoint = "mkdir", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int MakeDirectory(string path, uint mode);
+
+    /// <summary>
+    ///     Calls the Linux <c>renameat2</c> (glibc 2.28, kernel 3.15).
+    /// </summary>
+    /// <param name="oldDirectory">The directory <paramref name="oldPath"/> is relative to.</param>
+    /// <param name="oldPath">The path to rename.</param>
+    /// <param name="newDirectory">The directory <paramref name="newPath"/> is relative to.</param>
+    /// <param name="newPath">The new path.</param>
+    /// <param name="flags">The flags (<c>RENAME_NOREPLACE</c>).</param>
+    /// <returns>Zero on success, otherwise -1.</returns>
+    [LibraryImport("libc", EntryPoint = "renameat2", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int RenameAt2(int oldDirectory, string oldPath, int newDirectory, string newPath, uint flags);
+
+    /// <summary>
+    ///     Calls the macOS <c>renamex_np</c> (macOS 10.12).
+    /// </summary>
+    /// <param name="oldPath">The path to rename.</param>
+    /// <param name="newPath">The new path.</param>
+    /// <param name="flags">The flags (<c>RENAME_EXCL</c>).</param>
+    /// <returns>Zero on success, otherwise -1.</returns>
+    [LibraryImport("libc", EntryPoint = "renamex_np", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int RenameExclusive(string oldPath, string newPath, uint flags);
+
 
     /// <summary>
     ///     Marks a folder hidden on Windows, so a leftover does not clutter the user's folder; failing
@@ -1156,11 +1473,12 @@ internal sealed class GitClient
     /// <remarks>
     ///     Only rules that keep the address from being read as something other than a repository: it
     ///     must not be blank, must be a single line without control characters, must not start with
-    ///     <c>-</c> (git would read it as an option) and must not use the remote-helper syntax
-    ///     <c>&lt;name&gt;::&lt;address&gt;</c> (<c>ext::</c> runs a command, <c>fd::</c> reads an open
+    ///     <c>-</c> (git would read it as an option) and must not contain <c>::</c> before its first
+    ///     <c>/</c> outside a bracketed IPv6 literal (the remote-helper syntax
+    ///     <c>&lt;name&gt;::&lt;address&gt;</c>: <c>ext::</c> runs a command, <c>fd::</c> reads an open
     ///     file; neither is a repository location) or an <c>ssh://</c> host that starts with <c>-</c>
     ///     (ssh would read it as an option). Whether the repository exists is for git to say.
-    ///     Static, pure and thread-safe; no disk or process access.
+    ///     Static, pure and thread-safe; no disk or process access. The clone dialog uses this same rule.
     /// </remarks>
     public static string? CheckCloneUrl(string? url)
     {
@@ -1180,11 +1498,11 @@ internal sealed class GitClient
             return "The repository address must not start with a dash.";
         }
 
-        // "<name>::<address>" is git's remote-helper syntax; the helper may run arbitrary commands
-        var helperEnd = trimmed.IndexOf("::", StringComparison.Ordinal);
-        if (helperEnd > 0 && trimmed[..helperEnd].All(c => char.IsAsciiLetterOrDigit(c) || c is '+' or '.' or '-'))
+        // Git reads "<name>::<address>" as a remote helper, and a helper may run arbitrary commands
+        if (ContainsHelperSeparator(trimmed))
         {
-            return "Addresses that use a remote helper (such as ext:: or fd::) are not supported.";
+            return "Addresses that use a remote helper (such as ext:: or fd::) are not supported: " +
+                   "an address must not contain '::' before its first '/'.";
         }
 
         // An ssh host that starts with a dash would be read by ssh as an option
@@ -1205,6 +1523,46 @@ internal sealed class GitClient
         }
 
         return null;
+    }
+
+    /// <summary>
+    ///     Determines whether an address contains <c>::</c> before its first <c>/</c>, outside any
+    ///     bracketed IPv6 literal - the shape of git's remote-helper syntax.
+    /// </summary>
+    /// <param name="address">The trimmed address.</param>
+    /// <returns><see langword="true"/> when the address could be read as <c>&lt;name&gt;::&lt;address&gt;</c>.</returns>
+    /// <remarks>
+    ///     Git itself only treats <c>&lt;name&gt;::</c> as a helper when the name is a letter followed
+    ///     by letters, digits, <c>+</c>, <c>.</c> or <c>-</c> (so <c>foo_bar::x</c> is not one); the rule
+    ///     here is deliberately wider and does not depend on git's version: any <c>::</c> in the part of
+    ///     the address before the first <c>/</c> is refused. The colons of a bracketed IPv6 literal
+    ///     (<c>https://[::1]/r.git</c>, <c>[::1]:repo</c>) are not counted, so those addresses stay
+    ///     usable; an unclosed bracket or a bracket that holds more than an IPv6 literal is not removed.
+    /// </remarks>
+    private static bool ContainsHelperSeparator(string address)
+    {
+        // Only the text before the first slash can be a helper name
+        var slash = address.IndexOf('/', StringComparison.Ordinal);
+        var head = slash >= 0 ? address[..slash] : address;
+
+        // Take out the complete IPv6 literals, then look for the separator in what is left
+        var rest = new StringBuilder(head.Length);
+        var position = 0;
+        while (position < head.Length)
+        {
+            var open = head.IndexOf('[', position);
+            var close = open >= 0 ? head.IndexOf(']', open + 1) : -1;
+            if (close < 0 || head.AsSpan(open + 1, close - open - 1).ContainsAnyExcept(Ipv6LiteralCharacters))
+            {
+                rest.Append(head, position, head.Length - position);
+                break;
+            }
+
+            rest.Append(head, position, open - position);
+            position = close + 1;
+        }
+
+        return rest.ToString().Contains("::", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1413,8 +1771,15 @@ internal sealed class GitClient
     /// <param name="link">The link.</param>
     private static void RemoveLink(FileSystemInfo link)
     {
-        // Acts on the link itself, not on its target
-        ClearReadOnly(link);
+        // Acts on the link itself, not on its target. Only Windows can clear an attribute of the link
+        // itself: SetFileAttributes does not follow it. On Unix the attributes of a symbolic link read as
+        // those of its target and chmod follows the link, so clearing "read-only" there would make the
+        // user's read-only file writable; deleting a link needs no permission on it anyway.
+        if (OperatingSystem.IsWindows())
+        {
+            ClearReadOnly(link);
+        }
+
         if (link is DirectoryInfo)
         {
             // A non-recursive delete removes a junction or directory link and nothing behind it

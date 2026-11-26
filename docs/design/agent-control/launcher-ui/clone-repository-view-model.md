@@ -34,12 +34,15 @@ text - the disk is not read; empty while either is blank. **Groups** / **Selecte
 groups the owner gave, in the order given; the
 selection defaults to Ungrouped and a `null` assignment falls back to it
 (`AgentControl-CloneRepositoryViewModel-GroupChoiceDefaultsUngrouped`). **\_inputVersion**: a counter that every change
-of the address, the parent folder, the folder name or the group increments, so a disk check can tell that its answer
+of the address, the parent folder, the folder name or the group increments (through `InputChanged`, which also clears
+the disk finding and raises the changed texts), so a disk check can tell that its answer
 is stale.
 
 **ErrorText** / **HasError**: the disk check's finding when it refused the destination, otherwise the first rule that
 needs no disk and that the input breaks: the address (`GitClient.CheckCloneUrl`: not a single line, starts with a dash
-or uses a `name::address` remote-helper syntax), the folder name (`CheckFolderName`) or a parent folder that is not an
+or contains `::` before its first `/` outside a bracketed IPv6 literal - git's `name::address` remote-helper syntax and
+more - the one rule `GitClient.Clone` applies as well), the folder name (`CheckFolderName`) or a parent folder that is
+not an
 absolute path (`AgentControl-CloneRepositoryViewModel-UrlOptionRefused`, `-FolderNameRules`). An empty field is not an
 error. Any change of the input clears the disk finding. **IsChecking**: the destination is being checked on disk.
 
@@ -68,8 +71,8 @@ fixed, so the answer does not depend on the host operating system
 (`AgentControl-CloneRepositoryViewModel-FolderNameRules`).
 
 **AcceptAsync** (the body of `AcceptCommand`): Does nothing unless `CanAccept`. Captures the address, the destination
-and the group together with the *input version* (a counter that `InputChanged` and a change of `SelectedGroup`
-increment), sets `IsChecking`, runs
+and the group together with the *input version* (a counter that `InputChanged` - which every field, the group included,
+goes through - increments), sets `IsChecking`, runs
 `GitClient.CheckCloneDestination` through the background work runner - never on the calling (UI) thread, because the
 check reads the disk, which can be slow on a network drive or a sleeping disk
 (`AgentControl-CloneRepositoryViewModel-DestinationCheckedInBackground`, `-DestinationCheckShowsProgress`) - and, when

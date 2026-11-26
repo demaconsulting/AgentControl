@@ -247,8 +247,9 @@ into a new folder and add it to the list in one step. A dialog asks for:
 **Clone** stays unavailable until the address, the parent folder and the folder name are filled in and acceptable. A
 message under the boxes says what is not, for example:
 
-- an address that starts with a dash, that uses Git's *remote helper* syntax (anything of the form `name::...`, such as
-  `ext::...` or `fd::...`) or that
+- an address that starts with a dash, that uses Git's *remote helper* syntax (anything with `::` before its first `/`,
+  such as
+  `ext::...` or `fd::...`; an IPv6 address in brackets, such as `https://[::1]/repo.git`, is fine) or that
   spans more than one line is refused - AgentControl treats the address as an address and never lets Git read it as
   an option or as a command to run;
 - the folder name must be one valid Windows folder name: no `\`, `/`, `:`, `*`, `?`, `"`, `<`, `>` or `|`, no `.` or

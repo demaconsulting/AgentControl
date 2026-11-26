@@ -881,24 +881,24 @@ parent folder (typed, or chosen with Browse; it starts in the user's profile fol
 address - the last segment without `.git` - until edited), a line showing where the clone will go, the group (Ungrouped
 by default, then the existing groups named by their path), the inline error text and Cancel and Clone buttons. What
 needs no disk is checked while typing and keeps Clone disabled until it holds: an address that is blank, spans several
-lines, starts with a dash or uses a remote helper (`ext::`, `fd::`) is refused (`GitClient.CheckCloneUrl`, the same rule
-the clone applies), the folder name must be one valid Windows file name, the parent folder must be absolute. Pressing
-Clone (or Enter) checks the destination on disk in the background - nothing may exist there, not even an empty folder, a
-file or a link, and its parent must exist (`GitClient.CheckCloneDestination`) - and keeps the dialog open with the
-reason when it cannot be used. The dialog only chooses. `MainWindowViewModel.CloneRepositoryAsync` then clones as an
-operation of the window
+lines, starts with a dash or contains `::` before its first `/` (a remote helper such as `ext::` or `fd::`; the colons
+of a bracketed IPv6 literal do not count) is refused (`GitClient.CheckCloneUrl`, the same rule the clone applies), the
+folder name must be one valid Windows file name, the parent folder must be absolute. Pressing Clone (or Enter) checks
+the destination on disk in the background - nothing may exist there, not even an empty folder, a file or a link, and its
+parent must exist (`GitClient.CheckCloneDestination`) - and keeps the dialog open with the reason when it cannot be
+used. The dialog only chooses. `MainWindowViewModel.CloneRepositoryAsync` then clones as an operation of the window
 (`AgentControl-LauncherUI-CloneRepository`, `-CloneProgressCancel`): the strip shows an indeterminate `Cloning x...`
 with a Cancel button named *Cancel cloning repository*; `GitClient.Clone` runs on a worker thread and clones into a
 hidden folder next to the destination that it renames to the destination when git succeeded; one clone runs at a time:
 while a clone (and the add of its folder) or another operation that can be canceled shows in the strip, the Clone button
 is disabled and its tooltip says to wait for the running clone or other operation, or cancel it, and a request made
-anyway is refused (`-CloneOneAtATime`); Cancel (or closing the window, which waits at most five seconds for the
-cleanup) stops git and removes only that hidden
-folder (see the GitIntegration design) and says nothing. When git succeeds the folder is added through
-`EnqueueAddReposAsync` - the same checks, the chosen group (created when it does not exist), the save and the
-Retry/Discard question - so the card appears like any added repo; when that add is canceled, refused or cannot be saved
-the message says the cloned folder is still on disk. When git fails the message *Cloning failed:* gives git's own reason
-with credentials removed (the lines that only announce `Cloning into '...'` are left out) and nothing is added.
+anyway is refused (`-CloneOneAtATime`); Cancel (or closing the window, which waits at most five seconds for the cleanup)
+stops git and removes only that hidden folder (see the GitIntegration design) and says nothing. When git succeeds the
+folder is added through `EnqueueAddReposAsync` - the same checks, the chosen group (created when it does not exist), the
+save and the Retry/Discard question - so the card appears like any added repo; when that add is canceled, refused or
+cannot be saved the message says the cloned folder is still on disk. When git fails the message *Cloning failed:* gives
+git's own reason with credentials removed (the lines that only announce `Cloning into '...'` are left out) and nothing
+is added.
 
 **Repo groups and card colors (user-specific).** Both are personal organizing choices stored only in the user's own
 settings file (on the repo's `RecentRepo`, and the collapsed section names, the group colors and the group order in

@@ -247,8 +247,9 @@ internal sealed class CloneRepositoryViewModel : ViewModelBase
         {
             if (SetField(ref _selectedGroup, value ?? CloneGroupChoice.Ungrouped))
             {
-                // A check that is running was started for the other group
-                _inputVersion++;
+                // The same reaction as every other field: a check that is running was started for the
+                // other group, and a finding of an earlier check no longer applies
+                InputChanged();
             }
         }
     }

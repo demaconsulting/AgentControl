@@ -339,12 +339,15 @@ sections:
         title: >-
           The GitClient class shall refuse, before git starts and with a reason the user can read, an
           address to clone that is blank, spans several lines, starts with a dash (which git would
-          read as an option), uses git's remote-helper syntax <name>:: (such as ext:: or fd::), or is
-          an ssh address whose host starts with a dash (which ssh would read as an option).
+          read as an option), contains :: before its first / outside a bracketed IPv6 literal (which
+          covers git's remote-helper syntax <name>::, such as ext:: or fd::), or is an ssh address
+          whose host starts with a dash (which ssh would read as an option).
         justification: |
           The address comes from a text box or a clipboard; an address that git reads as an option
           (for example an upload-pack program) or as a remote helper, or whose host ssh reads as an
-          option, runs a command of the sender's choosing on the developer's machine.
+          option, runs a command of the sender's choosing on the developer's machine. The rule is
+          wider than git's own definition of a helper name so that it does not depend on git's
+          version, and it leaves IPv6 literals such as https://[::1]/r.git usable.
         tests:
           - GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit
           - GitClient_CheckCloneUrl_UsualAddress_ReturnsNull
@@ -381,15 +384,21 @@ sections:
       - id: AgentControl-GitClient-CloneIntoFreshFolder
         title: >-
           The GitClient class shall run git with a fresh, hidden folder it creates itself next to the
-          destination (named .agentcontrol-clone- followed by a new GUID) as the clone target, and
-          shall rename that folder to the destination only when git succeeded, making it visible
-          again, so that git never writes to the destination.
+          destination (named .agentcontrol-clone- followed by a new GUID) as the clone target, claiming
+          the name with an operating-system create that fails when anything exists under it and trying
+          another name when that happens, and shall rename that folder to the destination only when
+          git succeeded, making it visible again, so that git never writes to the destination and a
+          folder it did not create is never used or deleted.
         justification: |
           The destination is the user's name for a folder that does not exist yet; cloning into a
           folder of our own and renaming it on success leaves nothing half-finished under that name
-          and makes it certain which folder a cleanup may delete.
+          and makes it certain which folder a cleanup may delete. Checking that a name is free and then
+          creating it proves nothing (creating an existing folder succeeds), so only a create that
+          fails on an existing name makes the folder this call's own.
         tests:
           - GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList
+          - GitClient_Clone_WorkFolderNameTaken_IsNeverUsedOrDeleted
+          - GitClient_Clone_EveryWorkFolderNameTaken_FailsWithoutStartingGitOrTouchingTheFolder
           - GitClient_Clone_RealLocalBareRepository_ClonesIntoNewFolderAndLeavesNoTempBehind
 
       - id: AgentControl-GitClient-CloneCleansUpOnlyItsOwnFolder
@@ -414,13 +423,19 @@ sections:
       - id: AgentControl-GitClient-CloneDestinationAppearedMeanwhile
         title: >-
           The GitClient class shall, when something appears at the destination while git is cloning,
-          not move the clone there, report that as a failed result that names the folder, remove its
-          own working folder and leave what appeared exactly as it was.
+          not move the clone there - not even over an empty folder, on every platform, using the
+          operating system's rename that fails instead of replacing - report that as a failed result
+          that names the folder, remove its own working folder and leave what appeared exactly as it
+          was, and shall not complete the clone, but report why, on a platform that has no such rename.
         justification: |
           The check of the destination happens before a download that can take minutes; whatever the
-          user (or another program) puts there meanwhile is theirs and must never be replaced.
+          user (or another program) puts there meanwhile is theirs and must never be replaced. A plain
+          rename on Unix replaces an empty folder, so the no-replace variant of each platform is used
+          and its absence is a refusal, never a fall back.
         tests:
           - GitClient_Clone_DestinationAppearsWhileCloning_FailsClearlyAndTouchesNothingOfTheUsers
+          - GitClient_Clone_NativeNoReplaceMove_MovesToFreeNameAndNeverReplacesAnEmptyFolder
+          - GitClient_Clone_NoReplaceRenameUnsupported_RefusesAndRemovesOnlyTheWorkFolder
 
       - id: AgentControl-GitClient-CloneCancelStopsGit
         title: >-

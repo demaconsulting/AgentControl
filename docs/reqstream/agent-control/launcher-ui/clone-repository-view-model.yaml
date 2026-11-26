@@ -26,9 +26,9 @@ sections:
         title: >-
           The CloneRepositoryViewModel class shall refuse, with a message and without allowing Clone,
           a repository address that git would read as an option (it starts with a dash, also after
-          leading white space), that uses any remote-helper syntax of the form name:: (ext::, fd::
-          and every other name) or that is not a single line of text, and a parent folder that is not
-          an absolute path.
+          leading white space), that contains :: before its first / outside a bracketed IPv6 literal
+          (git's remote-helper syntax name::, ext::, fd:: and every other name, and wider) or that is
+          not a single line of text, and a parent folder that is not an absolute path.
         justification: |
           Addresses are pasted from chats and web pages; one that starts with a dash or names a remote
           helper can make git run a command of the attacker's choosing, so it is refused before git is
@@ -36,6 +36,7 @@ sections:
         tests:
           - CloneRepositoryViewModel_UrlStartingWithDashOrHelperOrMultiline_IsRefused
           - CloneRepositoryViewModel_Url_GenericHelperPrefixOrDashAfterWhitespace_IsRefused
+          - CloneRepositoryViewModel_Url_ColonsThatAreNotAHelper_AreAccepted
           - CloneRepositoryViewModel_RelativeParentFolder_IsRefused
           - CloneRepositoryWindow_UrlLooksLikeAnOption_ShowsErrorAndDisablesClone
 
@@ -113,13 +114,16 @@ sections:
           The CloneRepositoryViewModel class shall discard the answer of a destination check that
           arrives after the user changed the address, the parent folder, the folder name or the group -
           showing nothing, not ending the dialog and ending the checking state - so that the dialog
-          never acts on an answer for something else than it now holds.
+          never acts on an answer for something else than it now holds. A change of the group reacts
+          like every other change of the input: it also clears the finding of an earlier check and
+          tells the dialog.
         justification: |
           The fields stay editable while the disk is read (disabling the focused box would lose the
           keyboard focus); an old answer applied to new input could close the dialog with a request the
           user no longer sees, or show a refusal for a folder that is no longer chosen.
         tests:
           - CloneRepositoryViewModel_Accept_InputEditedWhileChecking_DiscardsTheStaleResult
+          - CloneRepositoryViewModel_SelectedGroup_Changed_ClearsDestinationFindingAndRaisesError
 
       - id: AgentControl-CloneRepositoryViewModel-CheckFailureReported
         title: >-

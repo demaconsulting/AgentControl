@@ -1398,6 +1398,12 @@ public class GitClientTests
     [InlineData("ext::sh -c touch% /tmp/pwned")]
     [InlineData("fd::17")]
     [InlineData("EXT::sh -c id")]
+    [InlineData("foo_bar::x")]
+    [InlineData("a b::x")]
+    [InlineData("ext::sh -c x")]
+    [InlineData("fd::0")]
+    [InlineData("[::1]::x")]
+    [InlineData("::x")]
     public void GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit(string url)
     {
         // Arrange
@@ -1432,6 +1438,13 @@ public class GitClientTests
     [InlineData("C:\\repos\\project")]
     [InlineData("/srv/git/project.git")]
     [InlineData("file:///srv/git/project.git")]
+    [InlineData("https://[::1]/r.git")]
+    [InlineData("ssh://git@[::1]:22/r.git")]
+    [InlineData("[::1]:repo")]
+    [InlineData("git@[fe80::1]:org/r.git")]
+    [InlineData("C:\\repos\\r")]
+    [InlineData("git@host:org/r.git")]
+    [InlineData("https://example.com/a::b.git")]
     public void GitClient_CheckCloneUrl_UsualAddress_ReturnsNull(string url)
     {
         // Act / Assert
@@ -1952,12 +1965,18 @@ public class GitClientTests
     }
 
     /// <summary>
-    ///     Test that something that appears at the destination while git is cloning is never replaced or
-    ///     changed: the clone is not moved there, the failure is reported without throwing, and the
-    ///     working folder is removed.
+    ///     Test that something that appears at the destination while git is cloning - a folder with
+    ///     content or an <em>empty</em> folder, which a plain Unix rename would silently replace - is never
+    ///     replaced or changed: the clone is not moved there, the failure is reported without throwing, and
+    ///     the working folder is removed. Runs the operating system's own no-replace rename on every
+    ///     platform.
     /// </summary>
-    [Fact]
-    public async Task GitClient_Clone_DestinationAppearsWhileCloning_FailsClearlyAndTouchesNothingOfTheUsers()
+    /// <param name="withContent">Whether the folder that appears holds a file; otherwise it is
+    ///     empty.</param>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GitClient_Clone_DestinationAppearsWhileCloning_FailsClearlyAndTouchesNothingOfTheUsers(bool withContent)
     {
         // Arrange: a clone that takes two seconds, during which the user creates the destination
         var stub = GitStub.Create(extraCommands:
@@ -1973,22 +1992,189 @@ public class GitClientTests
             Assert.True(WaitForReadOnlyPackFileInWorkFolder(parent, null), "The stub never created its read-only file.");
             Directory.CreateDirectory(destination);
             var userFile = Path.Combine(destination, "mine.txt");
-            await File.WriteAllTextAsync(userFile, "precious", TestContext.Current.CancellationToken);
+            if (withContent)
+            {
+                await File.WriteAllTextAsync(userFile, "precious", TestContext.Current.CancellationToken);
+            }
 
             // Act
             var result = await clone;
 
-            // Assert: a failed result naming the folder, the user's file intact, the working folder gone
+            // Assert: a failed result naming the folder, what the user made intact, the working folder gone
             Assert.False(result.Succeeded);
             Assert.Contains(destination, result.StandardError, StringComparison.Ordinal);
             Assert.Contains("was created while the repository was being cloned", result.StandardError, StringComparison.Ordinal);
-            Assert.Equal("precious", await File.ReadAllTextAsync(userFile, TestContext.Current.CancellationToken));
-            Assert.Equal([userFile], Directory.GetFileSystemEntries(destination));
             Assert.Equal([destination], Directory.GetFileSystemEntries(parent));
+            if (withContent)
+            {
+                Assert.Equal("precious", await File.ReadAllTextAsync(userFile, TestContext.Current.CancellationToken));
+                Assert.Equal([userFile], Directory.GetFileSystemEntries(destination));
+            }
+            else
+            {
+                Assert.Empty(Directory.GetFileSystemEntries(destination));
+            }
         }
         finally
         {
             stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a working folder name under which something already exists - a folder with content or
+    ///     a file - is never used, changed or deleted: the clone takes the next name, and the earlier
+    ///     entries are left exactly as they were.
+    /// </summary>
+    [Fact]
+    public void GitClient_Clone_WorkFolderNameTaken_IsNeverUsedOrDeleted()
+    {
+        // Arrange: the first two names are taken by somebody else's folder and file; the third is free
+        var argumentLog = TempFilePath();
+        var stub = GitStub.Create(
+            argumentLogPath: argumentLog,
+            extraCommands: [new GitStub.Command("clone", Error: "Cloning into 'repo'...", CreatesDestination: true)]);
+        var parent = CreateTempDirectory();
+        var destination = Path.Combine(parent, "repo");
+        var takenFolder = Path.Combine(parent, ".agentcontrol-clone-first");
+        var takenFile = Path.Combine(parent, ".agentcontrol-clone-second");
+        Directory.CreateDirectory(takenFolder);
+        var folderContent = Path.Combine(takenFolder, "theirs.txt");
+        File.WriteAllText(folderContent, "precious");
+        File.WriteAllText(takenFile, "also precious");
+        var names = new Queue<string>(["first", "second", "third"]);
+        try
+        {
+            var client = new GitClient(stub.Path, _logger) { CloneWorkFolderNameSource = names.Dequeue };
+
+            // Act
+            var result = client.Clone("https://example.com/r.git", destination, TestContext.Current.CancellationToken);
+
+            // Assert: git cloned into the third name, and the two that were taken are untouched
+            Assert.True(result.Succeeded);
+            var line = Assert.Single(ReadLines(argumentLog));
+            Assert.EndsWith(Path.Combine(parent, ".agentcontrol-clone-third"), line, StringComparison.Ordinal);
+            Assert.Equal("precious", File.ReadAllText(folderContent));
+            Assert.Equal("also precious", File.ReadAllText(takenFile));
+            Assert.True(File.Exists(Path.Combine(destination, ".git", "objects", "pack", "pack-1.pack")));
+            Assert.Equal(3, Directory.GetFileSystemEntries(parent).Length);
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+            File.Delete(argumentLog);
+        }
+    }
+
+    /// <summary>
+    ///     Test that when every name tried for the working folder is taken, the clone fails with a result
+    ///     that says so, git never starts, and what exists under the name is never deleted.
+    /// </summary>
+    [Fact]
+    public void GitClient_Clone_EveryWorkFolderNameTaken_FailsWithoutStartingGitOrTouchingTheFolder()
+    {
+        // Arrange: a folder with content under the only name the source ever offers
+        var invocationLog = TempFilePath();
+        var stub = GitStub.Create(invocationLogPath: invocationLog);
+        var parent = CreateTempDirectory();
+        var taken = Path.Combine(parent, ".agentcontrol-clone-same");
+        Directory.CreateDirectory(taken);
+        var content = Path.Combine(taken, "theirs.txt");
+        File.WriteAllText(content, "precious");
+        try
+        {
+            var client = new GitClient(stub.Path, _logger) { CloneWorkFolderNameSource = static () => "same" };
+
+            // Act
+            var result = client.Clone("https://example.com/r.git", Path.Combine(parent, "repo"), TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.False(result.Succeeded);
+            Assert.Contains("Could not create a working folder", result.StandardError, StringComparison.Ordinal);
+            Assert.False(File.Exists(invocationLog));
+            Assert.Equal("precious", File.ReadAllText(content));
+            Assert.Equal([taken], Directory.GetFileSystemEntries(parent));
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+            File.Delete(invocationLog);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a platform (or file system) that has no rename that refuses to replace does not
+    ///     complete the clone - it never falls back to a rename that could replace - and removes only the
+    ///     working folder.
+    /// </summary>
+    [Fact]
+    public void GitClient_Clone_NoReplaceRenameUnsupported_RefusesAndRemovesOnlyTheWorkFolder()
+    {
+        // Arrange: a clone that works, on a platform whose no-replace rename is unavailable
+        var stub = GitStub.Create(
+            extraCommands: [new GitStub.Command("clone", Error: "Cloning into 'repo'...", CreatesDestination: true)]);
+        var parent = CreateTempDirectory();
+        var destination = Path.Combine(parent, "repo");
+        var keepFile = Path.Combine(parent, "keep.txt");
+        File.WriteAllText(keepFile, "mine");
+        try
+        {
+            var client = new GitClient(stub.Path, _logger)
+            {
+                NoReplaceMove = static (_, _) => GitClient.NoReplaceMoveOutcome.Unsupported
+            };
+
+            // Act
+            var result = client.Clone("https://example.com/r.git", destination, TestContext.Current.CancellationToken);
+
+            // Assert: a failed result that explains it, no destination, and only the user's file left
+            Assert.False(result.Succeeded);
+            Assert.Contains("cannot rename a folder without the risk of replacing", result.StandardError, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(destination));
+            Assert.Equal([keepFile], Directory.GetFileSystemEntries(parent));
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
+    ///     Test that the operating system's own rename that refuses to replace - the one a clone uses -
+    ///     moves a folder to a name that is free, and reports an existing empty folder as a conflict
+    ///     without changing it or the source (on Windows, Linux and macOS alike).
+    /// </summary>
+    [Fact]
+    public void GitClient_Clone_NativeNoReplaceMove_MovesToFreeNameAndNeverReplacesAnEmptyFolder()
+    {
+        // Arrange
+        var parent = CreateTempDirectory();
+        var source = Path.Combine(parent, "source");
+        var free = Path.Combine(parent, "free");
+        var occupied = Path.Combine(parent, "occupied");
+        Directory.CreateDirectory(source);
+        File.WriteAllText(Path.Combine(source, "a.txt"), "a");
+        Directory.CreateDirectory(occupied);
+        var move = new GitClient("git", _logger).NoReplaceMove;
+        try
+        {
+            // Act
+            var conflict = move(source, occupied);
+            var moved = move(source, free);
+
+            // Assert: the empty folder was not replaced, and the free name received the folder
+            Assert.Equal(GitClient.NoReplaceMoveOutcome.DestinationExists, conflict);
+            Assert.Equal(GitClient.NoReplaceMoveOutcome.Moved, moved);
+            Assert.Empty(Directory.GetFileSystemEntries(occupied));
+            Assert.False(Directory.Exists(source));
+            Assert.Equal("a", File.ReadAllText(Path.Combine(free, "a.txt")));
+        }
+        finally
+        {
             GitSourceProvider.DeleteDirectory(parent);
         }
     }

@@ -346,6 +346,10 @@ public sealed class CloneRepositoryViewModelTests : IDisposable
     [Theory]
     [InlineData("foo::bar")]
     [InlineData("a+b.c::x")]
+    [InlineData("foo_bar::x")]
+    [InlineData("a b::x")]
+    [InlineData("ext::sh -c x")]
+    [InlineData("fd::0")]
     [InlineData("  -x")]
     [InlineData("\t--upload-pack=calc")]
     public void CloneRepositoryViewModel_Url_GenericHelperPrefixOrDashAfterWhitespace_IsRefused(string url)
@@ -360,6 +364,29 @@ public sealed class CloneRepositoryViewModelTests : IDisposable
         Assert.True(viewModel.HasError);
         Assert.False(viewModel.CanAccept);
         Assert.NotNull(GitClient.CheckCloneUrl(url));
+    }
+
+    /// <summary>
+    ///     Test that addresses with colons that are not a remote helper - a bracketed IPv6 literal, a
+    ///     drive letter, an scp-like address - are accepted by the dialog, by the same rule as the clone.
+    /// </summary>
+    /// <param name="url">The address.</param>
+    [Theory]
+    [InlineData("https://[::1]/r.git")]
+    [InlineData("ssh://git@[::1]:22/r.git")]
+    [InlineData(@"C:\repos\r")]
+    [InlineData("git@host:org/r.git")]
+    public void CloneRepositoryViewModel_Url_ColonsThatAreNotAHelper_AreAccepted(string url)
+    {
+        // Arrange
+        var viewModel = new CloneRepositoryViewModel([], CreateTempDirectory());
+
+        // Act
+        viewModel.RepositoryUrl = url;
+
+        // Assert
+        Assert.False(viewModel.HasError);
+        Assert.Null(GitClient.CheckCloneUrl(url));
     }
 
     /// <summary>
@@ -584,6 +611,39 @@ public sealed class CloneRepositoryViewModelTests : IDisposable
 
         // Assert
         Assert.False(viewModel.HasError);
+        Assert.True(viewModel.CanAccept);
+    }
+
+    /// <summary>
+    ///     Test that choosing another group clears the finding of an earlier destination check and tells
+    ///     the dialog (the error text and the has-error flag change), like a change of any other field -
+    ///     the finding was about a request for the other group.
+    /// </summary>
+    [Fact]
+    public async Task CloneRepositoryViewModel_SelectedGroup_Changed_ClearsDestinationFindingAndRaisesError()
+    {
+        // Arrange: a destination that exists, refused by the check, so a finding is shown
+        var parent = CreateTempDirectory();
+        Directory.CreateDirectory(Path.Combine(parent, "repo"));
+        var workGroup = new CloneGroupChoice("Work", "Work");
+        var viewModel = new CloneRepositoryViewModel([workGroup], parent)
+        {
+            RepositoryUrl = "https://example.com/team/repo.git"
+        };
+        await viewModel.AcceptCommand.ExecuteAsync();
+        var shownBefore = viewModel.HasError;
+        var raised = new List<string?>();
+        viewModel.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        // Act
+        viewModel.SelectedGroup = workGroup;
+
+        // Assert: the stale finding is gone and the dialog was told
+        Assert.True(shownBefore);
+        Assert.False(viewModel.HasError);
+        Assert.Null(viewModel.ErrorText);
+        Assert.Contains(nameof(CloneRepositoryViewModel.ErrorText), raised);
+        Assert.Contains(nameof(CloneRepositoryViewModel.HasError), raised);
         Assert.True(viewModel.CanAccept);
     }
 

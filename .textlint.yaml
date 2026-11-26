@@ -76,6 +76,7 @@ words:
   - fileserver
   - flaui
   - flyouts
+  - FDCWD
   - fsmonitor
   - gitdir
   - gpgsign
@@ -84,11 +85,13 @@ words:
   - inlines
   - Inlines
   - instnace
+  - libc
   - libsecret
   - lintmark
   - lsfiles
   - LTRB
   - mklink
+  - MOVEFILE
   - Mvvm
   - MVVM
   - Mvvm's
@@ -97,6 +100,7 @@ words:
   - netstandard
   - Newtonsoft
   - NOSYSTEM
+  - NOREPLACE
   - ntlm
   - NTLM
   - osxkeychain
@@ -104,6 +108,8 @@ words:
   - pathspecs
   - PATHSPECS
   - refspec
+  - renameat
+  - renamex
   - renderable
   - Reprompt
   - rescanned

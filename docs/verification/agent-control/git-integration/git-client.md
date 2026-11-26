@@ -227,19 +227,23 @@ process's own environment is never changed by a test). This scenario is tested b
 `clone -- <trimmed url> <target>`, where the target is a hidden `.agentcontrol-clone-<guid>` folder in the destination's
 parent folder - never the destination - and after the clone the destination holds the stub's clone, is not hidden, and
 is the only entry left in the parent folder. An address that starts with a dash, is blank, spans two lines or uses
-`ext::`, `EXT::` or `fd::` is refused with `ArgumentException` and the stub is never started, while ordinary https, ssh,
-scp-like and path addresses are accepted by `CheckCloneUrl`, and an `ssh://` address whose host (after any user name)
-starts with a dash is refused while a dash elsewhere in the address is accepted. A destination that is a folder with a
-file in it (the file stays intact), an empty folder or a file is refused with a reason that says it already exists, with
-git never started and the parent unchanged; so is a destination that is a link - a junction on Windows, a symbolic link
-elsewhere - whose target is untouched, and one whose target is gone; a destination with a missing parent or a relative
-one is refused; `CheckCloneDestination` gives the same reasons without cloning and accepts a name that does not exist
-yet, with or without a trailing separator. A stub whose `clone` takes two seconds completes under a one-second local
-limit (the clone limit applies); on a guarded thread the branch list, the switch, the clone and the destination check
-are each refused with `BlockingCallOnGuardedThreadException`. A real clone of a local bare repository works into a new
-folder (a repository root on `main` with the committed file, a clean working tree for git, no hidden attribute, nothing
-else left in the parent folder), and a clone of a path that is not a repository is a failed result that leaves the
-parent folder empty. This scenario is tested by `GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList`,
+`ext::`, `EXT::` or `fd::` is refused with `ArgumentException` and the stub is never started - as is any address with
+`::` before its first `/`, whatever the text before it (`foo_bar::x`, `a b::x`, `ext::sh -c x`, `fd::0`, `[::1]::x`,
+`::x`) - while ordinary https, ssh, scp-like and path addresses are accepted by `CheckCloneUrl`, among them the ones
+whose colons are not a helper (`https://[::1]/r.git`, `ssh://git@[::1]:22/r.git`, `[::1]:repo`,
+`git@[fe80::1]:org/r.git`, `C:\repos\r`, `git@host:org/r.git`, and `::` after the first `/`), and an `ssh://` address
+whose host (after any user name) starts with a dash is refused while a dash elsewhere in the address is accepted. A
+destination that is a folder with a file in it (the file stays intact), an empty folder or a file is refused with a
+reason that says it already exists, with git never started and the parent unchanged; so is a destination that is a
+link - a junction on Windows, a symbolic link elsewhere - whose target is untouched, and one whose target is gone; a
+destination with a missing parent or a relative one is refused; `CheckCloneDestination` gives the same reasons without
+cloning and accepts a name that does not exist yet, with or without a trailing separator. A stub whose `clone` takes two
+seconds completes under a one-second local limit (the clone limit applies); on a guarded thread the branch list, the
+switch, the clone and the destination check are each refused with `BlockingCallOnGuardedThreadException`. A real clone
+of a local bare repository works into a new folder (a repository root on `main` with the committed file, a clean working
+tree for git, no hidden attribute, nothing else left in the parent folder), and a clone of a path that is not a
+repository is a failed result that leaves the parent folder empty. This scenario is tested by
+`GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList`,
 `GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit`, `GitClient_CheckCloneUrl_UsualAddress_ReturnsNull`,
 `GitClient_CheckCloneUrl_SshHostStartingWithDash_IsRefused`,
 `GitClient_Clone_DestinationExists_ThrowsArgumentExceptionAndTouchesNothing`,
@@ -253,8 +257,8 @@ parent folder empty. This scenario is tested by `GitClient_Clone_Succeeds_RunsCl
 `GitClient_Clone_RealLocalBareRepository_ClonesIntoNewFolderAndLeavesNoTempBehind` and
 `GitClient_Clone_RealGit_NotARepository_ReturnsFailedResultAndLeavesParentEmpty`, covering
 `AgentControl-GitClient-Clone`, `-CloneTimeLimit`, `-CloneFailureReported`, `-CommandsRefuseGuardedThread`,
-`-CloneUrlRefused`, `-CloneUrlSeparatedFromOptions`, `-CloneDestinationRules` and `-CloneIntoFreshFolder`
-(all prefixed `AgentControl-GitClient`).
+`-CloneUrlRefused`, `-CloneUrlSeparatedFromOptions`, `-CloneDestinationRules` and `-CloneIntoFreshFolder` (all prefixed
+`AgentControl-GitClient`).
 
 **GitClient_Clone_StopsAndCleansUpOnlyItsOwnFolder**: A stub whose `clone` creates its working folder (with a read-only
 pack file) and then hangs is canceled after the file exists: the call throws `OperationCanceledException`, the stub
@@ -263,23 +267,36 @@ named `.agentcontrol-clone-theirs` (with a file in it) that the user had in the 
 their content. With a one-second clone limit the same stub is stopped and reported as `GitCommandTimeoutException`
 naming `git clone` and the limit, and the parent folder is empty; a stub whose `clone` leaves its folder and exits with
 an error is returned as a failed result with git's text, the working folder is removed and the user's file stays. A stub
-whose `clone` takes two seconds, during which the test creates the destination folder with a file in it, ends as a
-failed result (no exception) whose text names the destination and says it was created while the repository was being
-cloned; the file is intact, the working folder is gone and the destination is the only entry in the parent folder. A
-canceled clone whose working folder holds a junction (also one nested below it) to a folder of the user's with a
-read-only file ends with the working folder gone and the target folder, its files, the read-only flag included, and its
-sub folder unchanged; the same holds for a file symbolic link and a directory symbolic link (skipped where the platform
-refuses to create them). This
+whose `clone` takes two seconds, during which the test creates the destination folder - once with a file in it, once
+empty (which a plain Unix rename would silently replace; the rename of each platform must not) - ends as a failed result
+(no exception) whose text names the destination and says it was created while the repository was being cloned; the file
+is intact (the empty folder is still empty), the working folder is gone and the destination is the only entry in the
+parent folder. The rename that refuses to replace is also run directly (`MoveFileExW` with no flags on Windows,
+`renameat2` with `RENAME_NOREPLACE` on Linux, `renamex_np` with `RENAME_EXCL` on macOS): onto an existing empty folder
+it reports a conflict and changes nothing, onto a free name it moves the folder with its content. With a rename replaced
+by one that reports the platform as unsupported, the clone ends as a failed result that says the computer cannot rename
+without the risk of replacing, there is no destination and the working folder is gone. When the first two working-folder
+names the client would use are already taken - a folder with a file in it and a plain file - the clone uses the third
+name and both are intact afterwards; when every name tried is taken, the clone is a failed result saying the working
+folder could not be created, git is never started and the folder and its file are intact. A canceled clone whose working
+folder holds a junction (also one nested below it) to a folder of the user's with a read-only file ends with the working
+folder gone and the target folder, its files, the read-only flag included, and its sub folder unchanged; the same holds
+for a file symbolic link and a directory symbolic link (skipped where the platform refuses to create them). This
 scenario is tested by `GitClient_Clone_Canceled_RemovesOnlyItsTempFolder`,
 `GitClient_Clone_Canceled_LinkInWorkFolder_RemovesTheLinkAndLeavesItsTargetUntouched`,
 `GitClient_Clone_Canceled_SymbolicLinksInWorkFolder_AreRemovedAndTargetsUntouched`,
 `GitClient_Clone_TimesOut_StopsGitAndRemovesItsTempFolder`,
 `GitClient_Clone_Fails_RemovesItsTempFolderAndReturnsGitsReason` and
-`GitClient_Clone_DestinationAppearsWhileCloning_FailsClearlyAndTouchesNothingOfTheUsers`, covering
-`AgentControl-GitClient-CloneCleansUpOnlyItsOwnFolder`, `-CloneDestinationAppearedMeanwhile` and
-`-CloneCancelStopsGit` (all prefixed `AgentControl-GitClient`). Not tested: a working folder that cannot be created (a
-read-only parent) and one that cannot be removed because a process holds a file; both paths log and report the folder
-by name, and the second needs a process that holds a file open, which is not reproducible portably.
+`GitClient_Clone_DestinationAppearsWhileCloning_FailsClearlyAndTouchesNothingOfTheUsers`,
+`GitClient_Clone_NativeNoReplaceMove_MovesToFreeNameAndNeverReplacesAnEmptyFolder`,
+`GitClient_Clone_NoReplaceRenameUnsupported_RefusesAndRemovesOnlyTheWorkFolder`,
+`GitClient_Clone_WorkFolderNameTaken_IsNeverUsedOrDeleted` and
+`GitClient_Clone_EveryWorkFolderNameTaken_FailsWithoutStartingGitOrTouchingTheFolder`, covering
+`AgentControl-GitClient-CloneCleansUpOnlyItsOwnFolder`, `-CloneIntoFreshFolder`, `-CloneDestinationAppearedMeanwhile`
+and `-CloneCancelStopsGit` (all prefixed `AgentControl-GitClient`). The Linux and macOS native calls run only on those
+operating systems, which the continuous-integration jobs cover. Not tested: a working folder that cannot be created (a
+read-only parent) and one that cannot be removed because a process holds a file; both paths log and report the folder by
+name, and the second needs a process that holds a file open, which is not reproducible portably.
 
 **GitClient_Clone_NeverLogsTheAddressCredentials**: With an address `https://alice:<password>@example.com/...`, a stub
 whose `clone` fails and echoes the address in its error text, and a client whose git cannot be started, the password
