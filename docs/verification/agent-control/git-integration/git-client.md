@@ -188,23 +188,55 @@ the file, the current branch stays and the file content is intact. This scenario
 `GitClient_SwitchBranch_UsesSwitchTimeoutNotLocalTimeout`,
 `GitClient_SwitchBranch_Refused_ReturnsGitsMessageWithoutThrowing`,
 `GitClient_SwitchBranch_RealRepo_LocalAndRemoteCreatesTrackingBranch`,
-`GitClient_SwitchBranch_RealRepo_DirtyConflictingFile_IsRefusedWithGitsReasonAndChangesNothing` and
-`GitClient_SwitchBranch_RealRepo_UntrackedFileWouldBeOverwritten_IsRefused`, covering
-`AgentControl-GitClient-SwitchBranch`, `AgentControl-GitClient-SwitchNeverForces` and
-`AgentControl-GitClient-SwitchRefusalReported`.
+`GitClient_SwitchBranch_RealRepo_DirtyConflictingFile_IsRefusedWithGitsReasonAndChangesNothing`,
+`GitClient_SwitchBranch_RealRepo_UntrackedFileWouldBeOverwritten_IsRefused` and
+`GitClient_SwitchBranch_RealRepo_UnrelatedDirtyFile_SurvivesTheSwitch`, covering
+`AgentControl-GitClient-SwitchBranch`, `AgentControl-GitClient-SwitchNeverForces`,
+`AgentControl-GitClient-SwitchNeverMergesOrStashes`, `AgentControl-GitClient-SwitchNameIsData`,
+`AgentControl-GitClient-SwitchKeepsNonConflictingChanges` and `AgentControl-GitClient-SwitchRefusalReported`.
+
+In the stub tests the argument log holds exactly one call per switch, which is a `switch` (no `stash` anywhere) with
+no option but `--` and `--track` (so no `--merge`, `-m`, `--force` or `-C`). In a real clone where `notes.md` is the
+same on both branches and the other branch only adds another file, an edited `notes.md` and an untracked `scratch.txt`
+travel with a switch to the other branch (both files keep their content, the other branch's file appears, `git status`
+still lists `notes.md` and `git stash list` is empty).
+
+**GitClient_Utf8_OutputIsDecodedAsUtf8**: A stub whose `pull` prints non-ASCII text (umlauts, an en dash and Chinese
+characters, read from a UTF-8 file) on both streams is returned with exactly that text. In a real clone with a
+non-ASCII remote branch and a local branch with a slash and non-ASCII letters, the branch list holds the exact names and
+a switch to each succeeds and is reported as the
+current branch. This scenario is tested by `GitClient_Pull_NonAsciiOutput_IsDecodedAsUtf8` and
+`GitClient_GetBranchesAndSwitch_RealRepo_NonAsciiAndSlashBranchNames_RoundTrip`, covering
+`AgentControl-GitClient-OutputIsUtf8`.
+
+**GitClient_EnvironmentPolicy_AppliesToEveryCommand**: A stub that logs the environment it received shows that a
+switch and a status query run with `GIT_TERMINAL_PROMPT=0` and no `GIT_ALLOW_PROTOCOL` (the user's own value is removed
+for the test), and that a clone runs with `GIT_TERMINAL_PROMPT=0` and `GIT_ALLOW_PROTOCOL=file:git:http:https:ssh`.
+Values of `GCM_INTERACTIVE`, `GIT_ASKPASS` and `GIT_SSH_COMMAND` given to the client reach the stub unchanged, and one
+that the client was told to remove (`SSH_ASKPASS`) is unset. On a copy of an environment the base policy removes
+`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`,
+`GIT_CEILING_DIRECTORIES`, `GIT_EXEC_PATH`, `GIT_TRACE`, `GIT_TRACE_CURL` and `GIT_CURL_VERBOSE`, sets
+`GIT_TERMINAL_PROMPT` to `0` and leaves `GIT_ASKPASS`, `GCM_INTERACTIVE`, `PATH` and `LC_ALL` as they were (the
+process's own environment is never changed by a test). This scenario is tested by
+`GitClient_Clone_SetsPromptOffAndAllowedProtocols`, `GitClient_SwitchAndList_SetPromptOff_NoProtocolRestriction`,
+`GitClient_UserAskpassGcmAndSshSettings_AreLeftAlone` and
+`GitClient_ApplyBaseEnvironment_RemovesRepositoryRedirectingVariables`, covering
+`AgentControl-GitClient-EnvironmentPolicy` and `AgentControl-GitClient-CloneNeverPrompts`.
 
 **GitClient_Clone_RunsInParentWithDataArgumentsAndRefusesBadInput**: The stub's argument log shows
 `clone -- <trimmed url> <destination>`; an address that starts with a dash, is blank, spans two lines or uses `ext::`,
 `EXT::` or `fd::` is refused with `ArgumentException` and the stub is never started, while ordinary https, ssh, scp-like
-and path addresses are accepted by `CheckCloneUrl`; a destination that is a non-empty folder (whose file stays intact),
-has a missing parent, is relative or is a file is refused with a reason; a new or an empty folder is accepted; a stub
-whose `clone` takes two seconds completes under a one-second local limit (the clone limit applies); on a guarded thread
-the branch list, the switch, the clone and the destination check are each refused with
+and path addresses are accepted by `CheckCloneUrl`, and an `ssh://` address whose host (after any user name) starts with
+a dash is refused while a dash elsewhere in the address is accepted; a destination that is a non-empty folder (whose
+file stays intact), has a missing parent, is relative or is a file is refused with a reason; a new or an empty folder is
+accepted; a stub whose `clone` takes two seconds completes under a one-second local limit (the clone limit applies); on
+a guarded thread the branch list, the switch, the clone and the destination check are each refused with
 `BlockingCallOnGuardedThreadException`. A real clone of a local bare repository works into a new folder and into an
 existing empty folder (a repository root on `main` with the committed file), and a clone of a path that is not a
 repository is a failed result. This scenario is tested by
 `GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList`,
 `GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit`, `GitClient_CheckCloneUrl_UsualAddress_ReturnsNull`,
+`GitClient_CheckCloneUrl_SshHostStartingWithDash_IsRefused`,
 `GitClient_Clone_DestinationExistsNotEmpty_ThrowsArgumentExceptionAndTouchesNothing`,
 `GitClient_Clone_ParentMissingRelativeOrFile_ThrowsArgumentException`,
 `GitClient_CheckCloneDestination_NewOrEmptyFolder_ReturnsNull`, `GitClient_Clone_UsesCloneTimeoutNotLocalTimeout`,

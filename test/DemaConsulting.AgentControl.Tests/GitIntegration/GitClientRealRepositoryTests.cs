@@ -235,6 +235,81 @@ public class GitClientRealRepositoryTests
     }
 
     /// <summary>
+    ///     Test that branch names with a slash and with non-ASCII characters, local and remote-tracking,
+    ///     are listed exactly as git has them and can be switched to (git's output is read as UTF-8).
+    /// </summary>
+    [Fact]
+    public void GitClient_GetBranchesAndSwitch_RealRepo_NonAsciiAndSlashBranchNames_RoundTrip()
+    {
+        // Arrange: a remote with a non-ASCII branch, and a clone with two more local ones
+        // The non-ASCII characters (an o and an a with an umlaut, a u with an umlaut) are given by code
+        var umlauts = new string([(char)0x00FC, (char)0x00F6, (char)0x00E4]);
+        var remoteName = "remote-" + umlauts;
+        var localName = "feature/local-" + umlauts;
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        PublishBranches(fixture);
+        fixture.Git(fixture.WorkPath, "switch", "-q", "-c", remoteName);
+        fixture.Commit(new Dictionary<string, string> { ["branch.txt"] = "non-ascii" }, "Non-ASCII");
+        fixture.Git(fixture.WorkPath, "switch", "-q", "main");
+        fixture.Git(fixture.WorkPath, "push", "-q", fixture.RemotePath, remoteName);
+        var client = CreateClient(fixture);
+        var clone = Path.Combine(fixture.Root, "clone");
+        Assert.True(client.Clone(fixture.RemotePath, clone, TestContext.Current.CancellationToken).Succeeded);
+        fixture.Git(clone, "branch", localName, "origin/feature/x");
+
+        // Act
+        var listed = client.GetBranches(clone, TestContext.Current.CancellationToken);
+        var toLocal = client.SwitchBranch(clone, localName, createTrackingFromRemote: false, TestContext.Current.CancellationToken);
+        var afterLocal = client.GetBranches(clone, TestContext.Current.CancellationToken);
+        var toRemote = client.SwitchBranch(clone, "origin/" + remoteName, createTrackingFromRemote: true, TestContext.Current.CancellationToken);
+        var afterRemote = client.GetBranches(clone, TestContext.Current.CancellationToken);
+
+        // Assert: exact names, nothing mangled into replacement characters
+        Assert.Contains(localName, listed.Local);
+        Assert.Contains(new GitRemoteBranch("origin", remoteName, "origin/" + remoteName), listed.Remote);
+        Assert.Contains(new GitRemoteBranch("origin", "feature/x", "origin/feature/x"), listed.Remote);
+        Assert.True(toLocal.Succeeded, toLocal.StandardError);
+        Assert.Equal(localName, afterLocal.CurrentBranch);
+        Assert.True(toRemote.Succeeded, toRemote.StandardError);
+        Assert.Equal(remoteName, afterRemote.CurrentBranch);
+        Assert.Equal("non-ascii", File.ReadAllText(Path.Combine(clone, "branch.txt")));
+    }
+
+    /// <summary>
+    ///     Test that an uncommitted edit and an untracked file that do not conflict with the target
+    ///     branch travel with the switch (nothing is stashed, discarded or merged).
+    /// </summary>
+    [Fact]
+    public void GitClient_SwitchBranch_RealRepo_UnrelatedDirtyFile_SurvivesTheSwitch()
+    {
+        // Arrange: notes.md is the same on both branches; the other branch only adds another file
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(new Dictionary<string, string> { ["branch.txt"] = "main", ["notes.md"] = "notes" }, "Initial");
+        fixture.Git(fixture.WorkPath, "switch", "-q", "-c", "other");
+        fixture.Commit(new Dictionary<string, string> { ["only-on-other.txt"] = "other" }, "Other");
+        fixture.Git(fixture.WorkPath, "switch", "-q", "main");
+        fixture.Git(fixture.WorkPath, "push", "-q", fixture.RemotePath, "main", "other");
+        fixture.Git(fixture.RemotePath, "symbolic-ref", "HEAD", "refs/heads/main");
+        var client = CreateClient(fixture);
+        var clone = Path.Combine(fixture.Root, "clone");
+        Assert.True(client.Clone(fixture.RemotePath, clone, TestContext.Current.CancellationToken).Succeeded);
+        File.WriteAllText(Path.Combine(clone, "notes.md"), "my edit");
+        File.WriteAllText(Path.Combine(clone, "scratch.txt"), "scratch");
+
+        // Act
+        var result = client.SwitchBranch(clone, "origin/other", createTrackingFromRemote: true, TestContext.Current.CancellationToken);
+
+        // Assert: the branch changed, both edits are still there, and nothing was stashed
+        Assert.True(result.Succeeded, result.StandardError);
+        Assert.Equal("other", client.GetBranches(clone, TestContext.Current.CancellationToken).CurrentBranch);
+        Assert.Equal("other", File.ReadAllText(Path.Combine(clone, "only-on-other.txt")));
+        Assert.Equal("my edit", File.ReadAllText(Path.Combine(clone, "notes.md")));
+        Assert.Equal("scratch", File.ReadAllText(Path.Combine(clone, "scratch.txt")));
+        Assert.Equal(string.Empty, fixture.Git(clone, "stash", "list").Trim());
+        Assert.Contains("notes.md", fixture.Git(clone, "status", "--porcelain"), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     ///     Creates a client that runs the real git with the fixture's isolated configuration.
     /// </summary>
     /// <param name="fixture">The fixture.</param>

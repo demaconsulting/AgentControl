@@ -151,7 +151,9 @@ sections:
           one minute for a command on the local repository, ten minutes for a pull - together with
           every process it started, and report it as timed out with the limit it exceeded; it shall
           likewise stop waiting for, and report as timed out, a git command that exited while a
-          process it started still holds its output open past that limit.
+          process it started still holds its output open past that limit. The limit of a branch
+          switch is part of AgentControl-GitClient-SwitchBranch and the limit of a clone part of
+          AgentControl-GitClient-Clone; they stop git the same way.
         justification: |
           A git command on a network share, on a huge working tree or held by a stuck lock may never
           answer; without a limit it holds its caller, and the process keeps running unnoticed. A
@@ -228,16 +230,50 @@ sections:
 
       - id: AgentControl-GitClient-SwitchNeverForces
         title: >-
-          The GitClient class shall never force a branch switch or discard, merge or stash anything
-          while switching, shall pass the branch name to git as data that cannot be read as an option,
-          and shall refuse a blank, option-like or multi-line name without running git.
+          The GitClient class shall never pass an option to git that forces a branch switch, discards
+          local changes or creates or resets a branch while switching.
         justification: |
           A forced checkout or a discard would destroy a developer's uncommitted work without being
-          asked; only git's own protection may decide what a switch may do, and a branch name must
-          never become an option.
+          asked; only git's own protection may decide what a switch may do.
         tests:
           - GitClient_SwitchBranch_NeverPassesForceOrDiscardOptions
+
+      - id: AgentControl-GitClient-SwitchNeverMergesOrStashes
+        title: >-
+          The GitClient class shall switch with exactly one git switch command, without a merge option
+          and without stashing anything.
+        justification: |
+          A merge or a stash would change or hide the developer's uncommitted work on the way to
+          another branch; the developer decides what happens to it, and git alone decides whether it
+          may travel with the switch.
+        tests:
+          - GitClient_SwitchBranch_NeverPassesForceOrDiscardOptions
+          - GitClient_SwitchBranch_Local_RunsSwitchWithDoubleDash
+          - GitClient_SwitchBranch_Remote_RunsSwitchTrackWithRemoteName
+
+      - id: AgentControl-GitClient-SwitchNameIsData
+        title: >-
+          The GitClient class shall pass the branch name to git as data that cannot be read as an
+          option, and shall refuse a blank, option-like or multi-line name without running git.
+        justification: |
+          A branch name comes from a list git produced, but it is still text that must never become
+          an option of the command that receives it.
+        tests:
+          - GitClient_SwitchBranch_Local_RunsSwitchWithDoubleDash
           - GitClient_SwitchBranch_BlankOrOptionLikeName_ThrowsArgumentException
+
+      - id: AgentControl-GitClient-SwitchKeepsNonConflictingChanges
+        title: >-
+          The GitClient class shall leave uncommitted changes that do not conflict with the target
+          branch in place when it switches, so that they travel with the switch, and shall leave the
+          decision about conflicting changes to git alone.
+        justification: |
+          A developer often switches branches with unrelated work in progress; git carries such work
+          along, and a launcher that stashed, committed or discarded it would surprise the developer
+          or lose work.
+        tests:
+          - GitClient_SwitchBranch_RealRepo_UnrelatedDirtyFile_SurvivesTheSwitch
+          - GitClient_SwitchBranch_RealRepo_DirtyConflictingFile_IsRefusedWithGitsReasonAndChangesNothing
 
       - id: AgentControl-GitClient-SwitchRefusalReported
         title: >-
@@ -255,8 +291,8 @@ sections:
       - id: AgentControl-GitClient-Clone
         title: >-
           The GitClient class shall clone a repository, given by address, into a new folder, or into
-          an existing empty folder, under a time limit of one hour, without prompting on a terminal,
-          report a clone git refuses as a result carrying git's explanation without throwing, and
+          an existing empty folder, under a time limit of one hour, report a clone git refuses as a
+          result carrying git's explanation without throwing, and
           refuse to check the folder or start git on a thread guarded against blocking calls.
         justification: |
           Getting a repository onto the machine is the first step of using it; a clone can run for
@@ -275,15 +311,17 @@ sections:
         title: >-
           The GitClient class shall treat the address to clone as data: it shall refuse, before git
           starts, an address that is blank, spans several lines, starts with a dash (which git would
-          read as an option) or uses git's remote-helper syntax such as ext:: or fd::, and shall
+          read as an option), uses git's remote-helper syntax such as ext:: or fd::, or is an ssh
+          address whose host starts with a dash (which ssh would read as an option), and shall
           separate the address from git's options.
         justification: |
           The address comes from a text box or a clipboard; an address that git reads as an option
-          (for example an upload-pack program) or as a remote helper runs a command of the sender's
-          choosing on the developer's machine.
+          (for example an upload-pack program) or as a remote helper, or whose host ssh reads as an
+          option, runs a command of the sender's choosing on the developer's machine.
         tests:
           - GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit
           - GitClient_CheckCloneUrl_UsualAddress_ReturnsNull
+          - GitClient_CheckCloneUrl_SshHostStartingWithDash_IsRefused
           - GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList
 
       - id: AgentControl-GitClient-CloneDestinationRules
@@ -340,3 +378,42 @@ sections:
           credential that is not removed on the way out would leak.
         tests:
           - GitClient_Clone_UrlWithPassword_IsNeverWrittenToLogOrExceptionText
+
+      - id: AgentControl-GitClient-OutputIsUtf8
+        title: >-
+          The GitClient class shall read the output of git as UTF-8, so that branch names and
+          messages with non-ASCII characters are reported as git wrote them.
+        justification: |
+          Branch names with non-ASCII letters are legal; read with the console's code page they would be
+          shown, and passed back to git, as different names, and a switch to them would fail.
+        tests:
+          - GitClient_Pull_NonAsciiOutput_IsDecodedAsUtf8
+          - GitClient_GetBranchesAndSwitch_RealRepo_NonAsciiAndSlashBranchNames_RoundTrip
+
+      - id: AgentControl-GitClient-EnvironmentPolicy
+        title: >-
+          The GitClient class shall run every git command with a fixed environment policy: git shall
+          never prompt on a terminal, and the environment variables that trace git's traffic or
+          redirect which repository, index, object store or git programs it works with shall be
+          removed, while the user's credential-helper, askpass and ssh settings are left alone.
+        justification: |
+          No terminal exists for git to ask in, so a prompt would only hang until the time limit; a
+          variable inherited from the launching shell must not make a command act on another
+          repository than the folder it was started in or write credentials to a trace, yet the
+          user's own sign-in window or ssh agent must keep working.
+        tests:
+          - GitClient_ApplyBaseEnvironment_RemovesRepositoryRedirectingVariables
+          - GitClient_SwitchAndList_SetPromptOff_NoProtocolRestriction
+          - GitClient_UserAskpassGcmAndSshSettings_AreLeftAlone
+
+      - id: AgentControl-GitClient-CloneNeverPrompts
+        title: >-
+          The GitClient class shall clone without prompting on a terminal and with git limited to the
+          local, file, git, http, https and ssh transports.
+        justification: |
+          A prompt nobody can see would hang the clone until its limit, and a transport that runs a
+          helper program is not a repository location; a credential helper may still show its own
+          sign-in window.
+        tests:
+          - GitClient_Clone_SetsPromptOffAndAllowedProtocols
+          - GitClient_UserAskpassGcmAndSshSettings_AreLeftAlone

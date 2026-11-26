@@ -240,6 +240,7 @@ sections:
           - RepoCardViewModel_SwitchBranchAsync_Success_RunsSwitchAndSetsStatusMessage
           - RepoCardViewModel_SwitchBranchAsync_GitCannotBeStarted_ReportsErrorWithoutThrowing
           - RepoCardViewModel_SwitchBranchAsync_DetachedHead_ShowsDetachedAndSwitchesToBranch
+          - RepoCardViewModel_SwitchBranchAsync_RealRepo_UnrelatedDirtyFile_StaysDirtyAfterSwitch
           - RepoCardViewModel_CreateSwitchBranchViewModel_ListsTheBranchesGitReports
 
       - id: AgentControl-RepoCardViewModel-SwitchBranchRefused

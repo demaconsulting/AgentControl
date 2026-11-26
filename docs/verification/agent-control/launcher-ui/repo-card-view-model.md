@@ -342,13 +342,16 @@ the card idle and not failed, and, started from a guarded thread, makes no block
 (git runs on a worker). A git that cannot be started is reported through `ErrorOccurred` as `Failed to switch branch:`.
 Against a real clone whose `main` pins 1.0.0 and whose remote `feature` branch pins 2.0.0, switching to
 `origin/feature` makes the card show the branch `feature` and the pin 2.0.0 with the switch's status message and an
-unset failure flag, switching back shows `main` and 1.0.0, and a switch from a detached HEAD onto `main` works. This
+unset failure flag, switching back shows `main` and 1.0.0, and a switch from a detached HEAD onto `main` works. In a
+real clone with an edited `notes.md` that both branches share, the card shows the working tree as dirty before and
+after a switch to the other branch, the edit is intact and the pull stays unavailable. This
 scenario is tested by `RepoCardViewModel_SwitchBranchCommand_RepoMissingOrBusy_CannotExecute`,
 `RepoCardViewModel_SwitchBranchCommand_Executes_RaisesRequestForTheDialog`,
 `RepoCardViewModel_SwitchBranchAsync_Success_RunsSwitchAndSetsStatusMessage`,
 `RepoCardViewModel_SwitchBranchAsync_GitCannotBeStarted_ReportsErrorWithoutThrowing`,
 `RepoCardViewModel_SwitchBranchAsync_RealRepoWithOtherPin_PinChipFollowsTheNewBranch`,
 `RepoCardViewModel_SwitchBranchAsync_DetachedHead_ShowsDetachedAndSwitchesToBranch`,
+`RepoCardViewModel_SwitchBranchAsync_RealRepo_UnrelatedDirtyFile_StaysDirtyAfterSwitch`,
 `RepoCardViewModel_SwitchBranchAsync_RunsGitOffTheUiThread` and
 `RepoCardViewModel_CreateSwitchBranchViewModel_ListsTheBranchesGitReports`, covering
 `AgentControl-RepoCardViewModel-SwitchBranchRequest`, `AgentControl-RepoCardViewModel-SwitchBranch`,

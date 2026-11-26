@@ -1226,8 +1226,11 @@ public class GitClientTests
             // Act
             _ = client.SwitchBranch(repoDir, remote ? "origin/x" : "x", remote, TestContext.Current.CancellationToken);
 
-            // Assert: the options are exactly the safe ones
-            var options = ReadLines(argumentLog).Single().Split(' ').Where(word => word.StartsWith('-')).ToList();
+            // Assert: the options are exactly the safe ones, and the one call is a switch - nothing is stashed
+            var line = Assert.Single(ReadLines(argumentLog));
+            var options = line.Split(' ').Where(word => word.StartsWith('-')).ToList();
+            Assert.StartsWith("switch ", line, StringComparison.Ordinal);
+            Assert.DoesNotContain("stash", line, StringComparison.OrdinalIgnoreCase);
             Assert.Equal(remote ? ["--track", "--"] : ["--"], options);
             Assert.DoesNotContain(options, option => option is "-f" or "--force" or "--discard-changes" or "-C" or "-c" or "--merge" or "-m");
         }
@@ -1785,6 +1788,220 @@ public class GitClientTests
             GitSourceProvider.DeleteDirectory(parent);
             File.Delete(invocationLog);
         }
+    }
+
+    /// <summary>
+    ///     Test that output with non-ASCII characters is decoded as UTF-8, whatever the console code
+    ///     page is: branch names and git's messages can hold any character.
+    /// </summary>
+    [Fact]
+    public void GitClient_Pull_NonAsciiOutput_IsDecodedAsUtf8()
+    {
+        // Arrange: a pull whose output is read from a UTF-8 file by the stub; the non-ASCII characters are
+        // an umlaut pair, an en dash and two Chinese characters, given by code so no foreign word is spelled
+        var special = new string([(char)0x00FC, (char)0x00F6, (char)0x2013, (char)0x4E2D, (char)0x6587]);
+        var text = "Updated branch " + special;
+        var errorText = "Problem " + special;
+        var stub = GitStub.Create(extraCommands: [new GitStub.Command("pull", Output: text, Error: errorText)]);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act
+            var result = client.Pull(repoDir, TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.Equal(text, result.StandardOutput.Trim());
+            Assert.Equal(errorText, result.StandardError.Trim());
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a clone never prompts on a terminal and may use only the allowed transports.
+    /// </summary>
+    [Fact]
+    public void GitClient_Clone_SetsPromptOffAndAllowedProtocols()
+    {
+        // Arrange
+        var environmentLog = TempFilePath();
+        var stub = GitStub.Create(
+            environmentLogPath: environmentLog,
+            environmentNames: ["GIT_TERMINAL_PROMPT", "GIT_ALLOW_PROTOCOL"],
+            extraCommands: [new GitStub.Command("clone")]);
+        var parent = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act
+            var result = client.Clone("https://example.com/r.git", Path.Combine(parent, "repo"), TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.True(result.Succeeded);
+            Assert.Equal(
+                ["GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=file:git:http:https:ssh"],
+                ReadLines(environmentLog));
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+            File.Delete(environmentLog);
+        }
+    }
+
+    /// <summary>
+    ///     Test that the other commands never prompt either, but do not restrict the transports (they
+    ///     use no network except a pull, which uses the repository's own remotes).
+    /// </summary>
+    [Fact]
+    public void GitClient_SwitchAndList_SetPromptOff_NoProtocolRestriction()
+    {
+        // Arrange: the user's own protocol allow-list is removed for the test, so only the client can set it
+        var environmentLog = TempFilePath();
+        var stub = GitStub.Create(
+            environmentLogPath: environmentLog,
+            environmentNames: ["GIT_TERMINAL_PROMPT", "GIT_ALLOW_PROTOCOL"],
+            extraCommands: [new GitStub.Command("switch")]);
+        var repoDir = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(
+                stub.Path,
+                _logger,
+                extraEnvironment: new Dictionary<string, string?> { ["GIT_ALLOW_PROTOCOL"] = null });
+
+            // Act
+            _ = client.SwitchBranch(repoDir, "other", createTrackingFromRemote: false, TestContext.Current.CancellationToken);
+            _ = client.IsWorkingTreeClean(repoDir, TestContext.Current.CancellationToken);
+
+            // Assert: one pair of lines per invocation
+            Assert.Equal(
+                [
+                    "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=<unset>",
+                    "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=<unset>"
+                ],
+                ReadLines(environmentLog));
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(repoDir, recursive: true);
+            File.Delete(environmentLog);
+        }
+    }
+
+    /// <summary>
+    ///     Test that the user's credential helper, askpass and ssh settings reach git unchanged, so a
+    ///     sign-in window or an ssh agent keeps working.
+    /// </summary>
+    [Fact]
+    public void GitClient_UserAskpassGcmAndSshSettings_AreLeftAlone()
+    {
+        // Arrange
+        var environmentLog = TempFilePath();
+        var stub = GitStub.Create(
+            environmentLogPath: environmentLog,
+            environmentNames: ["GCM_INTERACTIVE", "GIT_ASKPASS", "SSH_ASKPASS", "GIT_SSH_COMMAND"],
+            extraCommands: [new GitStub.Command("clone")]);
+        var parent = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(
+                stub.Path,
+                _logger,
+                extraEnvironment: new Dictionary<string, string?>
+                {
+                    ["GCM_INTERACTIVE"] = "always",
+                    ["GIT_ASKPASS"] = "my-askpass",
+                    ["SSH_ASKPASS"] = null,
+                    ["GIT_SSH_COMMAND"] = "ssh -i my-key"
+                });
+
+            // Act
+            _ = client.Clone("https://example.com/r.git", Path.Combine(parent, "repo"), TestContext.Current.CancellationToken);
+
+            // Assert
+            Assert.Equal(
+                ["GCM_INTERACTIVE=always", "GIT_ASKPASS=my-askpass", "SSH_ASKPASS=<unset>", "GIT_SSH_COMMAND=ssh -i my-key"],
+                ReadLines(environmentLog));
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+            File.Delete(environmentLog);
+        }
+    }
+
+    /// <summary>
+    ///     Test that the base environment policy removes the variables that redirect which repository
+    ///     or git programs a command uses and the ones that trace git's traffic, sets the prompt off,
+    ///     and leaves everything else alone.
+    /// </summary>
+    [Fact]
+    public void GitClient_ApplyBaseEnvironment_RemovesRepositoryRedirectingVariables()
+    {
+        // Arrange: a copy of an environment, never the process's own
+        var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["GIT_DIR"] = "elsewhere",
+            ["GIT_WORK_TREE"] = "elsewhere",
+            ["GIT_INDEX_FILE"] = "elsewhere",
+            ["GIT_OBJECT_DIRECTORY"] = "elsewhere",
+            ["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = "elsewhere",
+            ["GIT_CEILING_DIRECTORIES"] = "elsewhere",
+            ["GIT_EXEC_PATH"] = "elsewhere",
+            ["GIT_TRACE"] = "1",
+            ["GIT_TRACE_CURL"] = "1",
+            ["GIT_CURL_VERBOSE"] = "1",
+            ["GIT_TERMINAL_PROMPT"] = "1",
+            ["GIT_ASKPASS"] = "my-askpass",
+            ["GCM_INTERACTIVE"] = "always",
+            ["PATH"] = "somewhere",
+            ["LC_ALL"] = "de_DE.UTF-8"
+        };
+
+        // Act
+        GitClient.ApplyBaseEnvironment(environment);
+
+        // Assert
+        Assert.Equal(
+            new SortedDictionary<string, string?>(StringComparer.Ordinal)
+            {
+                ["GCM_INTERACTIVE"] = "always",
+                ["GIT_ASKPASS"] = "my-askpass",
+                ["GIT_TERMINAL_PROMPT"] = "0",
+                ["LC_ALL"] = "de_DE.UTF-8",
+                ["PATH"] = "somewhere"
+            },
+            new SortedDictionary<string, string?>(environment, StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    ///     Test that an ssh address whose host starts with a dash, which ssh would read as an option, is
+    ///     refused, and that a dash elsewhere in the address is not.
+    /// </summary>
+    [Theory]
+    [InlineData("ssh://-oProxyCommand=calc/repo.git", true)]
+    [InlineData("ssh://git@-oProxyCommand=calc/repo.git", true)]
+    [InlineData("SSH://-host", true)]
+    [InlineData("ssh://git@my-host.example/team/repo.git", false)]
+    [InlineData("ssh://git@host.example/-team/-repo.git", false)]
+    [InlineData("ssh://user@host.example:2222/repo.git", false)]
+    public void GitClient_CheckCloneUrl_SshHostStartingWithDash_IsRefused(string url, bool refused)
+    {
+        // Act
+        var problem = GitClient.CheckCloneUrl(url);
+
+        // Assert
+        Assert.Equal(refused, problem is not null);
     }
 
     /// <summary>

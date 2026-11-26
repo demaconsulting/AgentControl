@@ -258,6 +258,44 @@ public sealed class RepoCardSwitchBranchTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a switch from a branch with an uncommitted change that does not conflict with the
+    ///     target branch succeeds, the change travels with it, and the card still shows the working tree
+    ///     as having uncommitted changes (so a pull stays unavailable).
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_SwitchBranchAsync_RealRepo_UnrelatedDirtyFile_StaysDirtyAfterSwitch()
+    {
+        // Arrange: notes.md is the same on both branches; only the pin differs
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(
+            new Dictionary<string, string> { [".agentcontrol.json"] = PinFileText("1.0.0"), ["notes.md"] = "notes" },
+            "Pin 1.0.0");
+        fixture.Git(fixture.WorkPath, "switch", "-q", "-c", "feature");
+        fixture.Commit(new Dictionary<string, string> { [".agentcontrol.json"] = PinFileText("2.0.0") }, "Pin 2.0.0");
+        fixture.Git(fixture.WorkPath, "switch", "-q", "main");
+        fixture.Git(fixture.WorkPath, "push", "-q", fixture.RemotePath, "main", "feature");
+        fixture.Git(fixture.RemotePath, "symbolic-ref", "HEAD", "refs/heads/main");
+        var clonePath = Path.Combine(fixture.Root, "clone");
+        fixture.Git(fixture.Root, "clone", "-q", "-b", "main", fixture.RemotePath, clonePath);
+        var notes = Path.Combine(clonePath, "notes.md");
+        await File.WriteAllTextAsync(notes, "my edit", TestContext.Current.CancellationToken);
+        var card = CreateCard(clonePath, new AppSettings());
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
+        Assert.True(card.IsWorkingTreeDirty);
+
+        // Act
+        await card.SwitchBranchAsync(new BranchChoice("feature", "origin/feature", true), TestContext.Current.CancellationToken);
+
+        // Assert: the switch worked, the pin follows, the edit is intact and the card still shows it
+        Assert.False(card.LastActionFailed);
+        Assert.Equal("feature", card.CurrentBranch);
+        Assert.Equal("2.0.0", card.PinnedPackageVersion);
+        Assert.Equal("my edit", await File.ReadAllTextAsync(notes, TestContext.Current.CancellationToken));
+        Assert.True(card.IsWorkingTreeDirty);
+        Assert.False(card.CanPull);
+    }
+
+    /// <summary>
     ///     Test that a switch from a detached HEAD to a branch works and the card then shows the branch.
     /// </summary>
     [Fact]

@@ -20,6 +20,7 @@
 
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 using DemaConsulting.AgentControl.Logging;
 using DemaConsulting.AgentControl.PackageCredentials;
 using DemaConsulting.AgentControl.Utilities;
@@ -30,12 +31,6 @@ namespace DemaConsulting.AgentControl.GitIntegration;
 /// <summary>
 ///     How long a <see cref="GitClient"/> lets a git command run before it stops it.
 /// </summary>
-/// <remarks>
-///     A git command against a local working tree normally answers in well under a second, but one on
-///     a network share or a huge tree, or a git that is stuck (a lock held by a crashed process, a
-///     credential helper waiting for input nobody sees), may never answer. Without a limit such a
-///     command holds its caller - and the worker slot it runs in - forever.
-/// </remarks>
 /// <param name="LocalCommand">The limit for every command that only reads or changes the local
 ///     repository (status, branch, <c>HEAD</c>, the committed-files listing, stopping the tracking of agent folders). Must be
 ///     positive.</param>
@@ -43,9 +38,12 @@ namespace DemaConsulting.AgentControl.GitIntegration;
 ///     credential helper's own sign-in window. Must be positive.</param>
 /// <param name="Stop">How long to wait for a stopped command to end. Must be positive.</param>
 /// <remarks>
-///     <see cref="SwitchBranch"/> and <see cref="CloneRepository"/> are init-only properties with
-///     defaults (rather than positional parameters) so that the three-argument form callers and tests
-///     already use keeps compiling.
+///     A git command against a local working tree normally answers in well under a second, but one on
+///     a network share or a huge tree, or a git that is stuck (a lock held by a crashed process, a
+///     credential helper waiting for input nobody sees), may never answer. Without a limit such a
+///     command holds its caller - and the worker slot it runs in - forever. <see cref="SwitchBranch"/>
+///     and <see cref="CloneRepository"/> are init-only properties with defaults (rather than positional
+///     parameters) so that the three-argument form callers and tests already use keeps compiling.
 /// </remarks>
 internal sealed record GitClientTimeouts(TimeSpan LocalCommand, TimeSpan Pull, TimeSpan Stop)
 {
@@ -193,6 +191,25 @@ internal sealed class GitClient
     ///     <c>.agent-logs/implementation-agentcontrol-v1-final-3e91c7.md</c>.
     /// </summary>
     private static readonly TimeSpan SlowExitWarningThreshold = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    ///     Git's output is read as UTF-8 without a byte-order mark: branch names and messages can hold
+    ///     any character, and git writes them as UTF-8 whatever the console code page is.
+    /// </summary>
+    private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
+
+    /// <summary>
+    ///     The environment variable that limits how far up git looks for a repository; removed by
+    ///     <see cref="ApplyBaseEnvironment"/>.
+    /// </summary>
+    private const string CeilingDirectoriesVariable = "GIT_CEILING_DIRECTORIES";
+
+    /// <summary>
+    ///     The transports a clone may use (<c>GIT_ALLOW_PROTOCOL</c>): local paths and <c>file</c>,
+    ///     <c>git</c>, <c>http</c>, <c>https</c> and <c>ssh</c>. Nothing else, so a submodule or a
+    ///     redirect can never make git run a remote helper.
+    /// </summary>
+    private const string AllowedCloneProtocols = "file:git:http:https:ssh";
 
     /// <summary>
     ///     Path (or bare command name, resolved via <c>PATH</c>) to the git executable this
@@ -869,9 +886,12 @@ internal sealed class GitClient
     /// <remarks>
     ///     <para>
     ///     Runs <c>git clone -- &lt;url&gt; &lt;destination&gt;</c> in the destination's parent folder
-    ///     (a clone needs an existing working directory) through an argument list, never a shell, with
-    ///     <c>GIT_TERMINAL_PROMPT=0</c> because there is no terminal to ask in (a credential helper such
-    ///     as Git Credential Manager still shows its own sign-in window). The URL is data: one that
+    ///     (a clone needs an existing working directory) through an argument list, never a shell. Like
+    ///     every command it runs under the environment policy (see <see cref="ApplyBaseEnvironment"/>:
+    ///     <c>GIT_TERMINAL_PROMPT=0</c> because there is no terminal to ask in; a credential helper such
+    ///     as Git Credential Manager still shows its own sign-in window), and in addition
+    ///     <c>GIT_ALLOW_PROTOCOL</c> limits the transports to local paths, <c>file</c>, <c>git</c>,
+    ///     <c>http</c>, <c>https</c> and <c>ssh</c>. The URL is data: one that
     ///     starts with <c>-</c> or names a remote helper (<c>ext::</c>, <c>fd::</c>) is refused before
     ///     git starts, and <c>--</c> separates it from the options. The URL may contain credentials, so
     ///     it is redacted in every log message and exception text (see <see cref="RunGit"/>).
@@ -928,7 +948,7 @@ internal sealed class GitClient
                 parent,
                 _timeouts.CloneRepository,
                 cancellationToken,
-                new Dictionary<string, string?> { ["GIT_TERMINAL_PROMPT"] = "0" },
+                new Dictionary<string, string?> { ["GIT_ALLOW_PROTOCOL"] = AllowedCloneProtocols },
                 ["clone", "--", url.Trim(), destination]);
         }
         catch (OperationCanceledException)
@@ -966,7 +986,8 @@ internal sealed class GitClient
     ///     must not be blank, must be a single line without control characters, must not start with
     ///     <c>-</c> (git would read it as an option) and must not use the remote-helper syntax
     ///     <c>&lt;name&gt;::&lt;address&gt;</c> (<c>ext::</c> runs a command, <c>fd::</c> reads an open
-    ///     file; neither is a repository location). Whether the repository exists is for git to say.
+    ///     file; neither is a repository location) or an <c>ssh://</c> host that starts with <c>-</c>
+    ///     (ssh would read it as an option). Whether the repository exists is for git to say.
     ///     Static, pure and thread-safe; no disk or process access.
     /// </remarks>
     public static string? CheckCloneUrl(string? url)
@@ -992,6 +1013,23 @@ internal sealed class GitClient
         if (helperEnd > 0 && trimmed[..helperEnd].All(c => char.IsAsciiLetterOrDigit(c) || c is '+' or '.' or '-'))
         {
             return "Addresses that use a remote helper (such as ext:: or fd::) are not supported.";
+        }
+
+        // An ssh host that starts with a dash would be read by ssh as an option
+        const string SshScheme = "ssh://";
+        if (trimmed.StartsWith(SshScheme, StringComparison.OrdinalIgnoreCase))
+        {
+            var authority = trimmed[SshScheme.Length..];
+            var slash = authority.IndexOf('/', StringComparison.Ordinal);
+            if (slash >= 0)
+            {
+                authority = authority[..slash];
+            }
+
+            if (authority[(authority.LastIndexOf('@') + 1)..].StartsWith('-'))
+            {
+                return "The host of an ssh address must not start with a dash.";
+            }
         }
 
         return null;
@@ -1323,6 +1361,8 @@ internal sealed class GitClient
             WorkingDirectory = repositoryPath,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = Utf8WithoutBom,
+            StandardErrorEncoding = Utf8WithoutBom,
             UseShellExecute = false,
             CreateNoWindow = true
         };
@@ -1332,6 +1372,8 @@ internal sealed class GitClient
             startInfo.ArgumentList.Add(argument);
         }
 
+        // The policy of every command first, then the client's own variables, then this command's
+        ApplyBaseEnvironment(startInfo.Environment);
         ApplyEnvironment(startInfo, _extraEnvironment);
         ApplyEnvironment(startInfo, environment);
 
@@ -1429,6 +1471,40 @@ internal sealed class GitClient
             throw new InvalidOperationException(
                 $"Failed to run '{_gitExecutablePath} {argumentsText.Value}': {SecretRedactor.Redact(ex.Message)}", ex);
         }
+    }
+
+    /// <summary>
+    ///     Applies the environment policy every git command of this client runs under to a process's
+    ///     environment.
+    /// </summary>
+    /// <param name="environment">The child's environment, initially a copy of ours.</param>
+    /// <remarks>
+    ///     Removes the variables that trace git's traffic (<c>GIT_TRACE*</c>, <c>GIT_CURL_VERBOSE</c>:
+    ///     they could carry an Authorization header into a message) and the ones that redirect which
+    ///     repository, index, object store or git programs a command works with (<c>GIT_DIR</c>,
+    ///     <c>GIT_WORK_TREE</c>, <c>GIT_EXEC_PATH</c>, <c>GIT_CEILING_DIRECTORIES</c>...), so that a
+    ///     command always works on the folder it was started in. The list is the one
+    ///     <see cref="GitRemoteClient"/> uses (<see cref="GitRemoteClient.IsRemovedVariable"/>) plus
+    ///     <c>GIT_CEILING_DIRECTORIES</c>. Sets <c>GIT_TERMINAL_PROMPT=0</c>, because no terminal exists
+    ///     to ask in. Deliberately leaves the user's sign-in and transport settings alone
+    ///     (<c>GCM_INTERACTIVE</c>, <c>GIT_ASKPASS</c>, <c>SSH_ASKPASS</c>, <c>GIT_SSH</c>,
+    ///     <c>GIT_SSH_COMMAND</c>) so a credential helper may show its own window and an ssh key agent
+    ///     keeps working, and leaves the language (<c>LC_ALL</c>) alone so git's messages stay in the
+    ///     user's language. Pure apart from changing <paramref name="environment"/>.
+    /// </remarks>
+    internal static void ApplyBaseEnvironment(IDictionary<string, string?> environment)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+
+        foreach (var key in environment.Keys
+                     .Where(key => GitRemoteClient.IsRemovedVariable(key) ||
+                                   key.Equals(CeilingDirectoriesVariable, StringComparison.OrdinalIgnoreCase))
+                     .ToList())
+        {
+            environment.Remove(key);
+        }
+
+        environment["GIT_TERMINAL_PROMPT"] = "0";
     }
 
     /// <summary>

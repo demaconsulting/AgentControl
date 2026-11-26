@@ -323,13 +323,15 @@ sections:
           - AgentControl-GitClient-ListBranches
           - AgentControl-GitClient-ListBranchesRemoteDistinct
           - AgentControl-GitClient-ListBranchesDetached
+          - AgentControl-GitClient-OutputIsUtf8
         tests:
           - GitIntegrationSubsystem_CloneThenListAndSwitchBranches_OnRealRepository_FollowsTheBranch
 
       - id: AgentControl-GitIntegration-SwitchBranch
         title: >-
           The GitIntegration subsystem shall switch a repo to a local or a remote-tracking branch
-          using git's own protection - never forcing, discarding or stashing anything - and report a
+          using git's own protection - never forcing, discarding, merging or stashing anything, and
+          leaving uncommitted changes that do not conflict in place - and report a
           refused switch with git's explanation and nothing changed.
         justification: |
           A developer's uncommitted work is not the tool's to discard; git already knows which
@@ -338,10 +340,15 @@ sections:
         children:
           - AgentControl-GitClient-SwitchBranch
           - AgentControl-GitClient-SwitchNeverForces
+          - AgentControl-GitClient-SwitchNeverMergesOrStashes
+          - AgentControl-GitClient-SwitchNameIsData
+          - AgentControl-GitClient-SwitchKeepsNonConflictingChanges
           - AgentControl-GitClient-SwitchRefusalReported
+          - AgentControl-GitClient-EnvironmentPolicy
         tests:
           - GitIntegrationSubsystem_CloneThenListAndSwitchBranches_OnRealRepository_FollowsTheBranch
           - GitClient_SwitchBranch_RealRepo_DirtyConflictingFile_IsRefusedWithGitsReasonAndChangesNothing
+          - GitClient_SwitchBranch_RealRepo_UnrelatedDirtyFile_SurvivesTheSwitch
 
       - id: AgentControl-GitIntegration-CloneRepository
         title: >-
@@ -356,6 +363,7 @@ sections:
           - AgentControl-GitClient-Clone
           - AgentControl-GitClient-CloneDestinationRules
           - AgentControl-GitClient-CloneCancelStopsGit
+          - AgentControl-GitClient-CloneNeverPrompts
         tests:
           - GitIntegrationSubsystem_CloneThenListAndSwitchBranches_OnRealRepository_FollowsTheBranch
           - GitClient_Clone_Canceled_RemovesDestinationItCreated
@@ -363,7 +371,8 @@ sections:
       - id: AgentControl-GitIntegration-CloneUrlIsData
         title: >-
           The GitIntegration subsystem shall treat the address to clone as data, refusing before git
-          starts an address that git would read as an option or as a remote helper.
+          starts an address that git would read as an option or as a remote helper, or whose ssh
+          host ssh would read as an option.
         justification: |
           An address pasted from an untrusted source must not be able to run a command of the
           sender's choosing.

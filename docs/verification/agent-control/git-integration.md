@@ -207,15 +207,20 @@ content and the branch list (no remote branch is left once a local one of the sa
 is tested by `GitIntegrationSubsystem_CloneThenListAndSwitchBranches_OnRealRepository_FollowsTheBranch`, covering
 `AgentControl-GitIntegration-ListBranches`, `AgentControl-GitIntegration-SwitchBranch` and
 `AgentControl-GitIntegration-CloneRepository`; a switch git refuses is verified with
-`GitClient_SwitchBranch_RealRepo_DirtyConflictingFile_IsRefusedWithGitsReasonAndChangesNothing` and a canceled clone
+`GitClient_SwitchBranch_RealRepo_DirtyConflictingFile_IsRefusedWithGitsReasonAndChangesNothing` and an edit that does
+not conflict travels with the switch with `GitClient_SwitchBranch_RealRepo_UnrelatedDirtyFile_SurvivesTheSwitch`, and a
+canceled clone
 with `GitClient_Clone_Canceled_RemovesDestinationItCreated`, cited at the subsystem level (children:
-`AgentControl-GitClient-ListBranches`, `-ListBranchesRemoteDistinct`, `-ListBranchesDetached`, `-SwitchBranch`,
-`-SwitchNeverForces`, `-SwitchRefusalReported`, `-Clone`, `-CloneDestinationRules` and `-CloneCancelStopsGit`).
+`AgentControl-GitClient-ListBranches`, `-ListBranchesRemoteDistinct`, `-ListBranchesDetached`, `-OutputIsUtf8`,
+`-SwitchBranch`, `-SwitchNeverForces`, `-SwitchNeverMergesOrStashes`, `-SwitchNameIsData`,
+`-SwitchKeepsNonConflictingChanges`, `-SwitchRefusalReported`, `-EnvironmentPolicy`, `-Clone`,
+`-CloneDestinationRules`, `-CloneNeverPrompts` and `-CloneCancelStopsGit`).
 
 **GitIntegration_CloneSafety_UnitTestsCoverAddressDataCleanupAndRedaction**: An address that git could read as an option
-or a remote helper is refused before git starts (`GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit`,
-covering `AgentControl-GitIntegration-CloneUrlIsData`, child `AgentControl-GitClient-CloneRefusesOptionLikeUrl`); a
-canceled clone into an existing empty folder keeps the folder and a failed clone deletes nothing
+or a remote helper, or an ssh address whose host starts with a dash, is refused before git starts
+(`GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit`, covering
+`AgentControl-GitIntegration-CloneUrlIsData`, child `AgentControl-GitClient-CloneRefusesOptionLikeUrl`); a canceled
+clone into an existing empty folder keeps the folder and a failed clone deletes nothing
 (`GitClient_Clone_CanceledIntoExistingEmptyFolder_RemovesContentsKeepsFolder` and
 `GitClient_Clone_Fails_LeavesFolderAlone`, covering `AgentControl-GitIntegration-CloneRemovesOnlyWhatItCreated`, child
 `AgentControl-GitClient-CloneRemovesOnlyWhatItCreated`); and an address with a password never puts the password into a

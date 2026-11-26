@@ -120,6 +120,11 @@ internal sealed class GitStub
     ///     fixed ones. <see langword="null"/> for none.</param>
     /// <param name="argumentLogPath">When supplied, the stub appends one line per invocation holding
     ///     all of its arguments (the invocation log holds only the first two) to this file.</param>
+    /// <param name="environmentLogPath">When supplied together with <paramref name="environmentNames"/>,
+    ///     the stub appends, on every invocation, one <c>NAME=value</c> line per named environment
+    ///     variable (<c>NAME=&lt;unset&gt;</c> when it is not set) to this file.</param>
+    /// <param name="environmentNames">The names of the environment variables to log; see
+    ///     <paramref name="environmentLogPath"/>. They must be plain upper-case names.</param>
     /// <returns>A new <see cref="GitStub"/> whose <see cref="Path"/> is ready to use.</returns>
     public static GitStub Create(
         string statusOutput = "",
@@ -142,11 +147,14 @@ internal sealed class GitStub
         int revParseHeadSleepSeconds = 0,
         int statusOutputHolderSeconds = 0,
         IReadOnlyList<Command>? extraCommands = null,
-        string? argumentLogPath = null)
+        string? argumentLogPath = null,
+        string? environmentLogPath = null,
+        IReadOnlyList<string>? environmentNames = null)
     {
         var sleeps = new StubSleeps(
             statusSleepSeconds, pullSleepSeconds, revParseHeadSleepSeconds, statusOutputHolderSeconds);
         var windows = OperatingSystem.IsWindows();
+        var environmentLines = BuildEnvironmentLines(windows, environmentLogPath, environmentNames ?? []);
         var path = System.IO.Path.Combine(
             System.IO.Path.GetTempPath(), $"agentcontrol_git_stub_{Guid.NewGuid()}" + (windows ? ".bat" : ".sh"));
         var prepared = PrepareCommands(path, extraCommands ?? []);
@@ -159,7 +167,7 @@ internal sealed class GitStub
                 revParseHeadOutput, revParseHeadExitCode, revParseHeadError,
                 abbrevRefOutput, abbrevRefExitCode,
                 lsFilesOutput, lsFilesExitCode, lsFilesError, invocationLogPath, sleeps, path + ".finished",
-                prepared, argumentLogPath));
+                prepared, argumentLogPath, environmentLines));
         }
         else
         {
@@ -168,7 +176,7 @@ internal sealed class GitStub
                 revParseHeadOutput, revParseHeadExitCode, revParseHeadError,
                 abbrevRefOutput, abbrevRefExitCode,
                 lsFilesOutput, lsFilesExitCode, lsFilesError, invocationLogPath, sleeps, path + ".finished",
-                prepared, argumentLogPath));
+                prepared, argumentLogPath, environmentLines));
             File.SetUnixFileMode(
                 path,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
@@ -177,6 +185,37 @@ internal sealed class GitStub
         }
 
         return stub;
+    }
+
+    /// <summary>
+    ///     Builds the script lines that log the named environment variables on every invocation.
+    /// </summary>
+    /// <param name="windows">Whether the script is a batch file.</param>
+    /// <param name="logPath">The log file, or <see langword="null"/> for no lines.</param>
+    /// <param name="names">The variable names.</param>
+    /// <returns>The lines.</returns>
+    private static List<string> BuildEnvironmentLines(bool windows, string? logPath, IReadOnlyList<string> names)
+    {
+        var lines = new List<string>();
+        if (logPath is null)
+        {
+            return lines;
+        }
+
+        foreach (var name in names)
+        {
+            if (windows)
+            {
+                lines.Add($"if defined {name} >>\"{logPath}\" echo {name}=%{name}%");
+                lines.Add($"if not defined {name} >>\"{logPath}\" echo {name}=^<unset^>");
+            }
+            else
+            {
+                lines.Add($"echo \"{name}=${{{name}-<unset>}}\" >> \"{logPath}\"");
+            }
+        }
+
+        return lines;
     }
 
     /// <summary>
@@ -345,7 +384,7 @@ internal sealed class GitStub
         string abbrevRefOutput, int abbrevRefExitCode,
         string lsFilesOutput, int lsFilesExitCode, string lsFilesError,
         string? invocationLogPath, StubSleeps sleeps, string markerPath,
-        IReadOnlyList<PreparedCommand> extraCommands, string? argumentLogPath)
+        IReadOnlyList<PreparedCommand> extraCommands, string? argumentLogPath, IReadOnlyList<string> environmentLines)
     {
         var lines = new List<string> { "@echo off" };
         if (invocationLogPath is not null)
@@ -357,6 +396,8 @@ internal sealed class GitStub
         {
             lines.Add($">>\"{argumentLogPath}\" echo %*");
         }
+
+        lines.AddRange(environmentLines);
 
         for (var index = 0; index < extraCommands.Count; index++)
         {
@@ -482,7 +523,7 @@ internal sealed class GitStub
         string abbrevRefOutput, int abbrevRefExitCode,
         string lsFilesOutput, int lsFilesExitCode, string lsFilesError,
         string? invocationLogPath, StubSleeps sleeps, string markerPath,
-        IReadOnlyList<PreparedCommand> extraCommands, string? argumentLogPath)
+        IReadOnlyList<PreparedCommand> extraCommands, string? argumentLogPath, IReadOnlyList<string> environmentLines)
     {
         var lines = new List<string> { "#!/bin/sh" };
         if (invocationLogPath is not null)
@@ -494,6 +535,8 @@ internal sealed class GitStub
         {
             lines.Add($"echo \"$*\" >> \"{argumentLogPath}\"");
         }
+
+        lines.AddRange(environmentLines);
 
         lines.Add("case \"$1 $2\" in");
         for (var index = 0; index < extraCommands.Count; index++)

@@ -156,10 +156,11 @@ accepts only `KnownAgentFolders` (same argument checks as `UntrackAgentFolders`)
 - *Algorithm*: `git switch -- <name>` for a local branch; `git switch --track -- <remote>/<name>` for a remote one,
   which creates a local branch of the same name that tracks it. Runs under the `SwitchBranch` limit
   (`AgentControl-GitClient-SwitchBranch`).
-- *Postconditions*: none of `--force`, `--discard-changes`, `-C` or `--merge` is ever passed and nothing is stashed, so
-  git's own protection decides: uncommitted changes that do not conflict travel with the switch, changes that would be
-  overwritten stop it with nothing changed. A blank, `-`-leading or control-character name throws `ArgumentException`
-  before git runs (`AgentControl-GitClient-SwitchNeverForces`).
+- *Postconditions*: none of `--force`, `--discard-changes`, `-C` or `--merge` is ever passed and nothing is stashed (the
+  call is exactly one `git switch`), so git's own protection decides: uncommitted changes that do not conflict travel
+  with the switch (`AgentControl-GitClient-SwitchKeepsNonConflictingChanges`), changes that would be overwritten stop it
+  with nothing changed. A blank, `-`-leading or control-character name throws `ArgumentException` before git runs
+  (`AgentControl-GitClient-SwitchNeverForces`, `-SwitchNeverMergesOrStashes`, `-SwitchNameIsData`).
 
 **Clone**: Clones a repository into a new folder.
 
@@ -170,12 +171,13 @@ accepts only `KnownAgentFolders` (same argument checks as `UntrackAgentFolders`)
   `ArgumentException` whose message is a reason the user can read, before git starts; (3) remember whether the
   destination exists (so only what this call creates is ever removed); (4) run `git clone -- <url> <destination>` with
   the destination's parent folder as working directory (a clone needs an existing one), under the `CloneRepository`
-  limit, with `GIT_TERMINAL_PROMPT=0`; (5) on **cancellation or timeout** git was killed mid-write: `RemovePartialClone`
-  removes the partial result - the whole folder when this call created it, only the contents of an empty folder that
-  existed before - clearing read-only attributes first (git writes read-only object files), never following a link, and
-  retrying a few times because a process git started may hold a file for a moment; a leftover that cannot be removed is
-  logged and named in the text of a timeout exception; (6) after a clone git reported as **failed** nothing is deleted:
-  git cleans up after itself and a deletion could only remove somebody else's folder
+  limit, with the environment policy and `GIT_ALLOW_PROTOCOL=file:git:http:https:ssh`
+  (`AgentControl-GitClient-CloneNeverPrompts`); (5) on **cancellation or timeout** git was killed mid-write:
+  `RemovePartialClone` removes the partial result - the whole folder when this call created it, only the contents of an
+  empty folder that existed before - clearing read-only attributes first (git writes read-only object files), never
+  following a link, and retrying a few times because a process git started may hold a file for a moment; a leftover that
+  cannot be removed is logged and named in the text of a timeout exception; (6) after a clone git reported as **failed**
+  nothing is deleted: git cleans up after itself and a deletion could only remove somebody else's folder
   (`AgentControl-GitClient-CloneRemovesOnlyWhatItCreated`, `-CloneCancelStopsGit`).
 - *Postconditions*: the address is data (`--` separates it from the options) and never appears in a log or exception
   message with its credentials (`AgentControl-GitClient-CloneRedactsCredentials`).
@@ -183,7 +185,9 @@ accepts only `KnownAgentFolders` (same argument checks as `UntrackAgentFolders`)
 **CheckCloneUrl** (static, pure): Returns the reason an address cannot be cloned, or `null`. Refuses a blank address,
 one that spans lines or has control characters, one that starts with `-` (git would read an option, for example
 `--upload-pack=`) and one that uses git's remote-helper syntax `<name>::<address>` (`ext::` runs a command, `fd::` reads
-an open file) (`AgentControl-GitClient-CloneRefusesOptionLikeUrl`). Whether the repository exists is for git to say.
+an open file) or an `ssh://` address whose host - the text after the `//` and any user name, up to the next `/` - starts
+with `-` (ssh would read an option) (`AgentControl-GitClient-CloneRefusesOptionLikeUrl`). Whether the repository
+exists is for git to say.
 
 **CheckCloneDestination** (static): Returns the reason a folder cannot be a clone destination, or `null`: it must be
 an absolute path, its parent folder must exist, and it must not exist or must be an empty folder (not a file, not a
@@ -208,10 +212,25 @@ code and output. The other methods pass the limit (`LocalCommand`, `Pull` for `P
 `SwitchBranch`; `Clone` goes through `RunGitCore` with `CloneRepository` and a per-command environment) and their
 token (`GetTrackedAgentFolders`, `UntrackAgentFolders` and `RestoreAgentFolderTracking` pass none). `RunGit` is a thin
 wrapper over `RunGitCore`, which also takes the environment variables of the one command (`Clone` sets
-`GIT_TERMINAL_PROMPT=0`: there is no terminal to ask in, while a credential helper such as Git Credential Manager still
-shows its own window). Everything that can reach a log or an exception message - the argument text, git's standard
+`GIT_ALLOW_PROTOCOL`). Everything that can reach a log or an exception message - the argument text, git's standard
 error and the operating system's error text - is passed through `SecretRedactor.Redact` first, because a clone
 address may carry `user:password@`; the values returned to callers are raw.
+
+*Output encoding*: standard output and standard error of every command are read as UTF-8 without a byte-order mark,
+whatever the console's code page is, because branch names and git's messages can hold any character
+(`AgentControl-GitClient-OutputIsUtf8`).
+
+*Environment*: `RunGitCore` builds the child's environment in three layers: first the policy of every command
+(`ApplyBaseEnvironment`, internal static, tested on a plain dictionary), then the constructor's `extraEnvironment`, then
+the variables of the one command. The policy removes the variables that trace git's traffic (`GIT_TRACE*`,
+`GIT_CURL_VERBOSE`) and the ones that redirect the repository, index, object store or git programs a command works
+with (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_EXEC_PATH`, `GIT_OBJECT_DIRECTORY`,
+`GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_COMMON_DIR`, `GIT_NAMESPACE`, `GIT_PREFIX`, `GIT_REPLACE_REF_BASE`,
+`GIT_SHALLOW_FILE` - the list `GitRemoteClient` uses, shared through `GitRemoteClient.IsRemovedVariable` - and
+`GIT_CEILING_DIRECTORIES`) and sets `GIT_TERMINAL_PROMPT=0`: there is no terminal to ask in. It deliberately leaves
+`GCM_INTERACTIVE`, `GIT_ASKPASS`, `SSH_ASKPASS`, `GIT_SSH`, `GIT_SSH_COMMAND` and `LC_ALL` alone, so a credential
+helper such as Git Credential Manager still shows its own window, an ssh agent keeps working and git's messages stay in
+the user's language (branch parsing uses `--format`) (`AgentControl-GitClient-EnvironmentPolicy`).
 
 - *Algorithm*: (1) ask `BlockingCallGuard.ThrowIfGuarded("git {subcommand}")` (see *BlockingCallGuard*), so a call on
   a thread the tests guard is refused before anything starts; (2) throw `OperationCanceledException` when the token is

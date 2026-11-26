@@ -141,11 +141,13 @@ them.
   `git switch --track -- <remote>/<name>` (remote) and returns the outcome, a refusal by git being a result with git's
   explanation, not an exception (`AgentControl-GitIntegration-ListBranches`, `AgentControl-GitIntegration-SwitchBranch`,
   `AgentControl-GitClient-ListBranches`, `AgentControl-GitClient-ListBranchesRemoteDistinct`,
-  `AgentControl-GitClient-ListBranchesDetached`, `AgentControl-GitClient-SwitchBranch`,
-  `AgentControl-GitClient-SwitchRefusalReported`).
-- *Constraints*: A switch never forces, discards, merges or stashes (`AgentControl-GitClient-SwitchNeverForces`); a
-  blank or option-like name is refused with `ArgumentException` before git runs; `GetBranches` throws
-  `InvalidOperationException` when git cannot list the refs.
+  `AgentControl-GitClient-ListBranchesDetached`, `AgentControl-GitClient-OutputIsUtf8`,
+  `AgentControl-GitClient-SwitchBranch`, `AgentControl-GitClient-SwitchRefusalReported`).
+- *Constraints*: A switch never forces, discards, merges or stashes (`AgentControl-GitClient-SwitchNeverForces`,
+  `-SwitchNeverMergesOrStashes`) and leaves uncommitted changes that do not conflict in place
+  (`AgentControl-GitClient-SwitchKeepsNonConflictingChanges`); a
+  blank or option-like name is refused with `ArgumentException` before git runs (`-SwitchNameIsData`); `GetBranches`
+  throws `InvalidOperationException` when git cannot list the refs.
 
 **GitClient.Clone / CheckCloneUrl / CheckCloneDestination**: Clones a repository into a new or empty folder, and
 tells beforehand why an address or a folder cannot be used.
@@ -218,8 +220,11 @@ places where the launcher acts on a developer's files at the developer's request
 the user's data intact. The branch list is what git already has locally: no implicit fetch, so it is quick and never
 prompts for a sign-in (a pull updates the remote-tracking branches). A switch is `git switch` with no force, discard,
 merge or stash: git refuses what would lose work and the launcher passes its explanation on. A clone treats the address
-as data (a leading `-` or a remote-helper address is refused, `--` separates it from the options), asks nothing on a
-terminal, shows no credential in a log (the one place a command line is logged, `RunGit`, redacts it) and, when it is
+as data (a leading `-`, a remote-helper address or an ssh host that starts with `-` is refused, `--` separates it from
+the options), asks nothing on a terminal and may use only the local, file, git, http, https and ssh transports
+(`AgentControl-GitClient-CloneNeverPrompts`; every command runs under one environment policy that also removes the
+variables that redirect the repository or trace git's traffic, `AgentControl-GitClient-EnvironmentPolicy`), shows no
+credential in a log (the one place a command line is logged, `RunGit`, redacts it) and, when it is
 killed, removes only what it created - an existing empty folder is kept - never following links and never after a
 failure git reported itself.
 
