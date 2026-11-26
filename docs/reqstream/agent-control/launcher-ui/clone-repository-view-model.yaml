@@ -25,15 +25,17 @@ sections:
       - id: AgentControl-CloneRepositoryViewModel-UrlOptionRefused
         title: >-
           The CloneRepositoryViewModel class shall refuse, with a message and without allowing Clone,
-          a repository address that git would read as an option (it starts with a dash), that uses
-          the remote-helper syntax (ext::, fd::) or that is not a single line of text, and a parent
-          folder that is not an absolute path.
+          a repository address that git would read as an option (it starts with a dash, also after
+          leading white space), that uses any remote-helper syntax of the form name:: (ext::, fd::
+          and every other name) or that is not a single line of text, and a parent folder that is not
+          an absolute path.
         justification: |
           Addresses are pasted from chats and web pages; one that starts with a dash or names a remote
           helper can make git run a command of the attacker's choosing, so it is refused before git is
           ever started.
         tests:
           - CloneRepositoryViewModel_UrlStartingWithDashOrHelperOrMultiline_IsRefused
+          - CloneRepositoryViewModel_Url_GenericHelperPrefixOrDashAfterWhitespace_IsRefused
           - CloneRepositoryViewModel_RelativeParentFolder_IsRefused
           - CloneRepositoryWindow_UrlLooksLikeAnOption_ShowsErrorAndDisablesClone
 
@@ -41,40 +43,93 @@ sections:
         title: >-
           The CloneRepositoryViewModel class shall suggest the folder name from the repository address
           - its last segment without a .git ending, for URLs, scp-like addresses and local paths - and
-          keep the suggestion following the address until the user types a folder name of their own.
+          keep the suggestion following the address until the user types a folder name of their own,
+          after which it follows the address again once the box is cleared and the address changes.
         justification: |
           The folder is nearly always named after the repository, as git itself would name it; typing
           it again would be a chore, but a name the user chose must not be overwritten.
         tests:
           - CloneRepositoryViewModel_DeriveFolderName_FollowsTheLastSegment
           - CloneRepositoryViewModel_FolderName_FollowsUrlUntilEdited
+          - CloneRepositoryViewModel_FolderName_ClearedFollowsTheUrlAgain
 
       - id: AgentControl-CloneRepositoryViewModel-FolderNameRules
         title: >-
           The CloneRepositoryViewModel class shall refuse, with a message and without allowing Clone,
-          a folder name that is not one valid Windows file name: one with path separators or other
-          characters a file name cannot have, "." or "..", a trailing dot or space, or a reserved
-          device name.
+          a folder name that is not one valid Windows file name, judged as typed and on every host
+          operating system: one with path separators or other characters a file name cannot have,
+          "." or "..", a space at the start or the end, a trailing dot, or a reserved device name
+          (also with a trailing space, an extension or a superscript digit), shall clone into exactly
+          the name typed, and shall treat a name of nothing but white space as empty.
         justification: |
           The folder name becomes one segment of the destination path; a name with a separator would
-          clone somewhere else than the dialog shows, and reserved names cannot be created at all.
+          clone somewhere else than the dialog shows, Windows would silently drop a trailing space or
+          dot so the folder would not have the name the dialog shows, and reserved names cannot be
+          created at all.
         tests:
           - CloneRepositoryViewModel_FolderName_InvalidNames_AreRefused
+          - CloneRepositoryViewModel_FolderName_TrailingOrLeadingSpace_IsRefusedAndNotTrimmed
+          - CloneRepositoryViewModel_FolderName_WhitespaceOnly_IsEmptyNotAnError
+          - CloneRepositoryViewModel_DestinationPath_UsesTheNameAsTyped
+          - CloneRepositoryViewModel_FolderName_ReservedDeviceNames_AreRefused
 
       - id: AgentControl-CloneRepositoryViewModel-DestinationCheckedInBackground
         title: >-
           The CloneRepositoryViewModel class shall, when Clone is pressed, check the destination on
-          disk through the background work runner rather than on the calling (UI) thread, show that it
-          is checking, keep the dialog open with the reason when anything exists at the destination (a
-          folder, even an empty one, a file or a link) or its parent folder does not exist, and accept
-          a name that does not exist yet.
+          disk through the background work runner rather than on the calling (UI) thread.
         justification: |
           The check reads the disk, which can be slow (a network drive, a sleeping disk), and must never
-          freeze the dialog; a clone onto somebody's existing folder must be refused before git starts.
+          freeze the dialog.
+        tests:
+          - CloneRepositoryViewModel_Accept_ChecksDestinationInBackground_ShowsExistingFolderMessage
+
+      - id: AgentControl-CloneRepositoryViewModel-DestinationCheckShowsProgress
+        title: >-
+          The CloneRepositoryViewModel class shall show that the destination is being checked, and not
+          allow Clone to be pressed again, until the check has answered.
+        justification: |
+          A check that can take seconds needs visible progress, and a second press would start a second
+          check for the same request.
+        tests:
+          - CloneRepositoryViewModel_Accept_ChecksDestinationInBackground_ShowsExistingFolderMessage
+
+      - id: AgentControl-CloneRepositoryViewModel-DestinationRefusalShown
+        title: >-
+          The CloneRepositoryViewModel class shall keep the dialog open with the reason as text when
+          anything exists at the destination (a folder, even an empty one, a file or a link) or its
+          parent folder does not exist, clear the reason when the input changes, and accept a name
+          that does not exist yet.
+        justification: |
+          A clone onto somebody's existing folder must be refused before git starts, and the user needs
+          the reason in words to choose another name.
         tests:
           - CloneRepositoryViewModel_Accept_ChecksDestinationInBackground_ShowsExistingFolderMessage
           - CloneRepositoryViewModel_Accept_NewFolderIsAcceptedExistingEmptyFolderAndMissingParentRefused
+          - CloneRepositoryViewModel_Accept_DestinationIsAFile_ShowsReason
           - CloneRepositoryWindow_EnterInAddressBox_ClonesAndExistingFolderShowsReason
+
+      - id: AgentControl-CloneRepositoryViewModel-StaleCheckDiscarded
+        title: >-
+          The CloneRepositoryViewModel class shall discard the answer of a destination check that
+          arrives after the user changed the address, the parent folder, the folder name or the group -
+          showing nothing, not ending the dialog and ending the checking state - so that the dialog
+          never acts on an answer for something else than it now holds.
+        justification: |
+          The fields stay editable while the disk is read (disabling the focused box would lose the
+          keyboard focus); an old answer applied to new input could close the dialog with a request the
+          user no longer sees, or show a refusal for a folder that is no longer chosen.
+        tests:
+          - CloneRepositoryViewModel_Accept_InputEditedWhileChecking_DiscardsTheStaleResult
+
+      - id: AgentControl-CloneRepositoryViewModel-CheckFailureReported
+        title: >-
+          The CloneRepositoryViewModel class shall, when the destination check itself fails, show the
+          reason as text with credentials removed, end the checking state and keep the dialog open.
+        justification: |
+          A disk that cannot be read is an everyday situation (a disconnected drive); it must be
+          explained, not thrown out of the command, and its text may carry an address with a password.
+        tests:
+          - CloneRepositoryViewModel_Accept_CheckThrows_ShowsRedactedReasonAndEndsChecking
 
       - id: AgentControl-CloneRepositoryViewModel-GroupChoiceDefaultsUngrouped
         title: >-
@@ -99,6 +154,7 @@ sections:
         tests:
           - CloneRepositoryViewModel_Accept_CompletesWithRequest
           - CloneRepositoryViewModel_Cancel_CompletesWithNone
+          - CloneRepositoryViewModel_Cancel_WhileCheckInFlight_CompletesOnceWithNone
           - CloneRepositoryWindow_CloneClicked_ReturnsTheRequest
           - CloneRepositoryWindow_EscapeAndCancel_ReturnNull
           - CloneRepositoryWindow_BrowseClicked_PutsChosenFolderInParentBoxAndCancelChangesNothing

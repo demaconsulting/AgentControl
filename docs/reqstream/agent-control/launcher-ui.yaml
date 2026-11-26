@@ -1668,6 +1668,10 @@ sections:
           - AgentControl-CloneRepositoryViewModel-FolderNameFromUrl
           - AgentControl-CloneRepositoryViewModel-FolderNameRules
           - AgentControl-CloneRepositoryViewModel-DestinationCheckedInBackground
+          - AgentControl-CloneRepositoryViewModel-DestinationCheckShowsProgress
+          - AgentControl-CloneRepositoryViewModel-DestinationRefusalShown
+          - AgentControl-CloneRepositoryViewModel-StaleCheckDiscarded
+          - AgentControl-CloneRepositoryViewModel-CheckFailureReported
           - AgentControl-CloneRepositoryViewModel-GroupChoiceDefaultsUngrouped
           - AgentControl-CloneRepositoryViewModel-CompletesWithRequest
         tests:

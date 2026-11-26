@@ -247,16 +247,21 @@ into a new folder and add it to the list in one step. A dialog asks for:
 **Clone** stays unavailable until the address, the parent folder and the folder name are filled in and acceptable. A
 message under the boxes says what is not, for example:
 
-- an address that starts with a dash, that uses Git's *remote helper* syntax (such as `ext::...` or `fd::...`) or that
+- an address that starts with a dash, that uses Git's *remote helper* syntax (anything of the form `name::...`, such as
+  `ext::...` or `fd::...`) or that
   spans more than one line is refused - AgentControl treats the address as an address and never lets Git read it as
   an option or as a command to run;
 - the folder name must be one valid Windows folder name: no `\`, `/`, `:`, `*`, `?`, `"`, `<`, `>` or `|`, no `.` or
-  `..`, no trailing dot or space, and not a name Windows reserves (`CON`, `NUL`, `COM1`...);
+  `..`, no space at the start or the end, no trailing dot, and not a name Windows reserves (`CON`, `NUL`, `COM1`...).
+  The name is used exactly as you typed it - AgentControl never trims it silently, because Windows would drop a
+  trailing space or dot and the folder would not have the name shown under the boxes;
 - the parent folder must be a complete path such as `C:\Source`.
 
 When you press **Clone** (or **Enter**), AgentControl checks the folder in the background: the parent folder must
 exist, and the new folder must not exist yet - not even as an empty folder, a file or a shortcut-like link. If
 anything is there the dialog stays open and says so, so nothing of yours can be overwritten or mixed with the clone.
+The boxes stay editable while the folder is checked; if you change one of them meanwhile, the answer of that check is
+ignored and you can press **Clone** again for what the dialog shows now.
 
 The dialog then closes and the clone runs in the background, shown in the progress strip under the app bar as
 "Cloning repo...". The window stays usable meanwhile, and you can start another clone into a different folder (a second

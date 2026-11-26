@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using DemaConsulting.AgentControl.GitIntegration;
 using DemaConsulting.AgentControl.LauncherUI;
 using DemaConsulting.AgentControl.Utilities;
 
@@ -173,6 +174,8 @@ public sealed class CloneRepositoryViewModelTests : IDisposable
     [InlineData("NUL.txt", true)]
     [InlineData("com1", true)]
     [InlineData("LPT9", true)]
+    [InlineData("CON" + "IN$", true)]
+    [InlineData("COM1.txt", true)]
     [InlineData("repo", false)]
     [InlineData("my repo", false)]
     [InlineData("repo.v2", false)]
@@ -210,6 +213,318 @@ public sealed class CloneRepositoryViewModelTests : IDisposable
         Assert.True(viewModel.HasError);
         Assert.Contains("absolute", viewModel.ErrorText, StringComparison.Ordinal);
         Assert.False(viewModel.CanAccept);
+    }
+
+    /// <summary>
+    ///     Test that a folder name that starts or ends with a space, or ends with a dot, is refused as
+    ///     typed - never silently trimmed - with a message, and that Clone stays disabled.
+    /// </summary>
+    /// <param name="name">The folder name.</param>
+    [Theory]
+    [InlineData("repo ")]
+    [InlineData(" repo")]
+    [InlineData("  repo  ")]
+    [InlineData("repo.")]
+    [InlineData("repo..")]
+    public void CloneRepositoryViewModel_FolderName_TrailingOrLeadingSpace_IsRefusedAndNotTrimmed(string name)
+    {
+        // Arrange
+        var parent = CreateTempDirectory();
+        var viewModel = new CloneRepositoryViewModel([], parent)
+        {
+            RepositoryUrl = "https://example.com/team/repo.git"
+        };
+
+        // Act
+        viewModel.FolderName = name;
+
+        // Assert: the name is kept as typed, refused with the rule, and the path shown is the raw one
+        Assert.Equal(name, viewModel.FolderName);
+        Assert.True(viewModel.HasError);
+        Assert.Contains("must not start or end with a space", viewModel.ErrorText, StringComparison.Ordinal);
+        Assert.False(viewModel.CanAccept);
+        Assert.False(viewModel.AcceptCommand.CanExecute(null));
+        Assert.Equal(Path.Combine(parent, name), viewModel.DestinationPath);
+    }
+
+    /// <summary>
+    ///     Test that a folder name of nothing but white space counts as empty - no error, Clone disabled,
+    ///     no destination.
+    /// </summary>
+    [Fact]
+    public void CloneRepositoryViewModel_FolderName_WhitespaceOnly_IsEmptyNotAnError()
+    {
+        // Arrange
+        var viewModel = new CloneRepositoryViewModel([], CreateTempDirectory())
+        {
+            RepositoryUrl = "https://example.com/team/repo.git"
+        };
+
+        // Act
+        viewModel.FolderName = "   ";
+
+        // Assert
+        Assert.False(viewModel.HasError);
+        Assert.False(viewModel.CanAccept);
+        Assert.Equal(string.Empty, viewModel.DestinationPath);
+        Assert.Equal("Enter a name for the new folder.", CloneRepositoryViewModel.CheckFolderName("   "));
+    }
+
+    /// <summary>
+    ///     Test that the destination uses the folder name exactly as typed (inner spaces included), and
+    ///     the parent folder with its surrounding white space removed.
+    /// </summary>
+    [Fact]
+    public void CloneRepositoryViewModel_DestinationPath_UsesTheNameAsTyped()
+    {
+        // Arrange
+        var parent = CreateTempDirectory();
+        var viewModel = new CloneRepositoryViewModel([], "  " + parent + "  ")
+        {
+            RepositoryUrl = "https://example.com/team/repo.git"
+        };
+
+        // Act
+        viewModel.FolderName = "my  repo.v2";
+
+        // Assert
+        Assert.False(viewModel.HasError);
+        Assert.True(viewModel.CanAccept);
+        Assert.Equal(Path.Combine(parent, "my  repo.v2"), viewModel.DestinationPath);
+    }
+
+    /// <summary>
+    ///     Test that device names are refused whatever follows them or whichever digit - also a
+    ///     superscript one - they carry, including the console handles and a name with a trailing space.
+    /// </summary>
+    [Fact]
+    public void CloneRepositoryViewModel_FolderName_ReservedDeviceNames_AreRefused()
+    {
+        // Arrange: names built by code so that no unusual character is typed in the source
+        var superscripts = new[] { (char)0x00B9, (char)0x00B2, (char)0x00B3 };
+        var names = new List<string> { "CON ", "con .txt", "CON" + "IN$", "CON" + "OUT$", "con" + "out$.log", "Aux.tar.gz" };
+        names.AddRange(superscripts.SelectMany(digit => new[] { "COM" + digit, "lpt" + digit + ".txt" }));
+
+        // Act / Assert
+        Assert.All(names, name => Assert.NotNull(CloneRepositoryViewModel.CheckFolderName(name)));
+        Assert.All(
+            new[] { "COMET", "CONSOLE", "COM10", "LPT", "console.log", "auxiliary" },
+            name => Assert.Null(CloneRepositoryViewModel.CheckFolderName(name)));
+    }
+
+    /// <summary>
+    ///     Test that clearing the folder name box lets it follow the address again from the next change
+    ///     of the address, while a name that is typed stays.
+    /// </summary>
+    [Fact]
+    public void CloneRepositoryViewModel_FolderName_ClearedFollowsTheUrlAgain()
+    {
+        // Arrange
+        var viewModel = new CloneRepositoryViewModel([], CreateTempDirectory());
+        viewModel.RepositoryUrl = "https://example.com/team/first.git";
+
+        // Act: a typed name stays through an address change; cleared, the next address names it again
+        viewModel.FolderName = "mine";
+        viewModel.RepositoryUrl = "https://example.com/team/second.git";
+        var kept = viewModel.FolderName;
+        viewModel.FolderName = string.Empty;
+        var cleared = viewModel.FolderName;
+        viewModel.RepositoryUrl = "https://example.com/team/third.git";
+
+        // Assert
+        Assert.Equal("mine", kept);
+        Assert.Equal(string.Empty, cleared);
+        Assert.Equal("third", viewModel.FolderName);
+    }
+
+    /// <summary>
+    ///     Test that any text of the form <c>name::address</c> is refused as a remote helper - not only
+    ///     <c>ext</c> and <c>fd</c> - and that an address that starts with a dash after leading white space
+    ///     is refused too.
+    /// </summary>
+    /// <param name="url">The address.</param>
+    [Theory]
+    [InlineData("foo::bar")]
+    [InlineData("a+b.c::x")]
+    [InlineData("  -x")]
+    [InlineData("\t--upload-pack=calc")]
+    public void CloneRepositoryViewModel_Url_GenericHelperPrefixOrDashAfterWhitespace_IsRefused(string url)
+    {
+        // Arrange
+        var viewModel = new CloneRepositoryViewModel([], CreateTempDirectory());
+
+        // Act
+        viewModel.RepositoryUrl = url;
+
+        // Assert
+        Assert.True(viewModel.HasError);
+        Assert.False(viewModel.CanAccept);
+        Assert.NotNull(GitClient.CheckCloneUrl(url));
+    }
+
+    /// <summary>
+    ///     Test that an answer of the disk check that arrives after the user changed the address, the
+    ///     parent folder, the folder name or the group is discarded: nothing is shown, the dialog does not
+    ///     end, checking stops, and Clone is available again for what the dialog now holds.
+    /// </summary>
+    /// <param name="edit">What the user changes while the disk is read.</param>
+    /// <param name="destinationExists">Whether the first destination exists, so that a stale answer
+    ///     would have been a refusal; otherwise it would have been an acceptance.</param>
+    [Theory]
+    [InlineData("url", true)]
+    [InlineData("url", false)]
+    [InlineData("parent", true)]
+    [InlineData("parent", false)]
+    [InlineData("name", true)]
+    [InlineData("name", false)]
+    [InlineData("group", true)]
+    [InlineData("group", false)]
+    public async Task CloneRepositoryViewModel_Accept_InputEditedWhileChecking_DiscardsTheStaleResult(string edit, bool destinationExists)
+    {
+        // Arrange: a destination that does or does not exist; the check is held at a gate
+        var parent = CreateTempDirectory();
+        var otherParent = CreateTempDirectory();
+        if (destinationExists)
+        {
+            Directory.CreateDirectory(Path.Combine(parent, "repo"));
+        }
+
+        var workGroup = new CloneGroupChoice("Work", "Work");
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = new CloneRepositoryViewModel([workGroup], parent, gate)
+        {
+            RepositoryUrl = "https://example.com/team/repo.git"
+        };
+        var requests = new List<CloneRepositoryRequest?>();
+        viewModel.Completed += (_, request) => requests.Add(request);
+        var accepting = viewModel.AcceptCommand.ExecuteAsync();
+        await gate.FirstCall;
+        Assert.True(viewModel.IsChecking);
+
+        // Act: edit while the disk is read, then let the check answer
+        switch (edit)
+        {
+            case "url":
+                viewModel.RepositoryUrl = "https://example.com/team/other.git";
+                break;
+            case "parent":
+                viewModel.ParentFolder = otherParent;
+                break;
+            case "name":
+                viewModel.FolderName = "other";
+                break;
+            default:
+                viewModel.SelectedGroup = workGroup;
+                break;
+        }
+
+        gate.Release();
+        await accepting;
+
+        // Assert: the stale answer is neither shown nor acted on
+        Assert.False(viewModel.IsChecking);
+        Assert.Null(viewModel.ErrorText);
+        Assert.Empty(requests);
+        Assert.True(viewModel.CanAccept);
+
+        // Act: Clone again for what the dialog holds now - the new input is checked on its own
+        await viewModel.AcceptCommand.ExecuteAsync();
+
+        // Assert: the new input decides
+        var expectsRefusal = destinationExists && edit is "group";
+        if (expectsRefusal)
+        {
+            Assert.Empty(requests);
+            Assert.Contains("already exists", viewModel.ErrorText, StringComparison.Ordinal);
+        }
+        else
+        {
+            var request = Assert.Single(requests);
+            Assert.Equal(viewModel.DestinationPath, request!.DestinationPath);
+            Assert.Equal(edit == "group" ? workGroup.GroupName : null, request.GroupName);
+        }
+    }
+
+    /// <summary>
+    ///     Test that an unexpected failure of the disk check is shown as text with the secret removed,
+    ///     checking ends and the dialog stays open.
+    /// </summary>
+    [Fact]
+    public async Task CloneRepositoryViewModel_Accept_CheckThrows_ShowsRedactedReasonAndEndsChecking()
+    {
+        // Arrange: a check that fails with a message that carries a password
+        const string secret = "Hunter2PasswordValue";
+        var runner = new ThrowingBackgroundWorkRunner(
+            new IOException($"The share for https://bob:{secret}@example.com/team/repo.git is gone."));
+        var viewModel = new CloneRepositoryViewModel([], CreateTempDirectory(), runner)
+        {
+            RepositoryUrl = "https://example.com/team/repo.git"
+        };
+        var requests = new List<CloneRepositoryRequest?>();
+        viewModel.Completed += (_, request) => requests.Add(request);
+
+        // Act
+        await viewModel.AcceptCommand.ExecuteAsync();
+
+        // Assert
+        Assert.False(viewModel.IsChecking);
+        Assert.StartsWith("The folder could not be checked:", viewModel.ErrorText, StringComparison.Ordinal);
+        Assert.DoesNotContain(secret, viewModel.ErrorText, StringComparison.Ordinal);
+        Assert.Empty(requests);
+        Assert.True(viewModel.CanAccept);
+    }
+
+    /// <summary>
+    ///     Test that Cancel while the disk check is in flight completes the dialog once with no request,
+    ///     and that the check's late answer raises nothing more.
+    /// </summary>
+    [Fact]
+    public async Task CloneRepositoryViewModel_Cancel_WhileCheckInFlight_CompletesOnceWithNone()
+    {
+        // Arrange
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = new CloneRepositoryViewModel([], CreateTempDirectory(), gate)
+        {
+            RepositoryUrl = "https://example.com/team/repo.git"
+        };
+        var requests = new List<CloneRepositoryRequest?>();
+        viewModel.Completed += (_, request) => requests.Add(request);
+        var accepting = viewModel.AcceptCommand.ExecuteAsync();
+        await gate.FirstCall;
+
+        // Act: cancel, then let the check answer
+        viewModel.Cancel();
+        gate.Release();
+        await accepting;
+
+        // Assert
+        Assert.Equal<CloneRepositoryRequest?>([null], requests);
+        Assert.False(viewModel.IsChecking);
+        Assert.Null(viewModel.ErrorText);
+    }
+
+    /// <summary>
+    ///     Test that a destination that is an existing file is refused with a reason that says so.
+    /// </summary>
+    [Fact]
+    public async Task CloneRepositoryViewModel_Accept_DestinationIsAFile_ShowsReason()
+    {
+        // Arrange
+        var parent = CreateTempDirectory();
+        await File.WriteAllTextAsync(Path.Combine(parent, "repo"), "x", TestContext.Current.CancellationToken);
+        var viewModel = new CloneRepositoryViewModel([], parent)
+        {
+            RepositoryUrl = "https://example.com/team/repo.git"
+        };
+        var requests = new List<CloneRepositoryRequest?>();
+        viewModel.Completed += (_, request) => requests.Add(request);
+
+        // Act
+        await viewModel.AcceptCommand.ExecuteAsync();
+
+        // Assert
+        Assert.Contains("is a file", viewModel.ErrorText, StringComparison.Ordinal);
+        Assert.Empty(requests);
     }
 
     /// <summary>
@@ -433,5 +748,16 @@ public sealed class CloneRepositoryViewModelTests : IDisposable
         Directory.CreateDirectory(path);
         _tempPaths.Add(path);
         return path;
+    }
+
+    /// <summary>
+    ///     A background work runner whose work always fails with a given error, standing in for a disk
+    ///     that cannot be read.
+    /// </summary>
+    /// <param name="error">The error every call fails with.</param>
+    private sealed class ThrowingBackgroundWorkRunner(Exception error) : IBackgroundWorkRunner
+    {
+        /// <inheritdoc />
+        public Task<T> RunAsync<T>(Func<T> work, CancellationToken cancellationToken) => Task.FromException<T>(error);
     }
 }

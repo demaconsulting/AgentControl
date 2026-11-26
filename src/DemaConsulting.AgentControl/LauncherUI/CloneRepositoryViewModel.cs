@@ -67,7 +67,11 @@ internal sealed record CloneRepositoryRequest(string Url, string DestinationPath
 ///     rule that needs the disk - nothing may exist at the destination (no folder, file or link), and its
 ///     parent must exist - is checked when the user presses Clone, <em>off the UI thread</em> through an
 ///     <see cref="IBackgroundWorkRunner"/>, so a slow or disconnected drive never freezes the dialog; a
-///     problem is shown as text and the dialog stays open, and only a usable destination ends it.
+///     problem is shown as text and the dialog stays open, and only a usable destination ends it. The
+///     fields stay editable while the disk is read; an answer that arrives after the address, the folder,
+///     the folder name or the group changed belongs to another request and is discarded (neither shown nor
+///     acted on), and Clone is available again for what the dialog holds then. The address and the parent
+///     folder are used with surrounding white space removed; the folder name is used exactly as typed.
 ///     </para>
 ///     <para>
 ///     The folder name follows the address (<see cref="DeriveFolderName"/>) until the user edits it
@@ -81,14 +85,10 @@ internal sealed class CloneRepositoryViewModel : ViewModelBase
 {
     /// <summary>
     ///     The names Windows reserves for devices, which no file or folder may have (with or without an
-    ///     extension).
+    ///     extension): the classic ones, the console handles and the numbered ports whose number may
+    ///     also be a superscript digit.
     /// </summary>
-    private static readonly HashSet<string> ReservedDeviceNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "CON", "PRN", "AUX", "NUL",
-        "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-        "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
-    };
+    private static readonly HashSet<string> ReservedDeviceNames = CreateReservedDeviceNames();
 
     /// <summary>
     ///     The characters no Windows file name may contain: <c>\ / : * ? " &lt; &gt; |</c> and every
@@ -133,6 +133,13 @@ internal sealed class CloneRepositoryViewModel : ViewModelBase
     ///     Whether <see cref="Completed"/> was already raised.
     /// </summary>
     private bool _isCompleted;
+
+    /// <summary>
+    ///     Counts the changes of anything the request is made of (the address, the folder, the folder
+    ///     name, the group), so a disk check that finished after the user edited the dialog can tell that
+    ///     its answer is stale.
+    /// </summary>
+    private int _inputVersion;
 
     /// <summary>
     ///     Initializes the dialog's view model.
@@ -206,7 +213,9 @@ internal sealed class CloneRepositoryViewModel : ViewModelBase
 
     /// <summary>
     ///     Gets or sets the name of the new folder inside <see cref="ParentFolder"/>. It follows
-    ///     <see cref="RepositoryUrl"/> until it is set here (typing in the box), and then stays as chosen.
+    ///     <see cref="RepositoryUrl"/> until it is set here (typing in the box), and then stays as chosen;
+    ///     clearing the box lets it follow the address again from the next change of the address. The
+    ///     text is kept exactly as typed - never trimmed - so that the path shown is the path cloned into.
     /// </summary>
     public string FolderName
     {
@@ -215,7 +224,7 @@ internal sealed class CloneRepositoryViewModel : ViewModelBase
         {
             if (SetField(ref _folderName, value ?? string.Empty))
             {
-                _folderNameEdited = true;
+                _folderNameEdited = _folderName.Length > 0;
                 InputChanged();
             }
         }
@@ -234,28 +243,34 @@ internal sealed class CloneRepositoryViewModel : ViewModelBase
     public CloneGroupChoice SelectedGroup
     {
         get => _selectedGroup;
-        set => SetField(ref _selectedGroup, value ?? CloneGroupChoice.Ungrouped);
+        set
+        {
+            if (SetField(ref _selectedGroup, value ?? CloneGroupChoice.Ungrouped))
+            {
+                // A check that is running was started for the other group
+                _inputVersion++;
+            }
+        }
     }
 
     /// <summary>
-    ///     Gets where the clone will be made: <see cref="FolderName"/> inside
-    ///     <see cref="ParentFolder"/>; empty while either is blank. Only combines the two texts - the
-    ///     disk is not read.
+    ///     Gets where the clone will be made: <see cref="FolderName"/> as typed inside
+    ///     <see cref="ParentFolder"/> (trimmed, like the address); empty while either is blank. Only
+    ///     combines the two texts - the disk is not read.
     /// </summary>
     public string DestinationPath
     {
         get
         {
             var parent = _parentFolder.Trim();
-            var name = _folderName.Trim();
-            if (parent.Length == 0 || name.Length == 0)
+            if (parent.Length == 0 || string.IsNullOrWhiteSpace(_folderName))
             {
                 return string.Empty;
             }
 
             try
             {
-                return Path.Combine(parent, name);
+                return Path.Combine(parent, _folderName);
             }
             catch (ArgumentException)
             {
@@ -302,7 +317,7 @@ internal sealed class CloneRepositoryViewModel : ViewModelBase
         !_isChecking &&
         !_isCompleted &&
         _repositoryUrl.Trim().Length > 0 &&
-        _folderName.Trim().Length > 0 &&
+        !string.IsNullOrWhiteSpace(_folderName) &&
         _parentFolder.Trim().Length > 0 &&
         FindInputProblem() is null;
 
@@ -355,42 +370,66 @@ internal sealed class CloneRepositoryViewModel : ViewModelBase
     }
 
     /// <summary>
+    ///     Builds the set of reserved device names.
+    /// </summary>
+    /// <returns>The names, compared without regard to letter case.</returns>
+    private static HashSet<string> CreateReservedDeviceNames()
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "CON", "PRN", "AUX", "NUL", "CON" + "IN$", "CON" + "OUT$",
+            "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+        };
+
+        // Windows also reserves the ports numbered with a superscript one, two or three
+        foreach (var superscript in new[] { (char)0x00B9, (char)0x00B2, (char)0x00B3 })
+        {
+            names.Add("COM" + superscript);
+            names.Add("LPT" + superscript);
+        }
+
+        return names;
+    }
+
+    /// <summary>
     ///     Tells why a text cannot be the name of the folder to clone into, or that it can.
     /// </summary>
     /// <remarks>
     ///     The folder name must be one valid Windows file name: no path separators or other characters a
-    ///     file name cannot have, not <c>.</c> or <c>..</c>, no space or dot at the end, and not a
-    ///     reserved device name (<c>CON</c>, <c>NUL</c>, <c>COM1</c>...), with or without an extension.
-    ///     The set of forbidden characters is fixed and does not depend on the host operating system.
-    ///     Pure; no disk access.
+    ///     file name cannot have, not <c>.</c> or <c>..</c>, no space at the start or the end and no dot
+    ///     at the end, and not a reserved device name (<c>CON</c>, <c>NUL</c>, <c>COM1</c>...), with or
+    ///     without an extension. The text is judged as typed, never trimmed: Windows would silently
+    ///     drop a trailing space or dot, so the folder would not have the name the dialog shows. Only
+    ///     a text of nothing but white space counts as empty. The set of forbidden characters is fixed
+    ///     and does not depend on the host operating system. Pure; no disk access.
     /// </remarks>
     /// <param name="name">The folder name as typed.</param>
     /// <returns>The reason, or <see langword="null"/> when the name is acceptable.</returns>
     public static string? CheckFolderName(string? name)
     {
-        var text = (name ?? string.Empty).Trim();
-        if (text.Length == 0)
+        if (string.IsNullOrWhiteSpace(name))
         {
             return "Enter a name for the new folder.";
         }
 
-        if (text is "." or "..")
+        if (name is "." or "..")
         {
             return "The folder name must not be '.' or '..'.";
         }
 
-        if (text.IndexOfAny(InvalidNameCharacters) >= 0)
+        if (name.IndexOfAny(InvalidNameCharacters) >= 0)
         {
             return "The folder name must not contain \\ / : * ? \" < > | or control characters.";
         }
 
-        if (text.EndsWith('.') || text.EndsWith(' '))
+        if (name.StartsWith(' ') || name.EndsWith(' ') || name.EndsWith('.'))
         {
-            return "The folder name must not end with a dot or a space.";
+            return "The folder name must not start or end with a space, and must not end with a dot.";
         }
 
-        var firstDot = text.IndexOf('.', StringComparison.Ordinal);
-        var baseName = firstDot < 0 ? text : text[..firstDot];
+        var firstDot = name.IndexOf('.', StringComparison.Ordinal);
+        var baseName = firstDot < 0 ? name : name[..firstDot];
         return ReservedDeviceNames.Contains(baseName.TrimEnd())
             ? $"'{baseName}' is a reserved name on Windows and cannot be used as a folder name."
             : null;
@@ -418,6 +457,7 @@ internal sealed class CloneRepositoryViewModel : ViewModelBase
         var url = _repositoryUrl.Trim();
         var destination = DestinationPath;
         var group = _selectedGroup.GroupName;
+        var version = _inputVersion;
 
         // The disk check can be slow (network drive, sleeping disk): never on the UI thread
         IsChecking = true;
@@ -426,6 +466,13 @@ internal sealed class CloneRepositoryViewModel : ViewModelBase
             var problem = await _backgroundWork.RunAsync(
                 () => GitClient.CheckCloneDestination(destination), cancellationToken);
             if (_isCompleted)
+            {
+                return;
+            }
+
+            // Edited while the disk was read: the answer is for another request, so it is discarded -
+            // neither shown nor acted on - and Clone is available again for what the dialog holds now
+            if (version != _inputVersion)
             {
                 return;
             }
@@ -464,7 +511,7 @@ internal sealed class CloneRepositoryViewModel : ViewModelBase
             return urlProblem;
         }
 
-        if (_folderName.Trim().Length > 0 && CheckFolderName(_folderName) is { } nameProblem)
+        if (!string.IsNullOrWhiteSpace(_folderName) && CheckFolderName(_folderName) is { } nameProblem)
         {
             return nameProblem;
         }
@@ -491,6 +538,7 @@ internal sealed class CloneRepositoryViewModel : ViewModelBase
     /// </summary>
     private void InputChanged()
     {
+        _inputVersion++;
         _destinationProblem = null;
         OnPropertyChanged(nameof(DestinationPath));
         RaiseErrorChanged();
