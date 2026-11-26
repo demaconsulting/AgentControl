@@ -367,8 +367,7 @@ the events that need a dialog.
   reads the branches (`GitClient.GetBranches`, no fetch) through the `IBackgroundWorkRunner`, so git never runs on the
   UI thread, and lists them (local first, then remote, the current one marked or the detached commit named); a failure
   is shown as text. The filter, the choice by button, Enter and double-click, and Cancel/Escape end in one `Completed`
-  event
-  - with a `BranchChoice` or `null` - which closes the window. The dialog only chooses: the code-behind then calls
+  event - with a `BranchChoice` or `null` - which closes the window. The dialog only chooses: the code-behind then calls
   `RepoCardViewModel.SwitchBranchAsync`, which runs the switch as an operation of the card (see *Switching branches*).
 - *`CloneRepositoryViewModel` and `CloneRepositoryWindow`*: the window's code-behind shows the dialog when the app bar's
   `CloneRepoButton` is pressed (`MainWindow.CloneRepositoryAsync`): it builds the dialog's view model with the group

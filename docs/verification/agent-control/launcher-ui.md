@@ -2,26 +2,26 @@
 
 ### Verification Approach
 
-The `LauncherUI` subsystem is verified by the combined unit tests of its eleven units (`MainWindowViewModelTests.cs` and
-`RepoGroupingTests.cs`, `RepoCardViewModelTests.cs`, `RepoCardLaunchVerificationTests.cs` (the checks of a repo's agent
-files before launch), `RepoCardServerSourceTests.cs` and `RepoCardImageTests.cs`, `SelectPackageWindowViewModelTests.cs`
-and `SelectPackageRetryTests.cs`, `SettingsWindowViewModelTests.cs`, `SettingsWindowGitSourceTests.cs`,
-`SourceEditorViewModelTests.cs`, `SourceEditorServerViewModelTests.cs`, `SourceEditorSignatureViewModelTests.cs` and
-`SourceEditorGitViewModelTests.cs`, `RepoCardGitAwarenessTests.cs` (the Git icon, tooltip, refresh and Change package of
-the card) and `PackageSourceGitPresentationTests.cs` (the Git icon and names, and how a source row classifies a remote
-Git source), `PackageSourceStatusPresentationTests.cs` (the "Online source" status, the folder statuses and the "Signed
-only" badge of a source row, with the Settings window showing it), `CredentialPromptViewModelTests.cs`,
-`RepoImageLocatorTests.cs`, `RepoGroupHeaderViewModelTests.cs`, `GroupNameViewModelTests.cs`,
-`SwitchBranchViewModelTests.cs`, `CloneRepositoryViewModelTests.cs`, `DialogBehaviorTests.cs` and
-`GlobalProgressViewModelTests.cs`, the last seven units each with its own verification document), plus
-`AsyncRelayCommandTests.cs` for the shared asynchronous command, which together exercise the full
-recent-repos/card/select-package/settings/sign-in interaction surface without ever constructing an Avalonia `Window`
-(apart from the picture decoder and `DialogBehavior`, which need Avalonia's headless session). The windows themselves
-are exercised by headless Avalonia tests (`DialogWindowTests.cs` - including the confirmation window's custom button
-labels -, `MainWindowTests.cs`, `SwitchBranchWindowTests.cs` (the branch dialog), `CloneRepositoryWindowTests.cs` (the
-clone dialog), `UsabilityWindowTests.cs` for the favorite star with real pointer and key input, the "Check again" menu
-item, the up-to-date check mark, the narrow card, the Settings sections, the keyboard behavior of the dialogs, the About
-version row, the order of the AGENTS.md question and the release notes and the keep-or-update and launch-anyway
+The `LauncherUI` subsystem is verified by the combined unit tests of its fourteen units (`MainWindowViewModelTests.cs`
+and `RepoGroupingTests.cs`, `RepoCardViewModelTests.cs`, `RepoCardLaunchVerificationTests.cs` (the checks of a repo's
+agent files before launch), `RepoCardServerSourceTests.cs` and `RepoCardImageTests.cs`,
+`SelectPackageWindowViewModelTests.cs` and `SelectPackageRetryTests.cs`, `SettingsWindowViewModelTests.cs`,
+`SettingsWindowGitSourceTests.cs`, `SourceEditorViewModelTests.cs`, `SourceEditorServerViewModelTests.cs`,
+`SourceEditorSignatureViewModelTests.cs` and `SourceEditorGitViewModelTests.cs`, `RepoCardGitAwarenessTests.cs` (the Git
+icon, tooltip, refresh and Change package of the card) and `PackageSourceGitPresentationTests.cs` (the Git icon and
+names, and how a source row classifies a remote Git source), `PackageSourceStatusPresentationTests.cs` (the "Online
+source" status, the folder statuses and the "Signed only" badge of a source row, with the Settings window showing it),
+`CredentialPromptViewModelTests.cs`, `RepoImageLocatorTests.cs`, `RepoGroupHeaderViewModelTests.cs`,
+`GroupNameViewModelTests.cs`, `SwitchBranchViewModelTests.cs`, `CloneRepositoryViewModelTests.cs`,
+`DialogBehaviorTests.cs`, `GlobalProgressViewModelTests.cs` and `RepoRefreshQueueTests.cs`, every unit having its own
+verification document), plus `AsyncRelayCommandTests.cs` for the shared asynchronous command, which together exercise
+the full recent-repos/card/select-package/settings/sign-in interaction surface without ever constructing an Avalonia
+`Window` (apart from the picture decoder and `DialogBehavior`, which need Avalonia's headless session). The windows
+themselves are exercised by headless Avalonia tests (`DialogWindowTests.cs` - including the confirmation window's custom
+button labels -, `MainWindowTests.cs`, `SwitchBranchWindowTests.cs` (the branch dialog), `CloneRepositoryWindowTests.cs`
+(the clone dialog), `UsabilityWindowTests.cs` for the favorite star with real pointer and key input, the "Check again"
+menu item, the up-to-date check mark, the narrow card, the Settings sections, the keyboard behavior of the dialogs, the
+About version row, the order of the AGENTS.md question and the release notes and the keep-or-update and launch-anyway
 questions about a repo's agent files, `RepoGroupWindowTests.cs` for the group headers (including that a window whose
 data context is cleared and assigned again handles each header request once, and stops handling a view model that
 another one replaced: `MainWindow_DataContextAssignedAgain_HandlesEachRequestOnceAndOnlyForTheCurrentViewModel`), the
@@ -49,10 +49,16 @@ sources, a source that requires signed packages refusing an unsigned upgrade, an
 FlaUI `DemaConsulting.AgentControl.UiTests` project. At the subsystem boundary, collaborating subsystems
 (`AgentPackageManagement`, `RepoSync`, `RepoConfig`, `GitIntegration`, `AgentToolLauncher`, `Settings`) are exercised
 through their real implementations against real temporary directories and package-zip fixtures, and git is substituted
-with a stub script (`GitStub`, shared with `GitClientTests`) so no test depends on a real git installation. The About
-command's dependency-list data source has direct unit coverage (`ThirdPartyDependenciesTests.cs`), since it is a plain
-static data source independent of any Avalonia control; the About dialog itself still has no dedicated view-model class,
-so its end-to-end rendering (opening the window and showing the tagline, version, copyright, license, and a non-empty
+with a stub script (`GitStub`, shared with `GitClientTests`) wherever a test needs only what git answers, so most tests
+depend on no git installation. The tests that need git's real behavior - a switch git refuses or the pin file following
+a branch (`RepoCardSwitchBranchTests.cs`), a clone of a local bare repository (`MainWindowViewModelCloneTests.cs` and
+the headless `MainWindow_CloneRepoButton_*` and `MainWindow_SwitchBranchMenuItem_*` window tests in
+`MainWindowTests.cs`) and the Git status and committed-files checks of a card - use a real local repository built by
+`GitRepositoryFixture`: they are skipped on a machine without git and failed when the environment variable `CI` is set,
+so a pipeline never passes with that evidence silently missing. No test uses a network. The About command's
+dependency-list data source has direct unit coverage (`ThirdPartyDependenciesTests.cs`), since it is a plain static data
+source independent of any Avalonia control; the About dialog itself still has no dedicated view-model class, so its
+end-to-end rendering (opening the window and showing the tagline, version, copyright, license, and a non-empty
 dependency list) is verified via the FlaUI `DemaConsulting.AgentControl.UiTests` project, while its banner (logo, name
 and tagline above the details) and its layout (600 wide, limited height, the banner and Close outside the one scrolling
 region that holds every detail) are verified by headless tests in `DialogWindowTests.cs`, and the legibility of the
@@ -1207,7 +1213,8 @@ name. The requirements are split by behavior; each is covered by the tests that 
   with a `main` and a `feature` branch: choosing the item opens the dialog owned by the main window, it lists the
   branches git knows, choosing the remote branch and Switch closes it, the repo is on `feature` with its files, and the
   card says `Switched to branch 'feature'.`). What the switch does to the card - the pin following the branch, a refusal
-  shown in git's words, git off the UI thread - is verified by the `RepoCardViewModel` unit tests
+  shown in git's words, a switch that git did not finish in time (the card reads the branch and working tree again and
+  says that the result is unknown), git off the UI thread - is verified by the `RepoCardViewModel` unit tests
   (`RepoCardSwitchBranchTests.cs`), whose requirements are its children.
 - `AgentControl-LauncherUI-SwitchBranchDialog` (the dialog that chooses the branch):
   `SwitchBranchWindow_Opened_ListsBranchesAndFocusesFilterBox`,

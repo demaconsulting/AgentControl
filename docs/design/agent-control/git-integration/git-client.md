@@ -10,7 +10,8 @@ branch, `HEAD` commit hash, and whether any of the four known agent folders are 
 the tree. It is also the one place AgentControl changes what git tracks: it reports which of
 the four folders are tracked and can stop git tracking them (index only), which lets the
 `LauncherUI` subsystem convert a repo that committed its agent files. Each public method
-invokes a single git subcommand via `RunGit` and translates its
+invokes a git subcommand via `RunGit` (listing branches asks for the refs, the remotes and, for a detached `HEAD`, the
+commit) and translates its
 exit code/output into a typed result or exception, isolating every other unit in the codebase
 from git's process-based interface. It also answers, without running git, whether a folder is the
 top folder of a Git repository, so the launcher can refuse to track a folder that is not one.
@@ -173,7 +174,8 @@ accepts only `KnownAgentFolders` (same argument checks as `UntrackAgentFolders`)
   `ArgumentException` whose message is a reason the user can read, before git starts; (3) create the working folder
   `.agentcontrol-clone-<guid>` in the destination's parent folder (`CreateCloneWorkFolder`: a name that does not exist
   yet, `Directory.CreateDirectory`, hidden on Windows as a best effort) - the call's own folder, so a deletion of it can
-  never reach anybody else's data; (4) run `git clone -- <url> <working folder>` with the destination's parent folder as
+  never reach anybody else's data; (4) run `git clone -- <url> <working folder>` - the address trimmed of surrounding
+  white space, the text `CheckCloneUrl` judged - with the destination's parent folder as
   working directory (a clone needs an existing one), under the `CloneRepository` limit
   (`AgentControl-GitClient-CloneTimeLimit`), with the environment policy and
   `GIT_ALLOW_PROTOCOL=file:git:http:https:ssh` (`AgentControl-GitClient-CloneNeverPrompts`); (5) on **cancellation,
@@ -318,9 +320,13 @@ flakiness.
 - **RepoCardViewModel** — constructs a `GitClient` per action (using the resolved git executable path and the card's
   time limits; the reads of its state run on worker threads of the shared refresh queue, whose shutdown token they pass,
   see *RepoRefreshQueue*) and calls `IsWorkingTreeClean`, `Pull`, `GetHeadCommitHash`, `HasCommittedAgentFiles`, and
-  `GetCurrentBranch` across its refresh/pull methods, and `GetTrackedAgentFolders` and `UntrackAgentFolders` when it
-  applies a package to a repo whose agent folders are tracked by git.
+  `GetCurrentBranch` across its refresh/pull methods, `GetBranches` for the Switch branch dialog (through
+  `CreateSwitchBranchViewModel`), `SwitchBranch` for a switch, and `GetTrackedAgentFolders` and `UntrackAgentFolders`
+  when it applies a package to a repo whose agent folders are tracked by git.
 - **MainWindowViewModel** (`LauncherUI` subsystem) — reads a new repo's cheap facts through a `GitClient` on a worker
-  thread of the shared refresh queue while it is added, and calls the static `IsRepositoryRoot` when a folder is added
+  thread of the shared refresh queue while it is added, calls the static `IsRepositoryRoot` when a folder is added
   as a new repo (single add, add to a group, several folders from the picker or dropped from the file manager), and
-  refuses the folder as not a Git repository when it returns `false`.
+  refuses the folder as not a Git repository when it returns `false`; and runs `Clone` on a worker thread for the
+  Clone repository dialog.
+- **CloneRepositoryViewModel** (`LauncherUI` subsystem) — calls the static `CheckCloneUrl` and `CheckCloneDestination`
+  (the latter on a worker thread) to judge what the user typed before a clone is started.

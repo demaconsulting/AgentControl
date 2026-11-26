@@ -263,8 +263,9 @@ anything is there the dialog stays open and says so, so nothing of yours can be 
 The boxes stay editable while the folder is checked; if you change one of them meanwhile, the answer of that check is
 ignored and you can press **Clone** again for what the dialog shows now.
 
-The dialog then closes and the clone runs in the background, shown in the progress strip under the app bar as "Cloning
-repo...". The window stays usable meanwhile, but one clone runs at a time: the **Clone repository** button is
+The dialog then closes and the clone runs in the background, shown in the progress strip under the app bar as "Cloning"
+followed by the new folder's name (for example "Cloning repo..."). The window stays usable meanwhile, but one clone
+runs at a time: the **Clone repository** button is
 unavailable (its tooltip says so) while a clone, the adding of its folder or any other operation with a **Cancel**
 button in the strip is running, so wait for it to finish or cancel it, then clone again. Git does not write into your
 new folder while it works: the clone is made in a hidden folder named `.agentcontrol-clone-` followed by a long random
@@ -1110,8 +1111,9 @@ red **Sign-in needed** chip; sign in with Git as above, then click the chip or c
 
 ### Git on Your Computer
 
-A Git repository source runs the `git` program installed on your computer - the same one used for **Git Pull** -
-and needs **Git 2.29 or newer**. With an older Git, **Test connection** and the other actions report **Git is too
+A Git repository source runs the `git` program installed on your computer - the same one used for **Git Pull**,
+**Switch branch...** (see *Switching Branches*) and **Clone repository** (see *Cloning a Repository*) - and
+needs **Git 2.29 or newer**. With an older Git, **Test connection** and the other actions report **Git is too
 old** and say which version was found. Install a newer Git, or set **Git executable path override** in Settings (see
 *Settings*) to a newer `git`.
 
@@ -1613,7 +1615,8 @@ Tools section](images/settings-dark.png)
   default.
 - **Tools** — the next three settings:
 - **Git executable path override** — a specific `git` executable to use instead of resolving
-  `git` from the process `PATH` (also used by Git repository sources, which need Git 2.29 or newer).
+  `git` from the process `PATH` (used for everything AgentControl asks Git: the repo card's state, **Git Pull**,
+  **Switch branch...**, **Clone repository** and the Git repository sources, which need Git 2.29 or newer).
 - **Agent tool selection** — which agentic CLI tool Launch starts: **GitHub Copilot CLI**,
   **Cursor**, **Claude Code**, or a **Custom command** line that you supply yourself. In a custom command
   line, quote the executable path if it contains spaces, for example
@@ -1664,14 +1667,15 @@ the Version row, copyright, license and the list of dependencies, and the Close 
 # Using the Keyboard in Dialogs
 
 Every dialog (Settings, the package source editors, the sign-in dialog, Select Package, confirmations, message boxes,
-the group name prompt and About) is modal: the window behind it cannot be used until you close it. When a dialog opens,
-the keyboard focus is already in it - on its first field or button (a confirmation starts on the safe answer, **No**) -
+the group name prompt, Switch branch, Clone repository and About) is modal: the window behind it cannot be used until
+you close it. When a dialog opens, the keyboard focus is already in it - on its first field or button (a confirmation
+starts on the safe answer, **No**; Switch branch starts in its filter box and Clone repository in the address box) -
 and, when you use the keyboard, it is drawn with a focus ring. **Tab** and **Shift+Tab** move between the dialog's
 controls and wrap around inside the dialog; they never reach the window behind it. **Escape** cancels a dialog that can
-be cancelled (a confirmation answers No; a message box, About, Select Package, the group name prompt, the source editors
-and the sign-in dialog close without applying anything). Settings has no Escape, so a stray key press cannot throw away
-your changes; use **Save**, or the window's close button to leave without saving. When a dialog closes, the focus is
-back where it was in the main window.
+be cancelled (a confirmation answers No; a message box, About, Select Package, the group name prompt, Switch branch,
+Clone repository, the source editors and the sign-in dialog close without applying anything). Settings has no Escape, so
+a stray key press cannot throw away your changes; use **Save**, or the window's close button to leave without saving.
+When a dialog closes, the focus is back where it was in the main window.
 
 # Authoring Agent Packages
 

@@ -481,7 +481,8 @@ public sealed class MainWindowTests : IDisposable
     [Fact]
     public void MainWindow_CloneRepoButton_CloneFails_ShowsGitsReasonInMessageBox() => HeadlessTestApp.RunAsync(async () =>
     {
-        // Arrange
+        // Arrange: the real git answers (skipped without git, failed when CI is set)
+        Tests.AgentPackageManagement.GitRepositoryFixture.SkipWithoutGit();
         var parent = CreateTempDirectory();
         var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory());
         var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 700 };
