@@ -265,8 +265,14 @@ naming `git clone` and the limit, and the parent folder is empty; a stub whose `
 an error is returned as a failed result with git's text, the working folder is removed and the user's file stays. A stub
 whose `clone` takes two seconds, during which the test creates the destination folder with a file in it, ends as a
 failed result (no exception) whose text names the destination and says it was created while the repository was being
-cloned; the file is intact, the working folder is gone and the destination is the only entry in the parent folder. This
+cloned; the file is intact, the working folder is gone and the destination is the only entry in the parent folder. A
+canceled clone whose working folder holds a junction (also one nested below it) to a folder of the user's with a
+read-only file ends with the working folder gone and the target folder, its files, the read-only flag included, and its
+sub folder unchanged; the same holds for a file symbolic link and a directory symbolic link (skipped where the platform
+refuses to create them). This
 scenario is tested by `GitClient_Clone_Canceled_RemovesOnlyItsTempFolder`,
+`GitClient_Clone_Canceled_LinkInWorkFolder_RemovesTheLinkAndLeavesItsTargetUntouched`,
+`GitClient_Clone_Canceled_SymbolicLinksInWorkFolder_AreRemovedAndTargetsUntouched`,
 `GitClient_Clone_TimesOut_StopsGitAndRemovesItsTempFolder`,
 `GitClient_Clone_Fails_RemovesItsTempFolderAndReturnsGitsReason` and
 `GitClient_Clone_DestinationAppearsWhileCloning_FailsClearlyAndTouchesNothingOfTheUsers`, covering

@@ -175,24 +175,25 @@ accepts only `KnownAgentFolders` (same argument checks as `UntrackAgentFolders`)
   `.agentcontrol-clone-<guid>` in the destination's parent folder (`CreateCloneWorkFolder`: a name that does not exist
   yet, `Directory.CreateDirectory`, hidden on Windows as a best effort) - the call's own folder, so a deletion of it can
   never reach anybody else's data; (4) run `git clone -- <url> <working folder>` - the address trimmed of surrounding
-  white space, the text `CheckCloneUrl` judged - with the destination's parent folder as
-  working directory (a clone needs an existing one), under the `CloneRepository` limit
-  (`AgentControl-GitClient-CloneTimeLimit`), with the environment policy and
-  `GIT_ALLOW_PROTOCOL=file:git:http:https:ssh` (`AgentControl-GitClient-CloneNeverPrompts`); (5) on **cancellation,
-  timeout** or a git that **cannot be started** the working folder is removed (`RemoveCloneWorkFolder`), clearing
-  read-only attributes first (git writes read-only object files), never following a link - a working folder that has
-  itself become a link is deleted as a link only - and retrying a few times because a process git started may hold a
-  file for a moment; a leftover that cannot be removed is logged and named in the text of a timeout exception; (6) a
-  **failed** clone (non-zero exit code) also removes the working folder and returns git's redacted result, with the
-  leftover sentence appended when the removal failed; (7) on success `MoveCloneIntoPlace` renames the working folder to
-  the destination with `Directory.Move` - a rename inside one folder, which on Windows is atomic and never replaces
-  anything - and clears the hidden attribute. An `IOException` or `UnauthorizedAccessException` means the destination
-  appeared meanwhile (or could not be written): the working folder is removed and a failed result (exit code 1) says
-  "The folder '<destination>' was created while the repository was being cloned, so the clone was not moved there.
-  Nothing in that folder was changed." (`AgentControl-GitClient-CloneIntoFreshFolder`,
-  `-CloneCleansUpOnlyItsOwnFolder`, `-CloneDestinationAppearedMeanwhile`, `-CloneCancelStopsGit`). On Unix a `rename`
-  could replace an *empty* folder that appeared in the instant between `Directory.Move`'s own check and the call; the
-  product is Windows-only and the window is that small.
+  white space, the text `CheckCloneUrl` judged - with the destination's parent folder as working directory (a clone
+  needs an existing one), under the `CloneRepository` limit (`AgentControl-GitClient-CloneTimeLimit`), with the
+  environment policy and `GIT_ALLOW_PROTOCOL=file:git:http:https:ssh` (`AgentControl-GitClient-CloneNeverPrompts`); (5)
+  on **cancellation, timeout** or a git that **cannot be started** the working folder is removed
+  (`RemoveCloneWorkFolder`): a link (junction, directory or file symbolic link) anywhere in it is removed as a link
+  without being entered, so its target is never changed; read-only attributes (git writes read-only object files) are
+  cleared on everything else; a working folder that has itself become a link is deleted as a link only; the removal is
+  retried a few times because a process git started may hold a file for a moment; a leftover that cannot be removed is
+  logged and named in the text of a timeout exception; (6) a **failed** clone (non-zero exit code) also removes the
+  working folder and returns git's redacted result, with the leftover sentence appended when the removal failed; (7) on
+  success `MoveCloneIntoPlace` renames the working folder to the destination with `Directory.Move` - a rename inside one
+  folder, which on Windows is atomic and never replaces anything - and clears the hidden attribute. An `IOException` or
+  `UnauthorizedAccessException` means the destination appeared meanwhile (or could not be written): the working folder
+  is removed and a failed result (exit code 1) says "The folder '<destination>' was created while the repository was
+  being cloned, so the clone was not moved there. Nothing in that folder was changed."
+  (`AgentControl-GitClient-CloneIntoFreshFolder`, `-CloneCleansUpOnlyItsOwnFolder`,
+  `-CloneDestinationAppearedMeanwhile`, `-CloneCancelStopsGit`). On Unix a `rename` could replace an *empty* folder that
+  appeared in the instant between `Directory.Move`'s own check and the call; the product is Windows-only and the window
+  is that small.
 - *Postconditions*: the address is data (`--` separates it from the options, `-CloneUrlSeparatedFromOptions`) and never
   appears in a log or exception message with its credentials (`AgentControl-GitClient-CloneRedactsCredentials`). A
   process killed together with the application leaves the hidden working folder behind: nothing deletes it
@@ -299,8 +300,8 @@ A command that outlives its limit, or whose output is still held open past the l
 exited, throws `GitCommandTimeoutException` (an `InvalidOperationException`), and a canceled one
 `OperationCanceledException`; both stop the process tree first. The constructor throws
 `ArgumentOutOfRangeException` for a limit that is not positive. On a thread guarded by `BlockingCallGuard` every method
-except `IsRepositoryRoot` throws `BlockingCallOnGuardedThreadException` without starting git (or reading `.git/HEAD`);
-callers must not catch it as an ordinary failure.
+except `IsRepositoryRoot` throws `BlockingCallOnGuardedThreadException` without starting git (or reading `.git/HEAD`;
+`AgentControl-GitClient-CommandsRefuseGuardedThread`); callers must not catch it as an ordinary failure.
 `RunGit` logs a warning when the process takes longer than 10 seconds to exit (distinguishing
 a hung process from a fast failure) and logs a caught `Win32Exception`'s `NativeErrorCode` at
 `Error` level before wrapping it in an `InvalidOperationException` — both added specifically to

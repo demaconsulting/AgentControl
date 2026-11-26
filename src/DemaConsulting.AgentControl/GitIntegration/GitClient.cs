@@ -1313,10 +1313,11 @@ internal sealed class GitClient
     /// <returns><see langword="null"/> when nothing is left; otherwise a sentence naming what could not
     ///     be removed, which is also logged.</returns>
     /// <remarks>
-    ///     Never throws and never follows a link: read-only attributes (git writes read-only object
-    ///     files) are cleared on everything below the folder except through links, and a link is
-    ///     removed as a link by the recursive delete. Retries a few times because a process git started
-    ///     may still hold a file for a moment after it was killed. Only ever called with the folder
+    ///     Never throws and never follows a link: a link (junction, directory or file symbolic link)
+    ///     anywhere below the folder is removed as a link, without entering it or changing its target,
+    ///     then the read-only attributes git sets on its object files are cleared and the rest is
+    ///     deleted recursively. Retries a few times because a process git started may still hold a
+    ///     file for a moment after it was killed. Only ever called with the folder
     ///     <see cref="CreateCloneWorkFolder"/> made.
     /// </remarks>
     private string? RemoveCloneWorkFolder(string folder)
@@ -1369,20 +1370,60 @@ internal sealed class GitClient
             return;
         }
 
-        // Links below are skipped (never entered, never changed); hidden and system entries are not
-        var options = new EnumerationOptions
-        {
-            RecurseSubdirectories = true,
-            IgnoreInaccessible = true,
-            AttributesToSkip = FileAttributes.ReparsePoint
-        };
-        foreach (var entry in root.EnumerateFileSystemInfos("*", options))
-        {
-            ClearReadOnly(entry);
-        }
-
+        PrepareForDelete(root);
         ClearReadOnly(root);
         root.Delete(recursive: true);
+    }
+
+    /// <summary>
+    ///     Removes every link below a folder as a link and clears the read-only attribute of everything
+    ///     else, so the folder can then be deleted recursively.
+    /// </summary>
+    /// <param name="directory">The folder; not itself a link.</param>
+    /// <remarks>
+    ///     Walks the folders by hand so no enumeration option can ever make it enter a link. Hidden and
+    ///     system entries are included.
+    /// </remarks>
+    private static void PrepareForDelete(DirectoryInfo directory)
+    {
+        // A snapshot is taken because links are removed while walking
+        var options = new EnumerationOptions { IgnoreInaccessible = true, AttributesToSkip = 0 };
+        foreach (var entry in directory.EnumerateFileSystemInfos("*", options).ToArray())
+        {
+            if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                RemoveLink(entry);
+            }
+            else if (entry is DirectoryInfo child)
+            {
+                PrepareForDelete(child);
+                ClearReadOnly(child);
+            }
+            else
+            {
+                ClearReadOnly(entry);
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Removes a link (junction, directory or file symbolic link) without entering it or changing
+    ///     its target.
+    /// </summary>
+    /// <param name="link">The link.</param>
+    private static void RemoveLink(FileSystemInfo link)
+    {
+        // Acts on the link itself, not on its target
+        ClearReadOnly(link);
+        if (link is DirectoryInfo)
+        {
+            // A non-recursive delete removes a junction or directory link and nothing behind it
+            Directory.Delete(link.FullName, recursive: false);
+        }
+        else
+        {
+            File.Delete(link.FullName);
+        }
     }
 
     /// <summary>

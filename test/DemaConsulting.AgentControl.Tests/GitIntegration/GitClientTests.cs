@@ -1758,6 +1758,122 @@ public class GitClientTests
     }
 
     /// <summary>
+    ///     Test that canceling a clone whose working folder holds a junction (also one nested below it)
+    ///     to a folder of the user's removes the junctions as links and leaves the target folder, its
+    ///     files and their read-only attributes untouched.
+    /// </summary>
+    [Fact]
+    public async Task GitClient_Clone_Canceled_LinkInWorkFolder_RemovesTheLinkAndLeavesItsTargetUntouched() =>
+        await AssertCanceledCloneRemovesLinksAndKeepsTargetAsync((work, target) =>
+        {
+            CreateDirectoryLinkOrSkip(Path.Combine(work, "linked"), target);
+            CreateDirectoryLinkOrSkip(Path.Combine(work, ".git", "nested-linked"), target);
+        });
+
+    /// <summary>
+    ///     Test that canceling a clone whose working folder holds a file symbolic link and a directory
+    ///     symbolic link to the user's files removes both as links and leaves the targets untouched; the
+    ///     test is skipped where the platform does not allow creating symbolic links.
+    /// </summary>
+    [Fact]
+    public async Task GitClient_Clone_Canceled_SymbolicLinksInWorkFolder_AreRemovedAndTargetsUntouched()
+    {
+        // Arrange: skip before anything starts when this environment cannot create symbolic links
+        var probeFolder = CreateTempDirectory();
+        try
+        {
+            var probeTarget = Path.Combine(probeFolder, "target.txt");
+            await File.WriteAllTextAsync(probeTarget, "probe", TestContext.Current.CancellationToken);
+            CreateFileSymbolicLinkOrSkip(Path.Combine(probeFolder, "link.txt"), probeTarget);
+        }
+        finally
+        {
+            GitSourceProvider.DeleteDirectory(probeFolder);
+        }
+
+        await AssertCanceledCloneRemovesLinksAndKeepsTargetAsync((work, target) =>
+        {
+            CreateFileSymbolicLinkOrSkip(Path.Combine(work, "linked-file.txt"), Path.Combine(target, "readonly.txt"));
+            CreateFileSymbolicLinkOrSkip(Path.Combine(work, ".git", "nested-linked-file.txt"), Path.Combine(target, "keep.txt"));
+            try
+            {
+                Directory.CreateSymbolicLink(Path.Combine(work, "linked-folder"), target);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+            {
+                Assert.Skip($"Cannot create symbolic links in this environment: {ex.Message}");
+            }
+        });
+    }
+
+    /// <summary>
+    ///     Runs a clone that hangs, adds links to the user's folder in its working folder, cancels, and
+    ///     checks that nothing is left of the clone while the folder the links point at is unchanged.
+    /// </summary>
+    /// <param name="addLinks">Adds the links; receives the working folder and the target folder.</param>
+    private async Task AssertCanceledCloneRemovesLinksAndKeepsTargetAsync(Action<string, string> addLinks)
+    {
+        // Arrange: a clone that creates its working folder and then hangs, and a folder of the user's
+        var stub = GitStub.Create(extraCommands:
+        [
+            new GitStub.Command("clone", SleepSeconds: GitStub.HangSeconds, CreatesDestination: true)
+        ]);
+        var parent = CreateTempDirectory();
+        var target = CreateTempDirectory();
+        var destination = Path.Combine(parent, "repo");
+        var keepFile = Path.Combine(target, "keep.txt");
+        var readOnlyFile = Path.Combine(target, "readonly.txt");
+        var innerFile = Path.Combine(target, "inner", "inner.txt");
+        await File.WriteAllTextAsync(keepFile, "theirs", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(readOnlyFile, "locked", TestContext.Current.CancellationToken);
+        File.SetAttributes(readOnlyFile, FileAttributes.ReadOnly);
+        Directory.CreateDirectory(Path.GetDirectoryName(innerFile)!);
+        await File.WriteAllTextAsync(innerFile, "deep", TestContext.Current.CancellationToken);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        Task? clone = null;
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+            clone = Task.Run(() => client.Clone("https://example.com/r.git", destination, cancellation.Token), TestContext.Current.CancellationToken);
+            Assert.True(WaitForReadOnlyPackFileInWorkFolder(parent, null), "The stub never created its read-only file.");
+
+            // The stub is still hanging, so adding links to the working folder cannot race with git
+            var work = Directory.GetDirectories(parent, ".agentcontrol-clone-*").Single();
+            addLinks(work, target);
+
+            // Act: cancel while git is writing
+            await cancellation.CancelAsync();
+
+            // Assert: canceled, the working folder and the links in it are gone, the target is untouched
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => clone);
+            Assert.False(Directory.Exists(destination));
+            Assert.Empty(Directory.GetFileSystemEntries(parent));
+            Assert.Equal("theirs", await File.ReadAllTextAsync(keepFile, TestContext.Current.CancellationToken));
+            Assert.Equal("locked", await File.ReadAllTextAsync(readOnlyFile, TestContext.Current.CancellationToken));
+            Assert.NotEqual(0, (int)(File.GetAttributes(readOnlyFile) & FileAttributes.ReadOnly));
+            Assert.Equal("deep", await File.ReadAllTextAsync(innerFile, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            // Stop a clone left running by a skipped or failed test before removing the folders
+            await cancellation.CancelAsync();
+            if (clone is not null)
+            {
+                await Task.WhenAny(clone);
+            }
+
+            stub.Delete();
+            if (File.Exists(readOnlyFile))
+            {
+                File.SetAttributes(readOnlyFile, FileAttributes.Normal);
+            }
+
+            GitSourceProvider.DeleteDirectory(parent);
+            GitSourceProvider.DeleteDirectory(target);
+        }
+    }
+
+    /// <summary>
     ///     Test that a clone that fails (git exits with an error) removes only its own working folder,
     ///     which git left behind, and returns git's reason; the user's other entries stay.
     /// </summary>
@@ -2297,6 +2413,23 @@ public class GitClientTests
                 .Select(folder => Path.Combine(folder, ".git", "objects", "pack", "pack-1.pack"))
                 .Any(pack => File.Exists(pack) && (File.GetAttributes(pack) & FileAttributes.ReadOnly) != 0),
             TimeSpan.FromSeconds(5));
+
+    /// <summary>
+    ///     Creates a file symbolic link or skips the test when the platform does not allow it.
+    /// </summary>
+    /// <param name="linkPath">The link to create.</param>
+    /// <param name="target">The file it points at.</param>
+    private static void CreateFileSymbolicLinkOrSkip(string linkPath, string target)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, target);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+        {
+            Assert.Skip($"Cannot create symbolic links in this environment: {ex.Message}");
+        }
+    }
 
     /// <summary>
     ///     Creates a link to a folder - a junction on Windows (it needs no privilege), a symbolic link

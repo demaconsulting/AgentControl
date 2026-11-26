@@ -395,15 +395,18 @@ sections:
       - id: AgentControl-GitClient-CloneCleansUpOnlyItsOwnFolder
         title: >-
           The GitClient class shall, when a clone is canceled, times out, fails or cannot be moved into
-          place, remove the working folder it created - clearing the read-only attributes git sets and
-          never following a link - and nothing else, leaving the destination and every other file,
-          folder and look-alike folder in the parent folder as they were.
+          place, remove the working folder it created - removing any link inside it as a link and never
+          following one, and clearing the read-only attributes git sets - and nothing else, leaving the
+          destination and every other file, folder and look-alike folder in the parent folder as they
+          were.
         justification: |
           A killed clone leaves a half-written repository that is useless and in the way, but a
           deletion that reached a folder somebody else made would lose their work; only a folder the
           call created itself may be deleted.
         tests:
           - GitClient_Clone_Canceled_RemovesOnlyItsTempFolder
+          - GitClient_Clone_Canceled_LinkInWorkFolder_RemovesTheLinkAndLeavesItsTargetUntouched
+          - GitClient_Clone_Canceled_SymbolicLinksInWorkFolder_AreRemovedAndTargetsUntouched
           - GitClient_Clone_TimesOut_StopsGitAndRemovesItsTempFolder
           - GitClient_Clone_Fails_RemovesItsTempFolderAndReturnsGitsReason
           - GitClient_Clone_RealGit_NotARepository_ReturnsFailedResultAndLeavesParentEmpty
