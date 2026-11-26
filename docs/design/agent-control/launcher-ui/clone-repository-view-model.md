@@ -63,7 +63,8 @@ device name (`CON`, `NUL`, `COM1`... with or without an extension) - or `null`. 
 `GitClient.CheckCloneDestination` through the background work runner - never on the calling (UI) thread, because the
 check reads the disk, which can be slow on a network drive or a sleeping disk
 (`AgentControl-CloneRepositoryViewModel-DestinationCheckedInBackground`) - and either shows the finding as `ErrorText`
-(the folder exists and is not empty, its parent does not exist, the path is not usable) and keeps the dialog open, or
+(something exists at the destination - a folder, even an empty one, a file or a link - its parent does not exist, the
+path is not usable) and keeps the dialog open, or
 completes with the request. An unexpected failure of the check becomes text as well; `IsChecking` always ends.
 
 **Cancel** (via `CancelCommand`, also called by the window when it closes by any other route): Completes with `null`.

@@ -290,30 +290,57 @@ sections:
 
       - id: AgentControl-GitClient-Clone
         title: >-
-          The GitClient class shall clone a repository, given by address, into a new folder, or into
-          an existing empty folder, under a time limit of one hour, report a clone git refuses as a
-          result carrying git's explanation without throwing, and
-          refuse to check the folder or start git on a thread guarded against blocking calls.
+          The GitClient class shall clone a repository, given by address, into a new folder and give
+          the finished clone the folder's name only when git succeeded, so that a folder that did not
+          exist before holds either a complete clone or nothing.
         justification: |
-          Getting a repository onto the machine is the first step of using it; a clone can run for
-          a long time on a large repository, so it needs a far longer limit than a local command,
-          yet a clone that never ends must still be stopped. A failed clone (unknown repository,
-          sign-in needed) is an expected outcome the user must be told about.
+          Getting a repository onto the machine is the first step of using it; a folder that holds a
+          half-finished clone is worse than none, because it looks like a repository and is not.
         tests:
           - GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList
-          - GitClient_Clone_RealLocalBareRepository_ClonesIntoNewAndIntoEmptyFolder
-          - GitClient_Clone_RealGit_NotARepository_ReturnsFailedResult
+          - GitClient_Clone_RealLocalBareRepository_ClonesIntoNewFolderAndLeavesNoTempBehind
+
+      - id: AgentControl-GitClient-CloneTimeLimit
+        title: >-
+          The GitClient class shall stop a clone that has not finished within one hour, together with
+          every process it started, and shall reject a clone limit that is not positive.
+        justification: |
+          A clone can run for a long time on a large repository, so it needs a far longer limit than
+          a local command, yet a clone that never ends must still be stopped; Cancel is the normal way
+          out, so the limit is only a backstop.
+        tests:
           - GitClient_Clone_UsesCloneTimeoutNotLocalTimeout
+          - GitClient_Clone_TimesOut_StopsGitAndRemovesItsTempFolder
           - GitClient_Constructor_NonPositiveSwitchOrCloneLimit_ThrowsArgumentOutOfRangeException
+
+      - id: AgentControl-GitClient-CloneFailureReported
+        title: >-
+          The GitClient class shall report a clone that git refuses or cannot finish as a result with a
+          non-zero exit code that carries git's explanation, without throwing.
+        justification: |
+          A failed clone (unknown repository, sign-in needed) is an expected outcome the user must be
+          told about in git's own words.
+        tests:
+          - GitClient_Clone_Fails_RemovesItsTempFolderAndReturnsGitsReason
+          - GitClient_Clone_RealGit_NotARepository_ReturnsFailedResultAndLeavesParentEmpty
+
+      - id: AgentControl-GitClient-CommandsRefuseGuardedThread
+        title: >-
+          The GitClient class shall refuse to list branches, switch a branch, check a clone destination
+          or clone on a thread that is guarded against blocking calls, before anything is read or
+          started.
+        justification: |
+          These commands block on the disk or on git; running them on the user-interface thread would
+          freeze the window, and the guard is how the tests prove that they never do.
+        tests:
           - GitClient_BranchAndCloneCommands_OnGuardedThread_ThrowBlockingCallOnGuardedThread
 
-      - id: AgentControl-GitClient-CloneRefusesOptionLikeUrl
+      - id: AgentControl-GitClient-CloneUrlRefused
         title: >-
-          The GitClient class shall treat the address to clone as data: it shall refuse, before git
-          starts, an address that is blank, spans several lines, starts with a dash (which git would
-          read as an option), uses git's remote-helper syntax such as ext:: or fd::, or is an ssh
-          address whose host starts with a dash (which ssh would read as an option), and shall
-          separate the address from git's options.
+          The GitClient class shall refuse, before git starts and with a reason the user can read, an
+          address to clone that is blank, spans several lines, starts with a dash (which git would
+          read as an option), uses git's remote-helper syntax <name>:: (such as ext:: or fd::), or is
+          an ssh address whose host starts with a dash (which ssh would read as an option).
         justification: |
           The address comes from a text box or a clipboard; an address that git reads as an option
           (for example an upload-pack program) or as a remote helper, or whose host ssh reads as an
@@ -322,38 +349,75 @@ sections:
           - GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit
           - GitClient_CheckCloneUrl_UsualAddress_ReturnsNull
           - GitClient_CheckCloneUrl_SshHostStartingWithDash_IsRefused
+
+      - id: AgentControl-GitClient-CloneUrlSeparatedFromOptions
+        title: >-
+          The GitClient class shall pass the address to clone to git as one argument that follows a
+          double dash, so that it can never be read as an option.
+        justification: |
+          Even an address that passed the checks is data, and the double dash is git's own way to say
+          that what follows is not an option.
+        tests:
           - GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList
 
       - id: AgentControl-GitClient-CloneDestinationRules
         title: >-
           The GitClient class shall clone only into an absolute path whose parent folder exists and
-          that does not exist yet or is an empty folder, shall refuse anything else with a reason
-          the user can read before git starts, and shall be able to tell that reason without cloning.
+          where nothing exists yet - no folder (not even an empty one), file, link or junction, not
+          even one whose target is gone - shall refuse anything else with a reason the user can read
+          before git starts, and shall be able to tell that reason without cloning.
         justification: |
-          A clone must never mix with, or overwrite, files that are already in a folder, and the
-          dialog that asks for the folder needs the reason in words before the user waits for a
-          download.
+          A clone must never mix with, replace or be redirected through anything that is already
+          there, and the dialog that asks for the folder needs the reason in words before the user
+          waits for a download.
         tests:
-          - GitClient_Clone_DestinationExistsNotEmpty_ThrowsArgumentExceptionAndTouchesNothing
+          - GitClient_Clone_DestinationExists_ThrowsArgumentExceptionAndTouchesNothing
+          - GitClient_Clone_DestinationIsLink_IsRefusedAndTargetUntouched
           - GitClient_Clone_ParentMissingRelativeOrFile_ThrowsArgumentException
-          - GitClient_CheckCloneDestination_NewOrEmptyFolder_ReturnsNull
+          - GitClient_CheckCloneDestination_NewFolder_ReturnsNull
+          - GitClient_CheckCloneDestination_ExistingEmptyFolderOrFile_ReturnsReason
+          - GitClient_CheckCloneDestination_DestinationIsLink_ReturnsReason
 
-      - id: AgentControl-GitClient-CloneRemovesOnlyWhatItCreated
+      - id: AgentControl-GitClient-CloneIntoFreshFolder
         title: >-
-          The GitClient class shall, when a clone is canceled or times out, remove the partly cloned
-          folder only if the clone created it, keep an existing empty destination folder and remove
-          only what the clone put into it, clear the read-only attributes git sets before removing,
-          and shall delete nothing after a clone that git itself reported as failed.
+          The GitClient class shall run git with a fresh, hidden folder it creates itself next to the
+          destination (named .agentcontrol-clone- followed by a new GUID) as the clone target, and
+          shall rename that folder to the destination only when git succeeded, making it visible
+          again, so that git never writes to the destination.
+        justification: |
+          The destination is the user's name for a folder that does not exist yet; cloning into a
+          folder of our own and renaming it on success leaves nothing half-finished under that name
+          and makes it certain which folder a cleanup may delete.
+        tests:
+          - GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList
+          - GitClient_Clone_RealLocalBareRepository_ClonesIntoNewFolderAndLeavesNoTempBehind
+
+      - id: AgentControl-GitClient-CloneCleansUpOnlyItsOwnFolder
+        title: >-
+          The GitClient class shall, when a clone is canceled, times out, fails or cannot be moved into
+          place, remove the working folder it created - clearing the read-only attributes git sets and
+          never following a link - and nothing else, leaving the destination and every other file,
+          folder and look-alike folder in the parent folder as they were.
         justification: |
           A killed clone leaves a half-written repository that is useless and in the way, but a
-          deletion that reached a folder somebody else made would lose their work; git cleans up
-          after a failure it reports itself, so deleting then could only do harm.
+          deletion that reached a folder somebody else made would lose their work; only a folder the
+          call created itself may be deleted.
         tests:
-          - GitClient_Clone_Canceled_RemovesDestinationItCreated
-          - GitClient_Clone_CanceledIntoExistingEmptyFolder_RemovesContentsKeepsFolder
-          - GitClient_Clone_Fails_LeavesFolderAlone
-          - GitClient_Clone_TimesOut_StopsGitAndRemovesDestinationItCreated
-          - GitClient_Clone_DestinationExistsNotEmpty_ThrowsArgumentExceptionAndTouchesNothing
+          - GitClient_Clone_Canceled_RemovesOnlyItsTempFolder
+          - GitClient_Clone_TimesOut_StopsGitAndRemovesItsTempFolder
+          - GitClient_Clone_Fails_RemovesItsTempFolderAndReturnsGitsReason
+          - GitClient_Clone_RealGit_NotARepository_ReturnsFailedResultAndLeavesParentEmpty
+
+      - id: AgentControl-GitClient-CloneDestinationAppearedMeanwhile
+        title: >-
+          The GitClient class shall, when something appears at the destination while git is cloning,
+          not move the clone there, report that as a failed result that names the folder, remove its
+          own working folder and leave what appeared exactly as it was.
+        justification: |
+          The check of the destination happens before a download that can take minutes; whatever the
+          user (or another program) puts there meanwhile is theirs and must never be replaced.
+        tests:
+          - GitClient_Clone_DestinationAppearsWhileCloning_FailsClearlyAndTouchesNothingOfTheUsers
 
       - id: AgentControl-GitClient-CloneCancelStopsGit
         title: >-
@@ -364,20 +428,24 @@ sections:
           Cancel is the normal way out of a clone that takes too long; a clone that keeps running
           after the user canceled it would keep downloading and writing into the folder.
         tests:
-          - GitClient_Clone_Canceled_RemovesDestinationItCreated
-          - GitClient_Clone_TimesOut_StopsGitAndRemovesDestinationItCreated
+          - GitClient_Clone_Canceled_RemovesOnlyItsTempFolder
+          - GitClient_Clone_TimesOut_StopsGitAndRemovesItsTempFolder
 
       - id: AgentControl-GitClient-CloneRedactsCredentials
         title: >-
           The GitClient class shall keep the credentials of an address to clone (the user name and
-          password before the host) out of every log message, exception message and result it
-          produces, while keeping the host and path that identify the repository.
+          password, or only a token or a user name, before the host, and a token in the query string)
+          out of every log message, exception message and result it produces, including those of a
+          canceled and a timed-out clone, while keeping the host and path that identify the
+          repository.
         justification: |
-          Users paste addresses of the form https://user:password@host/repo.git; the log is a plain
-          file users attach to reports, and git echoes the address in its own error text, so a
-          credential that is not removed on the way out would leak.
+          Users paste addresses of the form https://user:password@host/repo.git or with a token; the
+          log is a plain file users attach to reports, and git echoes the address in its own error
+          text, so a credential that is not removed on the way out would leak.
         tests:
           - GitClient_Clone_UrlWithPassword_IsNeverWrittenToLogOrExceptionText
+          - GitClient_Clone_TimeoutAndCancelMessages_NeverContainTheCredentials
+          - GitClient_Clone_TokenOnlyAndQueryStringUrls_AreRedactedEverywhere
 
       - id: AgentControl-GitClient-OutputIsUtf8
         title: >-

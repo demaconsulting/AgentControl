@@ -212,6 +212,11 @@ internal sealed class GitClient
     private const string AllowedCloneProtocols = "file:git:http:https:ssh";
 
     /// <summary>
+    ///     The name prefix of the hidden folder a clone is made in, next to its destination.
+    /// </summary>
+    private const string CloneWorkFolderPrefix = ".agentcontrol-clone-";
+
+    /// <summary>
     ///     Path (or bare command name, resolved via <c>PATH</c>) to the git executable this
     ///     client invokes.
     /// </summary>
@@ -874,36 +879,50 @@ internal sealed class GitClient
     /// </summary>
     /// <param name="url">The repository to clone: a URL, an scp-like address or a local path. Checked
     ///     by <see cref="CheckCloneUrl"/>.</param>
-    /// <param name="destinationPath">The absolute path of the folder to clone into: it must not exist,
-    ///     or must be an empty folder, and its parent folder must exist. Checked by
+    /// <param name="destinationPath">The absolute path of the folder to clone into: nothing may exist
+    ///     there (no folder, file or link) and its parent folder must exist. Checked by
     ///     <see cref="CheckCloneDestination"/>.</param>
     /// <param name="cancellationToken">Stops git and abandons the call when signaled; the normal way
     ///     to leave a clone that takes too long.</param>
     /// <returns>The command result, with credentials removed from both output streams. A clone git
     ///     refuses or cannot finish (unknown repository, sign-in needed) is a normal outcome, reported as
-    ///     a result that has not <see cref="GitCommandResult.Succeeded"/>; git has cleaned up after
-    ///     itself then and nothing is deleted here.</returns>
+    ///     a result that has not <see cref="GitCommandResult.Succeeded"/> and carries git's explanation;
+    ///     so is a clone that worked but could not be moved to the destination (see the remarks), and a
+    ///     working folder that could not be created. Nothing is left behind in those cases.</returns>
     /// <remarks>
     ///     <para>
-    ///     Runs <c>git clone -- &lt;url&gt; &lt;destination&gt;</c> in the destination's parent folder
-    ///     (a clone needs an existing working directory) through an argument list, never a shell. Like
-    ///     every command it runs under the environment policy (see <see cref="ApplyBaseEnvironment"/>:
-    ///     <c>GIT_TERMINAL_PROMPT=0</c> because there is no terminal to ask in; a credential helper such
-    ///     as Git Credential Manager still shows its own sign-in window), and in addition
-    ///     <c>GIT_ALLOW_PROTOCOL</c> limits the transports to local paths, <c>file</c>, <c>git</c>,
-    ///     <c>http</c>, <c>https</c> and <c>ssh</c>. The URL is data: one that
+    ///     The destination is never written to by git. The call creates a fresh, hidden folder next to
+    ///     it (<c>.agentcontrol-clone-&lt;guid&gt;</c> in the destination's parent folder; the folder is
+    ///     this call's own, nobody else has a name like it), runs
+    ///     <c>git clone -- &lt;url&gt; &lt;working folder&gt;</c> there through an argument list, never a
+    ///     shell, and renames the working folder to the destination only when git succeeded
+    ///     (<see cref="Directory.Move(string, string)"/>, a rename on one volume that on Windows is atomic
+    ///     and never replaces anything). Like every command it runs under the environment policy (see
+    ///     <see cref="ApplyBaseEnvironment"/>: <c>GIT_TERMINAL_PROMPT=0</c> because there is no terminal
+    ///     to ask in; a credential helper such as Git Credential Manager still shows its own sign-in
+    ///     window), and in addition <c>GIT_ALLOW_PROTOCOL</c> limits the transports to local paths,
+    ///     <c>file</c>, <c>git</c>, <c>http</c>, <c>https</c> and <c>ssh</c>. The URL is data: one that
     ///     starts with <c>-</c> or names a remote helper (<c>ext::</c>, <c>fd::</c>) is refused before
     ///     git starts, and <c>--</c> separates it from the options. The URL may contain credentials, so
     ///     it is redacted in every log message and exception text (see <see cref="RunGit"/>).
     ///     </para>
     ///     <para>
-    ///     When the clone is <b>canceled or times out</b>, git is killed in the middle of writing, so the
-    ///     partial result is removed - but only what this call created: a destination that did not exist
-    ///     is removed whole; an existing empty folder is kept and only its contents are removed.
-    ///     Read-only attributes (git writes read-only object files) are cleared first and links are
-    ///     never followed. A leftover that cannot be removed is logged, and named in the text of the
-    ///     timeout exception. After a <b>failed</b> clone nothing is deleted, because git cleans up
-    ///     after itself and a deletion could only remove somebody else's folder.
+    ///     Because the working folder is this call's own, deleting it is always safe: when the clone is
+    ///     <b>canceled</b>, <b>times out</b>, <b>fails</b> or cannot be moved into place, the whole
+    ///     working folder is removed and nothing else - never the destination and never anything else
+    ///     in the parent folder. Read-only attributes (git writes read-only object files) are cleared
+    ///     first and links are never followed. A working folder that cannot be removed (a process still
+    ///     holds a file) is logged and named in the text of the timeout exception or the failed
+    ///     result, so the user can delete it. A process that is killed together with the application
+    ///     leaves the hidden folder behind; nothing cleans it up automatically, because deleting a
+    ///     folder without proof that it is ours is exactly what this design avoids.
+    ///     </para>
+    ///     <para>
+    ///     If something appears at the destination while git is cloning, the move is refused (on
+    ///     Windows it is atomic and cannot replace; on Unix a rename could replace an <em>empty</em>
+    ///     folder that appeared meanwhile, and <see cref="Directory.Move(string, string)"/> itself checks
+    ///     only that nothing exists at that moment) and reported as a failed result; what appeared is
+    ///     not touched.
     ///     </para>
     /// </remarks>
     /// <exception cref="ArgumentException">Thrown when the URL or the destination is refused; the
@@ -911,9 +930,9 @@ internal sealed class GitClient
     /// <exception cref="InvalidOperationException">Thrown when the git executable cannot be
     ///     started.</exception>
     /// <exception cref="GitCommandTimeoutException">Thrown when the clone did not finish within the
-    ///     clone limit and was stopped; the partial folder was removed.</exception>
+    ///     clone limit and was stopped; the working folder was removed.</exception>
     /// <exception cref="OperationCanceledException">Thrown when
-    ///     <paramref name="cancellationToken"/> was signaled; git was stopped and the partial folder
+    ///     <paramref name="cancellationToken"/> was signaled; git was stopped and the working folder
     ///     removed.</exception>
     /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread guarded
     ///     by <see cref="BlockingCallGuard"/>; nothing was checked or started.</exception>
@@ -936,10 +955,14 @@ internal sealed class GitClient
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Only what this call creates may be removed after a kill: remember whether the folder existed
+        // git clones into a folder of its own, so nothing that exists is ever written to or deleted
         var destination = NormalizeFolder(destinationPath);
         var parent = Path.GetDirectoryName(destination)!;
-        var createdByThisCall = !Directory.Exists(destination);
+        var workFolder = CreateCloneWorkFolder(parent, out var creationFailure);
+        if (workFolder is null)
+        {
+            return creationFailure!;
+        }
 
         GitCommandResult result;
         try
@@ -949,17 +972,11 @@ internal sealed class GitClient
                 _timeouts.CloneRepository,
                 cancellationToken,
                 new Dictionary<string, string?> { ["GIT_ALLOW_PROTOCOL"] = AllowedCloneProtocols },
-                ["clone", "--", url.Trim(), destination]);
-        }
-        catch (OperationCanceledException)
-        {
-            // Killed while writing: the partial clone is not worth keeping
-            RemovePartialClone(destination, removeFolder: createdByThisCall);
-            throw;
+                ["clone", "--", url.Trim(), workFolder]);
         }
         catch (GitCommandTimeoutException ex)
         {
-            var leftover = RemovePartialClone(destination, removeFolder: createdByThisCall);
+            var leftover = RemoveCloneWorkFolder(workFolder);
             if (leftover is null)
             {
                 throw;
@@ -967,12 +984,167 @@ internal sealed class GitClient
 
             throw new GitCommandTimeoutException($"{ex.Message} {leftover}", ex.Timeout);
         }
+        catch (Exception)
+        {
+            // Canceled (killed while writing), git could not be started, anything else: the partial
+            // clone is of no use, and the folder is ours
+            RemoveCloneWorkFolder(workFolder);
+            throw;
+        }
 
         // The URL may carry credentials, and git can echo it back in its messages
-        return new GitCommandResult(
+        var redacted = new GitCommandResult(
             result.ExitCode,
             SecretRedactor.Redact(result.StandardOutput),
             SecretRedactor.Redact(result.StandardError));
+        if (!redacted.Succeeded)
+        {
+            // git reports its own failure; its leftovers are in our folder, which is removed
+            var leftover = RemoveCloneWorkFolder(workFolder);
+            return leftover is null
+                ? redacted
+                : redacted with { StandardError = $"{redacted.StandardError.TrimEnd()}\n{leftover}" };
+        }
+
+        return MoveCloneIntoPlace(workFolder, destination, redacted);
+    }
+
+    /// <summary>
+    ///     Creates the hidden folder a clone is made in: a fresh, unused name next to the destination.
+    /// </summary>
+    /// <param name="parent">The destination's parent folder, which exists.</param>
+    /// <param name="failure">When the folder could not be created, the failed result to return;
+    ///     otherwise <see langword="null"/>.</param>
+    /// <returns>The path of the new, empty folder, or <see langword="null"/> when it could not be
+    ///     created.</returns>
+    private string? CreateCloneWorkFolder(string parent, out GitCommandResult? failure)
+    {
+        failure = null;
+        try
+        {
+            // A name nobody has used: pick another one if, against all odds, it exists already
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                var candidate = Path.Combine(parent, CloneWorkFolderPrefix + Guid.NewGuid().ToString("N"));
+                if (PathEntryExists(candidate, out _))
+                {
+                    continue;
+                }
+
+                Directory.CreateDirectory(candidate);
+                HideBestEffort(candidate);
+                return candidate;
+            }
+
+            failure = new GitCommandResult(1, string.Empty, $"Could not create a working folder in '{parent}'.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException
+                                       or ArgumentException)
+        {
+            if (_logger.IsEnabled(LogLevel.Warning))
+            {
+                _logger.LogWarning(ex, "Could not create a clone working folder in '{Parent}'", parent);
+            }
+
+            failure = new GitCommandResult(
+                1, string.Empty, $"Could not create a working folder in '{parent}': {ex.Message}");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    ///     Makes the finished clone the destination by renaming its working folder, and makes it
+    ///     visible again.
+    /// </summary>
+    /// <param name="workFolder">The working folder holding the finished clone.</param>
+    /// <param name="destination">The destination, which did not exist when the clone started.</param>
+    /// <param name="succeeded">The (redacted) result of the successful <c>git clone</c>.</param>
+    /// <returns><paramref name="succeeded"/> when the folder was moved; otherwise a failed result
+    ///     that says why. The working folder is removed when it could not be moved.</returns>
+    private GitCommandResult MoveCloneIntoPlace(string workFolder, string destination, GitCommandResult succeeded)
+    {
+        try
+        {
+            Directory.Move(workFolder, destination);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            var leftover = RemoveCloneWorkFolder(workFolder);
+            var reason = PathEntryExists(destination, out _)
+                ? $"The folder '{destination}' was created while the repository was being cloned, so the clone was " +
+                  "not moved there. Nothing in that folder was changed."
+                : $"The clone could not be moved to '{destination}': {SecretRedactor.Redact(ex.Message)}";
+            return new GitCommandResult(1, succeeded.StandardOutput, leftover is null ? reason : $"{reason} {leftover}");
+        }
+
+        // The working folder was hidden; the destination is an ordinary folder
+        try
+        {
+            var attributes = File.GetAttributes(destination);
+            if ((attributes & FileAttributes.Hidden) != 0)
+            {
+                File.SetAttributes(destination, attributes & ~FileAttributes.Hidden);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            if (_logger.IsEnabled(LogLevel.Warning))
+            {
+                _logger.LogWarning(ex, "The cloned folder '{Destination}' could not be made visible", destination);
+            }
+        }
+
+        return succeeded;
+    }
+
+    /// <summary>
+    ///     Marks a folder hidden on Windows, so a leftover does not clutter the user's folder; failing
+    ///     to do so is harmless.
+    /// </summary>
+    /// <param name="folder">The folder.</param>
+    private static void HideBestEffort(string folder)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        try
+        {
+            File.SetAttributes(folder, File.GetAttributes(folder) | FileAttributes.Hidden);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Best effort: a visible working folder works just as well
+        }
+    }
+
+    /// <summary>
+    ///     Determines whether anything exists at a path - a file, a folder, a link or a junction,
+    ///     including one whose target is gone - without following links.
+    /// </summary>
+    /// <param name="path">The path.</param>
+    /// <param name="attributes">The attributes of what exists there; unspecified when nothing does.</param>
+    /// <returns><see langword="true"/> when something exists.</returns>
+    /// <remarks>
+    ///     <see cref="File.GetAttributes(string)"/> reads the entry itself, so a dangling link or
+    ///     junction counts; <see cref="Directory.Exists(string)"/> and <see cref="File.Exists(string)"/>
+    ///     would follow it and answer <see langword="false"/>. Any other failure (access denied, a bad
+    ///     path) propagates, so a caller never takes "cannot tell" for "nothing there".
+    /// </remarks>
+    private static bool PathEntryExists(string path, out FileAttributes attributes)
+    {
+        try
+        {
+            attributes = File.GetAttributes(path);
+            return true;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            attributes = 0;
+            return false;
+        }
     }
 
     /// <summary>
@@ -1040,12 +1212,13 @@ internal sealed class GitClient
     /// </summary>
     /// <param name="destinationPath">The folder to clone into, as typed.</param>
     /// <returns>The reason, in words the user can read, or <see langword="null"/> when the folder can
-    ///     be used: an absolute path whose parent folder exists and that does not exist yet or is an
-    ///     empty folder.</returns>
+    ///     be used: an absolute path whose parent folder exists and where nothing exists yet - no
+    ///     folder (not even an empty one), file, link or junction.</returns>
     /// <remarks>
     ///     Reads the disk, so it must be called off the UI thread; the clone dialog runs it through the
     ///     background work runner, and <see cref="Clone"/> repeats it right before git starts because
-    ///     the folder may have changed in between. Static and thread-safe.
+    ///     the folder may have changed in between. Links are not followed, so a link whose target is
+    ///     gone is refused too. Static and thread-safe.
     /// </remarks>
     /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread guarded
     ///     by <see cref="BlockingCallGuard"/>; nothing was read.</exception>
@@ -1077,15 +1250,17 @@ internal sealed class GitClient
                 return $"The folder '{parent}' does not exist.";
             }
 
-            if (File.Exists(destination))
+            // Nothing may be there: not a folder (empty or not), a file or a link, dangling or not
+            if (PathEntryExists(destination, out var attributes))
             {
-                return $"'{destination}' already exists and is a file.";
-            }
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    return $"'{destination}' already exists and is a link; choose a new folder name.";
+                }
 
-            // An empty folder is fine (git clones into it); anything inside it is not ours to mix with
-            if (Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any())
-            {
-                return $"The folder '{destination}' already exists and is not empty.";
+                return (attributes & FileAttributes.Directory) != 0
+                    ? $"The folder '{destination}' already exists; choose a name that does not exist yet."
+                    : $"'{destination}' already exists and is a file; choose a name that does not exist yet.";
             }
 
             return null;
@@ -1132,28 +1307,26 @@ internal sealed class GitClient
     private static readonly TimeSpan RemovalRetryDelay = TimeSpan.FromMilliseconds(200);
 
     /// <summary>
-    ///     Removes what a killed <c>git clone</c> left behind.
+    ///     Removes the working folder of a clone that was killed, failed or could not be moved into place.
     /// </summary>
-    /// <param name="destination">The clone destination.</param>
-    /// <param name="removeFolder"><see langword="true"/> to remove the folder itself (this call created
-    ///     it); <see langword="false"/> to keep the folder and remove only what is in it (it existed,
-    ///     empty, before).</param>
+    /// <param name="folder">The working folder this call created.</param>
     /// <returns><see langword="null"/> when nothing is left; otherwise a sentence naming what could not
     ///     be removed, which is also logged.</returns>
     /// <remarks>
     ///     Never throws and never follows a link: read-only attributes (git writes read-only object
-    ///     files) are cleared on everything below the destination except through links, and a link is
+    ///     files) are cleared on everything below the folder except through links, and a link is
     ///     removed as a link by the recursive delete. Retries a few times because a process git started
-    ///     may still hold a file for a moment after it was killed.
+    ///     may still hold a file for a moment after it was killed. Only ever called with the folder
+    ///     <see cref="CreateCloneWorkFolder"/> made.
     /// </remarks>
-    private string? RemovePartialClone(string destination, bool removeFolder)
+    private string? RemoveCloneWorkFolder(string folder)
     {
         Exception? failure = null;
         for (var attempt = 1; attempt <= RemovalAttempts; attempt++)
         {
             try
             {
-                DeleteCloneContent(destination, removeFolder);
+                DeleteCloneWorkFolder(folder);
                 return null;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -1168,62 +1341,48 @@ internal sealed class GitClient
 
         if (_logger.IsEnabled(LogLevel.Warning))
         {
-            _logger.LogWarning(
-                failure, "The partly cloned folder '{Destination}' could not be removed", destination);
+            _logger.LogWarning(failure, "The clone working folder '{Folder}' could not be removed", folder);
         }
 
-        return removeFolder
-            ? $"The partly cloned folder '{destination}' could not be removed; delete it yourself."
-            : $"The partly cloned content of the folder '{destination}' could not be removed; delete it yourself.";
+        return $"The partly cloned folder '{folder}' could not be removed; delete it yourself.";
     }
 
     /// <summary>
-    ///     Deletes a clone destination (or its content) once, clearing read-only attributes first.
+    ///     Deletes a clone working folder once, clearing read-only attributes first.
     /// </summary>
-    /// <param name="destination">The clone destination.</param>
-    /// <param name="removeFolder">See <see cref="RemovePartialClone"/>.</param>
+    /// <param name="folder">The working folder.</param>
     /// <exception cref="IOException">Thrown when something cannot be deleted.</exception>
     /// <exception cref="UnauthorizedAccessException">Thrown when access is denied.</exception>
-    private static void DeleteCloneContent(string destination, bool removeFolder)
+    private static void DeleteCloneWorkFolder(string folder)
     {
-        if (!Directory.Exists(destination))
+        if (!PathEntryExists(folder, out var attributes))
         {
             return;
         }
 
-        // Links are skipped (never entered, never changed); hidden and system entries are not
+        var root = new DirectoryInfo(folder);
+
+        // Should the working folder itself have become a link, remove the link and never look behind it
+        if ((attributes & FileAttributes.ReparsePoint) != 0)
+        {
+            root.Delete();
+            return;
+        }
+
+        // Links below are skipped (never entered, never changed); hidden and system entries are not
         var options = new EnumerationOptions
         {
             RecurseSubdirectories = true,
             IgnoreInaccessible = true,
             AttributesToSkip = FileAttributes.ReparsePoint
         };
-        var root = new DirectoryInfo(destination);
         foreach (var entry in root.EnumerateFileSystemInfos("*", options))
         {
             ClearReadOnly(entry);
         }
 
         ClearReadOnly(root);
-
-        if (removeFolder)
-        {
-            root.Delete(recursive: true);
-            return;
-        }
-
-        // The folder was there before: keep it, empty it
-        foreach (var entry in root.EnumerateFileSystemInfos())
-        {
-            if (entry is DirectoryInfo directory)
-            {
-                directory.Delete(recursive: true);
-            }
-            else
-            {
-                entry.Delete();
-            }
-        }
+        root.Delete(recursive: true);
     }
 
     /// <summary>

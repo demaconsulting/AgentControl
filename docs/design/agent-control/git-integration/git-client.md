@@ -166,32 +166,49 @@ accepts only `KnownAgentFolders` (same argument checks as `UntrackAgentFolders`)
 
 - *Parameters*: `string url`, `string destinationPath` (absolute), `CancellationToken cancellationToken = default`.
 - *Returns*: `GitCommandResult` with credentials removed from both output streams; a clone git refuses is a result
-  with `Succeeded == false`, not an exception (`AgentControl-GitClient-Clone`).
+  with `Succeeded == false` and git's explanation, not an exception (`AgentControl-GitClient-Clone`,
+  `-CloneFailureReported`). So are a working folder that cannot be created ("Could not create a working folder in
+  '<parent>': ...", exit code 1) and a clone that cannot be moved into place.
 - *Algorithm*: (1) ask the blocking-call guard; (2) `CheckCloneUrl` and `CheckCloneDestination`, each refusal an
-  `ArgumentException` whose message is a reason the user can read, before git starts; (3) remember whether the
-  destination exists (so only what this call creates is ever removed); (4) run `git clone -- <url> <destination>` with
-  the destination's parent folder as working directory (a clone needs an existing one), under the `CloneRepository`
-  limit, with the environment policy and `GIT_ALLOW_PROTOCOL=file:git:http:https:ssh`
-  (`AgentControl-GitClient-CloneNeverPrompts`); (5) on **cancellation or timeout** git was killed mid-write:
-  `RemovePartialClone` removes the partial result - the whole folder when this call created it, only the contents of an
-  empty folder that existed before - clearing read-only attributes first (git writes read-only object files), never
-  following a link, and retrying a few times because a process git started may hold a file for a moment; a leftover that
-  cannot be removed is logged and named in the text of a timeout exception; (6) after a clone git reported as **failed**
-  nothing is deleted: git cleans up after itself and a deletion could only remove somebody else's folder
-  (`AgentControl-GitClient-CloneRemovesOnlyWhatItCreated`, `-CloneCancelStopsGit`).
-- *Postconditions*: the address is data (`--` separates it from the options) and never appears in a log or exception
-  message with its credentials (`AgentControl-GitClient-CloneRedactsCredentials`).
+  `ArgumentException` whose message is a reason the user can read, before git starts; (3) create the working folder
+  `.agentcontrol-clone-<guid>` in the destination's parent folder (`CreateCloneWorkFolder`: a name that does not exist
+  yet, `Directory.CreateDirectory`, hidden on Windows as a best effort) - the call's own folder, so a deletion of it can
+  never reach anybody else's data; (4) run `git clone -- <url> <working folder>` with the destination's parent folder as
+  working directory (a clone needs an existing one), under the `CloneRepository` limit
+  (`AgentControl-GitClient-CloneTimeLimit`), with the environment policy and
+  `GIT_ALLOW_PROTOCOL=file:git:http:https:ssh` (`AgentControl-GitClient-CloneNeverPrompts`); (5) on **cancellation,
+  timeout** or a git that **cannot be started** the working folder is removed (`RemoveCloneWorkFolder`), clearing
+  read-only attributes first (git writes read-only object files), never following a link - a working folder that has
+  itself become a link is deleted as a link only - and retrying a few times because a process git started may hold a
+  file for a moment; a leftover that cannot be removed is logged and named in the text of a timeout exception; (6) a
+  **failed** clone (non-zero exit code) also removes the working folder and returns git's redacted result, with the
+  leftover sentence appended when the removal failed; (7) on success `MoveCloneIntoPlace` renames the working folder to
+  the destination with `Directory.Move` - a rename inside one folder, which on Windows is atomic and never replaces
+  anything - and clears the hidden attribute. An `IOException` or `UnauthorizedAccessException` means the destination
+  appeared meanwhile (or could not be written): the working folder is removed and a failed result (exit code 1) says
+  "The folder '<destination>' was created while the repository was being cloned, so the clone was not moved there.
+  Nothing in that folder was changed." (`AgentControl-GitClient-CloneIntoFreshFolder`,
+  `-CloneCleansUpOnlyItsOwnFolder`, `-CloneDestinationAppearedMeanwhile`, `-CloneCancelStopsGit`). On Unix a `rename`
+  could replace an *empty* folder that appeared in the instant between `Directory.Move`'s own check and the call; the
+  product is Windows-only and the window is that small.
+- *Postconditions*: the address is data (`--` separates it from the options, `-CloneUrlSeparatedFromOptions`) and never
+  appears in a log or exception message with its credentials (`AgentControl-GitClient-CloneRedactsCredentials`). A
+  process killed together with the application leaves the hidden working folder behind: nothing deletes it
+  automatically, and the user guide says it can be deleted.
 
 **CheckCloneUrl** (static, pure): Returns the reason an address cannot be cloned, or `null`. Refuses a blank address,
 one that spans lines or has control characters, one that starts with `-` (git would read an option, for example
 `--upload-pack=`) and one that uses git's remote-helper syntax `<name>::<address>` (`ext::` runs a command, `fd::` reads
 an open file) or an `ssh://` address whose host - the text after the `//` and any user name, up to the next `/` - starts
-with `-` (ssh would read an option) (`AgentControl-GitClient-CloneRefusesOptionLikeUrl`). Whether the repository
+with `-` (ssh would read an option) (`AgentControl-GitClient-CloneUrlRefused`). Whether the repository
 exists is for git to say.
 
 **CheckCloneDestination** (static): Returns the reason a folder cannot be a clone destination, or `null`: it must be
-an absolute path, its parent folder must exist, and it must not exist or must be an empty folder (not a file, not a
-folder with content) (`AgentControl-GitClient-CloneDestinationRules`). Reads the disk, so it asks the blocking-call
+an absolute path, its parent folder must exist, and nothing may exist at the destination - not a folder (even an
+empty one), not a file, not a link or junction, dangling or not (`PathEntryExists`, which reads the entry's own
+attributes with `File.GetAttributes` and so never follows a link; `Directory.Exists` and `File.Exists` would answer
+`false` for a dangling link). Each reason says what is there and to choose a name that does not exist yet
+(`AgentControl-GitClient-CloneDestinationRules`). Reads the disk, so it asks the blocking-call
 guard; the clone dialog runs it through the background work runner and `Clone` repeats it right before git starts.
 
 **GetCurrentBranch**: Gets the repo's current branch name, or `"(detached)"` for a detached

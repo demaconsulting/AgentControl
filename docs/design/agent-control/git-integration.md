@@ -149,21 +149,27 @@ them.
   blank or option-like name is refused with `ArgumentException` before git runs (`-SwitchNameIsData`); `GetBranches`
   throws `InvalidOperationException` when git cannot list the refs.
 
-**GitClient.Clone / CheckCloneUrl / CheckCloneDestination**: Clones a repository into a new or empty folder, and
+**GitClient.Clone / CheckCloneUrl / CheckCloneDestination**: Clones a repository into a new folder, and
 tells beforehand why an address or a folder cannot be used.
 
 - *Type*: In-process .NET instance method (`Clone`) and static methods (`CheckCloneUrl`, pure; `CheckCloneDestination`,
   reads the disk).
 - *Role*: Provider. Its consumers are the clone dialog and the main window's clone operation in `LauncherUI`.
-- *Contract*: `Clone` runs `git clone -- <address> <destination>` in the destination's parent folder under the clone
-  limit and returns the outcome with credentials removed; a clone git refuses is a result, not an exception; on cancel
-  or timeout the partial result is removed - only what the call created - and after a failed clone nothing is deleted
+- *Contract*: `Clone` creates a hidden working folder `.agentcontrol-clone-<guid>` next to the destination, runs
+  `git clone -- <address> <working folder>` in the destination's parent folder under the clone limit, and renames the
+  working folder to the destination only when git succeeded; it returns the outcome with credentials removed; a clone
+  git refuses is a result, not an exception; on cancel, timeout, failure or a failed move the working folder - which is
+  the call's own - is removed, and nothing else
   (`AgentControl-GitIntegration-CloneRepository`, `-CloneUrlIsData`, `-CloneNeverLogsCredentials`,
   `-CloneRemovesOnlyWhatItCreated`).
-- *Constraints*: An address that is blank, multi-line, starts with `-` or uses a remote-helper syntax such as `ext::`,
-  and a destination that is relative, has no parent folder, is a file or is a non-empty folder, are refused with
+- *Constraints*: An address that is blank, multi-line, starts with `-`, uses a remote-helper syntax such as `ext::` or
+  is an `ssh://` address whose host starts with `-`,
+  and a destination that is relative, has no parent folder, or where anything exists (a folder, even an empty one, a
+  file or a link, whether or not its target exists), are refused with
   `ArgumentException` (reason in the message) before git starts; a `GitCommandTimeoutException` or
-  `OperationCanceledException` reports a stopped clone; on a guarded thread nothing is read or started.
+  `OperationCanceledException` reports a stopped clone; on a guarded thread nothing is read or started. Something
+  that appears at the destination while git clones is never replaced: the move is refused and reported as a failed
+  result.
 
 **GitClient time limits and cancellation**: Every `GitClient` query, `Pull`, `SwitchBranch` and `Clone` runs under a
 time limit and accepts a cancellation token.
@@ -224,9 +230,12 @@ as data (a leading `-`, a remote-helper address or an ssh host that starts with 
 the options), asks nothing on a terminal and may use only the local, file, git, http, https and ssh transports
 (`AgentControl-GitClient-CloneNeverPrompts`; every command runs under one environment policy that also removes the
 variables that redirect the repository or trace git's traffic, `AgentControl-GitClient-EnvironmentPolicy`), shows no
-credential in a log (the one place a command line is logged, `RunGit`, redacts it) and, when it is
-killed, removes only what it created - an existing empty folder is kept - never following links and never after a
-failure git reported itself.
+credential in a log (the one place a command line is logged, `RunGit`, redacts it) and clones into a hidden folder of
+its own next to the destination that it renames into place only when git succeeded: nothing exists under the
+destination's name before that (not even an empty folder, a file or a link is accepted), what appears there meanwhile
+is never replaced, and when the clone is killed or fails only that hidden folder is removed - never following links.
+A process that dies with the application leaves the hidden folder behind; nothing sweeps it up, because deleting a
+folder without proof that it is ours is what this design avoids (the user guide says it can be deleted).
 
 `GitClient` invokes the configured git executable (default `git`, overridable via Settings)
 as an external process for every query. Status/pull/committed-files queries surface failures

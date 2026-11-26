@@ -201,8 +201,8 @@ public sealed class CloneRepositoryWindowTests : IDisposable
     });
 
     /// <summary>
-    ///     Test that Enter in the address box clones too, and that a destination that already exists and is
-    ///     not empty keeps the dialog open with the reason shown.
+    ///     Test that Enter in the address box clones too, and that a destination that already exists
+    ///     keeps the dialog open with the reason shown.
     /// </summary>
     [Fact]
     public void CloneRepositoryWindow_EnterInAddressBox_ClonesAndExistingFolderShowsReason() => HeadlessTestApp.RunAsync(async () =>
@@ -233,7 +233,7 @@ public sealed class CloneRepositoryWindowTests : IDisposable
             Assert.False(result.IsCompleted);
             var error = dialog.FindControl<TextBlock>("CloneErrorText")!;
             Assert.True(error.IsVisible);
-            Assert.Contains("already exists and is not empty", error.Text, StringComparison.Ordinal);
+            Assert.Contains("already exists", error.Text, StringComparison.Ordinal);
 
             // Act: another folder name, then Enter
             dialog.FindControl<TextBox>("CloneFolderNameTextBox")!.Text = "tools2";

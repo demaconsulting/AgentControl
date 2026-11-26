@@ -209,21 +209,25 @@ is tested by `GitIntegrationSubsystem_CloneThenListAndSwitchBranches_OnRealRepos
 `AgentControl-GitIntegration-CloneRepository`; a switch git refuses is verified with
 `GitClient_SwitchBranch_RealRepo_DirtyConflictingFile_IsRefusedWithGitsReasonAndChangesNothing` and an edit that does
 not conflict travels with the switch with `GitClient_SwitchBranch_RealRepo_UnrelatedDirtyFile_SurvivesTheSwitch`, and a
-canceled clone
-with `GitClient_Clone_Canceled_RemovesDestinationItCreated`, cited at the subsystem level (children:
+canceled clone with `GitClient_Clone_Canceled_RemovesOnlyItsTempFolder`, cited at the subsystem level (children:
 `AgentControl-GitClient-ListBranches`, `-ListBranchesRemoteDistinct`, `-ListBranchesDetached`, `-OutputIsUtf8`,
 `-SwitchBranch`, `-SwitchNeverForces`, `-SwitchNeverMergesOrStashes`, `-SwitchNameIsData`,
-`-SwitchKeepsNonConflictingChanges`, `-SwitchRefusalReported`, `-EnvironmentPolicy`, `-Clone`,
-`-CloneDestinationRules`, `-CloneNeverPrompts` and `-CloneCancelStopsGit`).
+`-SwitchKeepsNonConflictingChanges`, `-SwitchRefusalReported`, `-EnvironmentPolicy`, `-Clone`, `-CloneTimeLimit`,
+`-CloneFailureReported`, `-CommandsRefuseGuardedThread`, `-CloneDestinationRules`, `-CloneNeverPrompts` and
+`-CloneCancelStopsGit`). The real clone is made into a new folder through a hidden sibling working folder that is
+renamed when git succeeded.
 
 **GitIntegration_CloneSafety_UnitTestsCoverAddressDataCleanupAndRedaction**: An address that git could read as an option
 or a remote helper, or an ssh address whose host starts with a dash, is refused before git starts
 (`GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit`, covering
-`AgentControl-GitIntegration-CloneUrlIsData`, child `AgentControl-GitClient-CloneRefusesOptionLikeUrl`); a canceled
-clone into an existing empty folder keeps the folder and a failed clone deletes nothing
-(`GitClient_Clone_CanceledIntoExistingEmptyFolder_RemovesContentsKeepsFolder` and
-`GitClient_Clone_Fails_LeavesFolderAlone`, covering `AgentControl-GitIntegration-CloneRemovesOnlyWhatItCreated`, child
-`AgentControl-GitClient-CloneRemovesOnlyWhatItCreated`); and an address with a password never puts the password into a
+`AgentControl-GitIntegration-CloneUrlIsData`, children `AgentControl-GitClient-CloneUrlRefused` and
+`-CloneUrlSeparatedFromOptions`); a canceled clone removes only its own hidden working folder - a file, a folder and a
+look-alike folder of the user's next to the destination stay - and a failed clone removes that folder and returns git's
+text (`GitClient_Clone_Canceled_RemovesOnlyItsTempFolder` and
+`GitClient_Clone_Fails_RemovesItsTempFolderAndReturnsGitsReason`, covering
+`AgentControl-GitIntegration-CloneRemovesOnlyWhatItCreated`, children `AgentControl-GitClient-CloneIntoFreshFolder`,
+`-CloneCleansUpOnlyItsOwnFolder` and `-CloneDestinationAppearedMeanwhile`); and an address with a password never puts
+the password into a
 log message or a result: with a stub whose clone fails and echoes the address, the subsystem test searches the log and
 the result for the password. That scenario is tested by
 `GitIntegrationSubsystem_CloneWithCredentialsInUrl_NeverLogsThePassword`, covering

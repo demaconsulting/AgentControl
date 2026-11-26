@@ -27,8 +27,8 @@ tests use the shared headless Avalonia session (`HeadlessTestApp`).
   the user types a name, and then stays; a name that is not one valid Windows file name is refused with a message, on
   every host operating system (the forbidden characters are a fixed set, not the host's).
 - The destination is checked on disk through the background work runner when Clone is pressed, so the calling thread is
-  free meanwhile; an existing non-empty folder or a missing parent keeps the dialog open with the reason, and a new or
-  an empty folder is accepted.
+  free meanwhile; an existing folder (empty or not), a file or a link at the destination, or a missing parent, keeps the
+  dialog open with the reason, and a name that does not exist yet is accepted.
 - The group box starts on Ungrouped, lists the groups it was given after it, and falls back to Ungrouped.
 - The dialog completes exactly once - with the trimmed address, the destination and the group, or with none when
   canceled - whatever is done afterwards.
@@ -68,12 +68,13 @@ trailing dot, `con`, `NUL.txt`, `com1` and `LPT9` are refused with a message and
 
 **CloneRepositoryViewModel_DestinationCheckedInBackground**: With the destination check held at a gate and the calling
 thread guarded, pressing Clone records no blocking call, shows the checking state, keeps Clone unavailable, and after
-the gate opens an existing folder holding a file is refused with `already exists and is not empty`, the dialog stays
-open, the file is untouched and another folder name clears the message. A parent folder that does not exist is refused
-with `does not exist`, and an existing empty folder is accepted. In the window, Enter in the address box checks the
+the gate opens an existing folder holding a file is refused with `already exists; choose a name that does not exist
+yet`, the dialog stays open, the file is untouched and another folder name clears the message. A parent folder that
+does not exist is refused with `does not exist`, an existing empty folder and a file are refused too, and a name that
+does not exist yet is accepted. In the window, Enter in the address box checks the
 folder, shows the reason under the fields and keeps the dialog open; another name and Enter close it with the request.
 This scenario is tested by `CloneRepositoryViewModel_Accept_ChecksDestinationInBackground_ShowsExistingFolderMessage`,
-`CloneRepositoryViewModel_Accept_NewOrEmptyFolderIsAcceptedMissingParentRefused` and
+`CloneRepositoryViewModel_Accept_NewFolderIsAcceptedExistingEmptyFolderAndMissingParentRefused` and
 `CloneRepositoryWindow_EnterInAddressBox_ClonesAndExistingFolderShowsReason`, covering
 `AgentControl-CloneRepositoryViewModel-DestinationCheckedInBackground`.
 

@@ -1231,7 +1231,7 @@ name. The requirements are split by behavior; each is covered by the tests that 
   `CloneRepositoryWindow_EscapeAndCancel_ReturnNull` (`CloneRepositoryWindowTests.cs`, with a real temporary folder as
   the parent): the focus in the address box, the folder name following the address, the destination line, the group box
   with Ungrouped selected, the error text for an address that looks like an option, Browse answered through the
-  picker seam, Clone by button and by Enter, an existing non-empty folder refused with its reason while the dialog stays
+  picker seam, Clone by button and by Enter, an existing folder refused with its reason while the dialog stays
   open, and Escape and Cancel. The rules behind them are verified by the `CloneRepositoryViewModel` unit tests.
 - `AgentControl-LauncherUI-CloneRepository` (the clone and the card it adds):
   `MainWindow_CloneRepoButton_OpensDialogAndCloneAddsCardIntoChosenGroup` (a local bare repository, never the network:

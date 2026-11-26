@@ -215,7 +215,7 @@ public sealed class CloneRepositoryViewModelTests : IDisposable
     /// <summary>
     ///     Test that the destination is checked on disk when Clone is pressed, off the UI thread: the
     ///     check is held at a gate while the calling thread (guarded against blocking calls) is free and
-    ///     the dialog shows it is checking, and a destination that exists and is not empty keeps the dialog
+    ///     the dialog shows it is checking, and a destination that exists keeps the dialog
     ///     open with the reason.
     /// </summary>
     [Fact]
@@ -259,7 +259,7 @@ public sealed class CloneRepositoryViewModelTests : IDisposable
         Assert.True(checkingWhileHeld);
         Assert.False(canAcceptWhileHeld);
         Assert.False(viewModel.IsChecking);
-        Assert.Contains("already exists and is not empty", viewModel.ErrorText, StringComparison.Ordinal);
+        Assert.Contains("already exists; choose a name that does not exist yet", viewModel.ErrorText, StringComparison.Ordinal);
         Assert.Equal(0, raised);
         Assert.Null(completed);
         Assert.True(File.Exists(Path.Combine(existing, "keep.txt")));
@@ -273,15 +273,16 @@ public sealed class CloneRepositoryViewModelTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that a destination that does not exist, and one that is an existing empty folder, are
-    ///     accepted, and that a missing parent folder is refused.
+    ///     Test that a destination that does not exist is accepted, and that a missing parent folder, an
+    ///     existing empty folder and a file are refused with their reasons.
     /// </summary>
     [Fact]
-    public async Task CloneRepositoryViewModel_Accept_NewOrEmptyFolderIsAcceptedMissingParentRefused()
+    public async Task CloneRepositoryViewModel_Accept_NewFolderIsAcceptedExistingEmptyFolderAndMissingParentRefused()
     {
         // Arrange
         var parent = CreateTempDirectory();
         Directory.CreateDirectory(Path.Combine(parent, "empty"));
+        await File.WriteAllTextAsync(Path.Combine(parent, "a-file"), "x", TestContext.Current.CancellationToken);
         var viewModel = new CloneRepositoryViewModel([], Path.Combine(parent, "missing-parent"))
         {
             RepositoryUrl = "https://example.com/team/repo.git"
@@ -293,15 +294,29 @@ public sealed class CloneRepositoryViewModelTests : IDisposable
         await viewModel.AcceptCommand.ExecuteAsync();
         var missingParentMessage = viewModel.ErrorText;
 
-        // Act: an existing empty folder
+        // Act: an existing empty folder is refused now, and so is a file
         viewModel.ParentFolder = parent;
         viewModel.FolderName = "empty";
+        await viewModel.AcceptCommand.ExecuteAsync();
+        var emptyFolderMessage = viewModel.ErrorText;
+        var afterEmptyFolder = requests.Count;
+        viewModel.FolderName = "a-file";
+        await viewModel.AcceptCommand.ExecuteAsync();
+        var fileMessage = viewModel.ErrorText;
+        var afterFile = requests.Count;
+
+        // Act: a name that does not exist yet
+        viewModel.FolderName = "fresh";
         await viewModel.AcceptCommand.ExecuteAsync();
 
         // Assert
         Assert.Contains("does not exist", missingParentMessage, StringComparison.Ordinal);
+        Assert.Contains("already exists", emptyFolderMessage, StringComparison.Ordinal);
+        Assert.Contains("is a file", fileMessage, StringComparison.Ordinal);
+        Assert.Equal(0, afterEmptyFolder);
+        Assert.Equal(0, afterFile);
         var request = Assert.Single(requests);
-        Assert.Equal(Path.Combine(parent, "empty"), request!.DestinationPath);
+        Assert.Equal(Path.Combine(parent, "fresh"), request!.DestinationPath);
     }
 
     /// <summary>

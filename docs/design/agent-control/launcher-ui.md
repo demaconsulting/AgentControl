@@ -878,13 +878,15 @@ by default, then the existing groups named by their path), the inline error text
 needs no disk is checked while typing and keeps Clone disabled until it holds: an address that is blank, spans several
 lines, starts with a dash or uses a remote helper (`ext::`, `fd::`) is refused (`GitClient.CheckCloneUrl`, the same rule
 the clone applies), the folder name must be one valid Windows file name, the parent folder must be absolute. Pressing
-Clone (or Enter) checks the destination on disk in the background - it must not exist or be an empty folder and its
-parent must exist (`GitClient.CheckCloneDestination`) - and keeps the dialog open with the reason when it cannot be
-used. The dialog only chooses. `MainWindowViewModel.CloneRepositoryAsync` then clones as an operation of the window
+Clone (or Enter) checks the destination on disk in the background - nothing may exist there, not even an empty folder, a
+file or a link, and its parent must exist (`GitClient.CheckCloneDestination`) - and keeps the dialog open with the
+reason when it cannot be used. The dialog only chooses. `MainWindowViewModel.CloneRepositoryAsync` then clones as an
+operation of the window
 (`AgentControl-LauncherUI-CloneRepository`, `-CloneProgressCancel`): the strip shows an indeterminate `Cloning x...`
-with a Cancel button named *Cancel cloning repository*; `GitClient.Clone` runs on a worker thread; a second request for
-the destination being cloned into is refused; Cancel (or closing the window) stops git and removes only what the clone
-created (see the GitIntegration design) and says nothing. When git succeeds the folder is added through
+with a Cancel button named *Cancel cloning repository*; `GitClient.Clone` runs on a worker thread and clones into a
+hidden folder next to the destination that it renames to the destination when git succeeded; a second request for
+the destination being cloned into is refused; Cancel (or closing the window) stops git and removes only that hidden
+folder (see the GitIntegration design) and says nothing. When git succeeds the folder is added through
 `EnqueueAddReposAsync` - the same checks, the chosen group (created when it does not exist), the save and the
 Retry/Discard question - so the card appears like any added repo; when that add is canceled, refused or cannot be saved
 the message says the cloned folder is still on disk. When git fails the message *Cloning failed:* gives git's own reason

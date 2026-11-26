@@ -65,14 +65,15 @@ sections:
         title: >-
           The CloneRepositoryViewModel class shall, when Clone is pressed, check the destination on
           disk through the background work runner rather than on the calling (UI) thread, show that it
-          is checking, keep the dialog open with the reason when the folder exists and is not empty or
-          its parent folder does not exist, and accept a folder that does not exist or is empty.
+          is checking, keep the dialog open with the reason when anything exists at the destination (a
+          folder, even an empty one, a file or a link) or its parent folder does not exist, and accept
+          a name that does not exist yet.
         justification: |
           The check reads the disk, which can be slow (a network drive, a sleeping disk), and must never
-          freeze the dialog; a clone into somebody's existing folder must be refused before git starts.
+          freeze the dialog; a clone onto somebody's existing folder must be refused before git starts.
         tests:
           - CloneRepositoryViewModel_Accept_ChecksDestinationInBackground_ShowsExistingFolderMessage
-          - CloneRepositoryViewModel_Accept_NewOrEmptyFolderIsAcceptedMissingParentRefused
+          - CloneRepositoryViewModel_Accept_NewFolderIsAcceptedExistingEmptyFolderAndMissingParentRefused
           - CloneRepositoryWindow_EnterInAddressBox_ClonesAndExistingFolderShowsReason
 
       - id: AgentControl-CloneRepositoryViewModel-GroupChoiceDefaultsUngrouped

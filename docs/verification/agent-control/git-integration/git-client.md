@@ -223,44 +223,66 @@ process's own environment is never changed by a test). This scenario is tested b
 `GitClient_ApplyBaseEnvironment_RemovesRepositoryRedirectingVariables`, covering
 `AgentControl-GitClient-EnvironmentPolicy` and `AgentControl-GitClient-CloneNeverPrompts`.
 
-**GitClient_Clone_RunsInParentWithDataArgumentsAndRefusesBadInput**: The stub's argument log shows
-`clone -- <trimmed url> <destination>`; an address that starts with a dash, is blank, spans two lines or uses `ext::`,
-`EXT::` or `fd::` is refused with `ArgumentException` and the stub is never started, while ordinary https, ssh, scp-like
-and path addresses are accepted by `CheckCloneUrl`, and an `ssh://` address whose host (after any user name) starts with
-a dash is refused while a dash elsewhere in the address is accepted; a destination that is a non-empty folder (whose
-file stays intact), has a missing parent, is relative or is a file is refused with a reason; a new or an empty folder is
-accepted; a stub whose `clone` takes two seconds completes under a one-second local limit (the clone limit applies); on
-a guarded thread the branch list, the switch, the clone and the destination check are each refused with
-`BlockingCallOnGuardedThreadException`. A real clone of a local bare repository works into a new folder and into an
-existing empty folder (a repository root on `main` with the committed file), and a clone of a path that is not a
-repository is a failed result. This scenario is tested by
-`GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList`,
+**GitClient_Clone_RunsInFreshSiblingFolderWithDataArgumentsAndRefusesBadInput**: The stub's argument log shows
+`clone -- <trimmed url> <target>`, where the target is a hidden `.agentcontrol-clone-<guid>` folder in the destination's
+parent folder - never the destination - and after the clone the destination holds the stub's clone, is not hidden, and
+is the only entry left in the parent folder. An address that starts with a dash, is blank, spans two lines or uses
+`ext::`, `EXT::` or `fd::` is refused with `ArgumentException` and the stub is never started, while ordinary https, ssh,
+scp-like and path addresses are accepted by `CheckCloneUrl`, and an `ssh://` address whose host (after any user name)
+starts with a dash is refused while a dash elsewhere in the address is accepted. A destination that is a folder with a
+file in it (the file stays intact), an empty folder or a file is refused with a reason that says it already exists, with
+git never started and the parent unchanged; so is a destination that is a link - a junction on Windows, a symbolic link
+elsewhere - whose target is untouched, and one whose target is gone; a destination with a missing parent or a relative
+one is refused; `CheckCloneDestination` gives the same reasons without cloning and accepts a name that does not exist
+yet, with or without a trailing separator. A stub whose `clone` takes two seconds completes under a one-second local
+limit (the clone limit applies); on a guarded thread the branch list, the switch, the clone and the destination check
+are each refused with `BlockingCallOnGuardedThreadException`. A real clone of a local bare repository works into a new
+folder (a repository root on `main` with the committed file, a clean working tree for git, no hidden attribute, nothing
+else left in the parent folder), and a clone of a path that is not a repository is a failed result that leaves the
+parent folder empty. This scenario is tested by `GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList`,
 `GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit`, `GitClient_CheckCloneUrl_UsualAddress_ReturnsNull`,
 `GitClient_CheckCloneUrl_SshHostStartingWithDash_IsRefused`,
-`GitClient_Clone_DestinationExistsNotEmpty_ThrowsArgumentExceptionAndTouchesNothing`,
+`GitClient_Clone_DestinationExists_ThrowsArgumentExceptionAndTouchesNothing`,
+`GitClient_Clone_DestinationIsLink_IsRefusedAndTargetUntouched`,
 `GitClient_Clone_ParentMissingRelativeOrFile_ThrowsArgumentException`,
-`GitClient_CheckCloneDestination_NewOrEmptyFolder_ReturnsNull`, `GitClient_Clone_UsesCloneTimeoutNotLocalTimeout`,
+`GitClient_CheckCloneDestination_NewFolder_ReturnsNull`,
+`GitClient_CheckCloneDestination_ExistingEmptyFolderOrFile_ReturnsReason`,
+`GitClient_CheckCloneDestination_DestinationIsLink_ReturnsReason`, `GitClient_Clone_UsesCloneTimeoutNotLocalTimeout`,
 `GitClient_Constructor_NonPositiveSwitchOrCloneLimit_ThrowsArgumentOutOfRangeException`,
 `GitClient_BranchAndCloneCommands_OnGuardedThread_ThrowBlockingCallOnGuardedThread`,
-`GitClient_Clone_RealLocalBareRepository_ClonesIntoNewAndIntoEmptyFolder` and
-`GitClient_Clone_RealGit_NotARepository_ReturnsFailedResult`, covering `AgentControl-GitClient-Clone`,
-`AgentControl-GitClient-CloneRefusesOptionLikeUrl` and `AgentControl-GitClient-CloneDestinationRules`.
+`GitClient_Clone_RealLocalBareRepository_ClonesIntoNewFolderAndLeavesNoTempBehind` and
+`GitClient_Clone_RealGit_NotARepository_ReturnsFailedResultAndLeavesParentEmpty`, covering
+`AgentControl-GitClient-Clone`, `-CloneTimeLimit`, `-CloneFailureReported`, `-CommandsRefuseGuardedThread`,
+`-CloneUrlRefused`, `-CloneUrlSeparatedFromOptions`, `-CloneDestinationRules` and `-CloneIntoFreshFolder`
+(all prefixed `AgentControl-GitClient`).
 
-**GitClient_Clone_StopsAndCleansUpOnlyWhatItCreated**: A stub whose `clone` creates its destination (with a read-only
+**GitClient_Clone_StopsAndCleansUpOnlyItsOwnFolder**: A stub whose `clone` creates its working folder (with a read-only
 pack file) and then hangs is canceled after the file exists: the call throws `OperationCanceledException`, the stub
-never finishes, and the destination - which the call created - is gone while its parent remains; with an existing empty
-destination the folder stays and is empty afterwards; with a one-second clone limit the same stub is stopped and
-reported as `GitCommandTimeoutException` naming `git clone` and the limit, and the destination is removed; a stub whose
-`clone` leaves its destination and exits with an error is returned as a failed result and the destination is left alone.
-This scenario is tested by `GitClient_Clone_Canceled_RemovesDestinationItCreated`,
-`GitClient_Clone_CanceledIntoExistingEmptyFolder_RemovesContentsKeepsFolder`,
-`GitClient_Clone_TimesOut_StopsGitAndRemovesDestinationItCreated` and `GitClient_Clone_Fails_LeavesFolderAlone` (and,
-for a folder with content, `GitClient_Clone_DestinationExistsNotEmpty_ThrowsArgumentExceptionAndTouchesNothing`),
-covering `AgentControl-GitClient-CloneRemovesOnlyWhatItCreated` and `AgentControl-GitClient-CloneCancelStopsGit`.
+never finishes, the working folder is gone, the destination never existed, and a file, a folder and a look-alike folder
+named `.agentcontrol-clone-theirs` (with a file in it) that the user had in the parent folder are all still there with
+their content. With a one-second clone limit the same stub is stopped and reported as `GitCommandTimeoutException`
+naming `git clone` and the limit, and the parent folder is empty; a stub whose `clone` leaves its folder and exits with
+an error is returned as a failed result with git's text, the working folder is removed and the user's file stays. A stub
+whose `clone` takes two seconds, during which the test creates the destination folder with a file in it, ends as a
+failed result (no exception) whose text names the destination and says it was created while the repository was being
+cloned; the file is intact, the working folder is gone and the destination is the only entry in the parent folder. This
+scenario is tested by `GitClient_Clone_Canceled_RemovesOnlyItsTempFolder`,
+`GitClient_Clone_TimesOut_StopsGitAndRemovesItsTempFolder`,
+`GitClient_Clone_Fails_RemovesItsTempFolderAndReturnsGitsReason` and
+`GitClient_Clone_DestinationAppearsWhileCloning_FailsClearlyAndTouchesNothingOfTheUsers`, covering
+`AgentControl-GitClient-CloneCleansUpOnlyItsOwnFolder`, `-CloneDestinationAppearedMeanwhile` and
+`-CloneCancelStopsGit` (all prefixed `AgentControl-GitClient`). Not tested: a working folder that cannot be created (a
+read-only parent) and one that cannot be removed because a process holds a file; both paths log and report the folder
+by name, and the second needs a process that holds a file open, which is not reproducible portably.
 
-**GitClient_Clone_NeverLogsTheAddressPassword**: With an address `https://alice:<password>@example.com/...`, a stub
+**GitClient_Clone_NeverLogsTheAddressCredentials**: With an address `https://alice:<password>@example.com/...`, a stub
 whose `clone` fails and echoes the address in its error text, and a client whose git cannot be started, the password
 appears in no logged message (captured through `GitClientListLogger`), no result text and no exception text (its
-message and its full text), while the host `example.com` remains. This scenario is tested by
-`GitClient_Clone_UrlWithPassword_IsNeverWrittenToLogOrExceptionText`, covering
+message and its full text), while the host `example.com` remains. A clone that times out and one that is canceled with
+such an address leave the password out of the exception text and the log. A token before the host
+(`https://<token>@example.com/...`), a token in the query string and a user name alone are removed from the result and
+the log of a failed clone, with the host kept. This scenario is tested by
+`GitClient_Clone_UrlWithPassword_IsNeverWrittenToLogOrExceptionText`,
+`GitClient_Clone_TimeoutAndCancelMessages_NeverContainTheCredentials` and
+`GitClient_Clone_TokenOnlyAndQueryStringUrls_AreRedactedEverywhere`, covering
 `AgentControl-GitClient-CloneRedactsCredentials`.

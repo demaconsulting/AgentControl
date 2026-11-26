@@ -184,46 +184,47 @@ public class GitClientRealRepositoryTests
     }
 
     /// <summary>
-    ///     Test that a real local bare repository is cloned into a new folder and into an existing
-    ///     empty folder, giving working repositories.
+    ///     Test that a real local bare repository is cloned into a new folder, giving a working
+    ///     repository, and that no working folder is left behind next to it.
     /// </summary>
     [Fact]
-    public void GitClient_Clone_RealLocalBareRepository_ClonesIntoNewAndIntoEmptyFolder()
+    public void GitClient_Clone_RealLocalBareRepository_ClonesIntoNewFolderAndLeavesNoTempBehind()
     {
         // Arrange
         using var fixture = GitRepositoryFixture.CreateOrSkip();
         PublishBranches(fixture);
         var client = CreateClient(fixture);
-        var intoNew = Path.Combine(fixture.Root, "into-new");
-        var intoEmpty = Path.Combine(fixture.Root, "into-empty");
-        Directory.CreateDirectory(intoEmpty);
+        var parent = Path.Combine(fixture.Root, "clones");
+        Directory.CreateDirectory(parent);
+        var destination = Path.Combine(parent, "into-new");
 
         // Act
-        var first = client.Clone(fixture.RemotePath, intoNew, TestContext.Current.CancellationToken);
-        var second = client.Clone(fixture.RemotePath, intoEmpty, TestContext.Current.CancellationToken);
+        var result = client.Clone(fixture.RemotePath, destination, TestContext.Current.CancellationToken);
 
-        // Assert: both are repositories on main with the committed file
-        Assert.True(first.Succeeded, first.StandardError);
-        Assert.True(second.Succeeded, second.StandardError);
-        foreach (var folder in new[] { intoNew, intoEmpty })
-        {
-            Assert.True(GitClient.IsRepositoryRoot(folder));
-            Assert.Equal("main", client.GetCurrentBranch(folder, TestContext.Current.CancellationToken));
-            Assert.True(File.Exists(Path.Combine(folder, "branch.txt")));
-        }
+        // Assert: a repository root on main with the committed file that git itself finds clean after the move
+        Assert.True(result.Succeeded, result.StandardError);
+        Assert.True(GitClient.IsRepositoryRoot(destination));
+        Assert.Equal("main", client.GetCurrentBranch(destination, TestContext.Current.CancellationToken));
+        Assert.True(File.Exists(Path.Combine(destination, "branch.txt")));
+        Assert.True(client.IsWorkingTreeClean(destination, TestContext.Current.CancellationToken));
+        Assert.Equal([destination], Directory.GetFileSystemEntries(parent));
+        Assert.Equal(0, (int)(File.GetAttributes(destination) & FileAttributes.Hidden));
     }
 
     /// <summary>
     ///     Test that a clone of something that is not a repository is a failed result, not an
-    ///     exception, and that nothing is deleted afterwards.
+    ///     exception, and that nothing - neither the destination nor a working folder - is left in the
+    ///     parent folder.
     /// </summary>
     [Fact]
-    public void GitClient_Clone_RealGit_NotARepository_ReturnsFailedResult()
+    public void GitClient_Clone_RealGit_NotARepository_ReturnsFailedResultAndLeavesParentEmpty()
     {
         // Arrange
         using var fixture = GitRepositoryFixture.CreateOrSkip();
         var client = CreateClient(fixture);
-        var destination = Path.Combine(fixture.Root, "target");
+        var parent = Path.Combine(fixture.Root, "clones");
+        Directory.CreateDirectory(parent);
+        var destination = Path.Combine(parent, "target");
 
         // Act
         var result = client.Clone(Path.Combine(fixture.Root, "does-not-exist.git"), destination, TestContext.Current.CancellationToken);
@@ -231,7 +232,7 @@ public class GitClientRealRepositoryTests
         // Assert
         Assert.False(result.Succeeded);
         Assert.False(string.IsNullOrWhiteSpace(result.StandardError));
-        Assert.False(GitClient.IsRepositoryRoot(destination));
+        Assert.Empty(Directory.GetFileSystemEntries(parent));
     }
 
     /// <summary>

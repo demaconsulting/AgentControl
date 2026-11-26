@@ -125,9 +125,10 @@ public sealed class MainWindowViewModelCloneTests : IDisposable
         var saved = Assert.Single(SettingsStore.Load(configDirectory).RecentRepos);
         Assert.Equal(destination, saved.Path);
         Assert.Equal("Work", saved.GroupName);
+        var parent = Path.GetDirectoryName(destination)!;
         Assert.Contains(
             (await File.ReadAllLinesAsync(argumentLog, TestContext.Current.CancellationToken)).Select(line => line.Trim()),
-            line => line.Contains($"clone -- {Url} {destination}", StringComparison.Ordinal));
+            line => line.StartsWith($"clone -- {Url} {Path.Combine(parent, ".agentcontrol-clone-")}", StringComparison.Ordinal));
         Assert.False(viewModel.GlobalProgress.IsActive);
     }
 
@@ -166,21 +167,23 @@ public sealed class MainWindowViewModelCloneTests : IDisposable
     [Fact]
     public async Task MainWindowViewModel_CloneRepositoryAsync_Cancel_RemovesPartialFolderAndAddsNothing()
     {
-        // Arrange: a clone that creates the destination and then hangs
+        // Arrange: a clone that creates its working folder and then hangs
         var stub = CreateStub(null, new GitStub.Command("clone", CreatesDestination: true, SleepSeconds: GitStub.HangSeconds));
         var viewModel = CreateViewModel(stub, new AppSettings());
-        var destination = Path.Combine(CreateTempDirectory(), "repo");
+        var parent = CreateTempDirectory();
+        var destination = Path.Combine(parent, "repo");
         var cloning = viewModel.CloneRepositoryAsync(new CloneRepositoryRequest(Url, destination, null));
-        await WaitUntilAsync(() => Directory.Exists(destination));
+        await WaitUntilAsync(() => Directory.GetDirectories(parent, ".agentcontrol-clone-*").Length > 0);
 
         // Act: Cancel in the strip
         viewModel.GlobalProgress.CancelCommand.Execute(null);
         var result = await cloning;
 
-        // Assert
+        // Assert: nothing is left in the parent folder, neither the destination nor the working folder
         Assert.Equal(CloneRepositoryOutcome.Canceled, result.Outcome);
         Assert.Null(result.Notice);
         Assert.False(Directory.Exists(destination));
+        Assert.Empty(Directory.GetFileSystemEntries(parent));
         Assert.Empty(viewModel.RepoCards);
         Assert.False(viewModel.GlobalProgress.IsActive);
     }
@@ -234,12 +237,12 @@ public sealed class MainWindowViewModelCloneTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that a destination that turned out to be unusable after the dialog (it is not empty any
-    ///     more) is reported as a failed clone with the reason, without starting git and without touching
-    ///     the folder.
+    ///     Test that a destination that appeared after the dialog (a folder with a file in it now exists
+    ///     there) is reported as a failed clone with the reason, without starting git and without
+    ///     touching the folder.
     /// </summary>
     [Fact]
-    public async Task MainWindowViewModel_CloneRepositoryAsync_DestinationNotEmptyAnyMore_FailsWithReasonAndTouchesNothing()
+    public async Task MainWindowViewModel_CloneRepositoryAsync_DestinationAppeared_FailsWithReasonAndTouchesNothing()
     {
         // Arrange
         var argumentLog = TempFile("args.log");
@@ -253,7 +256,7 @@ public sealed class MainWindowViewModelCloneTests : IDisposable
 
         // Assert
         Assert.Equal(CloneRepositoryOutcome.Failed, result.Outcome);
-        Assert.Contains("not empty", result.Notice, StringComparison.Ordinal);
+        Assert.Contains("already exists", result.Notice, StringComparison.Ordinal);
         Assert.True(File.Exists(Path.Combine(destination, "mine.txt")));
         Assert.False(File.Exists(argumentLog) && (await File.ReadAllTextAsync(argumentLog, TestContext.Current.CancellationToken)).Contains("clone", StringComparison.Ordinal));
         Assert.Empty(viewModel.RepoCards);
@@ -287,7 +290,7 @@ public sealed class MainWindowViewModelCloneTests : IDisposable
         Assert.Equal(CloneRepositoryOutcome.Added, firstResult.Outcome);
         Assert.Single(viewModel.RepoCards);
 
-        // Act: once the clone ended the destination is free for a new request (and is now not empty)
+        // Act: once the clone ended the destination is free of the reservation (and now exists)
         var third = await viewModel.CloneRepositoryAsync(new CloneRepositoryRequest(Url, destination, null));
 
         // Assert: refused by the destination rule, not the reservation
@@ -359,12 +362,13 @@ public sealed class MainWindowViewModelCloneTests : IDisposable
     [Fact]
     public async Task MainWindowViewModel_CloneRepositoryAsync_Dispose_CancelsRunningClone()
     {
-        // Arrange: a clone that creates the destination and then hangs
+        // Arrange: a clone that creates its working folder and then hangs
         var stub = CreateStub(null, new GitStub.Command("clone", CreatesDestination: true, SleepSeconds: GitStub.HangSeconds));
         var viewModel = CreateViewModel(stub, new AppSettings());
-        var destination = Path.Combine(CreateTempDirectory(), "repo");
+        var parent = CreateTempDirectory();
+        var destination = Path.Combine(parent, "repo");
         var cloning = viewModel.CloneRepositoryAsync(new CloneRepositoryRequest(Url, destination, null));
-        await WaitUntilAsync(() => Directory.Exists(destination));
+        await WaitUntilAsync(() => Directory.GetDirectories(parent, ".agentcontrol-clone-*").Length > 0);
 
         // Act
         viewModel.Dispose();

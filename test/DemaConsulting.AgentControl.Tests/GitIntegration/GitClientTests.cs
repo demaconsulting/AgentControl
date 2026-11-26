@@ -1340,7 +1340,8 @@ public class GitClientTests
     }
 
     /// <summary>
-    ///     Test that a successful clone runs <c>git clone -- url destination</c> in the parent folder.
+    ///     Test that a successful clone runs <c>git clone -- url folder</c> in the parent folder with a
+    ///     fresh hidden sibling folder as the target, and then makes that folder the destination.
     /// </summary>
     [Fact]
     public void GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList()
@@ -1349,7 +1350,7 @@ public class GitClientTests
         var argumentLog = TempFilePath();
         var stub = GitStub.Create(
             argumentLogPath: argumentLog,
-            extraCommands: [new GitStub.Command("clone", Error: "Cloning into 'repo'...")]);
+            extraCommands: [new GitStub.Command("clone", Error: "Cloning into 'repo'...", CreatesDestination: true)]);
         var parent = CreateTempDirectory();
         var destination = Path.Combine(parent, "repo");
         try
@@ -1359,12 +1360,21 @@ public class GitClientTests
             // Act: the URL is padded, as a text box may deliver it
             var result = client.Clone("  https://example.com/team/repo.git ", destination, TestContext.Current.CancellationToken);
 
-            // Assert
+            // Assert: git cloned into a sibling of the destination, never into the destination itself
             Assert.True(result.Succeeded);
             Assert.Contains("Cloning into", result.StandardError, StringComparison.Ordinal);
             var line = Assert.Single(ReadLines(argumentLog));
             Assert.StartsWith("clone -- https://example.com/team/repo.git ", line, StringComparison.Ordinal);
-            Assert.Contains(destination, line, StringComparison.Ordinal);
+            var target = line["clone -- https://example.com/team/repo.git ".Length..];
+            Assert.Equal(parent, Path.GetDirectoryName(target));
+            Assert.StartsWith(".agentcontrol-clone-", Path.GetFileName(target), StringComparison.Ordinal);
+            Assert.NotEqual(destination, target);
+
+            // Assert: the clone was renamed to the destination and nothing else is left in the parent
+            Assert.True(File.Exists(Path.Combine(destination, ".git", "objects", "pack", "pack-1.pack")));
+            Assert.False(Directory.Exists(target));
+            Assert.Equal([destination], Directory.GetFileSystemEntries(parent));
+            Assert.Equal(0, (int)(File.GetAttributes(destination) & FileAttributes.Hidden));
         }
         finally
         {
@@ -1429,35 +1439,140 @@ public class GitClientTests
     }
 
     /// <summary>
-    ///     Test that a destination that already holds something is refused, and that what it holds is
-    ///     left alone.
+    ///     Test that a destination where anything exists - a folder with content, an empty folder or a
+    ///     file - is refused before git starts, and that what is there is left alone.
     /// </summary>
-    [Fact]
-    public void GitClient_Clone_DestinationExistsNotEmpty_ThrowsArgumentExceptionAndTouchesNothing()
+    /// <param name="kind">What exists at the destination.</param>
+    [Theory]
+    [InlineData("folder with a file")]
+    [InlineData("empty folder")]
+    [InlineData("file")]
+    public void GitClient_Clone_DestinationExists_ThrowsArgumentExceptionAndTouchesNothing(string kind)
     {
-        // Arrange: a destination folder with a file in it
+        // Arrange
         var invocationLog = TempFilePath();
         var stub = GitStub.Create(invocationLogPath: invocationLog);
         var parent = CreateTempDirectory();
         var destination = Path.Combine(parent, "repo");
-        Directory.CreateDirectory(destination);
         var existing = Path.Combine(destination, "mine.txt");
-        File.WriteAllText(existing, "precious");
+        if (kind == "file")
+        {
+            File.WriteAllText(destination, "precious");
+            existing = destination;
+        }
+        else
+        {
+            Directory.CreateDirectory(destination);
+            if (kind == "folder with a file")
+            {
+                File.WriteAllText(existing, "precious");
+            }
+        }
+
         try
         {
             var client = new GitClient(stub.Path, _logger);
 
-            // Act / Assert: refused with a reason naming the folder; git never started; the file is intact
+            // Act / Assert: refused with a reason naming what is there; git never started; it is intact
             var ex = Assert.Throws<ArgumentException>(() => client.Clone("https://example.com/r.git", destination, TestContext.Current.CancellationToken));
-            Assert.Contains("not empty", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("already exists", ex.Message, StringComparison.Ordinal);
             Assert.False(File.Exists(invocationLog));
-            Assert.Equal("precious", File.ReadAllText(existing));
+            Assert.Equal([destination], Directory.GetFileSystemEntries(parent));
+            if (kind != "empty folder")
+            {
+                Assert.Equal("precious", File.ReadAllText(existing));
+            }
+            else
+            {
+                Assert.Empty(Directory.GetFileSystemEntries(destination));
+            }
         }
         finally
         {
             stub.Delete();
             GitSourceProvider.DeleteDirectory(parent);
             File.Delete(invocationLog);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a destination that is a link (a junction on Windows, a symbolic link elsewhere), or
+    ///     a link whose target is gone, is refused, and that the link's target is not touched.
+    /// </summary>
+    /// <param name="dangling">Whether the link's target is removed before the clone is asked for.</param>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GitClient_Clone_DestinationIsLink_IsRefusedAndTargetUntouched(bool dangling)
+    {
+        // Arrange: a link in the parent folder that points at a folder with a file in it
+        var invocationLog = TempFilePath();
+        var stub = GitStub.Create(invocationLogPath: invocationLog);
+        var parent = CreateTempDirectory();
+        var target = Path.Combine(parent, "target");
+        var link = Path.Combine(parent, "link");
+        Directory.CreateDirectory(target);
+        var precious = Path.Combine(target, "mine.txt");
+        File.WriteAllText(precious, "precious");
+        CreateDirectoryLinkOrSkip(link, target);
+        try
+        {
+            if (dangling)
+            {
+                File.Delete(precious);
+                Directory.Delete(target);
+            }
+
+            var client = new GitClient(stub.Path, _logger);
+
+            // Act / Assert: refused as a link, git never started, nothing was created next to it
+            var ex = Assert.Throws<ArgumentException>(() => client.Clone("https://example.com/r.git", link, TestContext.Current.CancellationToken));
+            Assert.Contains("is a link", ex.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(invocationLog));
+            Assert.DoesNotContain(Directory.GetFileSystemEntries(parent), entry => Path.GetFileName(entry).StartsWith(".agentcontrol-clone-", StringComparison.Ordinal));
+            if (!dangling)
+            {
+                Assert.Equal("precious", File.ReadAllText(precious));
+            }
+        }
+        finally
+        {
+            stub.Delete();
+            RemoveLinkThenFolder(link, parent);
+            File.Delete(invocationLog);
+        }
+    }
+
+    /// <summary>
+    ///     Test that CheckCloneDestination gives the reason for a destination that is a link, dangling or
+    ///     not, and for a folder and a file, without following the link.
+    /// </summary>
+    [Fact]
+    public void GitClient_CheckCloneDestination_DestinationIsLink_ReturnsReason()
+    {
+        // Arrange
+        var parent = CreateTempDirectory();
+        var target = Path.Combine(parent, "target");
+        var link = Path.Combine(parent, "link");
+        var danglingLink = Path.Combine(parent, "dangling");
+        var danglingTarget = Path.Combine(parent, "gone");
+        Directory.CreateDirectory(target);
+        Directory.CreateDirectory(danglingTarget);
+        CreateDirectoryLinkOrSkip(link, target);
+        CreateDirectoryLinkOrSkip(danglingLink, danglingTarget);
+        Directory.Delete(danglingTarget);
+        try
+        {
+            // Act / Assert
+            Assert.Contains("is a link", GitClient.CheckCloneDestination(link), StringComparison.Ordinal);
+            Assert.Contains("is a link", GitClient.CheckCloneDestination(danglingLink), StringComparison.Ordinal);
+            Assert.Contains("already exists", GitClient.CheckCloneDestination(target), StringComparison.Ordinal);
+            Assert.Null(GitClient.CheckCloneDestination(Path.Combine(parent, "new")));
+        }
+        finally
+        {
+            RemoveLinkThenFolder(link, parent);
+            RemoveLinkThenFolder(danglingLink, parent);
         }
     }
 
@@ -1493,21 +1608,55 @@ public class GitClientTests
     }
 
     /// <summary>
-    ///     Test that CheckCloneDestination accepts a new folder and an empty existing one.
+    ///     Test that CheckCloneDestination accepts a folder name that does not exist yet.
     /// </summary>
     [Fact]
-    public void GitClient_CheckCloneDestination_NewOrEmptyFolder_ReturnsNull()
+    public void GitClient_CheckCloneDestination_NewFolder_ReturnsNull()
+    {
+        // Arrange
+        var parent = CreateTempDirectory();
+        try
+        {
+            // Act / Assert: also with a trailing separator
+            Assert.Null(GitClient.CheckCloneDestination(Path.Combine(parent, "new")));
+            Assert.Null(GitClient.CheckCloneDestination(Path.Combine(parent, "new") + Path.DirectorySeparatorChar));
+        }
+        finally
+        {
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
+    ///     Test that CheckCloneDestination refuses an existing empty folder, a folder with content and a
+    ///     file, each with a reason that says to choose a name that does not exist yet.
+    /// </summary>
+    [Fact]
+    public void GitClient_CheckCloneDestination_ExistingEmptyFolderOrFile_ReturnsReason()
     {
         // Arrange
         var parent = CreateTempDirectory();
         var empty = Path.Combine(parent, "empty");
+        var full = Path.Combine(parent, "full");
+        var file = Path.Combine(parent, "file.txt");
         Directory.CreateDirectory(empty);
+        Directory.CreateDirectory(full);
+        File.WriteAllText(Path.Combine(full, "mine.txt"), "x");
+        File.WriteAllText(file, "x");
         try
         {
-            // Act / Assert
-            Assert.Null(GitClient.CheckCloneDestination(Path.Combine(parent, "new")));
-            Assert.Null(GitClient.CheckCloneDestination(empty));
-            Assert.Null(GitClient.CheckCloneDestination(empty + Path.DirectorySeparatorChar));
+            // Act
+            var emptyReason = GitClient.CheckCloneDestination(empty);
+            var emptySeparatorReason = GitClient.CheckCloneDestination(empty + Path.DirectorySeparatorChar);
+            var fullReason = GitClient.CheckCloneDestination(full);
+            var fileReason = GitClient.CheckCloneDestination(file);
+
+            // Assert
+            Assert.Contains("already exists", emptyReason, StringComparison.Ordinal);
+            Assert.Contains("does not exist yet", emptyReason, StringComparison.Ordinal);
+            Assert.Equal(emptyReason, emptySeparatorReason);
+            Assert.Contains("already exists", fullReason, StringComparison.Ordinal);
+            Assert.Contains("is a file", fileReason, StringComparison.Ordinal);
         }
         finally
         {
@@ -1560,33 +1709,45 @@ public class GitClientTests
     }
 
     /// <summary>
-    ///     Test that canceling a clone kills git and removes the folder the clone created, even though
-    ///     git left read-only files in it.
+    ///     Test that canceling a clone kills git and removes only the working folder the clone made, even
+    ///     though git left read-only files in it, and that a file, a folder and a look-alike folder of
+    ///     the user's in the parent folder stay.
     /// </summary>
     [Fact]
-    public async Task GitClient_Clone_Canceled_RemovesDestinationItCreated()
+    public async Task GitClient_Clone_Canceled_RemovesOnlyItsTempFolder()
     {
-        // Arrange: a clone that creates its destination (with a read-only pack file) and then hangs
+        // Arrange: a clone that creates its working folder (with a read-only pack file) and then hangs
         var stub = GitStub.Create(extraCommands:
         [
             new GitStub.Command("clone", SleepSeconds: GitStub.HangSeconds, CreatesDestination: true)
         ]);
         var parent = CreateTempDirectory();
         var destination = Path.Combine(parent, "repo");
+        var keepFile = Path.Combine(parent, "keep.txt");
+        var keepFolder = Path.Combine(parent, "keep-folder");
+        var lookAlike = Path.Combine(parent, ".agentcontrol-clone-theirs");
+        await File.WriteAllTextAsync(keepFile, "mine", TestContext.Current.CancellationToken);
+        Directory.CreateDirectory(keepFolder);
+        Directory.CreateDirectory(lookAlike);
+        await File.WriteAllTextAsync(Path.Combine(lookAlike, "theirs.txt"), "theirs", TestContext.Current.CancellationToken);
         try
         {
             var client = new GitClient(stub.Path, _logger);
             using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
             var clone = Task.Run(() => client.Clone("https://example.com/r.git", destination, cancellation.Token), TestContext.Current.CancellationToken);
-            Assert.True(WaitForReadOnlyPackFile(destination), "The stub never created its read-only file.");
+            Assert.True(WaitForReadOnlyPackFileInWorkFolder(parent, lookAlike), "The stub never created its read-only file.");
 
             // Act: cancel while git is writing
             await cancellation.CancelAsync();
 
-            // Assert: canceled, git killed, the folder this call created is gone, the parent is not
+            // Assert: canceled, git killed, only the working folder is gone, the destination never existed
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => clone);
             Assert.False(Directory.Exists(destination));
-            Assert.True(Directory.Exists(parent));
+            Assert.Equal(
+                new[] { keepFile, keepFolder, lookAlike }.Order(StringComparer.Ordinal).ToArray(),
+                Directory.GetFileSystemEntries(parent).Order(StringComparer.Ordinal).ToArray());
+            Assert.Equal("mine", await File.ReadAllTextAsync(keepFile, TestContext.Current.CancellationToken));
+            Assert.Equal("theirs", await File.ReadAllTextAsync(Path.Combine(lookAlike, "theirs.txt"), TestContext.Current.CancellationToken));
             Assert.False(await stub.RanToTheEndOfItsHangAsync());
         }
         finally
@@ -1597,56 +1758,21 @@ public class GitClientTests
     }
 
     /// <summary>
-    ///     Test that canceling a clone into an existing empty folder keeps the folder and removes only
-    ///     what the clone put into it.
+    ///     Test that a clone that fails (git exits with an error) removes only its own working folder,
+    ///     which git left behind, and returns git's reason; the user's other entries stay.
     /// </summary>
     [Fact]
-    public async Task GitClient_Clone_CanceledIntoExistingEmptyFolder_RemovesContentsKeepsFolder()
+    public void GitClient_Clone_Fails_RemovesItsTempFolderAndReturnsGitsReason()
     {
-        // Arrange: an empty destination folder that existed before
-        var stub = GitStub.Create(extraCommands:
-        [
-            new GitStub.Command("clone", SleepSeconds: GitStub.HangSeconds, CreatesDestination: true)
-        ]);
-        var parent = CreateTempDirectory();
-        var destination = Path.Combine(parent, "repo");
-        Directory.CreateDirectory(destination);
-        try
-        {
-            var client = new GitClient(stub.Path, _logger);
-            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-            var clone = Task.Run(() => client.Clone("https://example.com/r.git", destination, cancellation.Token), TestContext.Current.CancellationToken);
-            Assert.True(WaitForReadOnlyPackFile(destination), "The stub never created its read-only file.");
-
-            // Act
-            await cancellation.CancelAsync();
-
-            // Assert: the folder is still there, and empty
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => clone);
-            Assert.True(Directory.Exists(destination));
-            Assert.Empty(Directory.EnumerateFileSystemEntries(destination));
-        }
-        finally
-        {
-            stub.Delete();
-            GitSourceProvider.DeleteDirectory(parent);
-        }
-    }
-
-    /// <summary>
-    ///     Test that a clone that fails (git exits with an error) deletes nothing: git cleans up after
-    ///     itself, and a deletion could only remove somebody else's folder.
-    /// </summary>
-    [Fact]
-    public void GitClient_Clone_Fails_LeavesFolderAlone()
-    {
-        // Arrange: a clone that leaves its destination behind and fails
+        // Arrange: a clone that leaves its target behind and fails
         var stub = GitStub.Create(extraCommands:
         [
             new GitStub.Command("clone", Error: "fatal: repository not found", ExitCode: 128, CreatesDestination: true)
         ]);
         var parent = CreateTempDirectory();
         var destination = Path.Combine(parent, "repo");
+        var keepFile = Path.Combine(parent, "keep.txt");
+        File.WriteAllText(keepFile, "mine");
         try
         {
             var client = new GitClient(stub.Path, _logger);
@@ -1654,10 +1780,12 @@ public class GitClientTests
             // Act
             var result = client.Clone("https://example.com/r.git", destination, TestContext.Current.CancellationToken);
 
-            // Assert: the failure is a result, and the folder is left as git left it
+            // Assert: the failure is a result with git's text, and only the user's file is left
             Assert.False(result.Succeeded);
+            Assert.Equal(128, result.ExitCode);
             Assert.Contains("repository not found", result.StandardError, StringComparison.Ordinal);
-            Assert.True(Directory.Exists(destination));
+            Assert.False(Directory.Exists(destination));
+            Assert.Equal([keepFile], Directory.GetFileSystemEntries(parent));
         }
         finally
         {
@@ -1668,10 +1796,10 @@ public class GitClientTests
 
     /// <summary>
     ///     Test that a clone that outlives the clone limit is stopped, reported as timed out and its
-    ///     partial folder removed.
+    ///     working folder removed.
     /// </summary>
     [Fact]
-    public async Task GitClient_Clone_TimesOut_StopsGitAndRemovesDestinationItCreated()
+    public async Task GitClient_Clone_TimesOut_StopsGitAndRemovesItsTempFolder()
     {
         // Arrange: a clone that hangs well past a one-second clone limit
         var stub = GitStub.Create(extraCommands:
@@ -1697,7 +1825,140 @@ public class GitClientTests
             Assert.Equal(TimeSpan.FromSeconds(1), failure.Timeout);
             Assert.Contains("git clone", failure.Message, StringComparison.Ordinal);
             Assert.False(Directory.Exists(destination));
+            Assert.Empty(Directory.GetFileSystemEntries(parent));
             Assert.False(await stub.RanToTheEndOfItsHangAsync());
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
+    ///     Test that something that appears at the destination while git is cloning is never replaced or
+    ///     changed: the clone is not moved there, the failure is reported without throwing, and the
+    ///     working folder is removed.
+    /// </summary>
+    [Fact]
+    public async Task GitClient_Clone_DestinationAppearsWhileCloning_FailsClearlyAndTouchesNothingOfTheUsers()
+    {
+        // Arrange: a clone that takes two seconds, during which the user creates the destination
+        var stub = GitStub.Create(extraCommands:
+        [
+            new GitStub.Command("clone", SleepSeconds: 2, CreatesDestination: true)
+        ]);
+        var parent = CreateTempDirectory();
+        var destination = Path.Combine(parent, "repo");
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+            var clone = Task.Run(() => client.Clone("https://example.com/r.git", destination, TestContext.Current.CancellationToken), TestContext.Current.CancellationToken);
+            Assert.True(WaitForReadOnlyPackFileInWorkFolder(parent, null), "The stub never created its read-only file.");
+            Directory.CreateDirectory(destination);
+            var userFile = Path.Combine(destination, "mine.txt");
+            await File.WriteAllTextAsync(userFile, "precious", TestContext.Current.CancellationToken);
+
+            // Act
+            var result = await clone;
+
+            // Assert: a failed result naming the folder, the user's file intact, the working folder gone
+            Assert.False(result.Succeeded);
+            Assert.Contains(destination, result.StandardError, StringComparison.Ordinal);
+            Assert.Contains("was created while the repository was being cloned", result.StandardError, StringComparison.Ordinal);
+            Assert.Equal("precious", await File.ReadAllTextAsync(userFile, TestContext.Current.CancellationToken));
+            Assert.Equal([userFile], Directory.GetFileSystemEntries(destination));
+            Assert.Equal([destination], Directory.GetFileSystemEntries(parent));
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
+    ///     Test that the messages of a canceled and of a timed-out clone never contain the credentials of
+    ///     the address, and neither does the log.
+    /// </summary>
+    [Fact]
+    public async Task GitClient_Clone_TimeoutAndCancelMessages_NeverContainTheCredentials()
+    {
+        // Arrange
+        const string password = "Hunter2PasswordValue";
+        var url = $"https://alice:{password}@example.com/team/repo.git";
+        var stub = GitStub.Create(extraCommands:
+        [
+            new GitStub.Command("clone", SleepSeconds: GitStub.HangSeconds, CreatesDestination: true)
+        ]);
+        var parent = CreateTempDirectory();
+        var logger = new GitClientListLogger();
+        try
+        {
+            var client = new GitClient(
+                stub.Path,
+                logger,
+                new GitClientTimeouts(TimeSpan.FromSeconds(60), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(10))
+                {
+                    CloneRepository = TimeSpan.FromSeconds(1)
+                });
+
+            // Act: one clone times out, another is canceled
+            var timeout = Assert.Throws<GitCommandTimeoutException>(() => client.Clone(url, Path.Combine(parent, "one"), TestContext.Current.CancellationToken));
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            var slowClient = new GitClient(stub.Path, logger);
+            var second = Task.Run(() => slowClient.Clone(url, Path.Combine(parent, "two"), cancellation.Token), TestContext.Current.CancellationToken);
+            Assert.True(WaitForReadOnlyPackFileInWorkFolder(parent, null), "The stub never created its read-only file.");
+            await cancellation.CancelAsync();
+            var canceled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => second);
+
+            // Assert
+            Assert.DoesNotContain(password, timeout.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain(password, canceled.ToString(), StringComparison.Ordinal);
+            var lines = logger.Inner.Snapshot();
+            Assert.NotEmpty(lines);
+            Assert.All(lines, line => Assert.DoesNotContain(password, line, StringComparison.Ordinal));
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a token-only address, one with a token in the query string and one with only a user
+    ///     name are redacted from every log message and result, while the host stays.
+    /// </summary>
+    /// <param name="url">The address.</param>
+    /// <param name="secret">The part of it that must never be shown.</param>
+    [Theory]
+    [InlineData("https://TokenValue1234567@example.com/team/repo.git", "TokenValue1234567")]
+    [InlineData("https://example.com/team/repo.git?token=TokenValue1234567", "TokenValue1234567")]
+    [InlineData("https://some-user-name@example.com/team/repo.git", "some-user-name")]
+    public void GitClient_Clone_TokenOnlyAndQueryStringUrls_AreRedactedEverywhere(string url, string secret)
+    {
+        // Arrange: a clone that fails and echoes the address, as git does
+        var stub = GitStub.Create(extraCommands:
+        [
+            new GitStub.Command("clone", Error: $"fatal: unable to access '{url}': Could not resolve host", ExitCode: 128)
+        ]);
+        var parent = CreateTempDirectory();
+        var logger = new GitClientListLogger();
+        try
+        {
+            var client = new GitClient(stub.Path, logger);
+
+            // Act
+            var result = client.Clone(url, Path.Combine(parent, "repo"), TestContext.Current.CancellationToken);
+
+            // Assert: the host survives for diagnosis; the secret is in no result and no log line
+            Assert.False(result.Succeeded);
+            Assert.Contains("example.com", result.StandardError, StringComparison.Ordinal);
+            Assert.DoesNotContain(secret, result.StandardError, StringComparison.Ordinal);
+            var lines = logger.Inner.Snapshot();
+            Assert.NotEmpty(lines);
+            Assert.All(lines, line => Assert.DoesNotContain(secret, line, StringComparison.Ordinal));
         }
         finally
         {
@@ -2022,15 +2283,89 @@ public class GitClientTests
             : [];
 
     /// <summary>
-    ///     Waits until a stub clone has created its destination with the read-only pack file in it.
+    ///     Waits until a stub clone has created its hidden working folder next to the destination, with
+    ///     the read-only pack file in it.
     /// </summary>
-    /// <param name="destination">The clone destination.</param>
+    /// <param name="parent">The folder the destination is in.</param>
+    /// <param name="ignoredFolder">A folder of the parent to disregard (a look-alike of the user's), or
+    ///     <see langword="null"/> for none.</param>
     /// <returns><see langword="true"/> when the file appeared and is read-only within the wait.</returns>
-    private static bool WaitForReadOnlyPackFile(string destination)
+    private static bool WaitForReadOnlyPackFileInWorkFolder(string parent, string? ignoredFolder) =>
+        SpinWait.SpinUntil(
+            () => Directory.GetDirectories(parent, ".agentcontrol-clone-*")
+                .Where(folder => !string.Equals(folder, ignoredFolder, StringComparison.Ordinal))
+                .Select(folder => Path.Combine(folder, ".git", "objects", "pack", "pack-1.pack"))
+                .Any(pack => File.Exists(pack) && (File.GetAttributes(pack) & FileAttributes.ReadOnly) != 0),
+            TimeSpan.FromSeconds(5));
+
+    /// <summary>
+    ///     Creates a link to a folder - a junction on Windows (it needs no privilege), a symbolic link
+    ///     elsewhere - or skips the test when the platform does not allow it.
+    /// </summary>
+    /// <param name="linkPath">The link to create.</param>
+    /// <param name="target">The existing folder it points at.</param>
+    private static void CreateDirectoryLinkOrSkip(string linkPath, string target)
     {
-        var pack = Path.Combine(destination, ".git", "objects", "pack", "pack-1.pack");
-        return SpinWait.SpinUntil(
-            () => File.Exists(pack) && (File.GetAttributes(pack) & FileAttributes.ReadOnly) != 0,
-            TimeSpan.FromSeconds(3));
+        if (!OperatingSystem.IsWindows())
+        {
+            try
+            {
+                Directory.CreateSymbolicLink(linkPath, target);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+            {
+                Assert.Skip($"Cannot create symbolic links in this environment: {ex.Message}");
+            }
+
+            return;
+        }
+
+        var startInfo = new System.Diagnostics.ProcessStartInfo("cmd.exe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        startInfo.ArgumentList.Add("/c");
+        // cspell:disable-next-line
+        startInfo.ArgumentList.Add("mklink");
+        startInfo.ArgumentList.Add("/J");
+        startInfo.ArgumentList.Add(linkPath);
+        startInfo.ArgumentList.Add(target);
+        using var process = System.Diagnostics.Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Could not start cmd.exe to create a junction.");
+        var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"Creating the junction failed ({process.ExitCode}): {output}");
+        }
+    }
+
+    /// <summary>
+    ///     Removes a link (never its target) and then the folder that held it.
+    /// </summary>
+    /// <param name="link">The link.</param>
+    /// <param name="folder">The folder to delete afterwards.</param>
+    private static void RemoveLinkThenFolder(string link, string folder)
+    {
+        try
+        {
+            Directory.Delete(link);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            try
+            {
+                File.Delete(link);
+            }
+            catch (Exception inner) when (inner is IOException or UnauthorizedAccessException)
+            {
+                // Best effort: the temporary folder is cleaned up below
+            }
+        }
+
+        GitSourceProvider.DeleteDirectory(folder);
     }
 }

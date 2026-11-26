@@ -1035,8 +1035,9 @@ the gate opens the clone is made and the card added. This scenario is tested by
 
 **MainWindowViewModel_CloneProgressAndCancel_StripShowsTheCloneAndCancelStopsIt**: While the clone is held the strip is
 active, reads `Cloning repo...`, is indeterminate, can be canceled and names its Cancel `Cancel cloning repository`; it
-is idle after the clone. With a git whose clone creates the destination and then hangs, executing the strip's Cancel
-makes the result `Canceled` with no notice, removes the destination, adds no card and leaves the strip idle; disposing
+is idle after the clone. With a git whose clone creates its working folder and then hangs, executing the strip's Cancel
+makes the result `Canceled` with no notice, removes the working folder, leaves the parent folder empty (no destination),
+adds no card and leaves the strip idle; disposing
 the view model does the same for a running clone, and a clone requested after the close does nothing. This scenario is
 tested by `MainWindowViewModel_CloneRepositoryAsync_ShowsProgressWithCancelAndRemovesItAtTheEnd`,
 `MainWindowViewModel_CloneRepositoryAsync_Cancel_RemovesPartialFolderAndAddsNothing` and
@@ -1044,7 +1045,8 @@ tested by `MainWindowViewModel_CloneRepositoryAsync_ShowsProgressWithCancelAndRe
 `AgentControl-MainWindowViewModel-CloneProgressAndCancel`.
 
 **MainWindowViewModel_CloneAddsCardThroughAddPath_CardInGroupSavedOrFolderKept**: A successful clone (the stub's, and a
-real clone of a local bare repository with one commit) runs git with `clone -- <address> <destination>`, adds one card
+real clone of a local bare repository with one commit) runs git with `clone -- <address> <working folder>`, where the
+working folder is a hidden sibling of the destination, then adds one card
 for the destination into the group `Work` (created by the add), saves it, says nothing and leaves the strip idle; the
 real clone has its file, is a repository root and its card is named after the folder. When every save fails and the user
 answers Discard, the result is `ClonedNotAdded`, its notice holds the reason and `still on disk`, the folder exists and
@@ -1058,11 +1060,12 @@ no card was added. This scenario is tested by
 naming an address with a password, gives a `Failed` result whose notice starts `Cloning failed: fatal: repository` and
 has no password; a failure without text names the exit code (`git exited with code 3.`); the real git cloning a folder
 that is no repository gives a notice starting `Cloning failed: fatal:` and leaves no folder; a destination that now
-holds a file fails with `not empty`, git is not started and the file is untouched; a request with a blank group name
-throws `ArgumentException` before the strip shows anything, and a null request throws `ArgumentNullException`. This
-scenario is tested by `MainWindowViewModel_CloneRepositoryAsync_Failure_ReturnsGitMessageAndAddsNothing`,
+exists (a folder holding a file) fails with `already exists`, git is not started and the file is untouched; a request
+with a blank group name throws `ArgumentException` before the strip shows anything, and a null request throws
+`ArgumentNullException`. This scenario is tested by
+`MainWindowViewModel_CloneRepositoryAsync_Failure_ReturnsGitMessageAndAddsNothing`,
 `MainWindowViewModel_CloneRepositoryAsync_FailureWithoutMessage_NamesTheExitCode`,
-`MainWindowViewModel_CloneRepositoryAsync_DestinationNotEmptyAnyMore_FailsWithReasonAndTouchesNothing`,
+`MainWindowViewModel_CloneRepositoryAsync_DestinationAppeared_FailsWithReasonAndTouchesNothing`,
 `MainWindowViewModel_CloneRepositoryAsync_RealGitNotARepository_FailsWithGitsMessage` and
 `MainWindowViewModel_CloneRepositoryAsync_InvalidGroup_ThrowsBeforeStarting`, covering
 `AgentControl-MainWindowViewModel-CloneFailureReported`.
@@ -1070,6 +1073,6 @@ scenario is tested by `MainWindowViewModel_CloneRepositoryAsync_Failure_ReturnsG
 **MainWindowViewModel_CloneOneDestinationAtATime_SecondRequestRefused**: With the first clone held at the gate, a second
 request for the same folder spelled in upper case returns `Refused` (its notice says a repository is already being
 cloned there) and git was started once; after the first clone ends its card is listed and the destination is no longer
-reserved (a third request is refused for the folder not being empty, not for the reservation). This scenario is tested
+reserved (a third request is refused for the destination now existing, not for the reservation). This scenario is tested
 by `MainWindowViewModel_CloneRepositoryAsync_SameDestinationTwice_SecondRefused`, covering
 `AgentControl-MainWindowViewModel-CloneOneDestinationAtATime`.

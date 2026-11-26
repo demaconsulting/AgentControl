@@ -49,7 +49,7 @@ internal sealed record CloneGroupChoice(string? GroupName, string DisplayName)
 /// <param name="Url">The repository address, trimmed, already accepted by
 ///     <see cref="GitClient.CheckCloneUrl"/>.</param>
 /// <param name="DestinationPath">The absolute path of the folder to clone into: the parent folder and
-///     the folder name combined, checked at the time of the request to be unused or an empty folder.</param>
+///     the folder name combined, checked at the time of the request to be unused: nothing exists there.</param>
 /// <param name="GroupName">The group to put the new card in, or <see langword="null"/> for none.</param>
 internal sealed record CloneRepositoryRequest(string Url, string DestinationPath, string? GroupName);
 
@@ -64,7 +64,7 @@ internal sealed record CloneRepositoryRequest(string Url, string DestinationPath
 ///     The rules that need no disk or git (the address is present and cannot be read as an option or a
 ///     remote helper, the folder name is one valid Windows file name, the parent folder is an absolute
 ///     path) are checked on every change and shown as text, and keep the Clone button disabled. The
-///     rule that needs the disk - the destination must not exist or must be an empty folder, and its
+///     rule that needs the disk - nothing may exist at the destination (no folder, file or link), and its
 ///     parent must exist - is checked when the user presses Clone, <em>off the UI thread</em> through an
 ///     <see cref="IBackgroundWorkRunner"/>, so a slow or disconnected drive never freezes the dialog; a
 ///     problem is shown as text and the dialog stays open, and only a usable destination ends it.

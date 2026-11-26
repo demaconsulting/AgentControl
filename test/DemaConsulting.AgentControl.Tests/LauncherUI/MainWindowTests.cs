@@ -521,7 +521,7 @@ public sealed class MainWindowTests : IDisposable
     [Fact]
     public void MainWindow_GlobalProgressCancel_WhileCloning_StopsTheCloneAndAddsNothing() => HeadlessTestApp.RunAsync(async () =>
     {
-        // Arrange: a git whose clone creates the destination and then hangs
+        // Arrange: a git whose clone creates its working folder and then hangs
         var stub = Tests.GitIntegration.GitStub.Create(
             extraCommands:
             [
@@ -547,7 +547,7 @@ public sealed class MainWindowTests : IDisposable
             Dispatcher.UIThread.RunJobs();
             DialogWindowTests.Click(dialog, "CloneAcceptButton");
             var destination = Path.Combine(parent, "slow");
-            await WaitUntilAsync(() => Directory.Exists(destination));
+            await WaitUntilAsync(() => Directory.GetDirectories(parent, ".agentcontrol-clone-*").Length > 0);
             Dispatcher.UIThread.RunJobs();
 
             // Assert: the strip shows the clone with a Cancel button named for it
@@ -561,8 +561,9 @@ public sealed class MainWindowTests : IDisposable
             DialogWindowTests.Click(window, "GlobalProgressCancelButton");
             await WaitUntilAsync(() => !viewModel.GlobalProgress.IsActive);
 
-            // Assert: stopped, cleaned up, nothing added, nothing said
+            // Assert: stopped, cleaned up (neither the destination nor the working folder), nothing added or said
             Assert.False(Directory.Exists(destination));
+            Assert.Empty(Directory.GetFileSystemEntries(parent));
             Assert.Empty(viewModel.RepoCards);
             Assert.Empty(window.OwnedWindows);
         }

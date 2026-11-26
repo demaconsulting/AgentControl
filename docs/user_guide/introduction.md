@@ -255,18 +255,21 @@ message under the boxes says what is not, for example:
 - the parent folder must be a complete path such as `C:\Source`.
 
 When you press **Clone** (or **Enter**), AgentControl checks the folder in the background: the parent folder must
-exist, and the new folder must not exist yet or must be an empty folder. A folder that already holds anything is never
-used - the dialog stays open and says so, so nothing of yours can be overwritten or mixed with the clone.
+exist, and the new folder must not exist yet - not even as an empty folder, a file or a shortcut-like link. If
+anything is there the dialog stays open and says so, so nothing of yours can be overwritten or mixed with the clone.
 
 The dialog then closes and the clone runs in the background, shown in the progress strip under the app bar as
 "Cloning repo...". The window stays usable meanwhile, and you can start another clone into a different folder (a second
-clone into the folder that is being cloned into is refused).
+clone into the folder that is being cloned into is refused). Git does not write into your new folder while it works:
+the clone is made in a hidden folder named `.agentcontrol-clone-` followed by a long random text, next to the new
+folder, and renamed to the name you chose when Git has finished. If something with your chosen name appears in the
+meantime, the clone is not moved there; the message says so and what appeared is left as it was.
 
-- **Cancel.** **Cancel** in the strip (named "Cancel cloning repository" for screen readers) stops Git and removes what
-  the clone had written so far. Only what the clone created is removed: a new folder is removed completely; if you chose
-  a folder that already existed and was empty, the folder stays and only the clone's files in it are removed. No
-  message is shown after a Cancel. A clone that Git itself ends with an error removes nothing on AgentControl's part
-  (Git cleans up after itself).
+- **Cancel.** **Cancel** in the strip (named "Cancel cloning repository" for screen readers) stops Git and removes the
+  hidden folder with what the clone had written so far. Nothing else is removed, and the folder you chose never
+  existed in the meantime. No message is shown after a Cancel. A clone that Git itself ends with an error removes the
+  same hidden folder and shows Git's reason. If the application is closed or crashes in the middle of a clone, the
+  hidden `.agentcontrol-clone-...` folder can stay behind; you can delete it yourself.
 - **Added like any repo.** When Git has finished, the folder is added to the list exactly as **Add repository** adds
   it - into the group you chose, which is created again if you removed it meanwhile - and the card appears. If that add
   cannot be saved, the same **Retry** or **Discard** question is asked, and the message that follows says that the

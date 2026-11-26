@@ -1398,7 +1398,7 @@ sections:
         tests:
           - MainWindowViewModel_CloneRepositoryAsync_Failure_ReturnsGitMessageAndAddsNothing
           - MainWindowViewModel_CloneRepositoryAsync_FailureWithoutMessage_NamesTheExitCode
-          - MainWindowViewModel_CloneRepositoryAsync_DestinationNotEmptyAnyMore_FailsWithReasonAndTouchesNothing
+          - MainWindowViewModel_CloneRepositoryAsync_DestinationAppeared_FailsWithReasonAndTouchesNothing
           - MainWindowViewModel_CloneRepositoryAsync_RealGitNotARepository_FailsWithGitsMessage
           - MainWindowViewModel_CloneRepositoryAsync_InvalidGroup_ThrowsBeforeStarting
 

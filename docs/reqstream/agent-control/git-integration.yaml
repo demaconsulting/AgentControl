@@ -352,32 +352,38 @@ sections:
 
       - id: AgentControl-GitIntegration-CloneRepository
         title: >-
-          The GitIntegration subsystem shall clone a repository into a new or an empty folder
-          within a time limit, report a clone git refuses with git's explanation, check the
-          destination before git starts, and stop a clone that the user cancels.
+          The GitIntegration subsystem shall clone a repository into a new folder - one where nothing
+          exists yet - within a time limit of one hour, report a clone git refuses with git's
+          explanation, check the destination before git starts, and stop a clone that the user
+          cancels.
         justification: |
           Cloning is how a repository gets onto the machine before it can be launched with agent
-          files; it must be bounded, cancelable and must never mix with files already in the
-          destination.
+          files; it must be bounded, cancelable and must never mix with, or replace, anything
+          already at the destination.
         children:
           - AgentControl-GitClient-Clone
+          - AgentControl-GitClient-CloneTimeLimit
+          - AgentControl-GitClient-CloneFailureReported
+          - AgentControl-GitClient-CommandsRefuseGuardedThread
           - AgentControl-GitClient-CloneDestinationRules
           - AgentControl-GitClient-CloneCancelStopsGit
           - AgentControl-GitClient-CloneNeverPrompts
+          - AgentControl-GitClient-EnvironmentPolicy
         tests:
           - GitIntegrationSubsystem_CloneThenListAndSwitchBranches_OnRealRepository_FollowsTheBranch
-          - GitClient_Clone_Canceled_RemovesDestinationItCreated
+          - GitClient_Clone_Canceled_RemovesOnlyItsTempFolder
 
       - id: AgentControl-GitIntegration-CloneUrlIsData
         title: >-
           The GitIntegration subsystem shall treat the address to clone as data, refusing before git
           starts an address that git would read as an option or as a remote helper, or whose ssh
-          host ssh would read as an option.
+          host ssh would read as an option, and separating the address from git's options.
         justification: |
           An address pasted from an untrusted source must not be able to run a command of the
           sender's choosing.
         children:
-          - AgentControl-GitClient-CloneRefusesOptionLikeUrl
+          - AgentControl-GitClient-CloneUrlRefused
+          - AgentControl-GitClient-CloneUrlSeparatedFromOptions
         tests:
           - GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit
 
@@ -395,13 +401,16 @@ sections:
 
       - id: AgentControl-GitIntegration-CloneRemovesOnlyWhatItCreated
         title: >-
-          The GitIntegration subsystem shall, when a clone is canceled or times out, remove only the
-          folder, or the contents of an empty folder, that the clone itself created, and shall never
-          delete after a clone git reported as failed.
+          The GitIntegration subsystem shall clone into a folder it creates itself next to the
+          destination and rename it into place only when git succeeded, shall refuse to move it
+          over anything that appeared at the destination meanwhile, and shall, when a clone is
+          canceled, times out, fails or cannot be moved, remove only that folder.
         justification: |
           Cleaning up a killed clone must never reach somebody else's files.
         children:
-          - AgentControl-GitClient-CloneRemovesOnlyWhatItCreated
+          - AgentControl-GitClient-CloneIntoFreshFolder
+          - AgentControl-GitClient-CloneCleansUpOnlyItsOwnFolder
+          - AgentControl-GitClient-CloneDestinationAppearedMeanwhile
         tests:
-          - GitClient_Clone_CanceledIntoExistingEmptyFolder_RemovesContentsKeepsFolder
-          - GitClient_Clone_Fails_LeavesFolderAlone
+          - GitClient_Clone_Canceled_RemovesOnlyItsTempFolder
+          - GitClient_Clone_Fails_RemovesItsTempFolderAndReturnsGitsReason
