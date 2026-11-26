@@ -720,6 +720,7 @@ sections:
           - AgentControl-LauncherUI-SwitchBranchDialog
         tests:
           - windows@SwitchBranchMenuItem_ChooseOtherBranch_ChangesBranchChipAndBlockedSwitchShowsGitsReason
+          - windows@SwitchBranchMenuItem_BranchWithOtherPin_ChangesPackageChipAndKeepsUnrelatedChanges
 
       - id: AgentControl-System-CloneRepository
         title: >-
@@ -740,23 +741,27 @@ sections:
           - AgentControl-LauncherUI-CloneOneAtATime
         tests:
           - windows@CloneRepoButton_CloneFromLocalBareRepoIntoGroup_AddsTheCardAndRemovesTheProgressStrip
+          - windows@GlobalProgressCancelButton_WhileCloning_StopsTheCloneAndLeavesNothingBehind
 
       - id: AgentControl-System-CloneSafety
         title: >-
           The tool shall treat the address to clone as data (refusing one that git would read as an
-          option or a remote helper), never write the credentials in an address to its log, and
-          remove after a canceled clone only a folder it created itself.
+          option or a remote helper), never write the credentials in an address to its log, clone
+          into a folder it creates itself and, when the clone is canceled or fails, remove only that
+          folder.
         tags: [system, security]
         justification: |
           Addresses are pasted from chats and web pages and may be hostile or carry a password; and
-          cleaning up after a canceled clone must never delete work the user already had in the
-          destination folder.
+          cleaning up after a canceled clone must never delete work the user already had next to
+          the destination folder.
         children:
           - AgentControl-GitIntegration-CloneUrlIsData
           - AgentControl-GitIntegration-CloneNeverLogsCredentials
           - AgentControl-GitIntegration-CloneRemovesOnlyWhatItCreated
         tests:
           - windows@CloneRepoButton_UrlThatLooksLikeAnOption_IsRefusedAndRunsNoGit
+          - windows@CloneRepoButton_CloneWithPasswordInAddress_NeverWritesThePasswordToApplicationFiles
+          - windows@GlobalProgressCancelButton_WhileCloning_StopsTheCloneAndLeavesNothingBehind
 
       - id: AgentControl-System-SelectPackage
         title: >-
@@ -1592,6 +1597,7 @@ sections:
           # levels as evidence of the children.
           - windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword
           - windows@SettingsWindow_SignInWithRememberTicked_SavedOnlyByTheUsersCredentialHelper
+          - windows@CloneRepoButton_CloneWithPasswordInAddress_NeverWritesThePasswordToApplicationFiles
 
       - id: AgentControl-System-CredentialSessionScope
         title: >-

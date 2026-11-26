@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 using System.Text.Json;
+using DemaConsulting.AgentControl.Tests.GitIntegration;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Tools;
 
@@ -33,6 +34,15 @@ namespace DemaConsulting.AgentControl.UiTests;
 /// </summary>
 public sealed class BranchAndCloneTests
 {
+    /// <summary>
+    ///     The user name of the private test server.
+    /// </summary>
+    private const string SignInUser = "agent";
+
+    /// <summary>
+    ///     The password of the private test server; it must never appear in a file the application writes.
+    /// </summary>
+    private const string SignInPassword = "clone-sentinel-pw-3b9e52";
     /// <summary>
     ///     Switching to a branch that exists only on the remote creates a local branch for it: the card's
     ///     branch chip and the files follow, the card says so; then, with uncommitted work that the other
@@ -223,6 +233,221 @@ public sealed class BranchAndCloneTests
         Assert.False(File.Exists(marker));
         Assert.Equal(["repo"], RepoNames(mainWindow));
     }
+
+    /// <summary>
+    ///     A repo whose branches pin different versions follows the switch: the package chip shows the new
+    ///     branch's version, and the uncommitted changes that do not touch the files that differ travel with the
+    ///     switch (an untracked file and an edit of a file both branches share), so the card still shows them.
+    /// </summary>
+    [Fact]
+    public void SwitchBranchMenuItem_BranchWithOtherPin_ChangesPackageChipAndKeepsUnrelatedChanges()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: a clone whose main branch pins 1.0.0 and whose other branch pins 2.0.0, with the same shared file
+        using var fixture = GitFixtureRepository.CreateOrSkip();
+        using var context = new AgentControlTestContext(useRealGit: true)
+        {
+            LaunchEnvironment = fixture.IsolationEnvironment
+        };
+        var repo = context.RepoPath;
+        fixture.Git(fixture.Root, "clone", "-q", fixture.BarePath, repo);
+        var shared = Path.Combine(repo, "shared.txt");
+        File.WriteAllText(shared, "shared\n");
+        TestRepoPinWriter.Write(repo, GitFixtureRepository.PackageName, "1.0.0");
+        fixture.Git(repo, "add", "-A");
+        fixture.Git(repo, "commit", "-q", "-m", "pin 1.0.0");
+        fixture.Git(repo, "switch", "-q", "-c", "other");
+        TestRepoPinWriter.Write(repo, GitFixtureRepository.PackageName, "2.0.0");
+        fixture.Git(repo, "commit", "-q", "-a", "-m", "pin 2.0.0");
+        fixture.Git(repo, "switch", "-q", "main");
+
+        // Arrange: work in progress that the switch has no reason to touch
+        var untracked = Path.Combine(repo, "my-notes.txt");
+        File.WriteAllText(untracked, "notes in progress\n");
+        File.WriteAllText(shared, "shared, edited\n");
+        var mainWindow = context.Launch();
+        Assert.True(GitSourceTests.WaitForText(mainWindow, "CurrentBranchText", "main"));
+        Assert.True(GitSourceTests.WaitForText(
+            mainWindow, "RepoPinnedVersionText", $"{GitFixtureRepository.PackageName} 1.0.0"));
+        Assert.True(WaitForDirtyBadge(mainWindow));
+
+        // Act: switch to the other branch
+        ChooseBranch(context, mainWindow, "other");
+
+        // Assert: the branch chip and the package chip follow the branch
+        Assert.True(GitSourceTests.WaitForText(mainWindow, "CurrentBranchText", "other"));
+        Assert.True(GitSourceTests.WaitForText(
+            mainWindow, "RepoPinnedVersionText", $"{GitFixtureRepository.PackageName} 2.0.0"));
+        Assert.Equal("other", fixture.Git(repo, "branch", "--show-current").Trim());
+
+        // Assert: the work in progress went along, and the card still shows it
+        Assert.Equal("notes in progress\n", File.ReadAllText(untracked));
+        Assert.Equal("shared, edited\n", File.ReadAllText(shared));
+        Assert.True(WaitForDirtyBadge(mainWindow));
+    }
+
+    /// <summary>
+    ///     While a clone runs (git held by the arg-logger stub), the progress strip shows it with a Cancel button
+    ///     named after the clone and the Clone button is unavailable; Cancel stops the clone, and the parent folder
+    ///     holds exactly what the user put there - no hidden working folder, no destination - with no message and no
+    ///     new card, and the Clone button is available again.
+    /// </summary>
+    [Fact]
+    public void GlobalProgressCancelButton_WhileCloning_StopsTheCloneAndLeavesNothingBehind()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: the stub stands in for git and keeps every command waiting while the hold file exists; the
+        // parent folder holds a file of the user's and a folder that only looks like the clone's working folder
+        using var context = new AgentControlTestContext();
+        var holdFile = Path.Combine(context.RootDirectory, "git-hold");
+        context.GitHoldFile = holdFile;
+        var parent = Path.Combine(context.RootDirectory, "clones");
+        Directory.CreateDirectory(parent);
+        var sentinel = Path.Combine(parent, "keep-me.txt");
+        File.WriteAllText(sentinel, "mine");
+        var lookAlike = Path.Combine(parent, ".agentcontrol-clone-not-mine");
+        Directory.CreateDirectory(lookAlike);
+        File.WriteAllText(Path.Combine(lookAlike, "keep-me-too.txt"), "mine");
+        var mainWindow = context.Launch();
+        Assert.True(CardRefreshWait.WaitUntilCardsAreRead(mainWindow, TimeSpan.FromSeconds(30)));
+        File.WriteAllText(holdFile, string.Empty);
+        try
+        {
+            // Act: clone from the dialog; git (the stub) is held
+            GitSourceTests.Find(mainWindow, "CloneRepoButton").AsButton().Invoke();
+            var dialog = context.WaitForDialog("CloneUrlTextBox", TimeSpan.FromSeconds(15));
+            Assert.NotNull(dialog);
+            GitSourceTests.Find(dialog, "CloneUrlTextBox").AsTextBox().Text = "https://example.invalid/team/r.git";
+            GitSourceTests.Find(dialog, "CloneParentTextBox").AsTextBox().Text = parent;
+            GitSourceTests.Find(dialog, "CloneFolderNameTextBox").AsTextBox().Text = "canceled-clone";
+            var clone = GitSourceTests.Find(dialog, "CloneAcceptButton").AsButton();
+            Assert.True(Retry.WhileFalse(() => clone.IsEnabled, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(200)).Result);
+            clone.Invoke();
+
+            // Assert: the strip shows the clone with a Cancel button named for it, and Clone is unavailable
+            Assert.True(Retry.WhileFalse(
+                () => CardRefreshWait.FindShown(mainWindow, "GlobalProgressText")?.Name == "Cloning canceled-clone...",
+                TimeSpan.FromSeconds(30),
+                TimeSpan.FromMilliseconds(200)).Result);
+            Assert.Equal(
+                "Cancel cloning repository",
+                CardRefreshWait.FindShown(mainWindow, "GlobalProgressCancelButton")?.Name);
+            Assert.False(GitSourceTests.Find(mainWindow, "CloneRepoButton").AsButton().IsEnabled);
+
+            // Act: Cancel
+            GitSourceTests.Find(mainWindow, "GlobalProgressCancelButton").AsButton().Invoke();
+
+            // Assert: the strip goes and Clone is available again
+            Assert.True(Retry.WhileFalse(
+                () => CardRefreshWait.FindShown(mainWindow, "GlobalProgressStrip") is null,
+                TimeSpan.FromSeconds(30),
+                TimeSpan.FromMilliseconds(200)).Result);
+            Assert.True(Retry.WhileFalse(
+                () => GitSourceTests.Find(mainWindow, "CloneRepoButton").AsButton().IsEnabled,
+                TimeSpan.FromSeconds(30),
+                TimeSpan.FromMilliseconds(200)).Result);
+
+            // Assert: only what the user put there is left - no working folder, no destination
+            Assert.Equal(
+                [".agentcontrol-clone-not-mine", "keep-me.txt"],
+                Directory.GetFileSystemEntries(parent).Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray());
+            Assert.Equal("mine", File.ReadAllText(sentinel));
+            Assert.Equal("mine", File.ReadAllText(Path.Combine(lookAlike, "keep-me-too.txt")));
+
+            // Assert: no message, no new card
+            Assert.Null(context.WaitForWindowWithDescendant("MessageText", TimeSpan.FromSeconds(2)));
+            Assert.Equal(["repo"], RepoNames(mainWindow));
+        }
+        finally
+        {
+            // Release any git still waiting before the application is closed
+            File.Delete(holdFile);
+        }
+    }
+
+    /// <summary>
+    ///     A clone whose address carries a password (<c>https://user:password@host/...</c>) works against a private
+    ///     server, adds the card, and never writes the password to the application's settings or logs; the
+    ///     password stays in git's own <c>.git/config</c> of the new folder, which is git's behavior.
+    /// </summary>
+    [Fact]
+    public async Task CloneRepoButton_CloneWithPasswordInAddress_NeverWritesThePasswordToApplicationFiles()
+    {
+        if (!System.OperatingSystem.IsWindows())
+        {
+            Assert.Skip("FlaUI end-to-end tests require Windows UI Automation.");
+            return;
+        }
+
+        // Arrange: a private server (real git, throw-away certificate, sign-in required) and an address with the
+        // user and password; the clone goes outside the application's folders, because git itself keeps the address
+        // in the new folder's configuration
+        using var fixture = GitFixtureRepository.CreateOrSkip();
+        await using var server = await GitHttpsServer.StartAsync(fixture.BarePath, SignInUser, SignInPassword);
+        var (configuration, _) = GitHttpsServer.CreateUserConfiguration(fixture.Root, SignInUser, SignInPassword);
+        using var context = new AgentControlTestContext(useRealGit: true)
+        {
+            LaunchEnvironment = new Dictionary<string, string>
+            {
+                ["GIT_CONFIG_GLOBAL"] = configuration,
+                ["GIT_CONFIG_NOSYSTEM"] = "1"
+            }
+        };
+        var address = new UriBuilder(server.RepositoryUrl) { UserName = SignInUser, Password = SignInPassword }.Uri.AbsoluteUri;
+        var parent = Path.Combine(fixture.Root, "clones");
+        Directory.CreateDirectory(parent);
+        var destination = Path.Combine(parent, "agents-clone");
+        var mainWindow = context.Launch();
+        Assert.True(CardRefreshWait.WaitUntilCardsAreRead(mainWindow, TimeSpan.FromSeconds(30)));
+
+        // Act: clone from the dialog with the password in the address
+        GitSourceTests.Find(mainWindow, "CloneRepoButton").AsButton().Invoke();
+        var dialog = context.WaitForDialog("CloneUrlTextBox", TimeSpan.FromSeconds(15));
+        Assert.NotNull(dialog);
+        GitSourceTests.Find(dialog, "CloneUrlTextBox").AsTextBox().Text = address;
+        GitSourceTests.Find(dialog, "CloneParentTextBox").AsTextBox().Text = parent;
+        GitSourceTests.Find(dialog, "CloneFolderNameTextBox").AsTextBox().Text = "agents-clone";
+        var accept = GitSourceTests.Find(dialog, "CloneAcceptButton").AsButton();
+        Assert.True(Retry.WhileFalse(() => accept.IsEnabled, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(200)).Result);
+        accept.Invoke();
+
+        // Assert: the clone worked - the card is listed, the folder is a working clone, the server was signed in
+        Assert.True(Retry.WhileFalse(
+            () => RepoNames(mainWindow).Contains("agents-clone"),
+            TimeSpan.FromSeconds(60),
+            TimeSpan.FromMilliseconds(200)).Result);
+        Assert.True(Directory.Exists(Path.Combine(destination, ".git")));
+        Assert.True(server.SignedInRequestCount > 0);
+        Assert.Null(context.WaitForWindowWithDescendant("MessageText", TimeSpan.FromSeconds(2)));
+
+        // Assert: the application wrote the password nowhere in its own folders (settings, logs, pin files)
+        context.CloseApplication();
+        foreach (var file in Directory.EnumerateFiles(context.RootDirectory, "*", SearchOption.AllDirectories))
+        {
+            Assert.DoesNotContain(SignInPassword, SharedFile.ReadAllText(file), StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    ///     Waits until the first card shows the warning that the working tree has uncommitted changes.
+    /// </summary>
+    /// <param name="mainWindow">The main window.</param>
+    /// <returns><see langword="true"/> when the warning was shown in time.</returns>
+    private static bool WaitForDirtyBadge(Window mainWindow) =>
+        Retry.WhileFalse(
+            () => CardRefreshWait.FindShown(mainWindow, "DirtyWorkingTreeBadge") is not null,
+            TimeSpan.FromSeconds(30),
+            TimeSpan.FromMilliseconds(200)).Result;
 
     /// <summary>
     ///     Opens the card's Switch branch dialog, filters the list down to one branch and switches to it.
