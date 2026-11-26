@@ -61,7 +61,10 @@ thread is never tripped (`AgentControl-SwitchBranchViewModel-LoadsInBackground`)
 branches then remote ones, the branch that git reported as current marked, `CurrentText` set (`Currently on {branch}`;
 `Detached HEAD at {commit}` when git named the commit; `Detached HEAD` otherwise). Any failure of the read becomes
 `ErrorText` (`The branches could not be read: {message}`, with credentials removed by `SecretRedactor`) instead of an
-exception; a canceled read (the window was closed) throws `OperationCanceledException` and shows nothing. The loading
+exception; a read whose `cancellationToken` is canceled is abandoned: `LoadAsync` throws `OperationCanceledException`
+and shows nothing. The view model does not close anything itself: `SwitchBranchWindow` owns the token and cancels it
+when the dialog closes, so closing the dialog stops the read (`AgentControl-LauncherUI-SwitchBranchDialog`, test
+`SwitchBranchWindow_ClosedWhileLoading_ReturnsNullAndStopsTheRead`). The loading
 state always ends.
 
 **Confirm(item)**: Selects the row and, when it can be switched to, completes with it - what a double-click on a row

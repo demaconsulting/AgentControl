@@ -1592,7 +1592,9 @@ sections:
           from the card's menu (the Repository group, after Git Pull), unavailable while the card's
           state is unread, its folder is missing or another operation of the card runs, show the new
           branch and the package state of the branch on the card afterwards, and, when git refuses the
-          switch, show git's reason on the card and in a message with nothing changed.
+          switch, show git's reason on the card and in a message with nothing changed, and, when git
+          does not finish the switch in time, show the card as it is on disk and say that the result is
+          unknown.
         justification: |
           Developers move between branches of the repos they launch agents in, and the branch decides
           which agent package version the repo is pinned to; the card must therefore follow the
@@ -1601,6 +1603,8 @@ sections:
         children:
           - AgentControl-RepoCardViewModel-SwitchBranchRequest
           - AgentControl-RepoCardViewModel-SwitchBranch
+          - AgentControl-RepoCardViewModel-SwitchBranchGitCannotBeStarted
+          - AgentControl-RepoCardViewModel-SwitchBranchTimeoutRefreshes
           - AgentControl-RepoCardViewModel-SwitchBranchRefused
           - AgentControl-RepoCardViewModel-SwitchBranchFollowsPin
           - AgentControl-RepoCardViewModel-SwitchBranchInBackground
@@ -1614,7 +1618,8 @@ sections:
           knows - local first, then remote - with the current one marked or, for a detached HEAD, the
           commit it is at, lets the user filter the list as they type and choose a branch other than the
           current one by button, Enter or double-click, reads the branches without blocking the window
-          and shows a failure as text, and closes without a branch on Cancel or Escape.
+          (and stops the read when the dialog is closed) and shows a failure as text, and closes without
+          a branch on Cancel or Escape.
         justification: |
           Choosing a branch among many needs a list that can be filtered and used from the keyboard; the
           list comes from git, which may be slow or fail, so it is read in the background and a failure

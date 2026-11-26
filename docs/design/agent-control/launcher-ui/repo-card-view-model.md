@@ -971,22 +971,32 @@ and the window never builds a git client (`AgentControl-RepoCardViewModel-Switch
 operation of the card: `RunOperationAsync("Switching to {name}...", cancelable: false, ..., NoFurtherStateCheck)`, so it
 holds `IsBusy`, waits for the card's pending state reads first and does nothing for a missing folder, and an unexpected
 failure is reported through `ReportUnexpectedFailure` rather than thrown into the window's fire-and-forget handler.
+When the card is already busy (the dialog was answered and then another operation started) the switch is not started
+and `StatusMessage` says *Another operation is running on this card; switching to 'x' was not started.*
+(`AgentControl-RepoCardViewModel-SwitchBranch`).
 The core (`SwitchBranchCoreAsync`) mirrors `PullCoreAsync`: (1) `GitClient.SwitchBranch(path, choice.FullName,
-choice.IsRemote)` runs on a worker thread (`Task.Run`; `git switch` never forced, `--track` for a remote branch)
+choice.IsRemote)` runs on a worker thread (`Task.Run`; `git switch` never forced, `--track` for a remote branch; the
+path is read on the UI thread before the worker starts)
 (`AgentControl-RepoCardViewModel-SwitchBranch`, `-SwitchBranchInBackground`); (2) when git **refused**, nothing was
 changed: the text `Could not switch to 'x': {git's message, credentials removed} Nothing was changed.` becomes the
 `StatusMessage` and is raised through `ErrorOccurred` (which marks the card as failed and shows the message box), and no
 refresh runs (`AgentControl-RepoCardViewModel-SwitchBranchRefused`); (3) when it **succeeded**, the status is `Switched
 to branch 'x'.` and `RefreshCoreAsync` runs inside the same busy operation - the repo state through the shared queue at
-user-action priority (branch, pin file, `HEAD`, committed agent files, working tree) and the upgrade check - so the
+user-action priority (branch, pin file, `HEAD`, committed agent files, working tree) and the upgrade check, which
+lists every package source again and may ask for a sign-in, as a Refresh does - so the
 branch chip, the pin chip (a branch can pin another package version; the launch re-sync reads the pin at launch, so it
 follows) and the badges show the new branch (`AgentControl-RepoCardViewModel-SwitchBranchFollowsPin`); a refresh that is
-canceled (the card was retired, or the caller gave up) does not turn the outcome into "The operation was canceled."
-
-- the branch and working tree are still read, except for a retired card - and the refresh never replaces the switch's
-status message (a failure to read the new branch's pin file is appended to it); (4) git that cannot be started or does
-not finish within the switch limit (`InvalidOperationException`, including `GitCommandTimeoutException`) is reported
-through `ErrorOccurred` as `Failed to switch branch: ...`, with credentials removed.
+canceled (the card was retired, or the caller gave up) does not turn the outcome into "The operation was canceled.": the
+branch and working tree are still read, except for a retired card, and the refresh never replaces the switch's
+status message (a failure to read the new branch's pin file is appended to it); (4) git that does not finish within
+the switch limit (`GitCommandTimeoutException`) was stopped part-way, so the result is unknown: unless the card was
+retired it reads the branch and working tree again (`RefreshRepoStateAsync` at user-action priority), and then sets the
+`StatusMessage` to *Switching to 'x' did not finish within N minutes and was stopped; the result is unknown. The card
+shows what is on disk now.* and raises the same text through `ErrorOccurred` - after the refresh, so the card stays
+marked as failed (`AgentControl-RepoCardViewModel-SwitchBranchTimeoutRefreshes`); a lock file such as `.git/index.lock`
+may be left behind and must be removed by the user once no git runs; (5) git that cannot be started
+(`InvalidOperationException`) is reported through `ErrorOccurred` as `Failed to switch branch: ...`, with credentials
+removed, without a refresh (`AgentControl-RepoCardViewModel-SwitchBranchGitCannotBeStarted`).
 
 **SelectPackage** (private, bound to `SelectPackageCommand`): Validates at least one package source is configured,
 then raises

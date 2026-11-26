@@ -229,19 +229,49 @@ sections:
           creating a tracking branch for a remote one - while the card shows its busy state, and
           afterwards report the switch as the card's status message and refresh the card in full - the
           branch, the pin, the committed agent files, the upgrade availability and the working-tree
-          status - exactly as the Refresh action does, without replacing the switch's status message;
-          a git that cannot be started or does not finish in time shall be reported as an error of the
-          card.
+          status - exactly as the Refresh action does, without replacing the switch's status message,
+          also when the caller gives up or the card is removed from the list while git switches
+          (a switch that was made is never reported as canceled, and a removed card reads nothing
+          more); a switch asked for while another operation of the card runs shall not start, and
+          the card shall say so.
         justification: |
           The developer needs immediate feedback that the switch happened and the card must show the
           branch they are now on; a switch can change the pin file, the branch and the committed agent
-          files, so a card that kept showing what it knew before would be stale.
+          files, so a card that kept showing what it knew before would be stale, and a choice that is
+          silently dropped would look like a bug.
         tests:
           - RepoCardViewModel_SwitchBranchAsync_Success_RunsSwitchAndSetsStatusMessage
-          - RepoCardViewModel_SwitchBranchAsync_GitCannotBeStarted_ReportsErrorWithoutThrowing
           - RepoCardViewModel_SwitchBranchAsync_DetachedHead_ShowsDetachedAndSwitchesToBranch
           - RepoCardViewModel_SwitchBranchAsync_RealRepo_UnrelatedDirtyFile_StaysDirtyAfterSwitch
-          - RepoCardViewModel_CreateSwitchBranchViewModel_ListsTheBranchesGitReports
+          - RepoCardViewModel_SwitchBranchAsync_RefreshCanceledAfterSwitch_KeepsSwitchedMessageAndReadsBranch
+          - RepoCardViewModel_SwitchBranchAsync_CardRetiredDuringSwitch_ReadsNothingAndReportsOutcome
+          - RepoCardViewModel_SwitchBranchAsync_CardBusy_DropsTheSwitchWithAMessage
+          - RepoCardViewModel_SwitchBranchAsync_OverlappingQueuedReads_EndsWithTheNewBranch
+
+      - id: AgentControl-RepoCardViewModel-SwitchBranchGitCannotBeStarted
+        title: >-
+          The RepoCardViewModel class shall report a switch whose git cannot be started as an error of
+          the card, with credentials removed, mark the card's last action as failed and throw
+          nothing.
+        justification: |
+          The window calls the switch from an event handler; a missing git must be explained, not
+          tear the application down.
+        tests:
+          - RepoCardViewModel_SwitchBranchAsync_GitCannotBeStarted_ReportsErrorWithoutThrowing
+
+      - id: AgentControl-RepoCardViewModel-SwitchBranchTimeoutRefreshes
+        title: >-
+          The RepoCardViewModel class shall, when git does not finish a switch within its time limit
+          and is stopped, read the card's branch and working tree from disk again (unless the card was
+          removed from the list) and then say, as the card's status message and as the error the view
+          layer shows, that the switch did not finish within the limit and that the result is unknown,
+          keeping the card's last action marked as failed.
+        justification: |
+          A switch that was stopped part-way may or may not have moved the branch and the working
+          tree; a card that went on showing the old branch, or that claimed a plain failure, would
+          mislead the developer about what is on disk.
+        tests:
+          - RepoCardViewModel_SwitchBranchAsync_TimesOut_RefreshesAndSaysResultIsUnknown
 
       - id: AgentControl-RepoCardViewModel-SwitchBranchRefused
         title: >-
@@ -249,13 +279,14 @@ sections:
           uncommitted changes would be overwritten), show git's explanation, with credentials removed
           and the sentence that nothing was changed, as the card's status message and as the error the
           view layer shows, mark the card's last action as failed, keep the branch and the user's
-          changes as they were, and never force the switch.
+          changes as they were, and never force the switch, for a local and for a remote branch.
         justification: |
           A developer whose uncommitted work blocks a switch must be told why in git's own words and
           must be certain nothing was lost; forcing the switch is never the tool's decision.
         tests:
           - RepoCardViewModel_SwitchBranchAsync_Refused_ShowsGitsReasonAndMarksTheCardFailed
           - RepoCardViewModel_SwitchBranchAsync_Blocked_ShowsGitReasonAndKeepsBranch
+          - RepoCardViewModel_SwitchBranchAsync_RemoteBranchBlocked_ShowsGitsReasonAndNothingChanges
 
       - id: AgentControl-RepoCardViewModel-SwitchBranchFollowsPin
         title: >-

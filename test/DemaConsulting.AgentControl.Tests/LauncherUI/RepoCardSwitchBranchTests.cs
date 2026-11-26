@@ -374,6 +374,217 @@ public sealed class RepoCardSwitchBranchTests : IDisposable
         Assert.Contains(card.RepoName, viewModel.Title, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    ///     Test that a switch git does not finish within the switch limit is stopped, the card then reads
+    ///     its branch and working tree from disk again, and the card, and the error the window shows, say
+    ///     that the result is unknown; the card stays marked as failed and ready.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_SwitchBranchAsync_TimesOut_RefreshesAndSaysResultIsUnknown()
+    {
+        // Arrange: a git whose switch hangs, a one-second switch limit and a card whose state was read
+        var argumentLog = TempFile("switch_timeout_args.log");
+        var stub = GitStub.Create(
+            argumentLogPath: argumentLog,
+            extraCommands: [new GitStub.Command("switch", SleepSeconds: GitStub.HangSeconds)]);
+        _tempPaths.Add(stub.Path);
+        _tempPaths.Add(stub.FinishedMarkerPath);
+        var card = CreateCard(
+            CreateTempDirectory(),
+            new AppSettings { GitExecutablePath = stub.Path },
+            gitTimeouts: new GitClientTimeouts(TimeSpan.FromSeconds(60), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(10))
+            {
+                SwitchBranch = TimeSpan.FromSeconds(1)
+            });
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
+        var errors = new List<string>();
+        card.ErrorOccurred += (_, message) => errors.Add(message);
+
+        // Act
+        await card.SwitchBranchAsync(new BranchChoice("other", "other", false), TestContext.Current.CancellationToken);
+
+        // Assert: said as unknown, in the status and in the error; marked failed; ready again
+        var expected =
+            "Switching to 'other' did not finish within 1 second and was stopped; the result is unknown. " +
+            "The card shows what is on disk now.";
+        Assert.Equal(expected, card.StatusMessage);
+        Assert.Equal(expected, Assert.Single(errors));
+        Assert.True(card.LastActionFailed);
+        Assert.False(card.IsBusy);
+
+        // Assert: after the stopped switch git was asked for the branch and the working tree again
+        var calls = ReadLog(argumentLog);
+        var switchIndex = Array.FindIndex(calls, call => call.StartsWith("switch", StringComparison.Ordinal));
+        Assert.True(switchIndex >= 0);
+        var after = calls.Skip(switchIndex + 1).ToArray();
+        Assert.Contains(after, call => call.StartsWith("rev-parse --abbrev-ref", StringComparison.Ordinal));
+        Assert.Contains(after, call => call.StartsWith("status", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     Test that a card that was removed from the list while its switch ran reads nothing afterwards
+    ///     (no git call follows the switch), and still reports the outcome of the switch.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_SwitchBranchAsync_CardRetiredDuringSwitch_ReadsNothingAndReportsOutcome()
+    {
+        // Arrange: a switch that takes a moment
+        var argumentLog = TempFile("switch_retired_args.log");
+        var stub = GitStub.Create(
+            argumentLogPath: argumentLog,
+            extraCommands: [new GitStub.Command("switch", SleepSeconds: 2)]);
+        _tempPaths.Add(stub.Path);
+        var card = CreateCard(CreateTempDirectory(), new AppSettings { GitExecutablePath = stub.Path });
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
+        var switching = card.SwitchBranchAsync(new BranchChoice("other", "other", false), TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => ReadLog(argumentLog).Any(call => call.StartsWith("switch", StringComparison.Ordinal)));
+
+        // Act: the repo is removed from the list while git switches
+        card.Retire();
+        await switching;
+
+        // Assert: the switch's outcome is reported, and git was not asked anything after the switch
+        Assert.Equal("Switched to branch 'other'.", card.StatusMessage);
+        Assert.False(card.LastActionFailed);
+        Assert.False(card.IsBusy);
+        var calls = ReadLog(argumentLog);
+        var switchIndex = Array.FindIndex(calls, call => call.StartsWith("switch", StringComparison.Ordinal));
+        Assert.Empty(calls.Skip(switchIndex + 1));
+    }
+
+    /// <summary>
+    ///     Test that a caller who gives up while the switch runs does not turn a switch that was made into
+    ///     "The operation was canceled.": the card keeps saying it switched, and still reads the branch
+    ///     and the working tree after it.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_SwitchBranchAsync_RefreshCanceledAfterSwitch_KeepsSwitchedMessageAndReadsBranch()
+    {
+        // Arrange: a switch that takes a moment and a caller that gives up while it runs
+        var argumentLog = TempFile("switch_canceled_args.log");
+        var stub = GitStub.Create(
+            argumentLogPath: argumentLog,
+            extraCommands: [new GitStub.Command("switch", SleepSeconds: 2)]);
+        _tempPaths.Add(stub.Path);
+        var card = CreateCard(CreateTempDirectory(), new AppSettings { GitExecutablePath = stub.Path });
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
+        using var giveUp = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var switching = card.SwitchBranchAsync(new BranchChoice("other", "other", false), giveUp.Token);
+        await WaitUntilAsync(() => ReadLog(argumentLog).Any(call => call.StartsWith("switch", StringComparison.Ordinal)));
+
+        // Act: the switch is not interrupted; the refresh that follows starts canceled
+        await giveUp.CancelAsync();
+        await switching;
+
+        // Assert: the switch's outcome stands, and the branch and working tree were read after it
+        Assert.Equal("Switched to branch 'other'.", card.StatusMessage);
+        Assert.False(card.LastActionFailed);
+        Assert.False(card.IsBusy);
+        var calls = ReadLog(argumentLog);
+        var switchIndex = Array.FindIndex(calls, call => call.StartsWith("switch", StringComparison.Ordinal));
+        var after = calls.Skip(switchIndex + 1).ToArray();
+        Assert.Contains(after, call => call.StartsWith("rev-parse --abbrev-ref", StringComparison.Ordinal));
+        Assert.Contains(after, call => call.StartsWith("status", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     Test that a switch asked for while the card runs another operation is not started and says so.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_SwitchBranchAsync_CardBusy_DropsTheSwitchWithAMessage()
+    {
+        // Arrange: a switch is running
+        var argumentLog = TempFile("switch_busy_args.log");
+        var stub = GitStub.Create(
+            argumentLogPath: argumentLog,
+            extraCommands: [new GitStub.Command("switch", SleepSeconds: 2)]);
+        _tempPaths.Add(stub.Path);
+        var card = CreateCard(CreateTempDirectory(), new AppSettings { GitExecutablePath = stub.Path });
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
+        var first = card.SwitchBranchAsync(new BranchChoice("other", "other", false), TestContext.Current.CancellationToken);
+        Assert.True(card.IsBusy);
+
+        // Act: a second switch is asked for
+        await card.SwitchBranchAsync(new BranchChoice("third", "third", false), TestContext.Current.CancellationToken);
+        var messageWhileBusy = card.StatusMessage;
+        await first;
+
+        // Assert: the second one was dropped with a message, the first one ended normally
+        Assert.Equal("Another operation is running on this card; switching to 'third' was not started.", messageWhileBusy);
+        Assert.Equal("Switched to branch 'other'.", card.StatusMessage);
+        Assert.Single(ReadLog(argumentLog), call => call.StartsWith("switch", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    ///     Test that a switch to a remote branch (a new local branch tracking it) that would overwrite an
+    ///     uncommitted change is refused with git's reason and changes nothing: no local branch is made
+    ///     and the card stays on its branch.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_SwitchBranchAsync_RemoteBranchBlocked_ShowsGitsReasonAndNothingChanges()
+    {
+        // Arrange: a clone with an edit of the pin file that the remote feature branch also changes
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var clonePath = CloneWithFeatureBranch(fixture);
+        var pinFile = Path.Combine(clonePath, ".agentcontrol.json");
+        await File.WriteAllTextAsync(pinFile, "{ \"edited\": true }", TestContext.Current.CancellationToken);
+        var card = CreateCard(clonePath, new AppSettings());
+        await card.RefreshAsync(TestContext.Current.CancellationToken);
+        var errors = new List<string>();
+        card.ErrorOccurred += (_, message) => errors.Add(message);
+
+        // Act
+        await card.SwitchBranchAsync(new BranchChoice("feature", "origin/feature", true), TestContext.Current.CancellationToken);
+
+        // Assert: git's reason names the file, and neither the branches nor the edit changed
+        Assert.StartsWith("Could not switch to 'feature':", card.StatusMessage, StringComparison.Ordinal);
+        Assert.Contains(".agentcontrol.json", card.StatusMessage, StringComparison.Ordinal);
+        Assert.Equal(card.StatusMessage, Assert.Single(errors));
+        Assert.True(card.LastActionFailed);
+        Assert.Equal("main", card.CurrentBranch);
+        Assert.Equal("main", fixture.Git(clonePath, "rev-parse", "--abbrev-ref", "HEAD").Trim());
+        Assert.Equal(string.Empty, fixture.Git(clonePath, "branch", "--list", "feature").Trim());
+        Assert.Equal("{ \"edited\": true }", await File.ReadAllTextAsync(pinFile, TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    ///     Test that queued reads of the card that are still held when the switch has been made end with
+    ///     the card showing the new branch: a read that was only queued behind the switch never puts the
+    ///     old branch back.
+    /// </summary>
+    [Fact]
+    public async Task RepoCardViewModel_SwitchBranchAsync_OverlappingQueuedReads_EndsWithTheNewBranch()
+    {
+        // Arrange: a clone whose state was read; from now on the card's reads are held at a gate
+        using var fixture = GitRepositoryFixture.CreateOrSkip();
+        var clonePath = CloneWithFeatureBranch(fixture);
+        var gate = new GatedBackgroundWorkRunner();
+        var card = CreateCard(clonePath, new AppSettings(), backgroundWork: gate);
+        var firstRead = card.RefreshAsync(TestContext.Current.CancellationToken);
+        await gate.FirstCall;
+        gate.Release();
+        await firstRead;
+        Assert.Equal("main", card.CurrentBranch);
+        gate.Close();
+
+        // Act: the switch is made (git runs outside the gate) and its refresh is held; a background read is
+        // queued beside it
+        var switching = card.SwitchBranchAsync(new BranchChoice("feature", "origin/feature", true), TestContext.Current.CancellationToken);
+        await gate.FirstCall;
+        var background = card.RefreshRepoStateAsync(
+            RepoRefreshPriority.Background, cheapFacts: true, workingTree: true, cancellationToken: TestContext.Current.CancellationToken);
+        gate.Release();
+        await switching;
+        await background;
+
+        // Assert
+        Assert.Equal("feature", card.CurrentBranch);
+        Assert.Equal("2.0.0", card.PinnedPackageVersion);
+        Assert.Equal("Switched to branch 'feature'.", card.StatusMessage);
+        Assert.False(card.LastActionFailed);
+        Assert.False(card.IsBusy);
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
@@ -402,14 +613,63 @@ public sealed class RepoCardSwitchBranchTests : IDisposable
     /// </summary>
     /// <param name="repoPath">The repo folder.</param>
     /// <param name="settings">The settings the card reads.</param>
+    /// <param name="backgroundWork">The runner of the card's background work, or <see langword="null"/> for the
+    ///     thread pool.</param>
+    /// <param name="gitTimeouts">The git time limits, or <see langword="null"/> for the defaults.</param>
     /// <returns>The card.</returns>
-    private static RepoCardViewModel CreateCard(string repoPath, AppSettings settings) =>
+    private static RepoCardViewModel CreateCard(
+        string repoPath,
+        AppSettings settings,
+        IBackgroundWorkRunner? backgroundWork = null,
+        GitClientTimeouts? gitTimeouts = null) =>
         new(
             new RecentRepo { Path = repoPath },
             () => settings,
             new PackageVersionCache(),
             processStarter: new FakeAgentToolProcessStarter(),
-            shellDetector: FakeAgentToolProcessStarter.CreateShellDetector());
+            shellDetector: FakeAgentToolProcessStarter.CreateShellDetector(),
+            backgroundWork: backgroundWork,
+            gitTimeouts: gitTimeouts);
+
+    /// <summary>
+    ///     Gets the path of a file in a fresh temporary folder, deleted when the test ends.
+    /// </summary>
+    /// <param name="name">The file's name.</param>
+    /// <returns>The path; the file does not exist yet.</returns>
+    private string TempFile(string name) => Path.Combine(CreateTempDirectory(), name);
+
+    /// <summary>
+    ///     Reads the arguments of the git calls a stub logged so far.
+    /// </summary>
+    /// <param name="argumentLog">The stub's log file.</param>
+    /// <returns>One trimmed line per call, oldest first; empty when nothing was logged or the file is
+    ///     being written right now.</returns>
+    private static string[] ReadLog(string argumentLog)
+    {
+        try
+        {
+            return File.Exists(argumentLog) ? File.ReadAllLines(argumentLog).Select(line => line.Trim()).ToArray() : [];
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
+    ///     Waits until a condition holds, failing the test when it does not within thirty seconds.
+    /// </summary>
+    /// <param name="condition">The condition.</param>
+    /// <returns>A task that completes when the condition holds.</returns>
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (!condition())
+        {
+            Assert.True(DateTime.UtcNow < deadline, "The condition was not met in time.");
+            await Task.Delay(20, TestContext.Current.CancellationToken);
+        }
+    }
 
     /// <summary>
     ///     Creates a unique temporary directory deleted when the test ends.

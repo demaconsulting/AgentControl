@@ -335,35 +335,67 @@ tested by `RepoCardViewModel_PullCommand_SuccessfulPull_UpdatesStatusMessage`,
 `CI` environment variable is set), as for the other real-git tests.
 
 **RepoCardViewModel_SwitchBranch_RequestsDialogThenSwitchesAndRefreshes**: `SwitchBranchCommand` is not executable
-before the card's state has been read, for a missing folder or while the card runs another operation, and is
-executable otherwise; executing it only raises `SwitchBranchRequested`. `SwitchBranchAsync` against a stub git runs
+before the card's state has been read, for a missing folder or while the card runs another operation, and is executable
+otherwise; executing it only raises `SwitchBranchRequested`. `SwitchBranchAsync` against a stub git runs
 `git switch --track -- origin/feature/x` for a remote branch, sets the status `Switched to branch 'feature/x'.`, leaves
 the card idle and not failed, and, started from a guarded thread, makes no blocking call there while the card is busy
-(git runs on a worker). A git that cannot be started is reported through `ErrorOccurred` as `Failed to switch branch:`.
-Against a real clone whose `main` pins 1.0.0 and whose remote `feature` branch pins 2.0.0, switching to
-`origin/feature` makes the card show the branch `feature` and the pin 2.0.0 with the switch's status message and an
-unset failure flag, switching back shows `main` and 1.0.0, and a switch from a detached HEAD onto `main` works. In a
-real clone with an edited `notes.md` that both branches share, the card shows the working tree as dirty before and
-after a switch to the other branch, the edit is intact and the pull stays unavailable. This
-scenario is tested by `RepoCardViewModel_SwitchBranchCommand_RepoMissingOrBusy_CannotExecute`,
+(git runs on a worker). Against a real clone whose `main` pins 1.0.0 and whose remote `feature` branch pins 2.0.0,
+switching to `origin/feature` makes the card show the branch `feature` and the pin 2.0.0 with the switch's status
+message and an unset failure flag, switching back shows `main` and 1.0.0, and a switch from a detached HEAD onto `main`
+works. In a real clone with an edited `notes.md` that both branches share, the card shows the working tree as dirty
+before and after a switch to the other branch, the edit is intact and the pull stays unavailable. This scenario is
+tested by `RepoCardViewModel_SwitchBranchCommand_RepoMissingOrBusy_CannotExecute`,
 `RepoCardViewModel_SwitchBranchCommand_Executes_RaisesRequestForTheDialog`,
 `RepoCardViewModel_SwitchBranchAsync_Success_RunsSwitchAndSetsStatusMessage`,
-`RepoCardViewModel_SwitchBranchAsync_GitCannotBeStarted_ReportsErrorWithoutThrowing`,
 `RepoCardViewModel_SwitchBranchAsync_RealRepoWithOtherPin_PinChipFollowsTheNewBranch`,
 `RepoCardViewModel_SwitchBranchAsync_DetachedHead_ShowsDetachedAndSwitchesToBranch`,
 `RepoCardViewModel_SwitchBranchAsync_RealRepo_UnrelatedDirtyFile_StaysDirtyAfterSwitch`,
 `RepoCardViewModel_SwitchBranchAsync_RunsGitOffTheUiThread` and
 `RepoCardViewModel_CreateSwitchBranchViewModel_ListsTheBranchesGitReports`, covering
-`AgentControl-RepoCardViewModel-SwitchBranchRequest`, `AgentControl-RepoCardViewModel-SwitchBranch`,
-`AgentControl-RepoCardViewModel-SwitchBranchFollowsPin` and `AgentControl-RepoCardViewModel-SwitchBranchInBackground`.
+`AgentControl-RepoCardViewModel-SwitchBranchRequest`, `AgentControl-RepoCardViewModel-SwitchBranchFollowsPin` and
+`AgentControl-RepoCardViewModel-SwitchBranchInBackground` (and the basic path of
+`AgentControl-RepoCardViewModel-SwitchBranch`).
+
+**RepoCardViewModel_SwitchBranch_OutcomesThatSurviveTheRefresh**: With a stub git whose `switch` takes two seconds: when
+the caller's token is canceled while git switches (the switch itself is not interrupted), the status stays `Switched to
+branch 'other'.` (never "The operation was canceled."), the card is not marked failed, and git was asked for the branch
+(`rev-parse --abbrev-ref`) and the working tree (`status`) after the switch; when the card is retired while git
+switches, the same status is reported and git is asked nothing after the switch; a second switch asked for while the
+first runs is not started (git saw one `switch`) and the card's status says *Another operation is running on this card;
+switching to 'third' was not started.* until the first ends. Against a real clone whose card reads are held at a gate
+after the first read, the switch to `origin/feature` is made, its own refresh and a background read queued beside it are
+held, and once the gate opens the card shows the branch `feature`, the pin 2.0.0 and the switch's status, idle and not
+failed. This scenario is tested by
+`RepoCardViewModel_SwitchBranchAsync_RefreshCanceledAfterSwitch_KeepsSwitchedMessageAndReadsBranch`,
+`RepoCardViewModel_SwitchBranchAsync_CardRetiredDuringSwitch_ReadsNothingAndReportsOutcome`,
+`RepoCardViewModel_SwitchBranchAsync_CardBusy_DropsTheSwitchWithAMessage` and
+`RepoCardViewModel_SwitchBranchAsync_OverlappingQueuedReads_EndsWithTheNewBranch`, covering
+`AgentControl-RepoCardViewModel-SwitchBranch`.
+
+**RepoCardViewModel_SwitchBranchGitCannotBeStarted_ReportsErrorWithoutThrowing**: A git executable that does not exist
+makes `SwitchBranchAsync` raise one `ErrorOccurred` that starts `Failed to switch branch:`, mark the card's last action
+as failed, leave the card idle and throw nothing. This scenario is tested by
+`RepoCardViewModel_SwitchBranchAsync_GitCannotBeStarted_ReportsErrorWithoutThrowing`, covering
+`AgentControl-RepoCardViewModel-SwitchBranchGitCannotBeStarted`.
+
+**RepoCardViewModel_SwitchBranchTimeoutRefreshes_ResultIsUnknown**: With a stub git whose `switch` hangs and a
+one-second switch limit, the switch is stopped, git is then asked for the branch (`rev-parse --abbrev-ref`) and the
+working tree (`status`), and the card's status message and the single `ErrorOccurred` text both read *Switching to
+'other' did not finish within 1 second and was stopped; the result is unknown. The card shows what is on disk now.*; the
+card is marked as failed and idle. This scenario is tested by
+`RepoCardViewModel_SwitchBranchAsync_TimesOut_RefreshesAndSaysResultIsUnknown`, covering
+`AgentControl-RepoCardViewModel-SwitchBranchTimeoutRefreshes`.
 
 **RepoCardViewModel_SwitchBranchRefused_ShowsGitReasonAndChangesNothing**: A stub git that refuses the switch with
 "Your local changes ... would be overwritten" makes the card's status message `Could not switch to 'other': ...
 Nothing was changed.`, carrying git's text including the file name, raises the same text through `ErrorOccurred` once,
 marks the card's last action as failed and leaves the card idle. Against a real clone with an edited pin file that the
-other branch also changes, the refusal names the file, the card stays on `main` and the edit is intact. This scenario is
-tested by `RepoCardViewModel_SwitchBranchAsync_Refused_ShowsGitsReasonAndMarksTheCardFailed` and
-`RepoCardViewModel_SwitchBranchAsync_Blocked_ShowsGitReasonAndKeepsBranch`, covering
+other branch also changes, the refusal names the file, the card stays on `main` and the edit is intact - for a local
+branch and for a remote branch (`origin/feature`, which would have created a tracking branch: no local `feature`
+branch exists afterwards). This scenario is
+tested by `RepoCardViewModel_SwitchBranchAsync_Refused_ShowsGitsReasonAndMarksTheCardFailed`,
+`RepoCardViewModel_SwitchBranchAsync_Blocked_ShowsGitReasonAndKeepsBranch` and
+`RepoCardViewModel_SwitchBranchAsync_RemoteBranchBlocked_ShowsGitsReasonAndNothingChanges`, covering
 `AgentControl-RepoCardViewModel-SwitchBranchRefused`.
 
 **RepoCardViewModel_Launch_RecordsTimestampOrRaisesErrorWhenUnconfigured**: `LaunchCommand`

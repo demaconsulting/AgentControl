@@ -3827,6 +3827,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
     {
         ArgumentNullException.ThrowIfNull(choice);
 
+        // The operation runner drops a request while another operation holds the card; say so rather
+        // than leave the user wondering why nothing happened
+        if (IsBusy)
+        {
+            StatusMessage = $"Another operation is running on this card; switching to '{choice.Name}' was not started.";
+            return;
+        }
+
         try
         {
             await RunOperationAsync(
@@ -3862,6 +3870,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     is refreshed: the card says so in git's words, and the same text is shown in a message box.
     ///     Nothing is ever forced, stashed or discarded (see <see cref="GitClient.SwitchBranch"/>).
     ///     </para>
+    ///     <para>
+    ///     A switch that git did not finish within the switch time limit was stopped part-way, so the
+    ///     result is unknown (the branch may or may not have changed, and a lock file may be left
+    ///     behind): the card reads the branch and the working tree again from disk (unless it was
+    ///     retired) and then says that the result is unknown, in the status line and in the same
+    ///     message box text, so it stays marked as failed. A git that cannot be started is reported
+    ///     as an error without a refresh.
+    ///     </para>
     /// </remarks>
     /// <param name="choice">The branch to switch to.</param>
     /// <param name="token">Cancels the package-source part of the refresh that follows the switch
@@ -3875,11 +3891,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 "Switching repo '{RepoName}' ('{RepoPath}') to branch '{Branch}'", RepoName, RepoPath, choice.FullName);
         }
 
+        // Read on the UI thread, before the worker starts: the path is the card's, which only this thread
+        // changes
+        var repoPath = RepoPath;
         try
         {
             var git = CreateGitClient(_getSettings());
             var result = await Task.Run(
-                () => git.SwitchBranch(RepoPath, choice.FullName, choice.IsRemote, CancellationToken.None),
+                () => git.SwitchBranch(repoPath, choice.FullName, choice.IsRemote, CancellationToken.None),
                 CancellationToken.None);
 
             if (!result.Succeeded)
@@ -3940,9 +3959,33 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 : switchMessage;
             LastActionFailed = false;
         }
+        catch (GitCommandTimeoutException ex)
+        {
+            // Git was stopped at the time limit while it may have been part-way through the switch, so
+            // what is on disk is unknown: read it again and say so, rather than leave the card showing
+            // the branch it had before
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(ex, "Switching repo '{RepoName}' to '{Branch}' timed out", RepoName, choice.FullName);
+            }
+
+            if (!_isRetired)
+            {
+                await RefreshRepoStateAsync(
+                    RepoRefreshPriority.UserAction, cheapFacts: true, workingTree: true, cancellationToken: CancellationToken.None);
+            }
+
+            var timeoutMessage =
+                $"Switching to '{choice.Name}' did not finish within {DescribeDuration(ex.Timeout)} and was stopped; " +
+                "the result is unknown. The card shows what is on disk now.";
+            StatusMessage = timeoutMessage;
+
+            // After the refresh, so the card stays marked as failed
+            ErrorOccurred?.Invoke(this, timeoutMessage);
+        }
         catch (InvalidOperationException ex)
         {
-            // Git could not be started, or did not finish within the switch limit
+            // Git could not be started
             if (_logger.IsEnabled(LogLevel.Error))
             {
                 _logger.LogError(ex, "Failed to switch repo '{RepoName}' to '{Branch}'", RepoName, choice.FullName);
@@ -3950,6 +3993,25 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             ErrorOccurred?.Invoke(this, $"Failed to switch branch: {SecretRedactor.Redact(ex.Message)}");
         }
+    }
+
+    /// <summary>
+    ///     Words a time limit for a message to the user.
+    /// </summary>
+    /// <param name="duration">The limit.</param>
+    /// <returns>For example <c>5 minutes</c>, <c>1 minute</c> or <c>1 second</c>.</returns>
+    private static string DescribeDuration(TimeSpan duration)
+    {
+        if (duration.TotalMinutes >= 1)
+        {
+            var minutes = duration.TotalMinutes;
+            var minuteWord = Math.Abs(minutes - 1) < 0.005 ? "minute" : "minutes";
+            return $"{minutes:0.##} {minuteWord}";
+        }
+
+        var seconds = duration.TotalSeconds;
+        var secondWord = Math.Abs(seconds - 1) < 0.0005 ? "second" : "seconds";
+        return $"{seconds:0.###} {secondWord}";
     }
 
     /// <summary>

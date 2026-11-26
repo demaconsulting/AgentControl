@@ -652,7 +652,11 @@ working tree can be slow; cloning 60 minutes, which you can end sooner with **Ca
 longer - for example on a network share that has gone away, or a Git that waits for something - is stopped, and the
 card's message says: "Git did not answer within 60 seconds and was stopped; the repo's Git state is unknown. Use Refresh
 to try again." The rest of the window, and the other cards, carry on meanwhile. When the cause is gone, choose
-**Refresh** in the card's "..." menu.
+**Refresh** in the card's "..." menu. That 60-second message is for the reads that fill the card. A **branch switch**
+that does not finish within its 10 minutes is stopped part-way, so the card says it plainly: "Switching to 'main' did
+not finish within 10 minutes and was stopped; the result is unknown. The card shows what is on disk now." The card then
+reads the branch and the uncommitted changes again, so what it shows is what is on disk; if Git left a lock file behind
+(`.git/index.lock`), make sure no Git is running in that repo and delete the file before trying again.
 
 # Package Sources
 
@@ -1576,7 +1580,11 @@ the same for the selected branch, and **Cancel** or **Esc** closes the dialog an
   card and a message show Git's own reason, for example "Could not switch to 'main': error: Your local changes to the
   following files would be overwritten by checkout: ... Nothing was changed." Commit or stash your changes (or move
   them somewhere else), then switch again.
-
+- **When Git does not finish.** A switch that takes longer than 10 minutes is stopped; because it may have been
+  stopped part-way, the message says that the result is unknown, and the card shows what is on disk after reading it
+  again.
+- **Another operation is running.** If you choose a branch and, before the switch can start, another operation has
+  started on the same card, the switch is not started and the card says so; switch again when the card is idle.
 While the switch runs, the card shows "Switching to main..." and its actions are unavailable; the switch may take up to
 10 minutes. When it has finished, the card says "Switched to branch 'main'." and refreshes completely, the same as after
 **Git Pull**: the **branch chip** shows the new branch, and because each branch has its own `.agentcontrol.json`, the

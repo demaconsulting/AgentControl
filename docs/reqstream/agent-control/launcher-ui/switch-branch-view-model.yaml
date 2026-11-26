@@ -71,11 +71,12 @@ sections:
       - id: AgentControl-SwitchBranchViewModel-LoadsInBackground
         title: >-
           The SwitchBranchViewModel class shall read the branches through the background work runner
-          rather than on the calling (UI) thread, show that it is loading meanwhile, and stop the read
-          when the dialog is closed.
+          rather than on the calling (UI) thread, show that it is loading meanwhile, and abandon the
+          read, without showing an error, when the cancellation token it was given is canceled.
         justification: |
           Asking git for the branches of a repo on a network share or a huge tree can take long; the
-          window must stay usable and the read must not outlive the dialog.
+          window must stay usable and the read must not outlive the dialog (the window owns the
+          token and cancels it when the dialog closes).
         tests:
           - SwitchBranchViewModel_Load_RunsOffTheUiThread
           - SwitchBranchViewModel_Load_Canceled_ThrowsCanceledWithoutShowingAnError
