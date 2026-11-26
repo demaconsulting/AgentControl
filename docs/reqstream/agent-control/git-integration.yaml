@@ -4,7 +4,8 @@
 # PURPOSE:
 # - Define requirements for the AgentControl GitIntegration subsystem
 # - GitIntegration spans GitClient.cs (invokes the configured git executable for status,
-#   pull, branch, and committed-files queries and for stopping git tracking managed agent folders,
+#   pull, branch, and committed-files queries, for listing and switching branches and for cloning a
+#   repository, and for stopping git tracking managed agent folders,
 #   and tells whether a folder is the top folder of a Git repository; every command runs under a
 #   time limit and can be canceled),
 #   CommittedAgentFilesCache.cs (caches the
@@ -309,3 +310,108 @@ sections:
           - AgentControl-GitCredentialClient-StartsOffCallerThread
         tests:
           - GitIntegrationSubsystem_RemoteAndCredentialGit_FromGuardedThread_StartOffThatThread
+
+      - id: AgentControl-GitIntegration-ListBranches
+        title: >-
+          The GitIntegration subsystem shall list the local and remote-tracking branches a repo
+          already knows about, mark the checked-out one and recognize a detached HEAD, without
+          contacting any remote.
+        justification: |
+          Switching a repo to another branch starts from what the repo has; the list must be quick,
+          free of network and sign-in prompts and must tell the user where HEAD is.
+        children:
+          - AgentControl-GitClient-ListBranches
+          - AgentControl-GitClient-ListBranchesRemoteDistinct
+          - AgentControl-GitClient-ListBranchesDetached
+          - AgentControl-GitClient-OutputIsUtf8
+        tests:
+          - GitIntegrationSubsystem_CloneThenListAndSwitchBranches_OnRealRepository_FollowsTheBranch
+
+      - id: AgentControl-GitIntegration-SwitchBranch
+        title: >-
+          The GitIntegration subsystem shall switch a repo to a local or a remote-tracking branch
+          using git's own protection - never forcing, discarding, merging or stashing anything, and
+          leaving uncommitted changes that do not conflict in place - and report a
+          refused switch with git's explanation and nothing changed.
+        justification: |
+          A developer's uncommitted work is not the tool's to discard; git already knows which
+          changes a switch would overwrite, so its refusal, passed on in its own words, is the
+          safeguard.
+        children:
+          - AgentControl-GitClient-SwitchBranch
+          - AgentControl-GitClient-SwitchNeverForces
+          - AgentControl-GitClient-SwitchNeverMergesOrStashes
+          - AgentControl-GitClient-SwitchNameIsData
+          - AgentControl-GitClient-SwitchKeepsNonConflictingChanges
+          - AgentControl-GitClient-SwitchRefusalReported
+          - AgentControl-GitClient-EnvironmentPolicy
+        tests:
+          - GitIntegrationSubsystem_CloneThenListAndSwitchBranches_OnRealRepository_FollowsTheBranch
+          - GitClient_SwitchBranch_RealRepo_DirtyConflictingFile_IsRefusedWithGitsReasonAndChangesNothing
+          - GitClient_SwitchBranch_RealRepo_UnrelatedDirtyFile_SurvivesTheSwitch
+
+      - id: AgentControl-GitIntegration-CloneRepository
+        title: >-
+          The GitIntegration subsystem shall clone a repository into a new folder - one where nothing
+          exists yet - within a time limit of one hour, report a clone git refuses with git's
+          explanation, check the destination before git starts, and stop a clone that the user
+          cancels.
+        justification: |
+          Cloning is how a repository gets onto the machine before it can be launched with agent
+          files; it must be bounded, cancelable and must never mix with, or replace, anything
+          already at the destination.
+        children:
+          - AgentControl-GitClient-Clone
+          - AgentControl-GitClient-CloneTimeLimit
+          - AgentControl-GitClient-CloneFailureReported
+          - AgentControl-GitClient-CommandsRefuseGuardedThread
+          - AgentControl-GitClient-CloneDestinationRules
+          - AgentControl-GitClient-CloneCancelStopsGit
+          - AgentControl-GitClient-CloneNeverPrompts
+          - AgentControl-GitClient-EnvironmentPolicy
+        tests:
+          - GitIntegrationSubsystem_CloneThenListAndSwitchBranches_OnRealRepository_FollowsTheBranch
+          - GitClient_Clone_Canceled_RemovesOnlyItsTempFolder
+
+      - id: AgentControl-GitIntegration-CloneUrlIsData
+        title: >-
+          The GitIntegration subsystem shall treat the address to clone as data, refusing before git
+          starts an address that git would read as an option or as a remote helper, or whose ssh
+          host ssh would read as an option, and separating the address from git's options.
+        justification: |
+          An address pasted from an untrusted source must not be able to run a command of the
+          sender's choosing.
+        children:
+          - AgentControl-GitClient-CloneUrlRefused
+          - AgentControl-GitClient-CloneUrlSeparatedFromOptions
+        tests:
+          - GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit
+
+      - id: AgentControl-GitIntegration-CloneNeverLogsCredentials
+        title: >-
+          The GitIntegration subsystem shall keep the credentials in an address to clone out of its
+          logs, messages and results.
+        justification: |
+          Addresses of the form https://user:password@host/repo.git are common; the log is a plain
+          file that users attach to reports.
+        children:
+          - AgentControl-GitClient-CloneRedactsCredentials
+        tests:
+          - GitIntegrationSubsystem_CloneWithCredentialsInUrl_NeverLogsThePassword
+
+      - id: AgentControl-GitIntegration-CloneRemovesOnlyWhatItCreated
+        title: >-
+          The GitIntegration subsystem shall clone into a folder it creates itself next to the
+          destination and rename it into place only when git succeeded, shall refuse to move it
+          over anything that appeared at the destination meanwhile, and shall, when a clone is
+          canceled, times out, fails or cannot be moved, remove only that folder.
+        justification: |
+          Cleaning up a killed clone must never reach somebody else's files.
+        children:
+          - AgentControl-GitClient-CloneIntoFreshFolder
+          - AgentControl-GitClient-CloneCleansUpOnlyItsOwnFolder
+          - AgentControl-GitClient-CloneDestinationAppearedMeanwhile
+          - AgentControl-GitClient-CloneReportsLeftoverFolder
+        tests:
+          - GitClient_Clone_Canceled_RemovesOnlyItsTempFolder
+          - GitClient_Clone_Fails_RemovesItsTempFolderAndReturnsGitsReason

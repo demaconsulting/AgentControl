@@ -8,6 +8,8 @@ package AgentControl_LauncherUISubsystem {
     public import AgentControl_RepoImageLocator::*;
     public import AgentControl_RepoGroupHeaderViewModel::*;
     public import AgentControl_GroupNameViewModel::*;
+    public import AgentControl_SwitchBranchViewModel::*;
+    public import AgentControl_CloneRepositoryViewModel::*;
     public import AgentControl_DialogBehavior::*;
     public import AgentControl_GlobalProgressViewModel::*;
     public import AgentControl_RepoRefreshQueue::*;
@@ -54,7 +56,9 @@ package AgentControl_LauncherUISubsystem {
          * (AgentToolKindDisplayNameConverterTests, ThemePreferenceDisplayNameConverterTests,
          * PathEllipsisTextTests). The independently testable classes with security or
          * interaction behavior of their own are units: RepoImageLocator,
-         * RepoGroupHeaderViewModel (with RepoGroupKind), GroupNameViewModel, DialogBehavior,
+         * RepoGroupHeaderViewModel (with RepoGroupKind), GroupNameViewModel, SwitchBranchViewModel (the
+         * branch dialog opened from a card's menu, with its SwitchBranchWindow view), CloneRepositoryViewModel
+         * (the clone dialog opened from the app bar, with its CloneRepositoryWindow view), DialogBehavior,
          * GlobalProgressViewModel and RepoRefreshQueue (the one queue, two reads at a time, every
          * lazy read of a repo's state goes through).
          */
@@ -75,6 +79,8 @@ package AgentControl_LauncherUISubsystem {
         part repoImageLocator : RepoImageLocator;
         part repoGroupHeaderViewModel : RepoGroupHeaderViewModel;
         part groupNameViewModel : GroupNameViewModel;
+        part switchBranchViewModel : SwitchBranchViewModel;
+        part cloneRepositoryViewModel : CloneRepositoryViewModel;
         part dialogBehavior : DialogBehavior;
         part globalProgressViewModel : GlobalProgressViewModel;
         part repoRefreshQueue : RepoRefreshQueue;

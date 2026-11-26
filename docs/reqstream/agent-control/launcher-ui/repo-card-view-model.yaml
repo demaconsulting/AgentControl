@@ -209,6 +209,107 @@ sections:
           - RepoCardViewModel_PullCommand_CancelledDuringUpgradeCheck_KeepsPullOutcomeAndChecksWorkingTree
           - RepoCardViewModel_PullCommand_CardRetiredDuringUpgradeCheck_KeepsPullOutcomeAndChecksNothingMore
 
+      - id: AgentControl-RepoCardViewModel-SwitchBranchRequest
+        title: >-
+          The RepoCardViewModel class shall offer a switch-branch command that is available only once
+          the card's repo state has been read, while the repo's folder exists and while no other
+          operation of the card runs, and that, when executed, only raises a request for the view layer
+          to show the branch dialog.
+        justification: |
+          Switching needs a repo that exists and whose state is known, must not start beside another
+          operation on the same repo, and the dialog is the view layer's business: the card must stay
+          free of windows.
+        tests:
+          - RepoCardViewModel_SwitchBranchCommand_RepoMissingOrBusy_CannotExecute
+          - RepoCardViewModel_SwitchBranchCommand_Executes_RaisesRequestForTheDialog
+
+      - id: AgentControl-RepoCardViewModel-SwitchBranch
+        title: >-
+          The RepoCardViewModel class shall switch the repo to the branch chosen in the dialog -
+          creating a tracking branch for a remote one - while the card shows its busy state, and
+          afterwards report the switch as the card's status message and refresh the card in full - the
+          branch, the pin, the committed agent files, the upgrade availability and the working-tree
+          status - exactly as the Refresh action does, without replacing the switch's status message,
+          also when the caller gives up or the card is removed from the list while git switches
+          (a switch that was made is never reported as canceled, and a removed card reads nothing
+          more); a switch asked for while another operation of the card runs shall not start, and
+          the card shall say so.
+        justification: |
+          The developer needs immediate feedback that the switch happened and the card must show the
+          branch they are now on; a switch can change the pin file, the branch and the committed agent
+          files, so a card that kept showing what it knew before would be stale, and a choice that is
+          silently dropped would look like a bug.
+        tests:
+          - RepoCardViewModel_SwitchBranchAsync_Success_RunsSwitchAndSetsStatusMessage
+          - RepoCardViewModel_SwitchBranchAsync_DetachedHead_ShowsDetachedAndSwitchesToBranch
+          - RepoCardViewModel_SwitchBranchAsync_RealRepo_UnrelatedDirtyFile_StaysDirtyAfterSwitch
+          - RepoCardViewModel_SwitchBranchAsync_RefreshCanceledAfterSwitch_KeepsSwitchedMessageAndReadsBranch
+          - RepoCardViewModel_SwitchBranchAsync_CardRetiredDuringSwitch_ReadsNothingAndReportsOutcome
+          - RepoCardViewModel_SwitchBranchAsync_CardBusy_DropsTheSwitchWithAMessage
+          - RepoCardViewModel_SwitchBranchAsync_OverlappingQueuedReads_EndsWithTheNewBranch
+
+      - id: AgentControl-RepoCardViewModel-SwitchBranchGitCannotBeStarted
+        title: >-
+          The RepoCardViewModel class shall report a switch whose git cannot be started as an error of
+          the card, with credentials removed, mark the card's last action as failed and throw
+          nothing.
+        justification: |
+          The window calls the switch from an event handler; a missing git must be explained, not
+          tear the application down.
+        tests:
+          - RepoCardViewModel_SwitchBranchAsync_GitCannotBeStarted_ReportsErrorWithoutThrowing
+
+      - id: AgentControl-RepoCardViewModel-SwitchBranchTimeoutRefreshes
+        title: >-
+          The RepoCardViewModel class shall, when git does not finish a switch within its time limit
+          and is stopped, read the card's branch and working tree from disk again (unless the card was
+          removed from the list) and then say, as the card's status message and as the error the view
+          layer shows, that the switch did not finish within the limit and that the result is unknown,
+          keeping the card's last action marked as failed.
+        justification: |
+          A switch that was stopped part-way may or may not have moved the branch and the working
+          tree; a card that went on showing the old branch, or that claimed a plain failure, would
+          mislead the developer about what is on disk.
+        tests:
+          - RepoCardViewModel_SwitchBranchAsync_TimesOut_RefreshesAndSaysResultIsUnknown
+
+      - id: AgentControl-RepoCardViewModel-SwitchBranchRefused
+        title: >-
+          The RepoCardViewModel class shall, when git refuses a switch (for example because
+          uncommitted changes would be overwritten), show git's explanation, with credentials removed
+          and the sentence that nothing was changed, as the card's status message and as the error the
+          view layer shows, mark the card's last action as failed, keep the branch and the user's
+          changes as they were, and never force the switch, for a local and for a remote branch.
+        justification: |
+          A developer whose uncommitted work blocks a switch must be told why in git's own words and
+          must be certain nothing was lost; forcing the switch is never the tool's decision.
+        tests:
+          - RepoCardViewModel_SwitchBranchAsync_Refused_ShowsGitsReasonAndMarksTheCardFailed
+          - RepoCardViewModel_SwitchBranchAsync_Blocked_ShowsGitReasonAndKeepsBranch
+          - RepoCardViewModel_SwitchBranchAsync_RemoteBranchBlocked_ShowsGitsReasonAndNothingChanges
+
+      - id: AgentControl-RepoCardViewModel-SwitchBranchFollowsPin
+        title: >-
+          The RepoCardViewModel class shall show, after a switch, the agent package and version that
+          the new branch's pin file names, so that what the card shows and what a launch syncs to is
+          the new branch's choice.
+        justification: |
+          The pin file is committed per branch; a branch that pins another package version means the
+          repo's agent files should follow it, and launching reads the pin at launch time.
+        tests:
+          - RepoCardViewModel_SwitchBranchAsync_RealRepoWithOtherPin_PinChipFollowsTheNewBranch
+
+      - id: AgentControl-RepoCardViewModel-SwitchBranchInBackground
+        title: >-
+          The RepoCardViewModel class shall run git for a switch, and read the branches for the
+          dialog, off the calling (UI) thread.
+        justification: |
+          A checkout of a large working tree can take a long time; running it on the UI thread would
+          freeze the window.
+        tests:
+          - RepoCardViewModel_SwitchBranchAsync_RunsGitOffTheUiThread
+          - RepoCardViewModel_CreateSwitchBranchViewModel_ListsTheBranchesGitReports
+
       - id: AgentControl-RepoCardViewModel-Launch
         title: >-
           The RepoCardViewModel class shall launch the configured agent tool in the repo's

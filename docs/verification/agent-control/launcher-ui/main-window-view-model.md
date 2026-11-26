@@ -8,8 +8,10 @@ groups, group colors), `RepoGroupTreeTests.cs` (nested groups: the tree listing,
 and removing a group inside another), `RepoOrderingTests.cs` (the user's own order: stability, new repos, the legacy
 seed, Move, drag and drop, filtering, persistence, and the order of the groups),
 `MainWindowViewModelPersistenceTests.cs` (every change the user makes when the settings file cannot be written,
-including the Retry/Discard question of a background add) and `MainWindowViewModelRecheckTests.cs` (the periodic upgrade
-re-check, on a fake clock). The background add and the background card refresh after a settings save are verified
+including the Retry/Discard question of a background add), `MainWindowViewModelRecheckTests.cs` (the periodic upgrade
+re-check, on a fake clock) and `MainWindowViewModelCloneTests.cs` (the group choices of the clone dialog and the clone:
+on a `GitStub` whose `clone` can create the destination and hang, plus a clone of a local bare repository with the real
+git, never the network). The background add and the background card refresh after a settings save are verified
 through the view model's two constructor seams rather than timing: `backgroundWork` takes a `GatedBackgroundWorkRunner`
 (a test helper that counts every piece of work and holds it until the test releases it), so a test asserts what holds
 while the folders are still being checked - the add has returned to its caller, nothing is added, the global progress
@@ -106,6 +108,18 @@ N/A - standard test environment; `RealProcess` collection applies (see Verificat
   made meanwhile together with the confirmed change when its write succeeded, or without it when its write failed.
 - Overlapping confirmed saves at the close (an add and the Settings window's settings) leave the file with the change
   of each one whose write succeeded and without the change of each one whose write failed.
+- The clone dialog's group choices are Ungrouped first, then every group in the order the list shows them, each named by
+  its path through the tree.
+- A clone runs through the background work runner, so the calling thread is free while git works; the strip shows
+  `Cloning {folder}...` with a Cancel button named for the clone and is idle again however the clone ended; Cancel (or
+  disposing the view model) stops git, removes the partial folder, adds nothing and says nothing.
+- After a successful clone the folder is added through the add path into the chosen group and saved; when that save
+  fails and is discarded the folder stays on disk, no card is added and the notice says so.
+- A clone that fails is reported as `Cloning failed:` with git's message (without the `Cloning into` progress line,
+  credentials removed) or the exit code, adds nothing and throws nothing; a destination that is no longer usable fails
+  without starting git or touching the folder; an invalid group name is refused before anything starts.
+- A second clone into a destination that is being cloned into, in any letter case, is refused without starting git; the
+  destination is free again once the clone has ended.
 
 #### Test Scenarios
 
@@ -1006,3 +1020,86 @@ tested by `MainWindowViewModel_RecheckAfterSettingsClosed_SourceNoLongerNeedsSig
 `MainWindowViewModel_RecheckAfterSettingsClosed_CardCheckInFlight_OldFailureIsNotShown` and
 `MainWindowViewModel_RecheckAfterSettingsClosed_SignedInDuringConnectionTest_UsesTheSignInWithoutAsking`, covering
 `AgentControl-MainWindowViewModel-RecheckAfterSettingsClosed`.
+
+**MainWindowViewModel_GroupChoices_UngroupedThenTreeOrderWithPaths**: With groups `Work` (holding `Backend`) and `Zeta`,
+`GetGroupChoices` returns `Ungrouped` (no group), `Work`, `Work > Backend` and `Zeta`, with the stored names `null`,
+`Work`, `Backend` and `Zeta`; a list without groups gives Ungrouped only. This scenario is tested by
+`MainWindowViewModel_GetGroupChoices_ListsGroupsInTreeOrder` and
+`MainWindowViewModel_GetGroupChoices_NoGroups_UngroupedOnly`, covering `AgentControl-MainWindowViewModel-GroupChoices`.
+
+**MainWindowViewModel_CloneInBackground_GitRunsOffTheCallingThread**: A clone started from a thread guarded against
+blocking calls, with the background work held at a gate, records no blocking call and has not completed while held; once
+the gate opens the clone is made and the card added. This scenario is tested by
+`MainWindowViewModel_CloneRepositoryAsync_RunsGitOffTheUiThread`, covering
+`AgentControl-MainWindowViewModel-CloneInBackground`.
+
+**MainWindowViewModel_CloneProgressAndCancel_StripShowsTheCloneAndCancelStopsIt**: While the clone is held the strip is
+active, reads `Cloning repo...`, is indeterminate, can be canceled and names its Cancel `Cancel cloning repository`; it
+is idle after the clone. With a git whose clone creates its working folder and then hangs, executing the strip's Cancel
+makes the result `Canceled` with no notice, removes the working folder, leaves the parent folder empty (no destination),
+adds no card and leaves the strip idle. This scenario is tested by
+`MainWindowViewModel_CloneRepositoryAsync_ShowsProgressWithCancelAndRemovesItAtTheEnd` and
+`MainWindowViewModel_CloneRepositoryAsync_Cancel_RemovesPartialFolderAndAddsNothing`, covering
+`AgentControl-MainWindowViewModel-CloneProgressAndCancel`.
+
+**MainWindowViewModel_CloneLeftoverFolderReported_CanceledCloneNamesWhatRemains**: With the background work ending in a
+`GitCloneCanceledException` whose message names a folder and carries an address with a password, the result is
+`Canceled`, its notice starts `Cloning was canceled.`, names the folder and says it could not be removed, and does not
+contain the password; no card is added, the strip is idle and a new clone may start. With the work ending in a plain
+`OperationCanceledException` (the clean cancel) the result is `Canceled` with no notice. This scenario is tested by
+`MainWindowViewModel_CloneRepositoryAsync_CancelLeavesFolder_ReturnsCanceledWithNotice` and, for the clean cancel with a
+real git, `MainWindowViewModel_CloneRepositoryAsync_Cancel_RemovesPartialFolderAndAddsNothing`, covering
+`AgentControl-MainWindowViewModel-CloneLeftoverFolderReported`.
+
+**MainWindowViewModel_CloneStopsWhenWindowCloses_WaitsBoundedForTheCleanup**: With a git whose clone creates its working
+folder and then hangs, disposing the view model returns only after git was stopped and the working folder removed (the
+parent folder is empty and the stub did not run to its end the moment `Dispose` returns); the clone's result is
+`Canceled`, no card was added, and a clone requested after the close does nothing. With the background work held at a
+gate that never opens and a bound of 200 milliseconds, `Dispose` waits for about that bound (at least 150
+milliseconds, well under the default five seconds) and returns while the clone has not completed; once the gate opens
+the clone ends `Canceled`. This scenario is tested by
+`MainWindowViewModel_CloneRepositoryAsync_Dispose_CancelsRunningClone` and
+`MainWindowViewModel_CloneRepositoryAsync_DisposeWhileCloneNeverEnds_ReturnsWithinTheBound`, covering
+`AgentControl-MainWindowViewModel-CloneStopsWhenWindowCloses`.
+
+**MainWindowViewModel_CloneAddsCardThroughAddPath_CardInGroupSavedOrFolderKept**: A successful clone (the stub's, and a
+real clone of a local bare repository with one commit) runs git with `clone -- <address> <working folder>`, where the
+working folder is a hidden sibling of the destination, then adds one card
+for the destination into the group `Work` (created by the add), saves it, says nothing and leaves the strip idle; the
+real clone has its file, is a repository root and its card is named after the folder. When every save fails and the user
+answers Discard, the result is `ClonedNotAdded`, its notice holds the reason and `still on disk`, the folder exists and
+no card was added. This scenario is tested by
+`MainWindowViewModel_CloneRepositoryAsync_Success_AddsCardThroughAddPathIntoGroup`,
+`MainWindowViewModel_CloneRepositoryAsync_SaveFails_KeepsFolderAndSaysSo` and
+`MainWindowViewModel_CloneRepositoryAsync_RealLocalBareRepository_ClonesAndAddsCard`, covering
+`AgentControl-MainWindowViewModel-CloneAddsCardThroughAddPath`.
+
+**MainWindowViewModel_CloneFailureReported_GitsReasonWithoutCredentials**: A git that says the repository was not found,
+naming an address with a password, gives a `Failed` result whose notice starts `Cloning failed: fatal: repository` and
+has no password; a failure without text names the exit code (`git exited with code 3.`); the real git cloning a folder
+that is no repository gives a notice starting `Cloning failed: fatal:` and leaves no folder; a destination that now
+exists (a folder holding a file) fails with `already exists`, git is not started and the file is untouched; a request
+with a blank group name throws `ArgumentException` before the strip shows anything, and a null request throws
+`ArgumentNullException`. This scenario is tested by
+`MainWindowViewModel_CloneRepositoryAsync_Failure_ReturnsGitMessageAndAddsNothing`,
+`MainWindowViewModel_CloneRepositoryAsync_FailureWithoutMessage_NamesTheExitCode`,
+`MainWindowViewModel_CloneRepositoryAsync_DestinationAppeared_FailsWithReasonAndTouchesNothing`,
+`MainWindowViewModel_CloneRepositoryAsync_RealGitNotARepository_FailsWithGitsMessage`,
+`MainWindowViewModel_CloneRepositoryAsync_InvalidGroup_ThrowsBeforeStarting` and
+`MainWindowViewModel_CloneRepositoryAsync_CloneFailsWithArgumentException_NoticeHasNoParameterSuffix`, covering
+`AgentControl-MainWindowViewModel-CloneFailureReported`. The last one clones from an address that starts with a dash:
+the notice is exactly `Cloning failed: The repository address must not start with a dash.`, without the framework's
+parameter suffix.
+
+**MainWindowViewModel_CloneOneAtATime_SecondRequestRefused**: With the first clone held at the gate, a second request
+for the same folder spelled in upper case and one for another folder both return `Refused` (the notice says a clone
+or another operation is still running) and git was started once; after the first clone ends its card is listed and
+another clone is accepted. `CanCloneRepository` is `true` when idle (tooltip `Clone a repository`), `false` with the
+tooltip that says to wait or cancel while an add that can be canceled is held and while a clone is held, and `true`
+again after each; each change raises `PropertyChanged` for `CanCloneRepository` and `CloneRepositoryToolTip`. With the
+clone finished and the add of its folder held at the gate, a further clone is refused too (the guard covers the gap
+between the clone and its add). This scenario is tested by
+`MainWindowViewModel_CloneRepositoryAsync_SecondCloneWhileOneRuns_RefusedWithoutStartingGit`,
+`MainWindowViewModel_CanCloneRepository_FalseWhileCloneOrAddRuns_TrueAfter` and
+`MainWindowViewModel_CloneRepositoryAsync_WhileTheClonedFolderIsBeingAdded_RefusedToo`, covering
+`AgentControl-MainWindowViewModel-CloneOneAtATime`.

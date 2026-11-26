@@ -1185,11 +1185,12 @@ internal sealed partial class GitRemoteClient
     }
 
     /// <summary>
-    ///     Determines whether an environment variable is removed from the child process.
+    ///     Determines whether an environment variable is removed from the child process. Shared with
+    ///     <see cref="GitClient"/>, so the application has one list of them.
     /// </summary>
     /// <param name="name">The variable name.</param>
     /// <returns><see langword="true"/> for any <c>GIT_TRACE*</c> variable and the redirecting ones.</returns>
-    private static bool IsRemovedVariable(string name) =>
+    internal static bool IsRemovedVariable(string name) =>
         name.StartsWith("GIT_TRACE", StringComparison.OrdinalIgnoreCase) ||
         RemovedVariables.Contains(name, StringComparer.OrdinalIgnoreCase);
 

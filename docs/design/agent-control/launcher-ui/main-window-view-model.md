@@ -18,7 +18,8 @@ The unit uses three independently documented `LauncherUI` units: `RepoGroupHeade
 starts a section, with `RepoGroupKind`, which kind of section a header introduces - see its own design),
 `GroupNameViewModel` (the validating view model of the group-name prompt window `GroupNameWindow` - see its own
 design) and `GlobalProgressViewModel` (the progress strip under the app bar, in which this view model shows its bulk
-work - adding repositories, and reading the cards at start-up and after a settings save - see its own design). It
+work - adding repositories, cloning a repository, and reading the cards at start-up and after a settings save - see its
+own design). It
 owns the one `RepoRefreshQueue` (see its own design) through which the cards' start-up reads, the folders of an add,
 the cards' refresh after a settings save
 and the cards' own reads are read off the UI thread, at most two at a time across all of them
@@ -190,6 +191,20 @@ add's folder checks (`null`: `GitClientTimeouts.Default`); tests pass a short li
 operation (`GlobalProgressOperation`, begun with "Adding repositories..." and `CancelAddRepos` as its cancel action),
 one `CancellationTokenSource` and a count of adds not yet ended; `null` when no add runs. Ending the last add of the
 session disposes its progress operation and its cancellation.
+
+**_cloneActive**, **_cloneCancellations**, **_cloneWork**: `bool`, `List<CancellationTokenSource>` and `List<Task>` (UI
+thread only) — whether a clone, including the add of its folder, is running, which refuses a second clone; the
+cancellations of the clones that run, which the strip's Cancel signals one by one and `Dispose` signals all; and the
+background tasks of those clones, which `Dispose` waits for. **CanCloneRepository** (`bool`) and
+**CloneRepositoryToolTip** (`string`): whether a clone may start now - the view model is not disposed, no clone runs
+and `GlobalProgress.HasCancelableOperation` is `false` - and the Clone button's tooltip (*Clone a repository*, or *Wait
+for the running clone or other operation to finish, or cancel it, before cloning again*); both raise `PropertyChanged`
+when `_cloneActive` changes and when `GlobalProgress` reports a change of `HasCancelableOperation`.
+**CloneCancelDescription**: the strip's cancel naming of a clone. **CloneStopTimeout** (internal static `TimeSpan`, five
+seconds) and **_cloneStopTimeout**: how long `Dispose` waits for the clones' background work, lowered by the
+constructor's optional `cloneStopTimeout`.
+**CloneRepositoryOutcome** (`enum`: `Added`, `ClonedNotAdded`, `Failed`, `Canceled`, `Refused`) and
+**CloneRepositoryResult** (`record`: `Outcome`, `Notice`) — how a clone ended and what to tell the user.
 
 **_settingsRefreshGeneration**: `int` — identifies the most recent card refresh started by `ApplySettingsAsync`, so an
 older one that is still running neither rebuilds the list nor starts the upgrade check.
@@ -364,6 +379,14 @@ nobody can be told any more (`-SettingsFlushedOnClose`). Nothing is handed to th
 (`ScheduleSettingsSave` ignores a change, and a confirmed save or a synchronous add throws `ObjectDisposedException`),
 so the close's write is the last one. The constructor's `settingsFlushTimeout` lets a test shorten the budget, so a
 write still running after it is tested without waiting.
+
+*Clones at close*: before the settings are written, `Dispose` cancels the clones that run and waits for their
+background tasks (`_cloneWork`), at most `CloneStopTimeout` (five seconds, lowered by the constructor's
+`cloneStopTimeout`), so git is stopped and the partly cloned folder removed before the process can end. The awaited task
+is the worker's own - killing git and removing the folder need no UI thread - so the wait cannot deadlock. When the
+time runs out a warning is logged and the close goes on; the cleanup finishes if the process lives long enough, which
+bounds the whole close by `CloneStopTimeout` plus `SettingsFlushTimeout`
+(`AgentControl-MainWindowViewModel-CloneStopsWhenWindowCloses`).
 
 *Test seam*: `FlushSettingsAsync()` (internal) flushes the writer and completes when the writes accepted so far have
 ended, so a test reads the settings file only once it holds every change.
@@ -712,7 +735,51 @@ during the add is kept and written as usual (`-AddKeepsOtherChanges`, see *Backg
   path segment (the whole path for a drive root) and then `and K more`, so the fixed-width message box stays a
   manageable size; the first save problem's text, if any, ends the message.
 
-**RemoveRepo**: Removes a repo card unconditionally.
+**GetGroupChoices**: The places a cloned repository can be put, for the clone dialog
+(`AgentControl-MainWindowViewModel-GroupChoices`). Returns `CloneGroupChoice.Ungrouped` (no group) first, then every
+group of the tree in the order the list shows them (`RepoGroupHierarchy.GetTreeOrder`), each with its stored name and
+its display name - the group's path through the tree from the outermost group, joined by `>` - so two nested groups
+of the same name can be told apart. Favorites is not offered. Reads the settings in memory only.
+
+**CloneRepositoryAsync**: The clone the dialog asks for, taking a `CloneRepositoryRequest` (address, destination, group
+or `null`) and returning a `CloneRepositoryResult` (a `CloneRepositoryOutcome` and the notice to show, if any).
+
+- *Algorithm*: an invalid group name throws `ArgumentException` before anything starts; a disposed view model returns
+  `Canceled`; when `CanCloneRepository` is `false` (another clone or its add runs, or another operation that can be
+  canceled shows in the strip) it returns `Refused` with *A clone or another operation that can be canceled is still
+  running; wait for it to end or cancel it, then clone again.* without starting git
+  (`AgentControl-MainWindowViewModel-CloneOneAtATime`). Otherwise `_cloneActive` is set for the whole call - the clone
+  and the add that follows it, so there is no gap between the clone's operation ending and the add's beginning - and
+  cleared in a `finally`. The destination is normalized (`NormalizeRepoPath`). `RunCloneAsync`
+  then begins a progress operation `Cloning {folder}...` (indeterminate) whose cancel action cancels the clone's
+  `CancellationTokenSource` and whose cancel description is *Cancel cloning repository* / *Stop cloning; the partly
+  cloned folder is removed*, and runs `new GitClient(git path, timeouts).Clone(url, destination, token)` through the
+  `IBackgroundWorkRunner` - never on the UI thread (`AgentControl-MainWindowViewModel-CloneInBackground`); the task is
+  kept in `_cloneWork` while it runs. Whatever the outcome, the operation is disposed, the task forgotten and the
+  cancellation released. An exit code of zero is a
+  successful clone, and the folder is then added by `EnqueueAddReposAsync([destination], group)` - the path every add
+  takes (`AgentControl-MainWindowViewModel-CloneAddsCardThroughAddPath`); a canceled add (the strip's second Cancel, or
+  the window closed), or one whose outcome is not `Added` (already listed, not a repository root, the save could not be
+  made and was discarded), returns `ClonedNotAdded` with the add's own message (`DescribeAddOutcomes`) followed by *The
+  cloned folder is still on disk.*
+- *Failures* (`AgentControl-MainWindowViewModel-CloneFailureReported`): a non-zero exit code returns `Failed` with
+  `Cloning failed: ` and git's message - standard error, else standard output, without the progress line that begins
+  `Cloning into` - redacted with `SecretRedactor`, or `git exited with code N.` when git said nothing; an
+  `ArgumentException` (the client refused the address or destination at the last moment) is returned as `Failed` with
+  its message without the framework's ` (Parameter 'x')` suffix, which names a code parameter the user cannot see; any
+  other exception other than a cancellation (git cannot be started, the clone limit) is logged through the redacting
+  logger and returned as `Failed` with its safe message. The method does
+  not throw for an expected failure, because the window calls it from an event handler.
+- *Cancel* (`AgentControl-MainWindowViewModel-CloneProgressAndCancel`): the strip's Cancel makes `GitClient.Clone` kill
+  git and remove only what the clone created; the result is `Canceled` with no notice, nothing is added and the strip is
+  idle again. When the client reports that the folder could not be removed (`GitCloneCanceledException`, caught before
+  the plain cancellation) the result is still `Canceled` and nothing is added, but the notice is *Cloning was canceled.*
+  followed by the client's sentence naming the folder, redacted with `SecretRedactor`, and the warning is logged
+  (`AgentControl-MainWindowViewModel-CloneLeftoverFolderReported`); the window shows a notice like any other. A view
+  model that was disposed meanwhile returns no notice, because nobody is left to read it. `Dispose` does the same for
+  every clone that runs and then waits for their background tasks, at most `CloneStopTimeout`; on a timeout it logs a
+  warning and goes on (`AgentControl-MainWindowViewModel-CloneStopsWhenWindowCloses`).
+
 
 - *Parameters*: `RepoCardViewModel card`.
 - *Returns*: `void`.
@@ -1117,7 +1184,10 @@ failed save either: nothing of the batch changed, every folder that would have b
 outcome with the redacted reason, and the window shows the reason in the summary of `DescribeAddOutcomes`;
 `EnqueueAddReposAsync` turns a failed save into the Retry/Discard question (`AddSaveFailed`) and, on Discard, into the
 same `SaveFailed` outcomes, and its task never faults for an expected failure (a queued add whose predecessor faulted
-still runs); a cancellation before the commit is a canceled result, not an exception; `AddRepos` and
+still runs); `CloneRepositoryAsync` throws `ArgumentNullException` for a null request and `ArgumentException` for an
+invalid group name before anything starts, and otherwise never throws: a failed clone, a refused destination and git
+that cannot be started are `Failed` results, a clone while another clone or cancelable operation runs is `Refused` and a
+cancellation is `Canceled`; a cancellation before the commit is a canceled result, not an exception; `AddRepos` and
 `EnqueueAddReposAsync` throw `ArgumentNullException` for a null list and `ArgumentException` for an invalid group name
 before adding (or queuing) anything; `ToggleGroupCollapsed` throws `ArgumentException` for a blank name, while
 `RenameGroup` and `RemoveGroup` report an unknown group or unusable name by returning `false`, as `SetGroupColor` does
@@ -1136,14 +1206,18 @@ succeeding. A background card refresh after a settings save that is canceled (th
 - **RepoGroupHeaderViewModel** (`LauncherUI`) — one header per section, updated in place (count, collapsed state,
   color, move availability); its toggle, rename, remove, add-repository and move requests are handled here.
 - **GlobalProgressViewModel** (`LauncherUI`) — the progress strip's state (`GlobalProgress`), in which the adds (one
-  cancelable operation per session) and the refresh queue's waves of counted reads (not cancelable) are shown.
+  cancelable operation per session), the clones (one cancelable operation each, with its own cancel naming) and the
+  refresh queue's waves of counted reads (not cancelable) are shown.
 - **RepoRefreshQueue** (`LauncherUI`) — the one queue (two reads at a time) through which the folder checks of an add
   and every card's reads run off the UI thread; created and disposed here and handed to every card.
 - **IBackgroundWorkRunner** / **ThreadPoolBackgroundWorkRunner** (`LauncherUI` supporting type,
   `BackgroundWorkRunner.cs`) — the runner under the refresh queue.
 - **CardColorPalette** (`LauncherUI` supporting type) — checks and spells a group color name in `SetGroupColor`.
 - **GitClient** (`GitIntegration` subsystem) — the static `IsRepositoryRoot`, which every add path uses to accept only
-  the top folder of a Git repository (no git process is started).
+  the top folder of a Git repository (no git process is started), and `Clone`, which `CloneRepositoryAsync` runs on a
+  worker thread with the settings' git executable and `_gitTimeouts`.
+- **CloneRepositoryRequest**, **CloneGroupChoice** (`LauncherUI`, in `CloneRepositoryViewModel.cs`) — what the clone
+  dialog asks for and the group choices it offers.
 - **SecretRedactor** (`PackageCredentials` subsystem) — makes the reason of a failed save safe to show.
 - **RepoCardViewModel.ReadCheapFacts** (`LauncherUI`) — reads, on a worker thread of the refresh queue, the pin
   (`RepoConfig`'s `RepoPinStore`), branch and committed agent folders of a folder being added, before it has a card,
@@ -1172,19 +1246,22 @@ succeeding. A background card refresh after a settings save that is canceled (th
 
 - **App** — constructs `MainWindowViewModel` in `OnFrameworkInitializationCompleted`, passing the
   process-wide `PackageCredentialContext`, and assigns it as `MainWindow.DataContext`.
-- **MainWindow** (code-behind) — calls `EnqueueAddReposAsync` and `DescribeAddOutcomes` for the app bar's Add button, a
-  header's "Add repository..." (both with several folders) and folders dropped from the file manager (the drop's add
-  posted to the UI thread), binds the progress strip to `GlobalProgress`, answers `AddSaveFailed` with the Retry/Discard
-  `ConfirmationWindow`, and calls `RemoveRepo`, `ToggleGroupCollapsed`, `RenameGroup` and `RemoveGroup` (a failed save
-  is reported through `SettingsSaveFailed`, in a message box it does not wait for), asks `IsReorderEnabled`,
-  `CanMoveCard`/`GetMoveDisabledReason`, `GetReorderDisabledReason`, `CanDrop` and `CanDropGroup` and calls `MoveCard`,
-  `DropCard` and `DropGroup` for the Move menu items and for drag and drop of cards and group headers (the failures are
-  reported through `SettingsSaveFailed`), calls `SetGroupColor` from the group color palette, starts the upgrade check
-  and the periodic re-check (`BeginUpgradeRefresh`, `StartPeriodicUpgradeRecheck`) when the view model is attached,
-  disposes the view model when it closes, subscribes to `SettingsSaveFailed` to show a message for the changes that come
-  from cards and headers, and reads `Settings` to open `SettingsWindow`, passing `CreateConnectionTestProvider` as its
-  provider factory, and once that window closes calls `RecheckAfterSettingsClosed` with whether its `Saved` event was
-  raised (not awaited); fills each card menu's "Move to group" submenu when the menu opens, shows the `GroupNameWindow`
-  prompt and the removal confirmations for the
+- **MainWindow** (code-behind) — calls `GetGroupChoices` to build the clone dialog and `CloneRepositoryAsync` with its
+  answer for the app bar's Clone button (showing the returned notice in a message box) and binds the button's
+  `IsEnabled` and tooltip to `CanCloneRepository` and `CloneRepositoryToolTip`, calls `EnqueueAddReposAsync` and
+  `DescribeAddOutcomes` for the app bar's Add button, a header's "Add repository..." (both with several folders) and
+  folders dropped from the file manager (the drop's add posted to the UI thread), binds the progress strip to
+  `GlobalProgress`, answers `AddSaveFailed` with the Retry/Discard `ConfirmationWindow`, and calls `RemoveRepo`,
+  `ToggleGroupCollapsed`, `RenameGroup` and `RemoveGroup` (a failed save is reported through `SettingsSaveFailed`, in a
+  message box it does not wait for), asks `IsReorderEnabled`, `CanMoveCard`/`GetMoveDisabledReason`,
+  `GetReorderDisabledReason`, `CanDrop` and `CanDropGroup` and calls `MoveCard`, `DropCard` and `DropGroup` for the Move
+  menu items and for drag and drop of cards and group headers (the failures are reported through `SettingsSaveFailed`),
+  calls `SetGroupColor` from the group color palette, starts the upgrade check and the periodic re-check
+  (`BeginUpgradeRefresh`, `StartPeriodicUpgradeRecheck`) when the view model is attached, disposes the view model when
+  it closes, subscribes to `SettingsSaveFailed` to show a message for the changes that come from cards and headers, and
+  reads `Settings` to open `SettingsWindow`, passing `CreateConnectionTestProvider` as its provider factory, and once
+  that window closes calls `RecheckAfterSettingsClosed` with whether its `Saved` event was raised (not awaited); fills
+  each card menu's "Move to group" submenu when the menu opens, shows the `GroupNameWindow` prompt and the removal
+  confirmations for the
   `GroupRenameRequested`/`GroupRemoveRequested`/`GroupRemoveWithContentsRequested`/`NewGroupRequested` requests, opens
   the card and group color palette pop-ups, and calls `RenameGroup`/`RemoveGroup`.

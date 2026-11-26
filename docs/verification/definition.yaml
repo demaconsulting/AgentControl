@@ -30,6 +30,8 @@ input-files:
   - docs/verification/agent-control/launcher-ui/repo-image-locator.md
   - docs/verification/agent-control/launcher-ui/repo-group-header-view-model.md
   - docs/verification/agent-control/launcher-ui/group-name-view-model.md
+  - docs/verification/agent-control/launcher-ui/clone-repository-view-model.md
+  - docs/verification/agent-control/launcher-ui/switch-branch-view-model.md
   - docs/verification/agent-control/launcher-ui/dialog-behavior.md
   - docs/verification/agent-control/launcher-ui/global-progress-view-model.md
   - docs/verification/agent-control/launcher-ui/repo-refresh-queue.md

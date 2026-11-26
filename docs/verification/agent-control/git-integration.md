@@ -2,23 +2,21 @@
 
 ### Verification Approach
 
-The `GitIntegration` subsystem is verified indirectly through its constituent units' test
-suites (`GitClientTests.cs`, `CommittedAgentFilesCacheTests.cs`, `GitCredentialClientTests.cs` /
-`GitCredentialClientIntegrationTests.cs` and `GitRemoteClientTests.cs` /
-`GitRemoteClientIntegrationTests.cs`), each documented in its
-own unit-level verification design, plus `GitIntegrationSubsystemTests.cs`, which drives the saved-sign-in capability
-through its contract with the real git and a throw-away credential helper, and the remote Git capability
-(`GitRemoteClient`) the way the Git package source uses it: against a real local repository with the user's git
-configuration replaced by an isolated one (and, for the sign-in test, against `GitHttpsServer.cs`, a private Git server
-of the test), or against `GitRemoteStub`, a fake git executable that records its arguments and environment. The
+The `GitIntegration` subsystem is verified indirectly through its constituent units' test suites (`GitClientTests.cs`,
+`GitClientRealRepositoryTests.cs`, `CommittedAgentFilesCacheTests.cs`, `GitCredentialClientTests.cs` /
+`GitCredentialClientIntegrationTests.cs` and `GitRemoteClientTests.cs` / `GitRemoteClientIntegrationTests.cs`), each
+documented in its own unit-level verification design, plus `GitIntegrationSubsystemTests.cs`, which drives the
+saved-sign-in capability through its contract with the real git and a throw-away credential helper, and the remote Git
+capability (`GitRemoteClient`) the way the Git package source uses it: against a real local repository with the user's
+git configuration replaced by an isolated one (and, for the sign-in test, against `GitHttpsServer.cs`, a private Git
+server of the test), or against `GitRemoteStub`, a fake git executable that records its arguments and environment. The
 subsystem test class reuses `GitRepositoryFixture` of the `AgentPackageManagement` test folder, a deliberate
 cross-hierarchy dependency of test code only (the fixture builds real local repositories with the user's git
-configuration isolated; nothing in the shipped code depends on it). `GitClientTests` uses `GitStub`,
-a fake git executable
-script that records its invocation arguments and returns configured output/exit codes, so
-tests never depend on a real git installation or a real repository's actual history. The credential tests use
-`GitCredentialStub`, a similar fake that also records the environment, working folder and standard input, and -
-separately - run the real git against a throw-away credential helper in a temporary folder.
+configuration isolated; nothing in the shipped code depends on it). `GitClientTests` uses `GitStub`, a fake git
+executable script that records its invocation arguments and returns configured output/exit codes, so tests never depend
+on a real git installation or a real repository's actual history. The credential tests use `GitCredentialStub`, a
+similar fake that also records the environment, working folder and standard input, and - separately - run the real git
+against a throw-away credential helper in a temporary folder.
 
 ### Test Environment
 
@@ -58,6 +56,9 @@ the test's isolated git configuration.
   stopped at the time limit.
 - A local git command that hangs past its time limit, or whose caller gives up, is stopped before it finishes and
   reported as timed out or canceled.
+- A repository is cloned from a local bare repository, its branches are listed, and a remote-tracking branch is
+  switched to with the working tree and the branch list following; the password of a clone address is in no log message
+  or result.
 - The git of package sources and of credential helpers is started off the thread that asks: a tag listing and a
   credential-helper question asked from a thread guarded against blocking calls are answered with nothing refused.
 
@@ -197,3 +198,37 @@ the helper is reported available. This scenario is tested by
 `GitIntegrationSubsystem_RemoteAndCredentialGit_FromGuardedThread_StartOffThatThread`, covering
 `AgentControl-GitIntegration-NoBlockingStart` (children: `AgentControl-GitRemoteClient-StartsOffCallerThread`,
 `AgentControl-GitCredentialClient-StartsOffCallerThread`).
+
+**GitIntegration_BranchesAndClone_SubsystemTestUsesTheRealGitAndALocalBareRepository**: Against a real working
+repository whose branches `main` and `feature` hold different files and a local bare repository that plays the remote
+(`GitRepositoryFixture`; never the network), a repository is cloned, its branches are listed (current `main`, remote
+`origin/feature`), the remote branch is switched to with a tracking branch created, and the current branch, the file
+content and the branch list (no remote branch is left once a local one of the same name exists) follow. This scenario
+is tested by `GitIntegrationSubsystem_CloneThenListAndSwitchBranches_OnRealRepository_FollowsTheBranch`, covering
+`AgentControl-GitIntegration-ListBranches`, `AgentControl-GitIntegration-SwitchBranch` and
+`AgentControl-GitIntegration-CloneRepository`; a switch git refuses is verified with
+`GitClient_SwitchBranch_RealRepo_DirtyConflictingFile_IsRefusedWithGitsReasonAndChangesNothing` and an edit that does
+not conflict travels with the switch with `GitClient_SwitchBranch_RealRepo_UnrelatedDirtyFile_SurvivesTheSwitch`, and a
+canceled clone with `GitClient_Clone_Canceled_RemovesOnlyItsTempFolder`, cited at the subsystem level (children:
+`AgentControl-GitClient-ListBranches`, `-ListBranchesRemoteDistinct`, `-ListBranchesDetached`, `-OutputIsUtf8`,
+`-SwitchBranch`, `-SwitchNeverForces`, `-SwitchNeverMergesOrStashes`, `-SwitchNameIsData`,
+`-SwitchKeepsNonConflictingChanges`, `-SwitchRefusalReported`, `-EnvironmentPolicy`, `-Clone`, `-CloneTimeLimit`,
+`-CloneFailureReported`, `-CommandsRefuseGuardedThread`, `-CloneDestinationRules`, `-CloneNeverPrompts` and
+`-CloneCancelStopsGit`). The real clone is made into a new folder through a hidden sibling working folder that is
+renamed when git succeeded.
+
+**GitIntegration_CloneSafety_UnitTestsCoverAddressDataCleanupAndRedaction**: An address that git could read as an option
+or a remote helper, or an ssh address whose host starts with a dash, is refused before git starts
+(`GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit`, covering
+`AgentControl-GitIntegration-CloneUrlIsData`, children `AgentControl-GitClient-CloneUrlRefused` and
+`-CloneUrlSeparatedFromOptions`); a canceled clone removes only its own hidden working folder - a file, a folder and a
+look-alike folder of the user's next to the destination stay - and a failed clone removes that folder and returns git's
+text (`GitClient_Clone_Canceled_RemovesOnlyItsTempFolder` and
+`GitClient_Clone_Fails_RemovesItsTempFolderAndReturnsGitsReason`, covering
+`AgentControl-GitIntegration-CloneRemovesOnlyWhatItCreated`, children `AgentControl-GitClient-CloneIntoFreshFolder`,
+`-CloneCleansUpOnlyItsOwnFolder` and `-CloneDestinationAppearedMeanwhile`); and an address with a password never puts
+the password into a
+log message or a result: with a stub whose clone fails and echoes the address, the subsystem test searches the log and
+the result for the password. That scenario is tested by
+`GitIntegrationSubsystem_CloneWithCredentialsInUrl_NeverLogsThePassword`, covering
+`AgentControl-GitIntegration-CloneNeverLogsCredentials` (child `AgentControl-GitClient-CloneRedactsCredentials`).

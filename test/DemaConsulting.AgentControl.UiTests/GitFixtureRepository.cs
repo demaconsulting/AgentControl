@@ -400,7 +400,7 @@ internal sealed class GitFixtureRepository : IDisposable
     /// <param name="arguments">The git arguments.</param>
     /// <returns>The standard output.</returns>
     /// <exception cref="InvalidOperationException">Thrown when git fails or takes too long.</exception>
-    private string Git(string folder, params string[] arguments) => Git(folder, arguments, null, null);
+    internal string Git(string folder, params string[] arguments) => Git(folder, arguments, null, null);
 
     /// <summary>
     ///     Runs git in a folder with the user's configuration replaced, a fixed identity, no signing

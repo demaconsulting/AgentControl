@@ -28,7 +28,9 @@ namespace DemaConsulting.AgentControl.Tests.GitIntegration;
 /// <remarks>
 ///     The stub recognizes five invocation shapes: <c>status --porcelain</c>, <c>pull</c>,
 ///     <c>rev-parse HEAD</c>, <c>rev-parse --abbrev-ref HEAD</c>, and <c>ls-files -- ...</c>,
-///     matching every subcommand <c>GitClient</c> issues. On Windows this is a <c>.bat</c> file
+///     matching the subcommands <c>GitClient</c> issues for its fixed queries, and any number of further
+///     canned commands (<see cref="Command"/>: <c>for-each-ref</c>, <c>remote</c>, <c>switch</c>,
+///     <c>clone</c>, <c>rev-parse --short</c>) whose output is read from files. On Windows this is a <c>.bat</c> file
 ///     (directly runnable by <see cref="System.Diagnostics.Process.Start(System.Diagnostics.ProcessStartInfo)"/>
 ///     without <c>UseShellExecute</c>); elsewhere it is a POSIX shell script marked executable via
 ///     <c>File.SetUnixFileMode</c>. On request, <c>status --porcelain</c> also starts a background copy
@@ -63,17 +65,25 @@ internal sealed class GitStub
     public string FinishedMarkerPath => Path + ".finished";
 
     /// <summary>
+    ///     The files that hold the output texts of the extra commands.
+    /// </summary>
+    private readonly List<string> _sidecars;
+
+    /// <summary>
     ///     Private constructor - use <see cref="Create"/> instead.
     /// </summary>
     /// <param name="path">The created stub script's path.</param>
-    private GitStub(string path)
+    /// <param name="sidecars">The files that hold the output texts of the extra commands.</param>
+    private GitStub(string path, List<string> sidecars)
     {
         Path = path;
+        _sidecars = sidecars;
     }
 
     /// <summary>
     ///     Creates a stub script with the given canned responses for the "status", "pull",
-    ///     "rev-parse HEAD", "rev-parse --abbrev-ref HEAD", and "ls-files" subcommands.
+    ///     "rev-parse HEAD", "rev-parse --abbrev-ref HEAD", and "ls-files" subcommands, and for any
+    ///     number of further subcommands (see <see cref="Command"/>).
     /// </summary>
     /// <param name="statusOutput">Stdout text the stub prints for <c>status --porcelain</c>.</param>
     /// <param name="statusError">Stderr text the stub prints for <c>status --porcelain</c>.</param>
@@ -106,6 +116,15 @@ internal sealed class GitStub
     ///     for that many seconds (then appends to <see cref="FinishedMarkerPath"/>), while the stub
     ///     itself answers and exits at once - a helper git started that outlives git. 0 starts
     ///     none.</param>
+    /// <param name="extraCommands">Canned answers to further subcommands; they are matched before the
+    ///     fixed ones. <see langword="null"/> for none.</param>
+    /// <param name="argumentLogPath">When supplied, the stub appends one line per invocation holding
+    ///     all of its arguments (the invocation log holds only the first two) to this file.</param>
+    /// <param name="environmentLogPath">When supplied together with <paramref name="environmentNames"/>,
+    ///     the stub appends, on every invocation, one <c>NAME=value</c> line per named environment
+    ///     variable (<c>NAME=&lt;unset&gt;</c> when it is not set) to this file.</param>
+    /// <param name="environmentNames">The names of the environment variables to log; see
+    ///     <paramref name="environmentLogPath"/>. They must be plain upper-case names.</param>
     /// <returns>A new <see cref="GitStub"/> whose <see cref="Path"/> is ready to use.</returns>
     public static GitStub Create(
         string statusOutput = "",
@@ -126,37 +145,146 @@ internal sealed class GitStub
         int statusSleepSeconds = 0,
         int pullSleepSeconds = 0,
         int revParseHeadSleepSeconds = 0,
-        int statusOutputHolderSeconds = 0)
+        int statusOutputHolderSeconds = 0,
+        IReadOnlyList<Command>? extraCommands = null,
+        string? argumentLogPath = null,
+        string? environmentLogPath = null,
+        IReadOnlyList<string>? environmentNames = null)
     {
         var sleeps = new StubSleeps(
             statusSleepSeconds, pullSleepSeconds, revParseHeadSleepSeconds, statusOutputHolderSeconds);
-        if (OperatingSystem.IsWindows())
+        var windows = OperatingSystem.IsWindows();
+        var environmentLines = BuildEnvironmentLines(windows, environmentLogPath, environmentNames ?? []);
+        var path = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(), $"agentcontrol_git_stub_{Guid.NewGuid()}" + (windows ? ".bat" : ".sh"));
+        var prepared = PrepareCommands(path, extraCommands ?? []);
+        var stub = new GitStub(path, prepared.SelectMany(command => new[] { command.OutputPath, command.ErrorPath })
+            .OfType<string>().ToList());
+        if (windows)
         {
-            var path = System.IO.Path.Combine(
-                System.IO.Path.GetTempPath(), $"agentcontrol_git_stub_{Guid.NewGuid()}.bat");
             File.WriteAllText(path, BuildBatchScript(
                 statusOutput, statusError, statusExitCode, pullOutput, pullError, pullExitCode,
                 revParseHeadOutput, revParseHeadExitCode, revParseHeadError,
                 abbrevRefOutput, abbrevRefExitCode,
-                lsFilesOutput, lsFilesExitCode, lsFilesError, invocationLogPath, sleeps, path + ".finished"));
-            return new GitStub(path);
+                lsFilesOutput, lsFilesExitCode, lsFilesError, invocationLogPath, sleeps, path + ".finished",
+                prepared, argumentLogPath, environmentLines));
         }
         else
         {
-            var path = System.IO.Path.Combine(
-                System.IO.Path.GetTempPath(), $"agentcontrol_git_stub_{Guid.NewGuid()}.sh");
             File.WriteAllText(path, BuildShellScript(
                 statusOutput, statusError, statusExitCode, pullOutput, pullError, pullExitCode,
                 revParseHeadOutput, revParseHeadExitCode, revParseHeadError,
                 abbrevRefOutput, abbrevRefExitCode,
-                lsFilesOutput, lsFilesExitCode, lsFilesError, invocationLogPath, sleeps, path + ".finished"));
+                lsFilesOutput, lsFilesExitCode, lsFilesError, invocationLogPath, sleeps, path + ".finished",
+                prepared, argumentLogPath, environmentLines));
             File.SetUnixFileMode(
                 path,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
                 | UnixFileMode.GroupRead | UnixFileMode.GroupExecute
                 | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-            return new GitStub(path);
         }
+
+        return stub;
+    }
+
+    /// <summary>
+    ///     Builds the script lines that log the named environment variables on every invocation.
+    /// </summary>
+    /// <param name="windows">Whether the script is a batch file.</param>
+    /// <param name="logPath">The log file, or <see langword="null"/> for no lines.</param>
+    /// <param name="names">The variable names.</param>
+    /// <returns>The lines.</returns>
+    private static List<string> BuildEnvironmentLines(bool windows, string? logPath, IReadOnlyList<string> names)
+    {
+        var lines = new List<string>();
+        if (logPath is null)
+        {
+            return lines;
+        }
+
+        foreach (var name in names)
+        {
+            if (windows)
+            {
+                lines.Add($"if defined {name} >>\"{logPath}\" echo {name}=%{name}%");
+                lines.Add($"if not defined {name} >>\"{logPath}\" echo {name}=^<unset^>");
+            }
+            else
+            {
+                lines.Add($"echo \"{name}=${{{name}-<unset>}}\" >> \"{logPath}\"");
+            }
+        }
+
+        return lines;
+    }
+
+    /// <summary>
+    ///     A canned answer of the stub to one more git subcommand (<c>for-each-ref</c>, <c>remote</c>,
+    ///     <c>switch</c>, <c>clone</c>, <c>rev-parse --short</c>), for the commands the fixed
+    ///     parameters of <see cref="Create"/> do not cover.
+    /// </summary>
+    /// <param name="First">The subcommand (the first argument).</param>
+    /// <param name="Second">The second argument that must match too (for example <c>--short</c>), or
+    ///     <see langword="null"/> to match on the subcommand alone.</param>
+    /// <param name="Output">Text the stub prints to standard output; it may have several lines and any
+    ///     characters, because it is read from a file.</param>
+    /// <param name="Error">Text the stub prints to standard error.</param>
+    /// <param name="ExitCode">The exit code the stub returns.</param>
+    /// <param name="SleepSeconds">How many seconds the stub sleeps before it answers (then appends to
+    ///     <see cref="FinishedMarkerPath"/>); 0 answers at once.</param>
+    /// <param name="CreatesDestination">When <see langword="true"/> the stub first creates the folder
+    ///     named by its fourth argument, with a read-only file in <c>.git/objects/pack</c>, like a clone
+    ///     that was started: <c>git clone -- &lt;url&gt; &lt;destination&gt;</c>.</param>
+    public sealed record Command(
+        string First,
+        string? Second = null,
+        string Output = "",
+        string Error = "",
+        int ExitCode = 0,
+        int SleepSeconds = 0,
+        bool CreatesDestination = false);
+
+    /// <summary>
+    ///     A <see cref="Command"/> whose output texts were written to files the script prints.
+    /// </summary>
+    /// <param name="Command">The command.</param>
+    /// <param name="OutputPath">The file with the standard output text, or <see langword="null"/> for
+    ///     none.</param>
+    /// <param name="ErrorPath">The file with the standard error text, or <see langword="null"/> for
+    ///     none.</param>
+    private sealed record PreparedCommand(Command Command, string? OutputPath, string? ErrorPath);
+
+    /// <summary>
+    ///     Writes the output texts of the extra commands to files next to the stub, so any characters
+    ///     (several lines, <c>|</c>, <c>%</c>) reach git's caller unchanged.
+    /// </summary>
+    /// <param name="stubPath">The stub script's path.</param>
+    /// <param name="commands">The extra commands.</param>
+    /// <returns>The commands with their files.</returns>
+    private static List<PreparedCommand> PrepareCommands(string stubPath, IReadOnlyList<Command> commands)
+    {
+        var prepared = new List<PreparedCommand>();
+        for (var index = 0; index < commands.Count; index++)
+        {
+            var command = commands[index];
+            string? outputPath = null;
+            string? errorPath = null;
+            if (command.Output.Length > 0)
+            {
+                outputPath = $"{stubPath}.{index}.out";
+                File.WriteAllText(outputPath, command.Output);
+            }
+
+            if (command.Error.Length > 0)
+            {
+                errorPath = $"{stubPath}.{index}.err";
+                File.WriteAllText(errorPath, command.Error);
+            }
+
+            prepared.Add(new PreparedCommand(command, outputPath, errorPath));
+        }
+
+        return prepared;
     }
 
     /// <summary>
@@ -172,6 +300,11 @@ internal sealed class GitStub
         if (File.Exists(FinishedMarkerPath))
         {
             File.Delete(FinishedMarkerPath);
+        }
+
+        foreach (var sidecar in _sidecars.Where(File.Exists))
+        {
+            File.Delete(sidecar);
         }
     }
 
@@ -250,12 +383,27 @@ internal sealed class GitStub
         string revParseHeadOutput, int revParseHeadExitCode, string revParseHeadError,
         string abbrevRefOutput, int abbrevRefExitCode,
         string lsFilesOutput, int lsFilesExitCode, string lsFilesError,
-        string? invocationLogPath, StubSleeps sleeps, string markerPath)
+        string? invocationLogPath, StubSleeps sleeps, string markerPath,
+        IReadOnlyList<PreparedCommand> extraCommands, string? argumentLogPath, IReadOnlyList<string> environmentLines)
     {
         var lines = new List<string> { "@echo off" };
         if (invocationLogPath is not null)
         {
             lines.Add($"echo %1 %2>>\"{invocationLogPath}\"");
+        }
+
+        if (argumentLogPath is not null)
+        {
+            lines.Add($">>\"{argumentLogPath}\" echo %*");
+        }
+
+        lines.AddRange(environmentLines);
+
+        for (var index = 0; index < extraCommands.Count; index++)
+        {
+            var command = extraCommands[index].Command;
+            var second = command.Second is null ? string.Empty : $" if \"%2\"==\"{command.Second}\"";
+            lines.Add($"if \"%1\"==\"{command.First}\"{second} goto :extra{index}");
         }
 
         lines.AddRange(
@@ -335,6 +483,33 @@ internal sealed class GitStub
         }
 
         lines.Add($"exit /b {lsFilesExitCode}");
+        for (var index = 0; index < extraCommands.Count; index++)
+        {
+            var (command, outputPath, errorPath) = extraCommands[index];
+            lines.Add($":extra{index}");
+            if (command.CreatesDestination)
+            {
+                // What a started clone leaves: the folder and a read-only pack file in it
+                lines.Add("if not exist \"%~4\" mkdir \"%~4\"");
+                lines.Add("mkdir \"%~4\\.git\\objects\\pack\" 2>nul");
+                lines.Add(">\"%~4\\.git\\objects\\pack\\pack-1.pack\" echo x");
+                lines.Add("attrib +R \"%~4\\.git\\objects\\pack\\pack-1.pack\"");
+            }
+
+            lines.AddRange(BatchSleep(command.SleepSeconds, markerPath));
+            if (outputPath is not null)
+            {
+                lines.Add($"type \"{outputPath}\"");
+            }
+
+            if (errorPath is not null)
+            {
+                lines.Add($"type \"{errorPath}\" 1>&2");
+            }
+
+            lines.Add($"exit /b {command.ExitCode}");
+        }
+
         return string.Join("\r\n", lines) + "\r\n";
     }
 
@@ -347,7 +522,8 @@ internal sealed class GitStub
         string revParseHeadOutput, int revParseHeadExitCode, string revParseHeadError,
         string abbrevRefOutput, int abbrevRefExitCode,
         string lsFilesOutput, int lsFilesExitCode, string lsFilesError,
-        string? invocationLogPath, StubSleeps sleeps, string markerPath)
+        string? invocationLogPath, StubSleeps sleeps, string markerPath,
+        IReadOnlyList<PreparedCommand> extraCommands, string? argumentLogPath, IReadOnlyList<string> environmentLines)
     {
         var lines = new List<string> { "#!/bin/sh" };
         if (invocationLogPath is not null)
@@ -355,7 +531,41 @@ internal sealed class GitStub
             lines.Add($"echo \"$1 $2\" >> \"{invocationLogPath}\"");
         }
 
+        if (argumentLogPath is not null)
+        {
+            lines.Add($"echo \"$*\" >> \"{argumentLogPath}\"");
+        }
+
+        lines.AddRange(environmentLines);
+
         lines.Add("case \"$1 $2\" in");
+        for (var index = 0; index < extraCommands.Count; index++)
+        {
+            var (command, outputPath, errorPath) = extraCommands[index];
+            lines.Add(command.Second is null ? $"  \"{command.First} \"*)" : $"  \"{command.First} {command.Second}\")");
+            if (command.CreatesDestination)
+            {
+                // What a started clone leaves: the folder and a read-only pack file in it
+                lines.Add("    mkdir -p \"$4/.git/objects/pack\"");
+                lines.Add("    echo x > \"$4/.git/objects/pack/pack-1.pack\"");
+                lines.Add("    chmod a-w \"$4/.git/objects/pack/pack-1.pack\"");
+            }
+
+            lines.AddRange(ShellSleep(command.SleepSeconds, markerPath));
+            if (outputPath is not null)
+            {
+                lines.Add($"    cat \"{outputPath}\"");
+            }
+
+            if (errorPath is not null)
+            {
+                lines.Add($"    cat \"{errorPath}\" 1>&2");
+            }
+
+            lines.Add($"    exit {command.ExitCode}");
+            lines.Add("    ;;");
+        }
+
         lines.Add("  \"__holder \")");
         lines.AddRange(ShellSleep(sleeps.StatusOutputHolder, markerPath));
         lines.Add("    exit 0");

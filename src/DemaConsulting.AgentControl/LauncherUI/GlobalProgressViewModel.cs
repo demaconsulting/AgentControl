@@ -21,6 +21,29 @@
 namespace DemaConsulting.AgentControl.LauncherUI;
 
 /// <summary>
+///     How the strip's Cancel button describes what it stops, for screen readers and the tooltip.
+/// </summary>
+/// <remarks>
+///     Exists because the one Cancel button serves every cancelable operation (adding repositories,
+///     cloning a repository): a button that always said "Cancel adding repositories" would tell a
+///     screen-reader user, and anyone who hovers it, the wrong thing while a clone runs.
+/// </remarks>
+/// <param name="AccessibleName">The name screen readers announce for the Cancel button, for example
+///     <c>Cancel adding repositories</c>. Must not be blank.</param>
+/// <param name="ToolTip">The tooltip of the Cancel button, saying what stopping does. Must not be
+///     blank.</param>
+internal sealed record GlobalProgressCancelDescription(string AccessibleName, string ToolTip)
+{
+    /// <summary>
+    ///     Gets the description of an operation that adds repositories, which every operation that
+    ///     gives no description of its own gets.
+    /// </summary>
+    public static GlobalProgressCancelDescription AddingRepositories { get; } = new(
+        "Cancel adding repositories",
+        "Stop adding repositories; nothing more is added");
+}
+
+/// <summary>
 ///     View model of the main window's global progress strip: the thin bar, the short status text and
 ///     the Cancel button shown directly under the app bar while a bulk operation (adding several
 ///     repositories, reading the cards at start-up, refreshing every card after Settings were saved)
@@ -68,6 +91,12 @@ internal sealed class GlobalProgressViewModel : ViewModelBase
 
     /// <summary>Backing field for <see cref="CanCancel"/>.</summary>
     private bool _canCancel;
+
+    /// <summary>Backing field for <see cref="CancelDescription"/>.</summary>
+    private GlobalProgressCancelDescription _cancelDescription = GlobalProgressCancelDescription.AddingRepositories;
+
+    /// <summary>Backing field for <see cref="HasCancelableOperation"/>.</summary>
+    private bool _hasCancelableOperation;
 
     /// <summary>
     ///     Initializes an idle progress strip.
@@ -156,6 +185,52 @@ internal sealed class GlobalProgressViewModel : ViewModelBase
     }
 
     /// <summary>
+    ///     Gets a value indicating whether any running operation was begun with a cancel action,
+    ///     whether or not it accepts a cancel at this point, was canceled already or is shown.
+    /// </summary>
+    /// <remarks>
+    ///     Stays <see langword="true"/> from the moment such an operation begins until it has ended,
+    ///     so the work behind a canceled operation (stopping git, removing a partial folder) is still
+    ///     counted; it is what the window uses to allow one clone or add at a time (see
+    ///     <see cref="MainWindowViewModel.CanCloneRepository"/>). An operation without a cancel action,
+    ///     such as the refresh of the cards, does not count.
+    /// </remarks>
+    public bool HasCancelableOperation
+    {
+        get => _hasCancelableOperation;
+        private set => SetField(ref _hasCancelableOperation, value);
+    }
+
+    /// <summary>
+    ///     Gets the description of what the Cancel button stops, taken from the shown operation (the
+    ///     adding-repositories description when none is shown or the operation gave none).
+    /// </summary>
+    private GlobalProgressCancelDescription CancelDescription
+    {
+        get => _cancelDescription;
+        set
+        {
+            if (!ReferenceEquals(_cancelDescription, value))
+            {
+                _cancelDescription = value;
+                OnPropertyChanged(nameof(CancelAccessibleName));
+                OnPropertyChanged(nameof(CancelToolTip));
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets the name screen readers announce for the Cancel button: it names the shown operation
+    ///     (for example <c>Cancel cloning repository</c>) rather than always the add.
+    /// </summary>
+    public string CancelAccessibleName => CancelDescription.AccessibleName;
+
+    /// <summary>
+    ///     Gets the tooltip of the Cancel button: what stopping the shown operation does.
+    /// </summary>
+    public string CancelToolTip => CancelDescription.ToolTip;
+
+    /// <summary>
     ///     Gets the command behind the strip's Cancel button: asks the shown operation to stop. Enabled
     ///     only while <see cref="CanCancel"/>; the operation's cancel action runs at most once.
     /// </summary>
@@ -165,21 +240,27 @@ internal sealed class GlobalProgressViewModel : ViewModelBase
     ///     Starts showing an operation: indeterminate, with the given text, until the operation reports
     ///     a count.
     /// </summary>
-    /// <param name="text">The status text to show, for example <c>Adding repositories...</c>. Must
-    ///     not be <see langword="null"/>.</param>
+    /// <param name="text">The status text to show, for example <c>Adding repositories...</c>; may be
+    ///     empty, which shows an empty line. Must not be <see langword="null"/>.</param>
     /// <param name="cancel">What the strip's Cancel button does for this operation, or
     ///     <see langword="null"/> for an operation that cannot be canceled (no Cancel button). It runs
     ///     on the UI thread, at most once.</param>
+    /// <param name="cancelDescription">How the Cancel button is named while this operation is shown,
+    ///     or <see langword="null"/> for <see cref="GlobalProgressCancelDescription.AddingRepositories"/>.
+    ///     Used only with a cancel action; ignored without one.</param>
     /// <returns>The operation; its owner reports through it and disposes it when the work has ended
-    ///     (however it ended), which removes it from the strip. It is shown at once unless an older
-    ///     operation that can still be canceled is running (see <see cref="Shown"/>).</returns>
+    ///     (however it ended), which removes it from the strip. An operation with a cancel action is
+    ///     shown at once and takes over from an older one (the most recently begun one that can be
+    ///     canceled is shown); one without a cancel action is shown only while no running operation
+    ///     has a cancel action (see <see cref="Shown"/>).</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="text"/> is
     ///     <see langword="null"/>.</exception>
-    public GlobalProgressOperation Begin(string text, Action? cancel = null)
+    public GlobalProgressOperation Begin(
+        string text, Action? cancel = null, GlobalProgressCancelDescription? cancelDescription = null)
     {
         ArgumentNullException.ThrowIfNull(text);
 
-        var operation = new GlobalProgressOperation(this, text, cancel);
+        var operation = new GlobalProgressOperation(this, text, cancel, cancelDescription);
         _operations.Add(operation);
         Publish();
         return operation;
@@ -240,6 +321,7 @@ internal sealed class GlobalProgressViewModel : ViewModelBase
     /// </summary>
     private void Publish()
     {
+        HasCancelableOperation = _operations.Any(operation => operation.HasCancelAction);
         var shown = Shown;
         if (shown is null)
         {
@@ -249,6 +331,7 @@ internal sealed class GlobalProgressViewModel : ViewModelBase
             Value = 0;
             Maximum = 1;
             CanCancel = false;
+            CancelDescription = GlobalProgressCancelDescription.AddingRepositories;
             return;
         }
 
@@ -257,6 +340,7 @@ internal sealed class GlobalProgressViewModel : ViewModelBase
         Maximum = Math.Max(1, shown.Total);
         Value = shown.IsIndeterminate ? 0 : Math.Clamp(shown.Completed, 0, Maximum);
         CanCancel = shown.CanCancel;
+        CancelDescription = shown.CancelDescription;
         IsActive = true;
     }
 
@@ -308,12 +392,21 @@ internal sealed class GlobalProgressOperation : IDisposable
     /// <param name="owner">The strip that shows it.</param>
     /// <param name="text">The initial status text.</param>
     /// <param name="cancel">The cancel action, or <see langword="null"/> for none.</param>
-    internal GlobalProgressOperation(GlobalProgressViewModel owner, string text, Action? cancel)
+    /// <param name="cancelDescription">How the Cancel button is named while this operation is shown, or
+    ///     <see langword="null"/> for <see cref="GlobalProgressCancelDescription.AddingRepositories"/>.</param>
+    internal GlobalProgressOperation(
+        GlobalProgressViewModel owner, string text, Action? cancel, GlobalProgressCancelDescription? cancelDescription)
     {
         _owner = owner;
         _cancel = cancel;
+        CancelDescription = cancelDescription ?? GlobalProgressCancelDescription.AddingRepositories;
         Text = text;
     }
+
+    /// <summary>
+    ///     Gets how the strip's Cancel button is named while this operation is shown.
+    /// </summary>
+    public GlobalProgressCancelDescription CancelDescription { get; }
 
     /// <summary>
     ///     Gets the operation's status text.
@@ -349,6 +442,13 @@ internal sealed class GlobalProgressOperation : IDisposable
     ///     operation.
     /// </summary>
     internal bool IsCancelable => _cancel is not null && !_cancelRequested && !_ended;
+
+    /// <summary>
+    ///     Gets a value indicating whether the operation was begun with a cancel action and has not
+    ///     ended, even when it accepts no cancel now or was canceled already (the work behind it is
+    ///     still running); see <see cref="GlobalProgressViewModel.HasCancelableOperation"/>.
+    /// </summary>
+    internal bool HasCancelAction => _cancel is not null && !_ended;
 
     /// <summary>
     ///     Gets or sets whether the operation accepts a cancel at this point; an owner turns it off for

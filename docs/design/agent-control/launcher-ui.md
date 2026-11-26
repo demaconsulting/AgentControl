@@ -4,29 +4,33 @@
 
 ### Overview
 
-The `LauncherUI` subsystem is the Avalonia-based user interface a developer interacts with
-directly. It spans the recent-repos main window, per-repo cards, the package-selection
-window, the settings window, the package-source editor window and the sign-in dialog
-(`MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`, `SettingsWindowViewModel`,
-`SourceEditorViewModel` (one class in two files: `SourceEditorViewModel.cs` and, for a Git repository source,
-`SourceEditorViewModel.Git.cs`), `CredentialPromptViewModel`), plus their `.axaml` Views (`MainWindow`,
-`AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`, `SettingsWindow`,
-`SourceEditorWindow`, `CredentialPromptWindow`, `GroupNameWindow`) and shared MVVM support types (`RelayCommand`,
-`AsyncRelayCommand`, `ViewModelBase`, `PackageSourceIcons`, `PackageSourceItemViewModel`,
-`SelectPackageSourceViewModel`, `AvaloniaCredentialPrompt`, `ConnectionTestResultKind`, `RepoCardStatus`,
-`CardColorPalette`, `ThirdPartyDependencies`, `ColorPalettePanel`), the shared theme resources and styles
-(`AppStyles.axaml`, included by `App.axaml`). The subsystem contains twelve units: the six
-view-model units `MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`,
-`SettingsWindowViewModel`, `SourceEditorViewModel` and `CredentialPromptViewModel`, and six further
-independently testable classes with behavior of their own, each with its own requirements, design, verification
-document and review set: `RepoImageLocator` (finds and decodes a repo's untrusted picture; security-relevant),
-`RepoGroupHeaderViewModel` (with `RepoGroupKind`; the header row of a repo-list section), `GroupNameViewModel` (the
-validating view model of the group-name prompt), `DialogBehavior` (the keyboard behavior every dialog shares) and
-`GlobalProgressViewModel` (with `GlobalProgressOperation`; the progress strip under the app bar that shows bulk work -
-adding repositories, and refreshing the cards at start-up and after Settings are saved - with Cancel for an add) and
-`RepoRefreshQueue` (the one queue every lazy read of a repo's state goes through - the cards' start-up reads, the
-folder checks of an add, the cards' refresh after a settings save, the working-tree checks of the cards shown, and the
-reads of Refresh, Pull and the card actions - so at most two run at once across all of them).
+The `LauncherUI` subsystem is the Avalonia-based user interface a developer interacts with directly. It spans the
+recent-repos main window, per-repo cards, the package-selection window, the settings window, the package-source editor
+window and the sign-in dialog (`MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`,
+`SettingsWindowViewModel`, `SourceEditorViewModel` (one class in two files: `SourceEditorViewModel.cs` and, for a Git
+repository source, `SourceEditorViewModel.Git.cs`), `CredentialPromptViewModel`), plus their `.axaml` Views
+(`MainWindow`, `AboutWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `SelectPackageWindow`, `SettingsWindow`,
+`SourceEditorWindow`, `CredentialPromptWindow`, `GroupNameWindow`, `SwitchBranchWindow`, `CloneRepositoryWindow`) and
+shared MVVM support types (`RelayCommand`, `AsyncRelayCommand`, `ViewModelBase`, `PackageSourceIcons`,
+`PackageSourceItemViewModel`, `SelectPackageSourceViewModel`, `AvaloniaCredentialPrompt`, `ConnectionTestResultKind`,
+`RepoCardStatus`, `CardColorPalette`, `ThirdPartyDependencies`, `ColorPalettePanel`, `BranchItemViewModel`,
+`BranchChoice`, `CloneGroupChoice`, `CloneRepositoryRequest`, `CloneRepositoryOutcome`, `CloneRepositoryResult`), the
+shared theme resources and styles (`AppStyles.axaml`, included by `App.axaml`). The subsystem contains fourteen units:
+the six view-model units `MainWindowViewModel`, `RepoCardViewModel`, `SelectPackageWindowViewModel`,
+`SettingsWindowViewModel`, `SourceEditorViewModel` and `CredentialPromptViewModel`, and eight further independently
+testable classes with behavior of their own, each with its own requirements, design, verification document and review
+set: `RepoImageLocator` (finds and decodes a repo's untrusted picture; security-relevant), `RepoGroupHeaderViewModel`
+(with `RepoGroupKind`; the header row of a repo-list section), `GroupNameViewModel` (the validating view model of the
+group-name prompt), `SwitchBranchViewModel` (the view model of the "Switch branch" dialog: the branches a repo knows,
+the filter and the choice; its rows `BranchItemViewModel` and its answer `BranchChoice` are in the same file),
+`CloneRepositoryViewModel` (the view model of the "Clone repository" dialog: the address, the folder, the group and the
+checks on them; its group choice `CloneGroupChoice` and its answer `CloneRepositoryRequest` are in the same file),
+`DialogBehavior` (the keyboard behavior every dialog shares) and `GlobalProgressViewModel` (with
+`GlobalProgressOperation`; the progress strip under the app bar that shows bulk work - adding repositories, cloning a
+repository, and refreshing the cards at start-up and after Settings are saved - with Cancel for an add or a clone) and
+`RepoRefreshQueue` (the one queue every lazy read of a repo's state goes through - the cards' start-up reads, the folder
+checks of an add, the cards' refresh after a settings save, the working-tree checks of the cards shown, and the reads of
+Refresh, Pull and the card actions - so at most two run at once across all of them).
 
 **Supporting types.** The remaining types are documented here, as supporting types of the subsystem, rather than as
 units: the `RelayCommand`/`ViewModelBase`/`PackageSourceItemViewModel`-style MVVM plumbing and the `.axaml` Views are
@@ -202,25 +206,30 @@ a NuGet source's editor and the "Forget saved sign-in" action of a server source
 - *Constraints*: The fingerprint is saved normalized, and only while signatures are required.
 
 **Global progress strip** (`MainWindowViewModel.GlobalProgress`, a `GlobalProgressViewModel`): the strip directly under
-the app bar that shows bulk work not tied to one card - adding repositories, and refreshing the cards at start-up and
-after Settings are saved.
+the app bar that shows bulk work not tied to one card - adding repositories, cloning a repository, and refreshing the
+cards at start-up and after Settings are saved.
 
 - *Type*: In-process .NET bindable properties and an `ICommand`, bound by `MainWindow.axaml` to a `Border`
   (AutomationId `GlobalProgressStrip`, exposed to UI Automation as a content element, visible only while `IsActive`),
   a 3-pixel `ProgressBar` (`GlobalProgressBar`,
   indeterminate or with `Value` of `Maximum`, its accessible name the status text), a `TextBlock`
-  (`GlobalProgressText`) and a Cancel `Button` (`GlobalProgressCancelButton`, accessible name "Cancel adding
-  repositories", visible only while `CanCancel`).
+  (`GlobalProgressText`) and a Cancel `Button` (`GlobalProgressCancelButton`, visible only while `CanCancel`; its
+  accessible name and tooltip follow the shown operation - "Cancel adding repositories" for an add, "Cancel cloning
+  repository" for a clone - through `CancelAccessibleName` and `CancelToolTip`).
 - *Role*: Provider.
 - *Contract*: Shows the most recently begun running bulk operation that can still be canceled or, when none can, the
-  most recently begun running one: "Adding repositories..." while the
-  folders of an add are counted, "Adding {completed} of {total} repositories..." as each folder has been checked,
-  "Saving..." while the add saves (no Cancel then), and "Refreshing repositories {completed} of {total}..." while the
-  shared refresh queue reads the cards at start-up or after a settings save (no Cancel). A single card's Refresh,
-  Pull or action shows on its card, not in the strip. Cancel stops the running add and every queued
-  add before anything is saved or added, with no message afterwards; an add stays shown, with its Cancel, while the
-  cards refresh after a settings save, and the refresh is shown once the add has ended or was canceled
-  (`AgentControl-LauncherUI-GlobalProgress`, `AgentControl-LauncherUI-AddCancel`).
+  most recently begun running one: "Adding repositories..." while the folders of an add are counted, "Adding {completed}
+  of {total} repositories..." as each folder has been checked, "Saving..." while the add saves (no Cancel then),
+  "Cloning {folder}..." while a clone runs (indeterminate, with Cancel) and "Refreshing repositories {completed} of
+  {total}..." while the shared refresh queue reads the cards at start-up or after a settings save (no Cancel). A single
+  card's Refresh, Pull or action shows on its card, not in the strip. Cancel stops the running add and every queued add
+  before anything is saved or added, with no message afterwards, or stops the running clone and removes the partly
+  cloned folder (a message names the folder only when it could not be removed); an add stays shown, with its Cancel,
+  while the cards refresh after a settings save, and the refresh is shown once the add has ended or was canceled
+  (`AgentControl-LauncherUI-GlobalProgress`, `AgentControl-LauncherUI-AddCancel`,
+  `AgentControl-LauncherUI-CloneProgressCancel`). `HasCancelableOperation` tells whether any running operation has a
+  cancel action, also one already canceled whose work is still ending; the Clone button is disabled while it is `true`
+  (`AgentControl-LauncherUI-CloneOneAtATime`), so one clone or add runs at a time.
 - *Constraints*: Fully collapsed when idle, so the idle window is unchanged; the strip, its text and its bar use
   the theme brushes `GlobalProgressStripBackground`, `GlobalProgressTextForeground`, `GlobalProgressForeground` and
   `GlobalProgressTrack`, defined for both themes and checked for contrast.
@@ -331,7 +340,8 @@ the events that need a dialog.
   (see *Adding repos by dropping folders*); how the add stays off the UI thread is described under *Background work
   and the global progress strip*.
 - *`MainWindowViewModel` and `GlobalProgressViewModel`*: the main view-model creates one `GlobalProgressViewModel`
-  (`GlobalProgress`) and is its only caller: `Begin` for a session of adds (with `CancelAddRepos` as the cancel action)
+  (`GlobalProgress`) and is its only caller: `Begin` for a session of adds (with `CancelAddRepos` as the cancel action),
+  for each clone (with the clone's own cancellation as the cancel action and a cancel description that names the clone)
   and for each wave of counted reads of the shared refresh queue (no cancel action), reporting through the returned
   `GlobalProgressOperation` and disposing it when the work ends.
 - *`MainWindowViewModel`, `RepoCardViewModel` and `RepoRefreshQueue`*: the main view-model creates one
@@ -348,11 +358,33 @@ the events that need a dialog.
   validates the card's `MoveToGroup` and repairs stored names, so the prompt, the card and the settings file agree on
   what a group name is) and raises `Completed` exactly once - with the accepted name, or `null` for Cancel - which
   closes the window; the code-behind then calls `RepoCardViewModel.MoveToGroup` or `MainWindowViewModel.RenameGroup`.
+- *`SwitchBranchViewModel` and `SwitchBranchWindow`*: the card does not show the dialog; the window's code-behind does,
+  when `RepoCardViewModel` raises `SwitchBranchRequested` (from the card menu's **Switch branch...**, the
+  `SwitchBranchCommand`): it builds the dialog's view model with `RepoCardViewModel.CreateSwitchBranchViewModel()` - so
+  the window never builds a git client; which git executable and time limits apply is the card's business - and shows
+  `SwitchBranchWindow` modally. `SwitchBranchViewModel.LoadAsync`, run when the window opens and stopped when it closes,
+  reads the branches (`GitClient.GetBranches`, no fetch) through the `IBackgroundWorkRunner`, so git never runs on the
+  UI thread, and lists them (local first, then remote, the current one marked or the detached commit named); a failure
+  is shown as text. The filter, the choice by button, Enter and double-click, and Cancel/Escape end in one `Completed`
+  event - with a `BranchChoice` or `null` - which closes the window. The dialog only chooses: the code-behind then calls
+  `RepoCardViewModel.SwitchBranchAsync`, which runs the switch as an operation of the card (see *Switching branches*).
+- *`CloneRepositoryViewModel` and `CloneRepositoryWindow`*: the window's code-behind shows the dialog when the app bar's
+  `CloneRepoButton` is pressed (`MainWindow.CloneRepositoryAsync`): it builds the dialog's view model with the group
+  choices of `MainWindowViewModel.GetGroupChoices()` (Ungrouped first, then every group in tree order named by its path)
+  and the user's profile folder as the parent folder, and shows `CloneRepositoryWindow` modally. The view model checks
+  what needs no disk while the user types (the address through `GitClient.CheckCloneUrl`, the folder name, an absolute
+  parent folder) and, when Clone is pressed, the destination on disk through the `IBackgroundWorkRunner`
+  (`GitClient.CheckCloneDestination`), so the dialog never blocks on a slow drive. The window's Browse button asks for a
+  folder through the native picker or, in tests, through the seam `CloneRepositoryWindow.FolderPicker`, which
+  `MainWindow` fills from its own seam `CloneFolderPicker`. The dialog only chooses: it ends in one `Completed` event
+  with a `CloneRepositoryRequest` or `null`, and the code-behind then calls `MainWindowViewModel.CloneRepositoryAsync`
+  (see *Cloning a repository*).
 - *`DialogBehavior`*: a stateless helper that every dialog window's code-behind calls once from its constructor
   (`DialogBehavior.Apply(window, initial-focus control, cancel action)`): `SettingsWindow`, `SourceEditorWindow`,
-  `CredentialPromptWindow`, `SelectPackageWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `AboutWindow` and
-  `GroupNameWindow`. It knows no view-model; a window that has a view-model passes its `Cancel` as the cancel
-  action. The release-notes window is the only window that does not apply it.
+  `CredentialPromptWindow`, `SelectPackageWindow`, `ConfirmationWindow`, `MessageBoxWindow`, `AboutWindow`,
+  `GroupNameWindow`, `SwitchBranchWindow` and `CloneRepositoryWindow`. It knows no view-model; a window that has a
+  view-model passes its `Cancel` as the cancel action. The release-notes window is the only window that does not apply
+  it.
 - *Resizable `SettingsWindow` and `SourceEditorWindow`*: both are `CanResize` with a `MinWidth` of 500 and a
   `MinHeight` of 360 and no maximum width, and keep their default opening size (800 and 640 wide, `SizeToContent`
   `Height`, centered on the owner); when the user resizes them Avalonia ends the automatic height, so nothing fights
@@ -816,12 +848,56 @@ tile, left-aligned under the star and as tall as the chip row plus the path row,
 path. The tile shows the repo's own `icon.png`/`logo.png` when it has one (see `RepoCardViewModel`), otherwise
 the repo name's initials on a color chosen by a deterministic hash of the repo path, otherwise a folder glyph.
 The **...** menu is grouped: *Repository* (**Git Pull**, with its enablement rules and its explanatory tooltip
-shown even while it is disabled, and **Refresh**), *Agent files* (**Select Package...** when no package is pinned,
+shown even while it is disabled, **Switch branch...**, enabled once the card's state is read, its folder exists and no
+other operation runs, and **Refresh**), *Agent files* (**Select Package...** when no package is pinned,
 **Change package...** when one is, and **Upgrade to x.y.z** when a newer version exists; the group is hidden when
 none applies) and *Organize* (**Move to group**, then **Reorder**, a submenu holding **Move to top**, **Move up**,
 **Move down** and **Move to bottom**, and **Card color...**) and **Remove from list**. The upgrade
 chip is a button that runs the same `UpgradeCommand` as the menu's Upgrade item
 (`AgentControl-RepoCardViewModel-UpgradeFromChip`).
+
+**Switching branches.** *Switch branch...* (`SwitchBranchMenuItem`, bound to `SwitchBranchCommand`) opens the modal
+`SwitchBranchWindow` (`AgentControl-LauncherUI-SwitchBranchDialog`): a line saying where the repo is (`Currently on
+main` or `Detached HEAD at 1a2b3c4`), a filter box, an indeterminate bar while git is asked, the list - local branches
+first, then the remote-tracking ones with their remote as a caption, the current one marked and not selectable - the
+inline error when git cannot list the branches, the hint *Remote branches are the ones Git already knows about. Use Git
+Pull to update them.* (the dialog never fetches, so it opens fast and never asks for a sign-in), and Cancel and Switch
+buttons. Typing narrows the list (a single remaining choice is selected, so typing and Enter is enough); Enter or a
+double-click on a row chooses it; Escape cancels. The dialog only chooses. `RepoCardViewModel.SwitchBranchAsync` then
+makes the switch as an operation of the card (`AgentControl-LauncherUI-SwitchBranch`): the busy row says `Switching to
+x...`, `GitClient.SwitchBranch` runs on a worker thread (`git switch`, or `git switch --track` for a remote branch;
+never forced, nothing stashed or discarded), and on success the card's status says `Switched to branch 'x'.` and the
+card is refreshed in full exactly as after a Pull - the branch chip, the pin (each branch can pin another package or
+version; the launch re-sync rules read the pin at launch, so they follow with no further work), the committed-files
+badge and the working-tree state - without replacing the switch's status message. When git refuses (typically because
+uncommitted changes would be overwritten) nothing was changed: the status message and a message box carry git's own
+explanation followed by *Nothing was changed.*, and the card is marked as failed. Git that cannot be started or does not
+finish within the switch limit is reported as an error of the card.
+
+**Cloning a repository.** The app bar's *Clone repository* button (`CloneRepoButton`, after Add) opens the modal
+`CloneRepositoryWindow` (`AgentControl-LauncherUI-CloneButton`, `-CloneRepositoryDialog`): the repository address, the
+parent folder (typed, or chosen with Browse; it starts in the user's profile folder), the folder name (it follows the
+address - the last segment without `.git` - until edited), a line showing where the clone will go, the group (Ungrouped
+by default, then the existing groups named by their path), the inline error text and Cancel and Clone buttons. What
+needs no disk is checked while typing and keeps Clone disabled until it holds: an address that is blank, spans several
+lines, starts with a dash or contains `::` before its first `/` (a remote helper such as `ext::` or `fd::`; the colons
+of a bracketed IPv6 literal do not count) is refused (`GitClient.CheckCloneUrl`, the same rule the clone applies), the
+folder name must be one valid Windows file name, the parent folder must be absolute. Pressing Clone (or Enter) checks
+the destination on disk in the background - nothing may exist there, not even an empty folder, a file or a link, and its
+parent must exist (`GitClient.CheckCloneDestination`) - and keeps the dialog open with the reason when it cannot be
+used. The dialog only chooses. `MainWindowViewModel.CloneRepositoryAsync` then clones as an operation of the window
+(`AgentControl-LauncherUI-CloneRepository`, `-CloneProgressCancel`): the strip shows an indeterminate `Cloning x...`
+with a Cancel button named *Cancel cloning repository*; `GitClient.Clone` runs on a worker thread and clones into a
+hidden folder next to the destination that it renames to the destination when git succeeded; one clone runs at a time:
+while a clone (and the add of its folder) or another operation that can be canceled shows in the strip, the Clone button
+is disabled and its tooltip says to wait for the running clone or other operation, or cancel it, and a request made
+anyway is refused (`-CloneOneAtATime`); Cancel (or closing the window, which waits at most five seconds for the cleanup)
+stops git and removes only that hidden folder (see the GitIntegration design) and says nothing. When git succeeds the
+folder is added through `EnqueueAddReposAsync` - the same checks, the chosen group (created when it does not exist), the
+save and the Retry/Discard question - so the card appears like any added repo; when that add is canceled, refused or
+cannot be saved the message says the cloned folder is still on disk. When git fails the message *Cloning failed:* gives
+git's own reason with credentials removed (the lines that only announce `Cloning into '...'` are left out) and nothing
+is added.
 
 **Repo groups and card colors (user-specific).** Both are personal organizing choices stored only in the user's own
 settings file (on the repo's `RecentRepo`, and the collapsed section names, the group colors and the group order in
@@ -1198,11 +1274,12 @@ window is the only non-modal window left.
 the window does not extend into it): the application logo (`AppLogo`, reused `Assets/AppIcon.ico` on the same white
 backing as in the About window, with the accessible name and tooltip "AgentControl" - the name and tagline are in
 the window title and the About window, not repeated here), the filter box (`FilterTextBox`, the star-width column,
-so it is what shrinks at narrow widths) and the `AddRepoButton`, `OpenSettingsButton` and `OpenAboutButton` icon
+so it is what shrinks at narrow widths) and the `AddRepoButton`, `CloneRepoButton`, `OpenSettingsButton` and
+`OpenAboutButton` icon
 buttons, which are auto-width and never clip. It is drawn on the `AppBarBackground` theme brush (a little off the
 page color in the dark theme, white in the light one) with a one-pixel `SurfaceDivider` line below it, instead of
 a branded header and a blue rule above a separate toolbar. The keyboard focus order is the visual order (the logo is
-not a stop): filter, Add, Settings, About (`AgentControl-LauncherUI-AppBar`).
+not a stop): filter, Add, Clone, Settings, About (`AgentControl-LauncherUI-AppBar`, `-CloneButton`).
 
 **Card presentation at narrow widths.** The repo name is one `TextBlock` with an end ellipsis and the whole name
 as its tooltip, in a star-width column beside the auto-width Launch and "..." buttons, so it never runs under

@@ -116,6 +116,12 @@ never prompts and that work the user started may. What is not exercised end to e
 address, and Git Credential Manager's own dialog - whether it can be shown from a hidden-console process - which is
 left to a manual check on a machine with a private https repository.
 
+The branch and clone scenarios (`BranchAndCloneTests.cs`) build on the same fixture: the switch and clone scenarios
+run the application with the real `git` against a repository cloned from a real local bare repository (and, for the
+password-in-address scenario, against the private Git server of the test), isolated and
+skipped or failed exactly like the Git source scenarios; the clone-safety scenario for a refused address and the
+cancel scenario need no real git, because they run with the arg-logger stub (the cancel scenario holds its commands
+with the hold file). No network is used beyond loopback.
 `AgentControl-System-PackageAuthenticity` is stated as far as one end-to-end scenario in `MultipleSourcesTests.cs`
 can show it: the published application runs against a real NuGet folder feed that holds an unsigned newer package,
 with the source configured to require signed packages, and the upgrade is refused with a message that says the
@@ -345,6 +351,67 @@ configured git executable and gated on a clean working tree. This scenario is te
 `windows@PullMenuItem_Click_InvokesConfiguredGitExecutableWithPullArgument`, covering
 `AgentControl-System-Pull`.
 
+**AgentControl_SwitchBranch_ChooseOtherBranch_BranchChipFollowsAndBlockedSwitchShowsGitsReason**: In the published
+application, started over the real git against a repository cloned from a local bare repository (on `main`, with a local
+branch `feature` and a branch `from-remote` that exists only on the remote), the card's "..." menu item
+**Switch branch...** opens the dialog; typing `from-remote` in its filter selects the only branch left to choose and
+Switch makes it the current branch: the repository really is on a new local branch `from-remote` with that branch's
+file content, the branch chip reads `from-remote` and the card says "Switched to branch 'from-remote'.". With the
+file then changed locally in a way the other branch would overwrite, switching to `main` is refused: a message
+quotes git's reason ("would be overwritten") and says "Nothing was changed.", and afterwards the repository is
+still on `from-remote` with the local change intact. A second scenario starts from a clone whose `main` pins
+`contoso-agents` 1.0.0 and whose local branch `other` pins 2.0.0, with an untracked file and an edit of a file that both
+branches share: the package chip reads 1.0.0 and the card shows the uncommitted-changes warning; switching to `other`
+makes the branch chip read `other` and the package chip read 2.0.0, both files are intact with the same content on
+disk, and the warning is still shown. These scenarios are tested by
+`windows@SwitchBranchMenuItem_ChooseOtherBranch_ChangesBranchChipAndBlockedSwitchShowsGitsReason` and
+`windows@SwitchBranchMenuItem_BranchWithOtherPin_ChangesPackageChipAndKeepsUnrelatedChanges`, covering
+`AgentControl-System-SwitchBranch`; the dialog's rules, the card's refusal handling and what git guarantees about
+other kinds of changes are verified one level down (`SwitchBranchViewModel`, `RepoCardViewModel`, `GitClient`), because
+the end-to-end tests cannot observe git's guarantees beyond what they check on disk.
+
+**AgentControl_CloneRepository_CloneFromLocalBareRepoIntoGroup_AddsTheCardAndRemovesTheProgressStrip**: In the
+published application, started over the real git with one repo in the group `Work`, the app bar's **Clone repository**
+button opens the dialog; the address of a local bare repository (never the network), the parent folder, a folder
+name and the group `Work` are entered and Clone is pressed. The card named after the folder appears, the progress strip
+and the dialog are gone, the destination is a working clone on `main` with the repository's files, the header
+`Work` counts two repos and the settings file stores the new repo with the group `Work`. This scenario is tested by
+`windows@CloneRepoButton_CloneFromLocalBareRepoIntoGroup_AddsTheCardAndRemovesTheProgressStrip`, covering
+`AgentControl-System-CloneRepository`.
+
+**AgentControl_CloneRepository_CancelWhileCloning_StopsTheCloneAndLeavesNothingBehind**: In the published application,
+with the arg-logger stub standing in for git and holding every command (its hold file), a clone is started from the
+dialog into a parent folder that holds a file of the user's and a folder named like a clone's working folder but not
+made by the clone. The progress strip reads `Cloning canceled-clone...` with a Cancel button named `Cancel cloning
+repository`, and the app bar's Clone button is disabled. Pressing Cancel removes the strip and enables the Clone button
+again; the parent folder holds exactly the user's two entries with their content (no hidden working folder, no
+destination), no message appeared and the list still holds only the original card. This scenario is tested by
+`windows@GlobalProgressCancelButton_WhileCloning_StopsTheCloneAndLeavesNothingBehind`, covering
+`AgentControl-System-CloneRepository` (progress that can be canceled) and `AgentControl-System-CloneSafety` (only the
+clone's own folder is removed). That the Clone button's tooltip gives the reason, that a second clone request is
+refused, that a failed clone removes its folder, and that closing the window waits for the cleanup, are verified one
+level down (`MainWindowViewModel`, `MainWindow` headless, `GitClient`): the tooltip text is not exposed through UI
+Automation, so the end-to-end scenario shows only that the button is disabled.
+
+**AgentControl_CloneSafety_UrlThatLooksLikeAnOption_IsRefusedAndRunsNoGit**: In the published application, with the
+arg-logger stub standing in for git, the Clone dialog is given `--upload-pack="echo ran > marker"` and then
+`ext::sh -c "echo ran > marker"`: each is refused with a message under the fields and the Clone button stays disabled.
+After the dialog is closed the stub recorded no `clone`, the marker file the addresses would have written does not
+exist and the list is unchanged. This scenario is tested by
+`windows@CloneRepoButton_UrlThatLooksLikeAnOption_IsRefusedAndRunsNoGit`, covering `AgentControl-System-CloneSafety`.
+
+**AgentControl_CloneSafety_PasswordInAddress_IsNeverWrittenToApplicationFiles**: In the published application, started
+over the real git against the private Git server of the test (loopback, throw-away certificate, sign-in required), a
+clone whose address is `https://agent:<password>@127.0.0.1:<port>/agents.git` is made into a folder outside the
+application's folders. The card of the clone appears, no message is shown, the destination is a working clone and the
+server answered signed-in requests. After the application is closed, no file under the test's root folder (the
+settings, the logs, the pin files) contains the password. Git itself keeps the address, password included, in the new
+folder's `.git/config`; that is git's behavior, which is why the user guide advises not to put a password in the
+address, and it is the reason the clone is made outside the folders that are searched. This scenario is tested by
+`windows@CloneRepoButton_CloneWithPasswordInAddress_NeverWritesThePasswordToApplicationFiles`, covering
+`AgentControl-System-CloneSafety` and, for what the application writes, `AgentControl-System-CredentialSafety`; that no
+log message can carry the password in any form is verified one level down (`GitClient`, `GitIntegration`).
+
 **AgentControl_SelectPackage_SelectPackageMenuItem_AppliesChosenPackageAndSyncsFolders**: The
 Select Package menu item is clicked on an unpinned repo card, a package name/version is chosen
 and confirmed; the repo's pin is set and its managed agent-file folders are synced to match,
@@ -545,8 +612,10 @@ text file in the configuration directory and every file in the target repo. In t
 nothing AgentControl wrote. What no log line may contain in every form an address, header or exception can take,
 including an exception that reaches the process-wide handlers or escapes startup, is verified at the subsystem and
 unit levels and covers the child requirements. This scenario is tested by
-`windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword` and
-`windows@SettingsWindow_SignInWithRememberTicked_SavedOnlyByTheUsersCredentialHelper`, covering
+`windows@SettingsWindow_AddNuGetServerWithSignIn_SelectPackagePinsServerSourceAndStoresNoPassword`,
+`windows@SettingsWindow_SignInWithRememberTicked_SavedOnlyByTheUsersCredentialHelper` and
+`windows@CloneRepoButton_CloneWithPasswordInAddress_NeverWritesThePasswordToApplicationFiles` (a password in the
+address of a clone, described under the clone scenarios), covering
 `AgentControl-System-CredentialSafety`. Residual risk, stated plainly: the tests prove what AgentControl
 supplies; the NuGet client, once a server has authenticated, answers 401 challenges from other hosts that
 the server's index advertises with the same credential, which is why users must only add servers they trust.

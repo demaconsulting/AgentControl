@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Text.Json;
 using DemaConsulting.AgentControl.AgentPackageManagement;
 using DemaConsulting.AgentControl.AgentToolLauncher;
@@ -142,6 +143,38 @@ internal readonly record struct AddReposProgress(int Completed, int Total);
 ///     the add was canceled.</param>
 /// <param name="Canceled">Whether the add was canceled before anything was saved or added.</param>
 internal sealed record AddReposBatchResult(IReadOnlyList<AddRepoOutcome> Outcomes, bool Canceled);
+
+/// <summary>
+///     How a clone ended (see <see cref="MainWindowViewModel.CloneRepositoryAsync"/>).
+/// </summary>
+internal enum CloneRepositoryOutcome
+{
+    /// <summary>The repository was cloned and its card was added.</summary>
+    Added,
+
+    /// <summary>The repository was cloned but its card was not added (the add was canceled, refused
+    ///     or could not be saved); the folder is still on disk.</summary>
+    ClonedNotAdded,
+
+    /// <summary>Git could not clone the repository; nothing was added.</summary>
+    Failed,
+
+    /// <summary>The clone was canceled (or the window closed); nothing was added. The partial folder
+    ///     was removed, or - when it could not be - the notice names what remains.</summary>
+    Canceled,
+
+    /// <summary>The clone was not started because another clone, or another operation that can be
+    ///     canceled (an add), is still running; one runs at a time.</summary>
+    Refused
+}
+
+/// <summary>
+///     What became of a clone and what the user needs to be told about it.
+/// </summary>
+/// <param name="Outcome">How the clone ended.</param>
+/// <param name="Notice">The message for the user, or <see langword="null"/> when there is nothing to
+///     tell (the repository was cloned and added, or the user canceled and nothing was left behind).</param>
+internal sealed record CloneRepositoryResult(CloneRepositoryOutcome Outcome, string? Notice);
 
 /// <summary>
 ///     Carries the question the view asks when the settings could not be saved while repos were being
@@ -360,6 +393,23 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     cure.
     /// </remarks>
     internal static readonly TimeSpan SettingsFlushTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    ///     The longest the window's closing waits for the clones that run to stop git and remove their
+    ///     partial folders.
+    /// </summary>
+    /// <remarks>
+    ///     Stopping git and removing a folder take well under a second; a folder held open by another
+    ///     process is retried for a few seconds at most (see <see cref="GitClient.Clone"/>). Five
+    ///     seconds lets that finish without keeping a closed window's process alive for long.
+    /// </remarks>
+    internal static readonly TimeSpan CloneStopTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    ///     The longest the window's closing waits for a clone's cleanup: <see cref="CloneStopTimeout"/>
+    ///     unless a test supplied another (see the constructor).
+    /// </summary>
+    private readonly TimeSpan _cloneStopTimeout;
 
     /// <summary>
     ///     The longest the window's closing waits for the settings that are not written yet:
@@ -625,12 +675,16 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     that are not written yet (see <see cref="Dispose"/>), or <see langword="null"/> for
     ///     <see cref="SettingsFlushTimeout"/>. Supplied so tests can close without waiting for a write
     ///     they hold.</param>
+    /// <param name="cloneStopTimeout">The longest the window's closing waits for the clones that run to
+    ///     stop git and remove their partial folders (see <see cref="Dispose"/>), or
+    ///     <see langword="null"/> for <see cref="CloneStopTimeout"/>. Supplied so tests can close
+    ///     without waiting for a clone that never ends.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="settings"/> is
     ///     <see langword="null"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when
     ///     <paramref name="upgradeRecheckInterval"/> is zero or negative, or
-    ///     <paramref name="settingsWriteDelay"/> or <paramref name="settingsFlushTimeout"/> is
-    ///     negative.</exception>
+    ///     <paramref name="settingsWriteDelay"/>, <paramref name="settingsFlushTimeout"/> or
+    ///     <paramref name="cloneStopTimeout"/> is negative.</exception>
     public MainWindowViewModel(
         AppSettings settings,
         StartupOptions? startupOptions = null,
@@ -647,16 +701,19 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RepoRefreshQueue? refreshQueue = null,
         GitClientTimeouts? gitTimeouts = null,
         TimeSpan? settingsWriteDelay = null,
-        TimeSpan? settingsFlushTimeout = null)
+        TimeSpan? settingsFlushTimeout = null,
+        TimeSpan? cloneStopTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(
             upgradeRecheckInterval ?? DefaultUpgradeRecheckInterval, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfLessThan(settingsWriteDelay ?? TimeSpan.Zero, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfLessThan(settingsFlushTimeout ?? TimeSpan.Zero, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfLessThan(cloneStopTimeout ?? TimeSpan.Zero, TimeSpan.Zero);
 
         _settings = settings;
         _settingsFlushTimeout = settingsFlushTimeout ?? SettingsFlushTimeout;
+        _cloneStopTimeout = cloneStopTimeout ?? CloneStopTimeout;
 
         // A first run, or settings built in memory, still have to get the order older versions
         // displayed; a stored user order is left alone
@@ -671,6 +728,7 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _startupOptions = startupOptions;
         _backgroundWork = backgroundWork ?? ThreadPoolBackgroundWorkRunner.Instance;
         GlobalProgress = new GlobalProgressViewModel();
+        GlobalProgress.PropertyChanged += OnGlobalProgressPropertyChanged;
         _ownsRefreshQueue = refreshQueue is null;
         _refreshQueue = refreshQueue ?? new RepoRefreshQueue(_backgroundWork);
         _refreshQueue.ProgressChanged += OnRefreshQueueProgressChanged;
@@ -1233,6 +1291,290 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     message is shown afterwards.
     /// </summary>
     public void CancelAddRepos() => _addSession?.Cancel();
+
+    /// <summary>
+    ///     Gets the groups a cloned repository can be put in, for the "Clone repository" dialog:
+    ///     Ungrouped first (the default), then every group in the order the list shows them, each named
+    ///     by its path through the tree.
+    /// </summary>
+    /// <remarks>
+    ///     Only groups that exist are offered; the built-in Favorites is not a place a repo is put at
+    ///     add time. Reads the in-memory settings only. Must be called on the UI thread.
+    /// </remarks>
+    /// <returns>The choices.</returns>
+    public IReadOnlyList<CloneGroupChoice> GetGroupChoices()
+    {
+        var tree = BuildGroupHierarchy();
+        return
+        [
+            CloneGroupChoice.Ungrouped,
+            .. tree.GetTreeOrder().Select(node => new CloneGroupChoice(
+                node.Name, string.Join(" > ", tree.GetAncestors(node.Name).Reverse().Append(node.Name))))
+        ];
+    }
+
+    /// <summary>
+    ///     Clones a repository in the background and adds the new folder's card, showing progress with
+    ///     Cancel in <see cref="GlobalProgress"/>; the clone the "Clone repository" dialog asks for.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///     The clone runs through the <see cref="IBackgroundWorkRunner"/>, off the UI thread, while the
+    ///     strip shows an indeterminate "Cloning {folder}..." with a Cancel that stops git and removes the
+    ///     partial folder (see <see cref="GitClient.Clone"/>); the rest of the window stays usable. When
+    ///     git succeeds the folder is added through <see cref="EnqueueAddReposAsync"/>, the path every
+    ///     add takes, so the same checks, group placement and expansion and the same question when the
+    ///     settings cannot be saved apply. A cloned folder whose add is canceled, refused or not saved
+    ///     stays on disk, and the notice says so.
+    ///     </para>
+    ///     <para>
+    ///     Only one clone runs at a time, and none while another operation that can be canceled (an
+    ///     add) is running: <see cref="CanCloneRepository"/> is then <see langword="false"/> (the
+    ///     window disables its Clone button) and a request is refused without starting git. That also
+    ///     keeps the removal after a cancel from touching a folder another clone is filling. The
+    ///     guard holds from the start of the clone until the add that follows it has ended. A failure
+    ///     (git's reason, redacted of credentials; the folder was refused after all; git cannot be
+    ///     started; the time limit) is reported in the result and never thrown. A cancel is silent,
+    ///     unless the partial folder could not be removed: the notice then says what remains. Disposing the view
+    ///     model cancels the clones that run and waits, at most <see cref="CloneStopTimeout"/>, for
+    ///     git to stop and the partial folders to be removed. Must be called on the UI thread.
+    ///     </para>
+    /// </remarks>
+    /// <param name="request">What to clone and where, as the dialog collected it.</param>
+    /// <returns>How the clone ended and what to tell the user, if anything.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="request"/> is
+    ///     <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when the request's group is given but is not a valid
+    ///     group name; nothing was started.</exception>
+    public async Task<CloneRepositoryResult> CloneRepositoryAsync(CloneRepositoryRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.GroupName is not null)
+        {
+            ResolveAddTargetGroup(request.GroupName);
+        }
+
+        // A closed window clones nothing
+        if (_disposed)
+        {
+            return new CloneRepositoryResult(CloneRepositoryOutcome.Canceled, null);
+        }
+
+        // One at a time: the button is disabled in this state, so this is the guard for any other caller
+        if (!CanCloneRepository)
+        {
+            return new CloneRepositoryResult(
+                CloneRepositoryOutcome.Refused,
+                "A clone or another operation that can be canceled is still running; wait for it to end or cancel it, then clone again.");
+        }
+
+        var destination = NormalizeRepoPath(request.DestinationPath);
+        SetCloneActive(true);
+        try
+        {
+            var clone = await RunCloneAsync(request, destination);
+            if (clone.Outcome != CloneRepositoryOutcome.Added)
+            {
+                return clone;
+            }
+
+            // The clone is on disk: add it the way every add is made
+            var add = await EnqueueAddReposAsync([destination], request.GroupName);
+            if (add.Canceled)
+            {
+                return new CloneRepositoryResult(
+                    CloneRepositoryOutcome.ClonedNotAdded, $"'{destination}' was cloned but was not added to the list.");
+            }
+
+            var notice = DescribeAddOutcomes(add.Outcomes, request.GroupName);
+            return notice is null
+                ? new CloneRepositoryResult(CloneRepositoryOutcome.Added, null)
+                : new CloneRepositoryResult(CloneRepositoryOutcome.ClonedNotAdded, $"{notice} The cloned folder is still on disk.");
+        }
+        finally
+        {
+            SetCloneActive(false);
+        }
+    }
+
+    /// <summary>
+    ///     Gets a value indicating whether a clone may be started now: false after the window closed,
+    ///     while a clone (and the add that follows it) runs and while any other operation that can be
+    ///     canceled shows in the progress strip; the window's Clone button is enabled by it.
+    /// </summary>
+    public bool CanCloneRepository => !_disposed && !_cloneActive && !GlobalProgress.HasCancelableOperation;
+
+    /// <summary>
+    ///     Gets the tooltip of the Clone button: what it does, or why it is unavailable right now.
+    /// </summary>
+    public string CloneRepositoryToolTip => CanCloneRepository
+        ? "Clone a repository"
+        : "Wait for the running clone or other operation to finish, or cancel it, before cloning again";
+
+    /// <summary>
+    ///     Whether a clone, including the add of its folder, is running (UI thread only).
+    /// </summary>
+    private bool _cloneActive;
+
+    /// <summary>
+    ///     Sets <see cref="_cloneActive"/> and tells the window when <see cref="CanCloneRepository"/>
+    ///     may have changed.
+    /// </summary>
+    /// <param name="active">Whether a clone is running now.</param>
+    private void SetCloneActive(bool active)
+    {
+        _cloneActive = active;
+        OnCanCloneRepositoryChanged();
+    }
+
+    /// <summary>
+    ///     Raises the change notifications of <see cref="CanCloneRepository"/> and
+    ///     <see cref="CloneRepositoryToolTip"/>.
+    /// </summary>
+    private void OnCanCloneRepositoryChanged()
+    {
+        OnPropertyChanged(nameof(CanCloneRepository));
+        OnPropertyChanged(nameof(CloneRepositoryToolTip));
+    }
+
+    /// <summary>
+    ///     Follows the progress strip: the Clone button is enabled again when the last operation that
+    ///     can be canceled has ended.
+    /// </summary>
+    /// <param name="sender">The progress view model.</param>
+    /// <param name="e">The change.</param>
+    private void OnGlobalProgressPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(GlobalProgressViewModel.HasCancelableOperation))
+        {
+            OnCanCloneRepositoryChanged();
+        }
+    }
+
+    /// <summary>
+    ///     Runs git's clone off the UI thread under a progress operation, and ends the operation when
+    ///     the work has ended however it ended.
+    /// </summary>
+    /// <param name="request">What to clone.</param>
+    /// <param name="destination">The normalized destination.</param>
+    /// <returns><see cref="CloneRepositoryOutcome.Added"/> when git succeeded (the caller adds the
+    ///     card), otherwise how it ended.</returns>
+    private async Task<CloneRepositoryResult> RunCloneAsync(CloneRepositoryRequest request, string destination)
+    {
+        var cancellation = new CancellationTokenSource();
+        _cloneCancellations.Add(cancellation);
+        var operation = GlobalProgress.Begin(
+            $"Cloning {GetFolderDisplayName(destination)}...",
+            () => cancellation.Cancel(),
+            CloneCancelDescription);
+        Task<GitCommandResult>? work = null;
+        try
+        {
+            var gitPath = RepoCardViewModel.ResolveGitExecutablePath(_settings, _startupOptions);
+            var timeouts = _gitTimeouts;
+            work = _backgroundWork.RunAsync(
+                () => new GitClient(gitPath, timeouts: timeouts).Clone(request.Url, destination, cancellation.Token),
+                cancellation.Token);
+
+            // Dispose waits for this task: git's stop and the removal of the partial folder happen in it
+            _cloneWork.Add(work);
+            var result = await work;
+            if (_disposed)
+            {
+                return new CloneRepositoryResult(CloneRepositoryOutcome.Canceled, null);
+            }
+
+            return result.Succeeded
+                ? new CloneRepositoryResult(CloneRepositoryOutcome.Added, null)
+                : new CloneRepositoryResult(CloneRepositoryOutcome.Failed, $"Cloning failed: {DescribeCloneFailure(result)}");
+        }
+        catch (GitCloneCanceledException ex)
+        {
+            // Canceled, but the partial folder could not be removed (something still holds a file): a
+            // deliberate cancel is silent, a folder left behind is not. The window closing says nothing
+            Logger.LogWarning(ex, "The clone into {Destination} was canceled but left its working folder", destination);
+            return new CloneRepositoryResult(
+                CloneRepositoryOutcome.Canceled,
+                _disposed ? null : $"Cloning was canceled. {SecretRedactor.Redact(ex.Message)}");
+        }
+        catch (OperationCanceledException)
+        {
+            // The user pressed Cancel (or the window closed): git was stopped and what it had written is
+            // removed; nothing is said about a deliberate cancel
+            return new CloneRepositoryResult(CloneRepositoryOutcome.Canceled, null);
+        }
+        catch (ArgumentException ex)
+        {
+            // The client names what is wrong with the address or the folder; the framework's
+            // " (Parameter 'x')" suffix names a code parameter the user cannot see
+            Logger.LogWarning(ex, "Cloning into {Destination} was refused", destination);
+            var reason = SecretRedactor.Redact(ex.Message.Replace($" (Parameter '{ex.ParamName}')", string.Empty, StringComparison.Ordinal));
+            return new CloneRepositoryResult(CloneRepositoryOutcome.Failed, $"Cloning failed: {reason}");
+        }
+        catch (Exception ex)
+        {
+            // Never thrown on: the caller is an async void event handler. The message is redacted
+            // because git may echo the address, which may carry credentials
+            Logger.LogWarning(ex, "Cloning into {Destination} failed", destination);
+            return new CloneRepositoryResult(
+                CloneRepositoryOutcome.Failed, $"Cloning failed: {SecretRedactor.SafeMessage(ex)}");
+        }
+        finally
+        {
+            operation.Dispose();
+            if (work is not null)
+            {
+                _cloneWork.Remove(work);
+            }
+
+            _cloneCancellations.Remove(cancellation);
+            cancellation.Dispose();
+        }
+    }
+
+    /// <summary>
+    ///     Words why git's clone did not succeed: git's own message, with credentials removed.
+    /// </summary>
+    /// <param name="result">The failed command's result.</param>
+    /// <returns>The message.</returns>
+    private static string DescribeCloneFailure(GitCommandResult result)
+    {
+        var text = (string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError).Trim();
+
+        // Git opens its message with the progress line "Cloning into '<folder>'...", which says nothing
+        // about why it failed; the reason is what follows
+        var reason = string.Join(
+            '\n',
+            text.Split('\n').Select(line => line.TrimEnd()).Where(line => !line.StartsWith("Cloning into ", StringComparison.Ordinal)))
+            .Trim();
+        if (reason.Length > 0)
+        {
+            text = reason;
+        }
+
+        return text.Length == 0
+            ? $"git exited with code {result.ExitCode}."
+            : SecretRedactor.Redact(text);
+    }
+
+    /// <summary>
+    ///     How the strip's Cancel button is named while a clone is shown.
+    /// </summary>
+    private static readonly GlobalProgressCancelDescription CloneCancelDescription = new(
+        "Cancel cloning repository",
+        "Stop cloning; the partly cloned folder is removed");
+
+    /// <summary>
+    ///     The background tasks of the clones that run, which <see cref="Dispose"/> waits for (UI
+    ///     thread only).
+    /// </summary>
+    private readonly List<Task> _cloneWork = [];
+
+    /// <summary>
+    ///     The cancellations of the clones that run, which <see cref="Dispose"/> signals (UI thread
+    ///     only).
+    /// </summary>
+    private readonly List<CancellationTokenSource> _cloneCancellations = [];
 
     /// <summary>
     ///     Runs one queued add once the adds before it have ended, and ends the shared progress
@@ -2760,10 +3102,18 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     Stops the periodic upgrade re-check (see <see cref="StartPeriodicUpgradeRecheck"/>) and
     ///     cancels the round that is running, the background upgrade check (launch, settings
     ///     change, added repo) and card refresh that are running, the adds that have not saved
-    ///     yet, and every repo read of the shared refresh queue (a running git is stopped), then
+    ///     yet, the clones that run (waiting for git to stop and the partial folders to go), and
+    ///     every repo read of the shared refresh queue (a running git is stopped), then
     ///     writes the settings that are not written yet; called when the main window closes.
     /// </summary>
     /// <remarks>
+    ///     <para>
+    ///     The calling thread waits for the clones' own background work, at most
+    ///     <see cref="CloneStopTimeout"/> in all: stopping git and removing the partial folder need no
+    ///     UI thread, so it cannot deadlock, and without the wait the process could end before the
+    ///     folder is removed. When the time runs out the close goes on and logs a warning; the cleanup
+    ///     finishes if the process lives long enough.
+    ///     </para>
     ///     <para>
     ///     The settings are written on a worker thread, after every write that is still running, by
     ///     the close's own write (see <see cref="WriteSettingsAtCloseAsync"/>): it first waits for the
@@ -2815,6 +3165,21 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         // Adds that have not saved yet stop: nothing more is added after the window closed
         CancelAddRepos();
+
+        // Clones that run stop too: git is killed and the partial folders are removed; the close waits
+        // for that, a bounded time, because the process may end right after it and leave the folder
+        foreach (var running in _cloneCancellations.ToArray())
+        {
+            running.Cancel();
+        }
+
+        var cloneWork = _cloneWork.ToArray();
+        if (cloneWork.Length > 0 && !WaitQuietly(Task.WhenAll(cloneWork), _cloneStopTimeout))
+        {
+            Logger.LogWarning(
+                "A clone's cleanup is still running after {Seconds} seconds; it finishes if the process lives long enough",
+                _cloneStopTimeout.TotalSeconds);
+        }
 
         // The launch-time check must not keep waiting for a slow source (or publish to cards) after
         // the window closed

@@ -264,8 +264,8 @@ sections:
         title: >-
           The LauncherUI subsystem shall show the main window's controls in one compact app bar,
           below the window's normal title bar, holding the application logo (with an accessible
-          name and a tooltip), the filter box, then the Add repository, Settings and About
-          buttons, in that keyboard focus order.
+          name and a tooltip), the filter box, then the Add repository, Clone repository, Settings
+          and About buttons, in that keyboard focus order.
         justification: |
           A branded header plus a separate toolbar used two bands of vertical space before the
           first repo; one bar keeps the name in the title bar and the About box, gives the repo
@@ -1136,14 +1136,18 @@ sections:
           The LauncherUI subsystem shall offer a Cancel button in the progress strip while repos are
           being added, including while the repo cards are refreshed at the same time, that stops the
           add, and every add queued after it, before anything is added or saved, without a message
-          afterwards.
+          afterwards, and shall name that button, for screen readers and in its tooltip, after the
+          operation it would stop.
         justification: |
           A drop of the wrong folders, or of far more than intended, must be stoppable without
-          having to remove the repos one by one afterwards.
+          having to remove the repos one by one afterwards; the one button also serves other
+          cancelable operations, and a name that always said "adding" would mislead while one of
+          them is shown.
         children:
           - AgentControl-MainWindowViewModel-AddReposCancel
           - AgentControl-GlobalProgressViewModel-CancelOnce
           - AgentControl-GlobalProgressViewModel-NoCancelWhenNotCancelable
+          - AgentControl-GlobalProgressViewModel-CancelDescribesOperation
         tests:
           - MainWindow_GlobalProgressCancel_WhileAddingFolders_AddsNothing
 
@@ -1581,6 +1585,161 @@ sections:
           - RepoCardViewModel_Refresh_CleanWorkingTree_SetsCanPullTrue
           - RepoCardViewModel_Refresh_DirtyWorkingTree_SetsCanPullFalse
           - RepoCardViewModel_PullCommand_SuccessfulPull_UpdatesStatusMessage
+
+      - id: AgentControl-LauncherUI-SwitchBranch
+        title: >-
+          The LauncherUI subsystem shall let the user switch a repo card's repo to another branch
+          from the card's menu (the Repository group, after Git Pull), unavailable while the card's
+          state is unread, its folder is missing or another operation of the card runs, show the new
+          branch and the package state of the branch on the card afterwards, and, when git refuses the
+          switch, show git's reason on the card and in a message with nothing changed, and, when git
+          does not finish the switch in time, show the card as it is on disk and say that the result is
+          unknown.
+        justification: |
+          Developers move between branches of the repos they launch agents in, and the branch decides
+          which agent package version the repo is pinned to; the card must therefore follow the
+          switch, and a refused switch (uncommitted work would be overwritten) must be explained in
+          git's words so the developer can decide what to do with their changes.
+        children:
+          - AgentControl-RepoCardViewModel-SwitchBranchRequest
+          - AgentControl-RepoCardViewModel-SwitchBranch
+          - AgentControl-RepoCardViewModel-SwitchBranchGitCannotBeStarted
+          - AgentControl-RepoCardViewModel-SwitchBranchTimeoutRefreshes
+          - AgentControl-RepoCardViewModel-SwitchBranchRefused
+          - AgentControl-RepoCardViewModel-SwitchBranchFollowsPin
+          - AgentControl-RepoCardViewModel-SwitchBranchInBackground
+        tests:
+          - MainWindow_CardMenu_SwitchBranchItemInRepositoryGroupAfterPull
+          - MainWindow_SwitchBranchMenuItem_OpensDialogAndSwitchesToChosenBranch
+
+      - id: AgentControl-LauncherUI-SwitchBranchDialog
+        title: >-
+          The LauncherUI subsystem shall show a modal dialog that lists the branches the repo already
+          knows - local first, then remote - with the current one marked or, for a detached HEAD, the
+          commit it is at, lets the user filter the list as they type and choose a branch other than the
+          current one by button, Enter or double-click, reads the branches without blocking the window
+          (and stops the read when the dialog is closed) and shows a failure as text, and closes without
+          a branch on Cancel or Escape.
+        justification: |
+          Choosing a branch among many needs a list that can be filtered and used from the keyboard; the
+          list comes from git, which may be slow or fail, so it is read in the background and a failure
+          is explained in the dialog instead of freezing or silently closing it.
+        children:
+          - AgentControl-SwitchBranchViewModel-ListsLocalAndRemote
+          - AgentControl-SwitchBranchViewModel-MarksCurrent
+          - AgentControl-SwitchBranchViewModel-DetachedHead
+          - AgentControl-SwitchBranchViewModel-Filter
+          - AgentControl-SwitchBranchViewModel-ConfirmChoice
+          - AgentControl-SwitchBranchViewModel-LoadsInBackground
+          - AgentControl-SwitchBranchViewModel-LoadFailureShown
+          - AgentControl-SwitchBranchViewModel-CancelCompletesWithNone
+        tests:
+          - SwitchBranchWindow_Opened_ListsBranchesAndFocusesFilterBox
+          - SwitchBranchWindow_FilterThenEnter_ChoosesTheOnlyMatchingBranch
+          - SwitchBranchWindow_SwitchClicked_ReturnsTheSelectedBranch
+          - SwitchBranchWindow_DoubleClickOnBranch_ReturnsIt
+          - SwitchBranchWindow_EscapeAndCancel_ReturnNull
+          - SwitchBranchWindow_ClosedWhileLoading_ReturnsNullAndStopsTheRead
+          - SwitchBranchWindow_ReadFails_ShowsErrorAndDisablesSwitch
+
+      - id: AgentControl-LauncherUI-CloneButton
+        title: >-
+          The LauncherUI subsystem shall offer a Clone repository button in the app bar, after the Add
+          repository button, with an accessible name and a tooltip, that opens the Clone repository
+          dialog as a modal dialog owned by the main window, and shall do nothing when no view model
+          is bound.
+        justification: |
+          Cloning is the other way, besides adding a folder, to get a repository into the list; the
+          button belongs next to Add so that both ways to bring a repository in are found together.
+        tests:
+          - MainWindow_AppBar_LogoFilterAndButtonsInOrderAndNothingClipsAtMinimumWidth
+          - MainWindow_CloneRepoButton_OpensDialogAndCloneAddsCardIntoChosenGroup
+          - MainWindow_NoViewModel_ButtonHandlersAreNoOps
+
+      - id: AgentControl-LauncherUI-CloneRepositoryDialog
+        title: >-
+          The LauncherUI subsystem shall show a modal dialog that asks for the repository address, the
+          parent folder (typed or chosen with Browse), the folder name (following the address until
+          edited) and the group (Ungrouped by default), shows what is wrong with the input as text and
+          keeps Clone disabled until it is usable, checks the destination folder without blocking the
+          dialog, and closes without a request on Cancel or Escape.
+        justification: |
+          Cloning needs more than one answer; a dialog that validates as the user types, shows where
+          the clone will go and refuses an address git would read as an option keeps a failed or unsafe
+          clone from ever starting.
+        children:
+          - AgentControl-CloneRepositoryViewModel-UrlRequired
+          - AgentControl-CloneRepositoryViewModel-UrlOptionRefused
+          - AgentControl-CloneRepositoryViewModel-FolderNameFromUrl
+          - AgentControl-CloneRepositoryViewModel-FolderNameRules
+          - AgentControl-CloneRepositoryViewModel-DestinationCheckedInBackground
+          - AgentControl-CloneRepositoryViewModel-DestinationCheckShowsProgress
+          - AgentControl-CloneRepositoryViewModel-DestinationRefusalShown
+          - AgentControl-CloneRepositoryViewModel-StaleCheckDiscarded
+          - AgentControl-CloneRepositoryViewModel-CheckFailureReported
+          - AgentControl-CloneRepositoryViewModel-GroupChoiceDefaultsUngrouped
+          - AgentControl-CloneRepositoryViewModel-CompletesWithRequest
+        tests:
+          - CloneRepositoryWindow_Opened_FocusesAddressAndTypingAnAddressFillsFolderNameAndEnablesClone
+          - CloneRepositoryWindow_UrlLooksLikeAnOption_ShowsErrorAndDisablesClone
+          - CloneRepositoryWindow_BrowseClicked_PutsChosenFolderInParentBoxAndCancelChangesNothing
+          - CloneRepositoryWindow_CloneClicked_ReturnsTheRequest
+          - CloneRepositoryWindow_EnterInAddressBox_ClonesAndExistingFolderShowsReason
+          - CloneRepositoryWindow_EscapeAndCancel_ReturnNull
+
+      - id: AgentControl-LauncherUI-CloneRepository
+        title: >-
+          The LauncherUI subsystem shall, when the user confirms the Clone repository dialog, clone the
+          repository in the background without blocking the window, add the cloned folder to the list in
+          the chosen group through the same path every add takes, and, when the clone fails, show git's
+          reason (with credentials removed) in a message and add nothing.
+        justification: |
+          A developer who has no copy of a repository yet should be able to get one, and the tool's
+          help with it, in one step; a failure must be explained, and a half-made clone must not leave
+          a card behind.
+        children:
+          - AgentControl-MainWindowViewModel-GroupChoices
+          - AgentControl-MainWindowViewModel-CloneInBackground
+          - AgentControl-MainWindowViewModel-CloneAddsCardThroughAddPath
+          - AgentControl-MainWindowViewModel-CloneFailureReported
+        tests:
+          - MainWindow_CloneRepoButton_OpensDialogAndCloneAddsCardIntoChosenGroup
+          - MainWindow_CloneRepoButton_CloneFails_ShowsGitsReasonInMessageBox
+
+      - id: AgentControl-LauncherUI-CloneOneAtATime
+        title: >-
+          The LauncherUI subsystem shall disable the Clone button, with a tooltip that says why, while
+          a clone or another operation that can be canceled is shown in the progress strip, and enable
+          it again when that operation has ended.
+        justification: |
+          One long, cancelable operation at a time keeps the strip's single Cancel button unambiguous
+          and keeps two clones from working at once; a disabled button that does not say why would
+          look broken.
+        children:
+          - AgentControl-MainWindowViewModel-CloneOneAtATime
+          - AgentControl-GlobalProgressViewModel-HasCancelableOperation
+        tests:
+          - MainWindow_CloneRepoButton_WhileCancelableOperationShown_IsDisabledWithTooltip
+          - MainWindow_GlobalProgressCancel_WhileCloning_StopsTheCloneAndAddsNothing
+
+      - id: AgentControl-LauncherUI-CloneProgressCancel
+        title: >-
+          The LauncherUI subsystem shall show a clone in the progress strip with a Cancel button named
+          after the clone, that stops the clone and removes the partly cloned folder without a message
+          afterwards (but with one when that folder could not be removed), and, when the window is
+          closed while a clone runs, stop it and wait a short,
+          bounded time for the partly cloned folder to be removed.
+        justification: |
+          A clone of a large repository can take long, and a clone started by mistake must be
+          stoppable; the strip is where the window shows its long operations, and its one Cancel
+          button must say which operation it stops.
+        children:
+          - AgentControl-MainWindowViewModel-CloneProgressAndCancel
+          - AgentControl-MainWindowViewModel-CloneLeftoverFolderReported
+          - AgentControl-MainWindowViewModel-CloneStopsWhenWindowCloses
+          - AgentControl-GlobalProgressViewModel-CancelDescribesOperation
+        tests:
+          - MainWindow_GlobalProgressCancel_WhileCloning_StopsTheCloneAndAddsNothing
 
       - id: AgentControl-LauncherUI-SelectPackage
         title: >-

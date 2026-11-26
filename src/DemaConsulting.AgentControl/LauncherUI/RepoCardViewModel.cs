@@ -454,6 +454,10 @@ internal sealed class RepoCardViewModel : ViewModelBase
         // package..."): the user's way to choose another package or version and to accept content
         // that changed behind a version they already use
         SelectPackageCommand = new RelayCommand(SelectPackage, () => !IsMissing && !IsBusy);
+        // Switching branches needs the repo's state read (so the folder is known to exist and to be a
+        // repository) and no other operation running
+        SwitchBranchCommand = new RelayCommand(
+            () => SwitchBranchRequested?.Invoke(this, EventArgs.Empty), () => !IsMissing && !IsBusy && HasRepoState);
         // Refresh stays available for a repo whose folder is missing: it is the only in-app way to
         // re-check once the folder (a remounted drive, a restored clone) is back
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, ReportUnexpectedFailure, () => !IsBusy);
@@ -503,6 +507,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 PullCommand.RaiseCanExecuteChanged();
                 UpgradeCommand.RaiseCanExecuteChanged();
                 SelectPackageCommand.RaiseCanExecuteChanged();
+                SwitchBranchCommand.RaiseCanExecuteChanged();
                 OnPropertyChanged(nameof(RefreshMenuText));
                 OnPropertyChanged(nameof(RefreshTooltip));
                 OnPropertyChanged(nameof(IsWorkingTreeDirty));
@@ -1080,6 +1085,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
             if (SetField(ref _hasRepoState, value))
             {
                 RaiseBranchChipChanged();
+                SwitchBranchCommand.RaiseCanExecuteChanged();
                 OnPropertyChanged(nameof(ShowNoPackageChip));
                 RaiseStatusChanged();
             }
@@ -1720,6 +1726,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
                 PullCommand.RaiseCanExecuteChanged();
                 UpgradeCommand.RaiseCanExecuteChanged();
                 SelectPackageCommand.RaiseCanExecuteChanged();
+                SwitchBranchCommand.RaiseCanExecuteChanged();
                 RefreshCommand.RaiseCanExecuteChanged();
             }
         }
@@ -2092,6 +2099,14 @@ internal sealed class RepoCardViewModel : ViewModelBase
     public RelayCommand SelectPackageCommand { get; }
 
     /// <summary>
+    ///     Gets the command bound to the card's "Switch branch..." menu item: raises
+    ///     <see cref="SwitchBranchRequested"/> so the view layer can show the branch dialog. Available
+    ///     while the card's repo state has been read, its folder exists and no other operation of the
+    ///     card runs.
+    /// </summary>
+    public RelayCommand SwitchBranchCommand { get; }
+
+    /// <summary>
     ///     Gets the command bound to the card's manual "Refresh" action, re-running the cheap
     ///     checks, the upgrade check and the (otherwise lazy) working-tree dirty check for just
     ///     this card.
@@ -2240,6 +2255,7 @@ internal sealed class RepoCardViewModel : ViewModelBase
         LaunchRecorded = null;
         RemoveRequested = null;
         SelectPackageRequested = null;
+        SwitchBranchRequested = null;
         AgentsMdTemplateOfferRequested = null;
         ContentChangeConfirmationRequested = null;
         CommittedFilesConversionRequested = null;
@@ -2258,6 +2274,15 @@ internal sealed class RepoCardViewModel : ViewModelBase
     ///     <see cref="RemoveRequested"/>/<see cref="ConfirmationWindow"/>.
     /// </summary>
     public event EventHandler? SelectPackageRequested;
+
+    /// <summary>
+    ///     Raised by <see cref="SwitchBranchCommand"/> to request the "Switch branch" dialog be shown.
+    ///     The dialog is built with <see cref="CreateSwitchBranchViewModel"/>, and the branch the user
+    ///     chose is switched to with <see cref="SwitchBranchAsync"/>. Does not itself show any dialog -
+    ///     that is a view-layer concern handled by <c>MainWindow</c>'s code-behind, exactly like
+    ///     <see cref="SelectPackageRequested"/>.
+    /// </summary>
+    public event EventHandler? SwitchBranchRequested;
 
     /// <summary>
     ///     Raised after a successful extraction when the repo has no root-level <c>AGENTS.md</c>
@@ -3768,6 +3793,225 @@ internal sealed class RepoCardViewModel : ViewModelBase
 
             ErrorOccurred?.Invoke(this, $"Failed to pull: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    ///     Creates the view model of the "Switch branch" dialog for this repo: it lists the branches
+    ///     git already knows, read through this card's git client and background work runner.
+    /// </summary>
+    /// <remarks>
+    ///     Exists so the window never builds a git client: which git executable and which time limits
+    ///     apply is the card's business. The read runs off the UI thread (through the card's
+    ///     <see cref="IBackgroundWorkRunner"/>) when the dialog loads.
+    /// </remarks>
+    /// <returns>The view model; the dialog loads it when it opens.</returns>
+    internal SwitchBranchViewModel CreateSwitchBranchViewModel()
+    {
+        var git = CreateGitClient(_getSettings());
+        var path = RepoPath;
+        return new SwitchBranchViewModel(RepoName, token => git.GetBranches(path, token), _backgroundWork);
+    }
+
+    /// <summary>
+    ///     Switches this repo to the branch the user chose in the "Switch branch" dialog, on a worker
+    ///     thread, then refreshes the whole card the way <see cref="RefreshAsync"/> does.
+    /// </summary>
+    /// <param name="choice">The branch to switch to. Must not be <see langword="null"/>.</param>
+    /// <param name="cancellationToken">Signaled when the caller gives up; a switch that has already
+    ///     started is not interrupted.</param>
+    /// <returns>A task that completes when the switch and the refresh have finished (or the switch was
+    ///     refused).</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="choice"/> is
+    ///     <see langword="null"/>.</exception>
+    public async Task SwitchBranchAsync(BranchChoice choice, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(choice);
+
+        // The operation runner drops a request while another operation holds the card; say so rather
+        // than leave the user wondering why nothing happened
+        if (IsBusy)
+        {
+            StatusMessage = $"Another operation is running on this card; switching to '{choice.Name}' was not started.";
+            return;
+        }
+
+        try
+        {
+            await RunOperationAsync(
+                $"Switching to {choice.Name}...",
+                cancelable: false,
+                token => SwitchBranchCoreAsync(choice, token),
+                cancellationToken,
+                NoFurtherStateCheck);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Called from the window's fire-and-forget handler: an unexpected failure is reported to
+            // the user rather than left to tear the application down
+            ReportUnexpectedFailure(ex);
+        }
+    }
+
+    /// <summary>
+    ///     Performs the switch for <see cref="SwitchBranchAsync"/>.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///     Mirrors <see cref="PullCoreAsync"/>: git runs on a worker thread, the outcome becomes the
+    ///     card's status, and after a switch that was made the whole card is refreshed, because a
+    ///     branch can change everything the card shows - the branch chip, the pin file (each branch can
+    ///     pin another package or version, and the launch re-sync rules read the pin at launch, so they
+    ///     follow without further work), which agent files are committed and the working tree. A
+    ///     switch that has been made cannot be undone, so its outcome survives the refresh being
+    ///     cancelled.
+    ///     </para>
+    ///     <para>
+    ///     A switch git refuses (local changes that would be overwritten) changes nothing, so nothing
+    ///     is refreshed: the card says so in git's words, and the same text is shown in a message box.
+    ///     Nothing is ever forced, stashed or discarded (see <see cref="GitClient.SwitchBranch"/>).
+    ///     </para>
+    ///     <para>
+    ///     A switch that git did not finish within the switch time limit was stopped part-way, so the
+    ///     result is unknown (the branch may or may not have changed, and a lock file may be left
+    ///     behind): the card reads the branch and the working tree again from disk (unless it was
+    ///     retired) and then says that the result is unknown, in the status line and in the same
+    ///     message box text, so it stays marked as failed. A git that cannot be started is reported
+    ///     as an error without a refresh.
+    ///     </para>
+    /// </remarks>
+    /// <param name="choice">The branch to switch to.</param>
+    /// <param name="token">Cancels the package-source part of the refresh that follows the switch
+    ///     (the switch itself is never interrupted).</param>
+    /// <returns>A task that completes when the switch and the refresh have finished.</returns>
+    private async Task SwitchBranchCoreAsync(BranchChoice choice, CancellationToken token)
+    {
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            _logger.LogInformation(
+                "Switching repo '{RepoName}' ('{RepoPath}') to branch '{Branch}'", RepoName, RepoPath, choice.FullName);
+        }
+
+        // Read on the UI thread, before the worker starts: the path is the card's, which only this thread
+        // changes
+        var repoPath = RepoPath;
+        try
+        {
+            var git = CreateGitClient(_getSettings());
+            var result = await Task.Run(
+                () => git.SwitchBranch(repoPath, choice.FullName, choice.IsRemote, CancellationToken.None),
+                CancellationToken.None);
+
+            if (!result.Succeeded)
+            {
+                // Git refused and changed nothing; say why in git's own words
+                var reason = SecretRedactor.Redact(
+                        string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError)
+                    .Trim();
+                if (reason.Length == 0)
+                {
+                    reason = $"git reported an error (exit code {result.ExitCode}).";
+                }
+
+                var refusal = $"Could not switch to '{choice.Name}': {reason} Nothing was changed.";
+                if (_logger.IsEnabled(LogLevel.Warning))
+                {
+                    _logger.LogWarning(
+                        "Switching repo '{RepoName}' to '{Branch}' was refused: {Reason}", RepoName, choice.FullName, reason);
+                }
+
+                StatusMessage = refusal;
+                ErrorOccurred?.Invoke(this, refusal);
+                return;
+            }
+
+            var switchMessage = $"Switched to branch '{choice.Name}'.";
+            StatusMessage = switchMessage;
+            LastActionFailed = false;
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation("Switched repo '{RepoName}' to branch '{Branch}'", RepoName, choice.FullName);
+            }
+
+            // What the switch changed (the branch, the pin, the committed agent files, the working
+            // tree) is picked up by the same full refresh the Refresh action runs
+            try
+            {
+                await RefreshCoreAsync(token);
+            }
+            catch (OperationCanceledException)
+            {
+                // The switch has already happened and cannot be undone, so canceling the
+                // package-source part of the refresh (the card was retired, or the caller gave up)
+                // must not turn its outcome into "The operation was canceled." The branch and the
+                // working tree are what the switch most directly affects, so they are still read
+                // (except for a retired card, which reads nothing any more)
+                if (!_isRetired)
+                {
+                    await RefreshRepoStateAsync(
+                        RepoRefreshPriority.UserAction, cheapFacts: true, workingTree: true, cancellationToken: CancellationToken.None);
+                }
+            }
+
+            // The refresh must not replace the switch's outcome; the only status text it can set is a
+            // failure to read the pin file of the branch just switched to, which is kept after it
+            StatusMessage = StatusMessage != switchMessage && !string.IsNullOrEmpty(StatusMessage)
+                ? $"{switchMessage} {StatusMessage}"
+                : switchMessage;
+            LastActionFailed = false;
+        }
+        catch (GitCommandTimeoutException ex)
+        {
+            // Git was stopped at the time limit while it may have been part-way through the switch, so
+            // what is on disk is unknown: read it again and say so, rather than leave the card showing
+            // the branch it had before
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(ex, "Switching repo '{RepoName}' to '{Branch}' timed out", RepoName, choice.FullName);
+            }
+
+            if (!_isRetired)
+            {
+                await RefreshRepoStateAsync(
+                    RepoRefreshPriority.UserAction, cheapFacts: true, workingTree: true, cancellationToken: CancellationToken.None);
+            }
+
+            var timeoutMessage =
+                $"Switching to '{choice.Name}' did not finish within {DescribeDuration(ex.Timeout)} and was stopped; " +
+                "the result is unknown. The card shows what is on disk now.";
+            StatusMessage = timeoutMessage;
+
+            // After the refresh, so the card stays marked as failed
+            ErrorOccurred?.Invoke(this, timeoutMessage);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Git could not be started
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(ex, "Failed to switch repo '{RepoName}' to '{Branch}'", RepoName, choice.FullName);
+            }
+
+            ErrorOccurred?.Invoke(this, $"Failed to switch branch: {SecretRedactor.Redact(ex.Message)}");
+        }
+    }
+
+    /// <summary>
+    ///     Words a time limit for a message to the user.
+    /// </summary>
+    /// <param name="duration">The limit.</param>
+    /// <returns>For example <c>5 minutes</c>, <c>1 minute</c> or <c>1 second</c>.</returns>
+    private static string DescribeDuration(TimeSpan duration)
+    {
+        if (duration.TotalMinutes >= 1)
+        {
+            var minutes = duration.TotalMinutes;
+            var minuteWord = Math.Abs(minutes - 1) < 0.005 ? "minute" : "minutes";
+            return $"{minutes:0.##} {minuteWord}";
+        }
+
+        var seconds = duration.TotalSeconds;
+        var secondWord = Math.Abs(seconds - 1) < 0.0005 ? "second" : "seconds";
+        return $"{seconds:0.###} {secondWord}";
     }
 
     /// <summary>

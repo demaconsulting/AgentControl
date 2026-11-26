@@ -298,6 +298,19 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
   only the top folder of a Git repository (`GitClient.IsRepositoryRoot`: a `.git` folder or file directly in it, no
   git process) and leaves the repos already in the list as they are; `DescribeAddOutcomes` turns the outcomes into one
   message (nothing when all were added, nothing after a cancel).
+- *Switching branches* (`AgentControl-System-SwitchBranch`): the card's **Switch branch...** item asks `GitClient` for
+  the branches git already knows (`GetBranches`, no fetch) and, for the one the user chose, runs `git switch` (with
+  `--track` for a remote branch) as an operation of the card - never forced, nothing stashed or discarded, so git alone
+  decides whether uncommitted work blocks the switch and its reason is shown. A switch refreshes the card in full, so
+  the branch chip and the pin (each branch can pin its own package) follow.
+- *Cloning a repository* (`AgentControl-System-CloneRepository`, `AgentControl-System-CloneSafety`): the app bar's
+  **Clone repository** button collects an address, a parent folder, a folder name and a group in a dialog that applies
+  the rules of `GitClient` (an address that git would read as an option or as a remote helper is refused before git
+  starts; the destination must not exist at all). `MainWindowViewModel.CloneRepositoryAsync` runs `GitClient.Clone`
+  off the UI thread under a progress-strip operation with Cancel, one clone at a time (the Clone button is disabled with
+  a tooltip while a clone or another cancelable operation runs), and then adds the folder
+  through the same add path as any repo. Credentials in an address are removed from every log message and failure
+  text, and a canceled or timed-out clone removes only what it created.
 - *Responsive repo-list work* (`AgentControl-System-ResponsiveRepoListWork`): reading the cards at start-up, adding
   folders and refreshing the cards after Settings are saved read the disk and run git for every repo, so that work
   never runs on the UI thread. Every such read - each card's start-up read, each folder of an add, each card's refresh

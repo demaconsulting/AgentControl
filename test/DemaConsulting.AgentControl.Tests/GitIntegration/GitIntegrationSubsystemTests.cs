@@ -633,6 +633,81 @@ public class GitIntegrationSubsystemTests
             Directory.Delete(folder, recursive: true);
         }
     }
+
+    /// <summary>
+    ///     Test, with the real git and a local bare repository (no network), that the branch and clone
+    ///     capability works as a whole: a repository is cloned, its branches listed, a remote-tracking
+    ///     branch switched to, and the working tree and branch list follow.
+    /// </summary>
+    [Fact]
+    public void GitIntegrationSubsystem_CloneThenListAndSwitchBranches_OnRealRepository_FollowsTheBranch()
+    {
+        // Arrange: a remote with main and feature, whose files differ
+        using var fixture = AgentPackageManagement.GitRepositoryFixture.CreateOrSkip();
+        fixture.Commit(new Dictionary<string, string> { ["branch.txt"] = "main" }, "Initial");
+        fixture.Git(fixture.WorkPath, "switch", "-q", "-c", "feature");
+        fixture.Commit(new Dictionary<string, string> { ["branch.txt"] = "feature" }, "Feature");
+        fixture.Git(fixture.WorkPath, "switch", "-q", "main");
+        fixture.Git(fixture.WorkPath, "push", "-q", fixture.RemotePath, "main", "feature");
+        fixture.Git(fixture.RemotePath, "symbolic-ref", "HEAD", "refs/heads/main");
+        var client = new GitClient("git", extraEnvironment: fixture.IsolationEnvironment);
+        var clone = Path.Combine(fixture.Root, "clone");
+
+        // Act
+        var cloned = client.Clone(fixture.RemotePath, clone, TestContext.Current.CancellationToken);
+        var before = client.GetBranches(clone, TestContext.Current.CancellationToken);
+        var switched = client.SwitchBranch(clone, "origin/feature", createTrackingFromRemote: true, TestContext.Current.CancellationToken);
+        var after = client.GetBranches(clone, TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Multiple(
+            () => Assert.True(cloned.Succeeded, cloned.StandardError),
+            () => Assert.Equal("main", before.CurrentBranch),
+            () => Assert.Equal(["origin/feature"], before.Remote.Select(branch => branch.FullName)),
+            () => Assert.True(switched.Succeeded, switched.StandardError),
+            () => Assert.Equal("feature", after.CurrentBranch),
+            () => Assert.Equal("feature", client.GetCurrentBranch(clone, TestContext.Current.CancellationToken)),
+            () => Assert.Equal("feature", File.ReadAllText(Path.Combine(clone, "branch.txt"))),
+            () => Assert.Empty(after.Remote));
+    }
+
+    /// <summary>
+    ///     Test, with a stub standing in for git, that a clone URL carrying a password never leaves the
+    ///     subsystem in clear text: not in the log, the result or the failure text.
+    /// </summary>
+    [Fact]
+    public void GitIntegrationSubsystem_CloneWithCredentialsInUrl_NeverLogsThePassword()
+    {
+        // Arrange: a clone that fails and echoes the URL back, as git does
+        const string password = "Sup3rSecretPw";
+        var url = $"https://bob:{password}@git.example.com/team/agents.git";
+        var folder = CreateTempDirectory();
+        var stub = GitStub.Create(extraCommands:
+        [
+            new GitStub.Command("clone", Error: $"fatal: unable to access '{url}/': 401", ExitCode: 128)
+        ]);
+        var logger = new GitClientListLogger();
+        try
+        {
+            var client = new GitClient(stub.Path, logger);
+
+            // Act
+            var result = client.Clone(url, Path.Combine(folder, "agents"), TestContext.Current.CancellationToken);
+
+            // Assert: git's explanation is still there, the secret is not
+            Assert.Multiple(
+                () => Assert.False(result.Succeeded),
+                () => Assert.Contains("git.example.com", result.StandardError, StringComparison.Ordinal),
+                () => Assert.DoesNotContain(password, result.StandardError, StringComparison.Ordinal),
+                () => Assert.All(logger.Inner.Snapshot(), line => Assert.DoesNotContain(password, line, StringComparison.Ordinal)));
+        }
+        finally
+        {
+            stub.Delete();
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     /// <summary>
     ///     Creates a fresh temporary directory.
     /// </summary>

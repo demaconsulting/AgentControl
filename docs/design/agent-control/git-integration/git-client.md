@@ -10,13 +10,19 @@ branch, `HEAD` commit hash, and whether any of the four known agent folders are 
 the tree. It is also the one place AgentControl changes what git tracks: it reports which of
 the four folders are tracked and can stop git tracking them (index only), which lets the
 `LauncherUI` subsystem convert a repo that committed its agent files. Each public method
-invokes a single git subcommand via `RunGit` and translates its
+invokes a git subcommand via `RunGit` (listing branches asks for the refs, the remotes and, for a detached `HEAD`, the
+commit) and translates its
 exit code/output into a typed result or exception, isolating every other unit in the codebase
 from git's process-based interface. It also answers, without running git, whether a folder is the
 top folder of a Git repository, so the launcher can refuse to track a folder that is not one.
 Every git command runs under a time limit and can be canceled, so a git that never answers (a
 network share, a huge tree, a stuck lock) neither holds its caller forever nor keeps running
 unnoticed (`AgentControl-GitClient-TimeoutStopsGit`, `AgentControl-GitClient-CancelStopsGit`).
+
+Beyond those questions it also **lists and switches branches** and **clones a repository**, so a developer can move
+between branches from a repo's card and bring a new repository onto the machine without leaving the launcher. Both
+follow the same safety posture: nothing is forced, discarded or stashed, and every value that comes from the user (a
+branch name, an address) is data that git can never read as an option.
 
 #### Data Model
 
@@ -36,7 +42,18 @@ intermittent exit-code `-1` flakiness documented in
 positive) — how long a command on the local repository may run, how long a pull may run, and how
 long to wait for a stopped command to end. `Default` is 60 seconds (enough for a cold
 `git status` of a large tree on a network share), 10 minutes (a pull is network work and may wait
-for the credential helper's own sign-in window) and 10 seconds.
+for the credential helper's own sign-in window) and 10 seconds. Two init-only properties with defaults
+keep the three-argument form compiling: `SwitchBranch` (10 minutes: a checkout of a large tree can take far
+longer than a local command) and `CloneRepository` (60 minutes: a clone downloads a whole repository; Cancel is the
+normal way out, so the limit is only a backstop). The names avoid `Switch` and `Clone`, which a record cannot declare.
+
+**GitBranchList** (record, same file): `CurrentBranch` (`string?`, `null` when `HEAD` is detached), `DetachedAt`
+(`string?`, the short commit id while detached), `Local` (sorted names) and `Remote` (sorted `GitRemoteBranch` entries:
+`Remote`, `Name`, `FullName` = `<remote>/<name>`).
+
+**\_extraEnvironment**: `IReadOnlyDictionary<string, string?>?` — the constructor's optional `extraEnvironment`,
+applied to every git process (a `null` value removes the variable). The application passes none; tests that run a real
+git use it to replace the user's global configuration with an empty one.
 
 **\_timeouts**: `GitClientTimeouts` — the constructor's optional `timeouts` argument, or
 `GitClientTimeouts.Default`; tests pass a one-second local limit against a stub that hangs.
@@ -45,6 +62,11 @@ for the credential helper's own sign-in window) and 10 seconds.
 type every method already throws when git cannot answer, so existing callers keep treating a hung
 git as "git could not tell"; carries the exceeded **Timeout** (`TimeSpan`) so a caller can tell the
 user.
+
+**GitCloneCanceledException** (sealed, same file): derives from `OperationCanceledException`, so a caller that treats
+every cancel alike keeps working; thrown by `Clone` only when the clone was canceled and its working folder could not be
+removed, its message the sentence that names the folder left behind. A cancel that removed its folder is a plain
+`OperationCanceledException`.
 
 **KnownAgentFolders**: `static readonly string[]` — the four folders (`.github/agents`,
 `.github/standards`, `.github/templates`, `.github/skills`) whose tracking status
@@ -116,6 +138,111 @@ to roll back a conversion whose package could not be applied (`AgentControl-GitC
 accepts only `KnownAgentFolders` (same argument checks as `UntrackAgentFolders`) and throws
 `InvalidOperationException` carrying git's message when `git reset` fails.
 
+**GetBranches**: Lists the branches the repo already knows about.
+
+- *Parameters*: `string repositoryPath`, `CancellationToken cancellationToken = default`.
+- *Returns*: `GitBranchList`.
+- *Algorithm*: runs `git for-each-ref --format=%(HEAD)%09%(refname) refs/heads refs/remotes` (tab-separated, because
+  a tab can never occur in a ref name), `git remote` (so `<remote>/<branch>` is split without guessing where a remote
+  name that contains a slash ends; the longest matching remote name wins) and, only when no local branch is current,
+  `git rev-parse --short HEAD` for the detached commit. The `<remote>/HEAD` pointer is dropped, and so is a remote
+  branch that has a local branch of the same name (the local one is the one to switch to)
+  (`AgentControl-GitClient-ListBranches`, `-ListBranchesRemoteDistinct`, `-ListBranchesDetached`).
+- *Postconditions*: never fetches: the list is what git already has locally, so it is fast and free of network and
+  sign-in prompts; the user refreshes the remote-tracking branches with a pull or fetch. A git failure throws
+  `InvalidOperationException` carrying git's message.
+
+**SwitchBranch**: Switches the repo to a branch with `git switch`.
+
+- *Parameters*: `string repositoryPath`, `string branchName` (a local name, or for a remote branch its `FullName`),
+  `bool createTrackingFromRemote`, `CancellationToken cancellationToken = default`.
+- *Returns*: `GitCommandResult`. A checkout git refuses (local changes that would be overwritten, an unknown branch) is
+  a normal outcome, returned with `Succeeded == false` and git's own explanation in `StandardError`, exactly like
+  `Pull` (`AgentControl-GitClient-SwitchRefusalReported`).
+- *Algorithm*: `git switch -- <name>` for a local branch; `git switch --track -- <remote>/<name>` for a remote one,
+  which creates a local branch of the same name that tracks it. Runs under the `SwitchBranch` limit
+  (`AgentControl-GitClient-SwitchBranch`).
+- *Postconditions*: none of `--force`, `--discard-changes`, `-C` or `--merge` is ever passed and nothing is stashed (the
+  call is exactly one `git switch`), so git's own protection decides: uncommitted changes that do not conflict travel
+  with the switch (`AgentControl-GitClient-SwitchKeepsNonConflictingChanges`), changes that would be overwritten stop it
+  with nothing changed. A blank, `-`-leading or control-character name throws `ArgumentException` before git runs
+  (`AgentControl-GitClient-SwitchNeverForces`, `-SwitchNeverMergesOrStashes`, `-SwitchNameIsData`).
+
+**Clone**: Clones a repository into a new folder.
+
+- *Parameters*: `string url`, `string destinationPath` (absolute), `CancellationToken cancellationToken = default`.
+- *Returns*: `GitCommandResult` with credentials removed from both output streams; a clone git refuses is a result
+  with `Succeeded == false` and git's explanation, not an exception (`AgentControl-GitClient-Clone`,
+  `-CloneFailureReported`). So are a working folder that cannot be created ("Could not create a working folder in
+  '<parent>': ...", exit code 1) and a clone that cannot be moved into place.
+- *Algorithm*: (1) ask the blocking-call guard; (2) `CheckCloneUrl` and `CheckCloneDestination`, each refusal an
+  `ArgumentException` whose message is a reason the user can read, before git starts; (3) create the working folder
+  `.agentcontrol-clone-<guid>` in the destination's parent folder (`CreateCloneWorkFolder`: the name is claimed with
+  `TryCreateFolderExclusively`, an operating-system create that fails when anything - folder, file or link, dangling or
+  not - already exists under it: `CreateDirectoryW` on Windows, failing with `ERROR_ALREADY_EXISTS`, and `mkdir` from
+  libc on Linux and macOS, failing with `EEXIST`; on a collision another GUID is tried, up to five times, and a name
+  under which something exists is never used, changed or deleted; `Directory.CreateDirectory` is not used because it
+  succeeds on an existing folder and so proves nothing; then hidden on Windows as a best effort) - the call's own
+  folder, so a deletion of it can never reach anybody else's data; (4) run `git clone -- <url> <working folder>` - the
+  address trimmed of surrounding white space, the text `CheckCloneUrl` judged - with the destination's parent folder as
+  working directory (a clone needs an existing one), under the `CloneRepository` limit
+  (`AgentControl-GitClient-CloneTimeLimit`), with the environment policy and
+  `GIT_ALLOW_PROTOCOL=file:git:http:https:ssh` (`AgentControl-GitClient-CloneNeverPrompts`); (5) on **cancellation,
+  timeout** or a git that **cannot be started** the working folder is removed (`RemoveCloneWorkFolder`): a link
+  (junction, directory or file symbolic link) anywhere in it is removed as a link without being entered, so its target
+  is never changed; read-only attributes (git writes read-only object files) are cleared on everything else; a working
+  folder that has itself become a link is deleted as a link only; the removal is retried a few times because a process
+  git started may hold a file for a moment; a leftover that cannot be removed is logged and named in the text of the
+  exception that ends the clone: the timeout exception's text, a `GitCloneCanceledException` (an
+  `OperationCanceledException`) for a cancel, or - for any other exception, such as a git that cannot be started - an
+  `InvalidOperationException` that keeps the original as its inner exception
+  (`AgentControl-GitClient-CloneReportsLeftoverFolder`); when the folder was removed the original exception is rethrown
+  unchanged, so a clean cancel stays a plain cancellation; (6) a **failed** clone (non-zero exit code) also removes the
+  working folder and returns git's redacted result, with the leftover sentence appended when the removal failed; (7) on
+  success `MoveCloneIntoPlace` renames the working folder to the destination with a rename that fails instead of
+  replacing anything (`MoveFolderWithoutReplacing`), on every platform, and clears the hidden attribute: `MoveFileExW`
+  with no flags on Windows (without `MOVEFILE_REPLACE_EXISTING` it fails with `ERROR_ALREADY_EXISTS`, which
+  `Directory.Move` also relies on, but the call is explicit so that the guarantee does not depend on the framework),
+  `renameat2` with `RENAME_NOREPLACE` (`1`) on Linux and `renamex_np` with `RENAME_EXCL` (`0x4`) on macOS, both failing
+  with `EEXIST` when the name is taken - a plain Unix `rename` would replace an *empty* folder that appeared in the
+  meantime. When the platform has no such call (`ENOSYS`, `EINVAL` or `ENOTSUP`/`EOPNOTSUPP` from an old kernel or a
+  volume, or a C library without the function) the clone is **not** completed and there is no fall back to a replacing
+  rename: the working folder is removed and a failed result (exit code 1) says "This computer cannot rename a folder
+  without the risk of replacing one that appeared meanwhile, so the clone was not moved to '<destination>'." When the
+  destination appeared meanwhile - even as an empty folder - the working folder is removed and a failed result (exit
+  code 1) says "The folder '<destination>' was created while the repository was being cloned, so the clone was not moved
+  there. Nothing in that folder was changed."; any other `IOException` or `UnauthorizedAccessException` is reported as
+  "The clone could not be moved to '<destination>': ..." with the same cleanup
+  (`AgentControl-GitClient-CloneIntoFreshFolder`, `-CloneCleansUpOnlyItsOwnFolder`,
+  `-CloneDestinationAppearedMeanwhile`, `-CloneCancelStopsGit`). The two native calls are P/Invoked with `LibraryImport`
+  (source generated); the working-folder name source, the rename and the single deletion attempt are `internal` seams
+  (`CloneWorkFolderNameSource`, `NoReplaceMove`, `DeleteCloneFolder`) that tests replace to force a name collision, a
+  platform without the rename or a folder that cannot be removed.
+- *Postconditions*: the address is data (`--` separates it from the options, `-CloneUrlSeparatedFromOptions`) and never
+  appears in a log or exception message with its credentials (`AgentControl-GitClient-CloneRedactsCredentials`). A
+  process killed together with the application leaves the hidden working folder behind: nothing deletes it
+  automatically, and the user guide says it can be deleted.
+
+**CheckCloneUrl** (static, pure): Returns the reason an address cannot be cloned, or `null`. Refuses a blank address,
+one that spans lines or has control characters, one that starts with `-` (git would read an option, for example
+`--upload-pack=`), one that contains `::` before its first `/` once the colons of a bracketed IPv6 literal are set aside
+(`ContainsHelperSeparator`) and an `ssh://` address whose host - the text after the `//` and any user name, up to the
+next `/` - starts with `-` (ssh would read an option) (`AgentControl-GitClient-CloneUrlRefused`). The `::` rule covers
+git's remote-helper syntax `<name>::<address>` (`ext::` runs a command, `fd::` reads an open file) and is deliberately
+wider than git's own (which only reads `<name>::` as a helper when the name is a letter followed by letters, digits,
+`+`, `.` or `-`, so `foo_bar::x` is not one): it does not depend on git's version. `https://[::1]/r.git`,
+`ssh://git@[::1]:22/r.git`, `[::1]:repo`, `C:\repos\r` and `git@host:org/r.git` stay accepted; a bracket that is not a
+complete IPv6 literal is not set aside. The clone dialog uses this same method, so the dialog and `Clone` can never
+disagree. Whether the repository exists is for git to say.
+
+**CheckCloneDestination** (static): Returns the reason a folder cannot be a clone destination, or `null`: it must be
+an absolute path, its parent folder must exist, and nothing may exist at the destination - not a folder (even an
+empty one), not a file, not a link or junction, dangling or not (`PathEntryExists`, which reads the entry's own
+attributes with `File.GetAttributes` and so never follows a link; `Directory.Exists` and `File.Exists` would answer
+`false` for a dangling link). Each reason says what is there and to choose a name that does not exist yet
+(`AgentControl-GitClient-CloneDestinationRules`). Reads the disk, so it asks the blocking-call
+guard; the clone dialog runs it through the background work runner and `Clone` repeats it right before git starts.
+
 **GetCurrentBranch**: Gets the repo's current branch name, or `"(detached)"` for a detached
 `HEAD`.
 
@@ -130,8 +257,29 @@ accepts only `KnownAgentFolders` (same argument checks as `UntrackAgentFolders`)
   (`AgentControl-GitClient-CurrentBranch`).
 
 **RunGit** (private): Runs one git subcommand in the repository folder and captures its exit
-code and output. The other methods pass the limit (`LocalCommand`, or `Pull` for `Pull`) and their
-token (`GetTrackedAgentFolders`, `UntrackAgentFolders` and `RestoreAgentFolderTracking` pass none).
+code and output. The other methods pass the limit (`LocalCommand`, `Pull` for `Pull`, `SwitchBranch` for
+`SwitchBranch`; `Clone` goes through `RunGitCore` with `CloneRepository` and a per-command environment) and their
+token (`GetTrackedAgentFolders`, `UntrackAgentFolders` and `RestoreAgentFolderTracking` pass none). `RunGit` is a thin
+wrapper over `RunGitCore`, which also takes the environment variables of the one command (`Clone` sets
+`GIT_ALLOW_PROTOCOL`). Everything that can reach a log or an exception message - the argument text, git's standard
+error and the operating system's error text - is passed through `SecretRedactor.Redact` first, because a clone
+address may carry `user:password@`; the values returned to callers are raw.
+
+*Output encoding*: standard output and standard error of every command are read as UTF-8 without a byte-order mark,
+whatever the console's code page is, because branch names and git's messages can hold any character
+(`AgentControl-GitClient-OutputIsUtf8`).
+
+*Environment*: `RunGitCore` builds the child's environment in three layers: first the policy of every command
+(`ApplyBaseEnvironment`, internal static, tested on a plain dictionary), then the constructor's `extraEnvironment`, then
+the variables of the one command. The policy removes the variables that trace git's traffic (`GIT_TRACE*`,
+`GIT_CURL_VERBOSE`) and the ones that redirect the repository, index, object store or git programs a command works
+with (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_EXEC_PATH`, `GIT_OBJECT_DIRECTORY`,
+`GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_COMMON_DIR`, `GIT_NAMESPACE`, `GIT_PREFIX`, `GIT_REPLACE_REF_BASE`,
+`GIT_SHALLOW_FILE` - the list `GitRemoteClient` uses, shared through `GitRemoteClient.IsRemovedVariable` - and
+`GIT_CEILING_DIRECTORIES`) and sets `GIT_TERMINAL_PROMPT=0`: there is no terminal to ask in. It deliberately leaves
+`GCM_INTERACTIVE`, `GIT_ASKPASS`, `SSH_ASKPASS`, `GIT_SSH`, `GIT_SSH_COMMAND` and `LC_ALL` alone, so a credential
+helper such as Git Credential Manager still shows its own window, an ssh agent keeps working and git's messages stay in
+the user's language (branch parsing uses `--format`) (`AgentControl-GitClient-EnvironmentPolicy`).
 
 - *Algorithm*: (1) ask `BlockingCallGuard.ThrowIfGuarded("git {subcommand}")` (see *BlockingCallGuard*), so a call on
   a thread the tests guard is refused before anything starts; (2) throw `OperationCanceledException` when the token is
@@ -172,15 +320,17 @@ token (`GetTrackedAgentFolders`, `UntrackAgentFolders` and `RestoreAgentFolderTr
 Every public method throws `ArgumentException` for a null/empty/whitespace `repositoryPath`
 and `InvalidOperationException` when the git executable cannot be started or the underlying
 git subcommand exits non-zero (except `Pull`, whose non-zero exit is reported via
-`GitCommandResult.Succeeded` rather than thrown, since a failed pull is an expected outcome).
+`GitCommandResult.Succeeded` rather than thrown, since a failed pull is an expected outcome; `SwitchBranch` and `Clone`
+report a refusal by git the same way, as a result, and throw `ArgumentException` for a value they refuse before git
+starts: a blank or option-like branch name, a refused address or destination).
 `IsRepositoryRoot` throws `ArgumentException` for a null/empty/whitespace `folderPath` and otherwise never throws: a
 missing or unreadable folder is reported as `false`.
 A command that outlives its limit, or whose output is still held open past the limit by a process it started after it
 exited, throws `GitCommandTimeoutException` (an `InvalidOperationException`), and a canceled one
 `OperationCanceledException`; both stop the process tree first. The constructor throws
 `ArgumentOutOfRangeException` for a limit that is not positive. On a thread guarded by `BlockingCallGuard` every method
-except `IsRepositoryRoot` throws `BlockingCallOnGuardedThreadException` without starting git (or reading `.git/HEAD`);
-callers must not catch it as an ordinary failure.
+except `IsRepositoryRoot` throws `BlockingCallOnGuardedThreadException` without starting git (or reading `.git/HEAD`;
+`AgentControl-GitClient-CommandsRefuseGuardedThread`); callers must not catch it as an ordinary failure.
 `RunGit` logs a warning when the process takes longer than 10 seconds to exit (distinguishing
 a hung process from a fast failure) and logs a caught `Win32Exception`'s `NativeErrorCode` at
 `Error` level before wrapping it in an `InvalidOperationException` — both added specifically to
@@ -200,9 +350,13 @@ flakiness.
 - **RepoCardViewModel** — constructs a `GitClient` per action (using the resolved git executable path and the card's
   time limits; the reads of its state run on worker threads of the shared refresh queue, whose shutdown token they pass,
   see *RepoRefreshQueue*) and calls `IsWorkingTreeClean`, `Pull`, `GetHeadCommitHash`, `HasCommittedAgentFiles`, and
-  `GetCurrentBranch` across its refresh/pull methods, and `GetTrackedAgentFolders` and `UntrackAgentFolders` when it
-  applies a package to a repo whose agent folders are tracked by git.
+  `GetCurrentBranch` across its refresh/pull methods, `GetBranches` for the Switch branch dialog (through
+  `CreateSwitchBranchViewModel`), `SwitchBranch` for a switch, and `GetTrackedAgentFolders` and `UntrackAgentFolders`
+  when it applies a package to a repo whose agent folders are tracked by git.
 - **MainWindowViewModel** (`LauncherUI` subsystem) — reads a new repo's cheap facts through a `GitClient` on a worker
-  thread of the shared refresh queue while it is added, and calls the static `IsRepositoryRoot` when a folder is added
+  thread of the shared refresh queue while it is added, calls the static `IsRepositoryRoot` when a folder is added
   as a new repo (single add, add to a group, several folders from the picker or dropped from the file manager), and
-  refuses the folder as not a Git repository when it returns `false`.
+  refuses the folder as not a Git repository when it returns `false`; and runs `Clone` on a worker thread for the
+  Clone repository dialog.
+- **CloneRepositoryViewModel** (`LauncherUI` subsystem) — calls the static `CheckCloneUrl` and `CheckCloneDestination`
+  (the latter on a worker thread) to judge what the user typed before a clone is started.

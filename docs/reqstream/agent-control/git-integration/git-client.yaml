@@ -5,6 +5,8 @@
 # commits, read the HEAD commit hash, detect committed agent files, list which managed agent
 # folders are tracked and stop tracking them, and resolve the current
 # branch (using a fast path that reads .git/HEAD directly before falling back to a subprocess),
+# lists and switches branches, clones a repository into a new folder (removing only what a canceled
+# clone created, never logging credentials in the address),
 # and tells whether a folder is the top folder of a Git repository. Every command runs under a time
 # limit and can be canceled; a command that is stopped is stopped with every process it started.
 
@@ -149,7 +151,9 @@ sections:
           one minute for a command on the local repository, ten minutes for a pull - together with
           every process it started, and report it as timed out with the limit it exceeded; it shall
           likewise stop waiting for, and report as timed out, a git command that exited while a
-          process it started still holds its output open past that limit.
+          process it started still holds its output open past that limit. The limit of a branch
+          switch is part of AgentControl-GitClient-SwitchBranch and the limit of a clone part of
+          AgentControl-GitClient-Clone; they stop git the same way.
         justification: |
           A git command on a network share, on a huge working tree or held by a stuck lock may never
           answer; without a limit it holds its caller, and the process keeps running unnoticed. A
@@ -170,3 +174,348 @@ sections:
           background.
         tests:
           - GitClient_GetHeadCommitHash_Canceled_StopsGitAndThrowsCanceled
+
+      - id: AgentControl-GitClient-ListBranches
+        title: >-
+          The GitClient class shall list the local branches and the remote-tracking branches a
+          repo already knows about, from git's current state and without contacting any remote, mark
+          the checked-out branch, and raise a clear error when git cannot list them.
+        justification: |
+          Switching branches starts from the list of branches the repo has; reading what is already
+          local keeps the list fast and free of network and sign-in prompts, and a repo that git
+          cannot read must be reported rather than shown as having no branches.
+        tests:
+          - GitClient_GetBranches_ListsLocalAndRemoteWithCurrentMarked
+          - GitClient_GetBranches_ForEachRefFails_ThrowsInvalidOperationException
+          - GitClient_GetBranches_RealRepo_ListsLocalAndRemoteTracking
+          - GitClient_BranchAndCloneCommands_OnGuardedThread_ThrowBlockingCallOnGuardedThread
+
+      - id: AgentControl-GitClient-ListBranchesRemoteDistinct
+        title: >-
+          The GitClient class shall report each remote-tracking branch with the remote it belongs to
+          (including a remote whose name contains a slash), leave out a remote's HEAD pointer, and
+          leave out a remote branch that has a local branch of the same name.
+        justification: |
+          A remote branch is switched to differently from a local one, so the two must stay
+          distinguishable; a HEAD pointer is not a branch, and a local branch that already tracks the
+          remote one is the one to switch to, so listing both would offer the same choice twice.
+        tests:
+          - GitClient_GetBranches_ListsLocalAndRemoteWithCurrentMarked
+          - GitClient_GetBranches_RealRepo_ListsLocalAndRemoteTracking
+
+      - id: AgentControl-GitClient-ListBranchesDetached
+        title: >-
+          The GitClient class shall report a repo whose HEAD is detached as having no current branch
+          and name the commit it is at by its short commit id.
+        justification: |
+          A detached HEAD is a normal state (a tag or a commit was checked out); the user must see
+          that no branch is current, and where HEAD is, before choosing a branch to go to.
+        tests:
+          - GitClient_GetBranches_DetachedHead_ReportsNullBranchAndShortCommit
+          - GitClient_SwitchBranch_RealRepo_FromDetachedHead_Works
+
+      - id: AgentControl-GitClient-SwitchBranch
+        title: >-
+          The GitClient class shall switch a repo to a chosen local branch, or to a remote-tracking
+          branch by creating a local branch of the same name that tracks it, and report the outcome.
+        justification: |
+          Developers move between branches of the repos they launch agents in; a remote branch has no
+          local branch yet, so a tracking branch is created for it, as a developer would at the
+          command line.
+        tests:
+          - GitClient_SwitchBranch_Local_RunsSwitchWithDoubleDash
+          - GitClient_SwitchBranch_Remote_RunsSwitchTrackWithRemoteName
+          - GitClient_SwitchBranch_RealRepo_LocalAndRemoteCreatesTrackingBranch
+          - GitClient_SwitchBranch_UsesSwitchTimeoutNotLocalTimeout
+
+      - id: AgentControl-GitClient-SwitchNeverForces
+        title: >-
+          The GitClient class shall never pass an option to git that forces a branch switch, discards
+          local changes or creates or resets a branch while switching.
+        justification: |
+          A forced checkout or a discard would destroy a developer's uncommitted work without being
+          asked; only git's own protection may decide what a switch may do.
+        tests:
+          - GitClient_SwitchBranch_NeverPassesForceOrDiscardOptions
+
+      - id: AgentControl-GitClient-SwitchNeverMergesOrStashes
+        title: >-
+          The GitClient class shall switch with exactly one git switch command, without a merge option
+          and without stashing anything.
+        justification: |
+          A merge or a stash would change or hide the developer's uncommitted work on the way to
+          another branch; the developer decides what happens to it, and git alone decides whether it
+          may travel with the switch.
+        tests:
+          - GitClient_SwitchBranch_NeverPassesForceOrDiscardOptions
+          - GitClient_SwitchBranch_Local_RunsSwitchWithDoubleDash
+          - GitClient_SwitchBranch_Remote_RunsSwitchTrackWithRemoteName
+
+      - id: AgentControl-GitClient-SwitchNameIsData
+        title: >-
+          The GitClient class shall pass the branch name to git as data that cannot be read as an
+          option, and shall refuse a blank, option-like or multi-line name without running git.
+        justification: |
+          A branch name comes from a list git produced, but it is still text that must never become
+          an option of the command that receives it.
+        tests:
+          - GitClient_SwitchBranch_Local_RunsSwitchWithDoubleDash
+          - GitClient_SwitchBranch_BlankOrOptionLikeName_ThrowsArgumentException
+
+      - id: AgentControl-GitClient-SwitchKeepsNonConflictingChanges
+        title: >-
+          The GitClient class shall leave uncommitted changes that do not conflict with the target
+          branch in place when it switches, so that they travel with the switch, and shall leave the
+          decision about conflicting changes to git alone.
+        justification: |
+          A developer often switches branches with unrelated work in progress; git carries such work
+          along, and a launcher that stashed, committed or discarded it would surprise the developer
+          or lose work.
+        tests:
+          - GitClient_SwitchBranch_RealRepo_UnrelatedDirtyFile_SurvivesTheSwitch
+          - GitClient_SwitchBranch_RealRepo_DirtyConflictingFile_IsRefusedWithGitsReasonAndChangesNothing
+
+      - id: AgentControl-GitClient-SwitchRefusalReported
+        title: >-
+          The GitClient class shall report a switch that git refuses (for example because uncommitted
+          changes would be overwritten) as a result carrying git's own explanation, without throwing,
+          and with nothing changed in the repo.
+        justification: |
+          Blocked checkouts are an everyday outcome that the user must be told about in git's words,
+          and the repo must be exactly as it was so that no work is lost.
+        tests:
+          - GitClient_SwitchBranch_Refused_ReturnsGitsMessageWithoutThrowing
+          - GitClient_SwitchBranch_RealRepo_DirtyConflictingFile_IsRefusedWithGitsReasonAndChangesNothing
+          - GitClient_SwitchBranch_RealRepo_UntrackedFileWouldBeOverwritten_IsRefused
+
+      - id: AgentControl-GitClient-Clone
+        title: >-
+          The GitClient class shall clone a repository, given by address, into a new folder and give
+          the finished clone the folder's name only when git succeeded, so that a folder that did not
+          exist before holds either a complete clone or nothing.
+        justification: |
+          Getting a repository onto the machine is the first step of using it; a folder that holds a
+          half-finished clone is worse than none, because it looks like a repository and is not.
+        tests:
+          - GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList
+          - GitClient_Clone_RealLocalBareRepository_ClonesIntoNewFolderAndLeavesNoTempBehind
+
+      - id: AgentControl-GitClient-CloneTimeLimit
+        title: >-
+          The GitClient class shall stop a clone that has not finished within one hour, together with
+          every process it started, and shall reject a clone limit that is not positive.
+        justification: |
+          A clone can run for a long time on a large repository, so it needs a far longer limit than
+          a local command, yet a clone that never ends must still be stopped; Cancel is the normal way
+          out, so the limit is only a backstop.
+        tests:
+          - GitClient_Clone_UsesCloneTimeoutNotLocalTimeout
+          - GitClient_Clone_TimesOut_StopsGitAndRemovesItsTempFolder
+          - GitClient_Constructor_NonPositiveSwitchOrCloneLimit_ThrowsArgumentOutOfRangeException
+
+      - id: AgentControl-GitClient-CloneFailureReported
+        title: >-
+          The GitClient class shall report a clone that git refuses or cannot finish as a result with a
+          non-zero exit code that carries git's explanation, without throwing.
+        justification: |
+          A failed clone (unknown repository, sign-in needed) is an expected outcome the user must be
+          told about in git's own words.
+        tests:
+          - GitClient_Clone_Fails_RemovesItsTempFolderAndReturnsGitsReason
+          - GitClient_Clone_RealGit_NotARepository_ReturnsFailedResultAndLeavesParentEmpty
+
+      - id: AgentControl-GitClient-CommandsRefuseGuardedThread
+        title: >-
+          The GitClient class shall refuse to list branches, switch a branch, check a clone destination
+          or clone on a thread that is guarded against blocking calls, before anything is read or
+          started.
+        justification: |
+          These commands block on the disk or on git; running them on the user-interface thread would
+          freeze the window, and the guard is how the tests prove that they never do.
+        tests:
+          - GitClient_BranchAndCloneCommands_OnGuardedThread_ThrowBlockingCallOnGuardedThread
+
+      - id: AgentControl-GitClient-CloneUrlRefused
+        title: >-
+          The GitClient class shall refuse, before git starts and with a reason the user can read, an
+          address to clone that is blank, spans several lines, starts with a dash (which git would
+          read as an option), contains :: before its first / outside a bracketed IPv6 literal (which
+          covers git's remote-helper syntax <name>::, such as ext:: or fd::), or is an ssh address
+          whose host starts with a dash (which ssh would read as an option).
+        justification: |
+          The address comes from a text box or a clipboard; an address that git reads as an option
+          (for example an upload-pack program) or as a remote helper, or whose host ssh reads as an
+          option, runs a command of the sender's choosing on the developer's machine. The rule is
+          wider than git's own definition of a helper name so that it does not depend on git's
+          version, and it leaves IPv6 literals such as https://[::1]/r.git usable.
+        tests:
+          - GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit
+          - GitClient_CheckCloneUrl_UsualAddress_ReturnsNull
+          - GitClient_CheckCloneUrl_SshHostStartingWithDash_IsRefused
+
+      - id: AgentControl-GitClient-CloneUrlSeparatedFromOptions
+        title: >-
+          The GitClient class shall pass the address to clone to git as one argument that follows a
+          double dash, so that it can never be read as an option.
+        justification: |
+          Even an address that passed the checks is data, and the double dash is git's own way to say
+          that what follows is not an option.
+        tests:
+          - GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList
+
+      - id: AgentControl-GitClient-CloneDestinationRules
+        title: >-
+          The GitClient class shall clone only into an absolute path whose parent folder exists and
+          where nothing exists yet - no folder (not even an empty one), file, link or junction, not
+          even one whose target is gone - shall refuse anything else with a reason the user can read
+          before git starts, and shall be able to tell that reason without cloning.
+        justification: |
+          A clone must never mix with, replace or be redirected through anything that is already
+          there, and the dialog that asks for the folder needs the reason in words before the user
+          waits for a download.
+        tests:
+          - GitClient_Clone_DestinationExists_ThrowsArgumentExceptionAndTouchesNothing
+          - GitClient_Clone_DestinationIsLink_IsRefusedAndTargetUntouched
+          - GitClient_Clone_ParentMissingRelativeOrFile_ThrowsArgumentException
+          - GitClient_CheckCloneDestination_NewFolder_ReturnsNull
+          - GitClient_CheckCloneDestination_ExistingEmptyFolderOrFile_ReturnsReason
+          - GitClient_CheckCloneDestination_DestinationIsLink_ReturnsReason
+
+      - id: AgentControl-GitClient-CloneIntoFreshFolder
+        title: >-
+          The GitClient class shall run git with a fresh, hidden folder it creates itself next to the
+          destination (named .agentcontrol-clone- followed by a new GUID) as the clone target, claiming
+          the name with an operating-system create that fails when anything exists under it and trying
+          another name when that happens, and shall rename that folder to the destination only when
+          git succeeded, making it visible again, so that git never writes to the destination and a
+          folder it did not create is never used or deleted.
+        justification: |
+          The destination is the user's name for a folder that does not exist yet; cloning into a
+          folder of our own and renaming it on success leaves nothing half-finished under that name
+          and makes it certain which folder a cleanup may delete. Checking that a name is free and then
+          creating it proves nothing (creating an existing folder succeeds), so only a create that
+          fails on an existing name makes the folder this call's own.
+        tests:
+          - GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList
+          - GitClient_Clone_WorkFolderNameTaken_IsNeverUsedOrDeleted
+          - GitClient_Clone_EveryWorkFolderNameTaken_FailsWithoutStartingGitOrTouchingTheFolder
+          - GitClient_Clone_RealLocalBareRepository_ClonesIntoNewFolderAndLeavesNoTempBehind
+
+      - id: AgentControl-GitClient-CloneCleansUpOnlyItsOwnFolder
+        title: >-
+          The GitClient class shall, when a clone is canceled, times out, fails or cannot be moved into
+          place, remove the working folder it created - removing any link inside it as a link and never
+          following one, and clearing the read-only attributes git sets - and nothing else, leaving the
+          destination and every other file, folder and look-alike folder in the parent folder as they
+          were.
+        justification: |
+          A killed clone leaves a half-written repository that is useless and in the way, but a
+          deletion that reached a folder somebody else made would lose their work; only a folder the
+          call created itself may be deleted.
+        tests:
+          - GitClient_Clone_Canceled_RemovesOnlyItsTempFolder
+          - GitClient_Clone_Canceled_LinkInWorkFolder_RemovesTheLinkAndLeavesItsTargetUntouched
+          - GitClient_Clone_Canceled_SymbolicLinksInWorkFolder_AreRemovedAndTargetsUntouched
+          - GitClient_Clone_TimesOut_StopsGitAndRemovesItsTempFolder
+          - GitClient_Clone_Fails_RemovesItsTempFolderAndReturnsGitsReason
+          - GitClient_Clone_RealGit_NotARepository_ReturnsFailedResultAndLeavesParentEmpty
+
+      - id: AgentControl-GitClient-CloneDestinationAppearedMeanwhile
+        title: >-
+          The GitClient class shall, when something appears at the destination while git is cloning,
+          not move the clone there - not even over an empty folder, on every platform, using the
+          operating system's rename that fails instead of replacing - report that as a failed result
+          that names the folder, remove its own working folder and leave what appeared exactly as it
+          was, and shall not complete the clone, but report why, on a platform that has no such rename.
+        justification: |
+          The check of the destination happens before a download that can take minutes; whatever the
+          user (or another program) puts there meanwhile is theirs and must never be replaced. A plain
+          rename on Unix replaces an empty folder, so the no-replace variant of each platform is used
+          and its absence is a refusal, never a fall back.
+        tests:
+          - GitClient_Clone_DestinationAppearsWhileCloning_FailsClearlyAndTouchesNothingOfTheUsers
+          - GitClient_Clone_NativeNoReplaceMove_MovesToFreeNameAndNeverReplacesAnEmptyFolder
+          - GitClient_Clone_NoReplaceRenameUnsupported_RefusesAndRemovesOnlyTheWorkFolder
+
+      - id: AgentControl-GitClient-CloneReportsLeftoverFolder
+        title: >-
+          The GitClient class shall, when the working folder of a canceled clone, or of a clone that
+          stopped with another exception, could not be removed, throw an exception that names the
+          folder left behind - for a cancel an OperationCanceledException subclass, so a caller that
+          treats every cancel alike keeps working - and shall throw a plain cancellation when the
+          folder was removed.
+        justification: |
+          A cancel is deliberate and needs no message, but a half-written clone that stays on disk
+          (a file still held by git's helper or a virus scanner) is something the user must be told
+          about, as the timeout and the failed clone already do; without it the leftover is silent.
+        tests:
+          - GitClient_Clone_CanceledWhenTheFolderCannotBeRemoved_ThrowsCancellationNamingTheLeftover
+          - GitClient_Clone_CanceledAndFolderRemoved_ThrowsPlainCancellation
+          - GitClient_Clone_FailsToStartWhenTheFolderCannotBeRemoved_NamesTheLeftover
+
+      - id: AgentControl-GitClient-CloneCancelStopsGit
+        title: >-
+          The GitClient class shall stop a running clone, together with every process it started,
+          when its caller cancels it or the clone limit passes, and report the cancellation or the
+          timeout.
+        justification: |
+          Cancel is the normal way out of a clone that takes too long; a clone that keeps running
+          after the user canceled it would keep downloading and writing into the folder.
+        tests:
+          - GitClient_Clone_Canceled_RemovesOnlyItsTempFolder
+          - GitClient_Clone_TimesOut_StopsGitAndRemovesItsTempFolder
+
+      - id: AgentControl-GitClient-CloneRedactsCredentials
+        title: >-
+          The GitClient class shall keep the credentials of an address to clone (the user name and
+          password, or only a token or a user name, before the host, and a token in the query string)
+          out of every log message, exception message and result it produces, including those of a
+          canceled and a timed-out clone, while keeping the host and path that identify the
+          repository.
+        justification: |
+          Users paste addresses of the form https://user:password@host/repo.git or with a token; the
+          log is a plain file users attach to reports, and git echoes the address in its own error
+          text, so a credential that is not removed on the way out would leak.
+        tests:
+          - GitClient_Clone_UrlWithPassword_IsNeverWrittenToLogOrExceptionText
+          - GitClient_Clone_TimeoutAndCancelMessages_NeverContainTheCredentials
+          - GitClient_Clone_TokenOnlyAndQueryStringUrls_AreRedactedEverywhere
+
+      - id: AgentControl-GitClient-OutputIsUtf8
+        title: >-
+          The GitClient class shall read the output of git as UTF-8, so that branch names and
+          messages with non-ASCII characters are reported as git wrote them.
+        justification: |
+          Branch names with non-ASCII letters are legal; read with the console's code page they would be
+          shown, and passed back to git, as different names, and a switch to them would fail.
+        tests:
+          - GitClient_Pull_NonAsciiOutput_IsDecodedAsUtf8
+          - GitClient_GetBranchesAndSwitch_RealRepo_NonAsciiAndSlashBranchNames_RoundTrip
+
+      - id: AgentControl-GitClient-EnvironmentPolicy
+        title: >-
+          The GitClient class shall run every git command with a fixed environment policy: git shall
+          never prompt on a terminal, and the environment variables that trace git's traffic or
+          redirect which repository, index, object store or git programs it works with shall be
+          removed, while the user's credential-helper, askpass and ssh settings are left alone.
+        justification: |
+          No terminal exists for git to ask in, so a prompt would only hang until the time limit; a
+          variable inherited from the launching shell must not make a command act on another
+          repository than the folder it was started in or write credentials to a trace, yet the
+          user's own sign-in window or ssh agent must keep working.
+        tests:
+          - GitClient_ApplyBaseEnvironment_RemovesRepositoryRedirectingVariables
+          - GitClient_SwitchAndList_SetPromptOff_NoProtocolRestriction
+          - GitClient_UserAskpassGcmAndSshSettings_AreLeftAlone
+
+      - id: AgentControl-GitClient-CloneNeverPrompts
+        title: >-
+          The GitClient class shall clone without prompting on a terminal and with git limited to the
+          local, file, git, http, https and ssh transports.
+        justification: |
+          A prompt nobody can see would hang the clone until its limit, and a transport that runs a
+          helper program is not a repository location; a credential helper may still show its own
+          sign-in window.
+        tests:
+          - GitClient_Clone_SetsPromptOffAndAllowedProtocols
+          - GitClient_UserAskpassGcmAndSshSettings_AreLeftAlone

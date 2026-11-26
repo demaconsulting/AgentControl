@@ -101,6 +101,8 @@ internal static class ApplicationTeardown
     [
         "CredentialPromptCancelButton",
         "GroupNameCancelButton",
+        "SwitchBranchCancelButton",
+        "CloneCancelButton",
         "SelectPackageCancelButton",
         "SourceEditorCancelButton",
         "AboutCloseButton",

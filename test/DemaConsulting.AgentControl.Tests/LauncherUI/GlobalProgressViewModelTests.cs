@@ -240,4 +240,85 @@ public sealed class GlobalProgressViewModelTests
         Assert.Equal(string.Empty, progress.Text);
         Assert.False(progress.CanCancel);
     }
+
+    /// <summary>
+    ///     Test that the Cancel button is named after the operation that is shown: the default
+    ///     description for an add, an operation's own description while it is shown (also when it is shown
+    ///     over an older cancelable one), and the default again once it ended.
+    /// </summary>
+    [Fact]
+    public void GlobalProgressViewModel_Cancel_NamesTheOperation()
+    {
+        // Arrange: an idle strip names the add, as the strip always did
+        var progress = new GlobalProgressViewModel();
+        var changed = new List<string?>();
+        progress.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        Assert.Equal("Cancel adding repositories", progress.CancelAccessibleName);
+        Assert.Equal("Stop adding repositories; nothing more is added", progress.CancelToolTip);
+
+        // Act: an add without its own description, then a clone with one
+        using var add = progress.Begin("Adding repositories...", () => { });
+        var addName = progress.CancelAccessibleName;
+        using var clone = progress.Begin(
+            "Cloning agents...",
+            () => { },
+            new GlobalProgressCancelDescription("Cancel cloning agents", "Stop cloning; the partly cloned folder is removed"));
+
+        // Assert: the clone is shown, with its own name and tooltip, and the change was announced
+        Assert.Equal("Cancel adding repositories", addName);
+        Assert.Equal("Cancel cloning agents", progress.CancelAccessibleName);
+        Assert.Equal("Stop cloning; the partly cloned folder is removed", progress.CancelToolTip);
+        Assert.Contains(nameof(GlobalProgressViewModel.CancelAccessibleName), changed);
+        Assert.Contains(nameof(GlobalProgressViewModel.CancelToolTip), changed);
+
+        // Act: the clone ends, the add is shown again
+        clone.Dispose();
+
+        // Assert
+        Assert.Equal("Cancel adding repositories", progress.CancelAccessibleName);
+        Assert.Equal("Stop adding repositories; nothing more is added", progress.CancelToolTip);
+    }
+
+    /// <summary>
+    ///     Test that <see cref="GlobalProgressViewModel.HasCancelableOperation"/> is false when idle and
+    ///     while only an operation without a cancel action runs, true from the start of one with a cancel
+    ///     action until it ended - also after its cancel was requested and while it accepts no cancel -
+    ///     and that each change is announced once.
+    /// </summary>
+    [Fact]
+    public void GlobalProgressViewModel_HasCancelableOperation_FollowsOperationsWithACancelAction()
+    {
+        // Arrange
+        var progress = new GlobalProgressViewModel();
+        var announced = 0;
+        progress.PropertyChanged += (_, e) => announced += e.PropertyName == nameof(GlobalProgressViewModel.HasCancelableOperation) ? 1 : 0;
+        var idle = progress.HasCancelableOperation;
+
+        // Act: an operation that cannot be canceled
+        var refresh = progress.Begin("Refreshing repositories...");
+        var withoutCancel = progress.HasCancelableOperation;
+
+        // Act: one that can
+        var add = progress.Begin("Adding repositories...", () => { });
+        var cancelable = progress.HasCancelableOperation;
+        add.AllowCancel = false;
+        var refusingCancel = progress.HasCancelableOperation;
+        add.AllowCancel = true;
+        progress.CancelCommand.Execute(null);
+        var afterCancelRequested = progress.HasCancelableOperation;
+        var announcedWhileRunning = announced;
+        add.Dispose();
+        var afterEnd = progress.HasCancelableOperation;
+        refresh.Dispose();
+
+        // Assert
+        Assert.False(idle);
+        Assert.False(withoutCancel);
+        Assert.True(cancelable);
+        Assert.True(refusingCancel);
+        Assert.True(afterCancelRequested);
+        Assert.Equal(1, announcedWhileRunning);
+        Assert.False(afterEnd);
+        Assert.Equal(2, announced);
+    }
 }

@@ -10,7 +10,13 @@ never depend on a real git installation or a real repository history. Tests usin
 xUnit collection since they still launch a real subprocess (the stub script itself). The tests of listing and stopping
 git tracking agent folders also use a real temporary git repository (built by `GitRepositoryFixture`, skipped where git
 is not installed and failed when the environment variable `CI` is set), because what git tracks before and after must be
-observed, not assumed.
+observed, not assumed. The branch and clone tests come in two kinds. The stub kind, in `GitClientTests.cs`, pins down
+the command lines (the stub is given extra canned commands - `for-each-ref`, `remote`, `switch`, `clone`,
+`rev-parse --short` - whose output is read from files, and logs all arguments of each call) and the time-limit,
+cancellation and clean-up behavior (the stub's `clone` can create the destination with a read-only pack file and then
+hang). The real kind, in `GitClientRealRepositoryTests.cs`, proves that git really does what the command lines assume,
+against a real working repository and a local bare repository playing the remote (never the network), with the user's
+global git configuration replaced by an empty one through the client's `extraEnvironment`.
 
 #### Test Environment
 
@@ -30,6 +36,13 @@ Approach).
 - A command that exited while a process it started still holds its output open is not waited for past its limit: it
   is reported as timed out (with the limit) instead of returning once that process ends.
 - On a thread guarded against blocking calls no git command starts.
+- The branch list holds the local and remote-tracking branches git already knows, marks the checked-out one (or
+  reports a detached HEAD with its short commit id) and never contacts a remote.
+- A switch never passes an option that forces, discards or merges; a switch git refuses is returned with git's
+  explanation and leaves the branch and the user's uncommitted work as they were.
+- A clone refuses an address git could read as an option or a remote helper, and a destination that is not new or
+  empty, before git starts; a canceled or timed-out clone removes only what it created; a failed clone deletes nothing;
+  the password of an address appears in no log message, exception message or result.
 
 #### Test Scenarios
 
@@ -146,3 +159,166 @@ second; the call throws `OperationCanceledException` and the stub never finishes
 `BlockingCallOnGuardedThreadException`, five refusals are recorded, and the stub's invocation log was never written, so
 git never started. This scenario is tested by `GitClient_AnyCommand_OnGuardedThread_ThrowsBlockingCallOnGuardedThread`;
 it verifies a guard point of `Quality-UiThreadRegressionGuard` and is not linked to a `GitClient` requirement.
+
+**GitClient_ListBranches_ReportsLocalRemoteAndDetached**: A stub that lists two local branches (one current) and
+remote branches of two remotes - one remote named `up/stream` - is reported with the current branch marked, the remote
+`up/stream` split from its branch `z`, the remote's `HEAD` pointer and the remote `main` (which has a local twin)
+left out; a stub whose listing carries no current marker reports `null` and the short commit id of `rev-parse --short
+HEAD`; a failing `for-each-ref` throws `InvalidOperationException` carrying git's text. In a real clone of a remote
+with `main`, `feature/x` and `other`, the list holds local `main` and remote `origin/feature/x` and `origin/other`
+(not `origin/HEAD`, not `origin/main`), and a clone with a detached HEAD reports a commit id that starts the full
+`HEAD`. This scenario is tested by `GitClient_GetBranches_ListsLocalAndRemoteWithCurrentMarked`,
+`GitClient_GetBranches_DetachedHead_ReportsNullBranchAndShortCommit`,
+`GitClient_GetBranches_ForEachRefFails_ThrowsInvalidOperationException`,
+`GitClient_GetBranches_RealRepo_ListsLocalAndRemoteTracking` and
+`GitClient_SwitchBranch_RealRepo_FromDetachedHead_Works`, covering `AgentControl-GitClient-ListBranches`,
+`AgentControl-GitClient-ListBranchesRemoteDistinct` and `AgentControl-GitClient-ListBranchesDetached`.
+
+**GitClient_SwitchBranch_RunsSafeCommandsAndReportsRefusals**: The stub's argument log shows `switch -- feature/x` for a
+local branch and `switch --track -- origin/feature/y` for a remote one, and the only options ever present are `--` and
+`--track`; a blank, `-f`, `--detach` or multi-line name is refused with `ArgumentException` and the stub is never
+started; a stub whose `switch` takes two seconds completes under a one-second local limit (the switch limit applies); a
+stub whose `switch` fails with "would be overwritten" is returned as a result, not thrown. In real repositories a switch
+to a remote branch creates a local tracking branch (`branch.feature/x.remote` is `origin`) and changes the files, a
+switch back works, a switch that would overwrite an edited file or an untracked file is refused with git's text naming
+the file, the current branch stays and the file content is intact. This scenario is tested by
+`GitClient_SwitchBranch_Local_RunsSwitchWithDoubleDash`, `GitClient_SwitchBranch_Remote_RunsSwitchTrackWithRemoteName`,
+`GitClient_SwitchBranch_NeverPassesForceOrDiscardOptions`,
+`GitClient_SwitchBranch_BlankOrOptionLikeName_ThrowsArgumentException`,
+`GitClient_SwitchBranch_UsesSwitchTimeoutNotLocalTimeout`,
+`GitClient_SwitchBranch_Refused_ReturnsGitsMessageWithoutThrowing`,
+`GitClient_SwitchBranch_RealRepo_LocalAndRemoteCreatesTrackingBranch`,
+`GitClient_SwitchBranch_RealRepo_DirtyConflictingFile_IsRefusedWithGitsReasonAndChangesNothing`,
+`GitClient_SwitchBranch_RealRepo_UntrackedFileWouldBeOverwritten_IsRefused` and
+`GitClient_SwitchBranch_RealRepo_UnrelatedDirtyFile_SurvivesTheSwitch`, covering
+`AgentControl-GitClient-SwitchBranch`, `AgentControl-GitClient-SwitchNeverForces`,
+`AgentControl-GitClient-SwitchNeverMergesOrStashes`, `AgentControl-GitClient-SwitchNameIsData`,
+`AgentControl-GitClient-SwitchKeepsNonConflictingChanges` and `AgentControl-GitClient-SwitchRefusalReported`.
+
+In the stub tests the argument log holds exactly one call per switch, which is a `switch` (no `stash` anywhere) with
+no option but `--` and `--track` (so no `--merge`, `-m`, `--force` or `-C`). In a real clone where `notes.md` is the
+same on both branches and the other branch only adds another file, an edited `notes.md` and an untracked `scratch.txt`
+travel with a switch to the other branch (both files keep their content, the other branch's file appears, `git status`
+still lists `notes.md` and `git stash list` is empty).
+
+**GitClient_Utf8_OutputIsDecodedAsUtf8**: A stub whose `pull` prints non-ASCII text (umlauts, an en dash and Chinese
+characters, read from a UTF-8 file) on both streams is returned with exactly that text. In a real clone with a
+non-ASCII remote branch and a local branch with a slash and non-ASCII letters, the branch list holds the exact names and
+a switch to each succeeds and is reported as the
+current branch. This scenario is tested by `GitClient_Pull_NonAsciiOutput_IsDecodedAsUtf8` and
+`GitClient_GetBranchesAndSwitch_RealRepo_NonAsciiAndSlashBranchNames_RoundTrip`, covering
+`AgentControl-GitClient-OutputIsUtf8`.
+
+**GitClient_EnvironmentPolicy_AppliesToEveryCommand**: A stub that logs the environment it received shows that a
+switch and a status query run with `GIT_TERMINAL_PROMPT=0` and no `GIT_ALLOW_PROTOCOL` (the user's own value is removed
+for the test), and that a clone runs with `GIT_TERMINAL_PROMPT=0` and `GIT_ALLOW_PROTOCOL=file:git:http:https:ssh`.
+Values of `GCM_INTERACTIVE`, `GIT_ASKPASS` and `GIT_SSH_COMMAND` given to the client reach the stub unchanged, and one
+that the client was told to remove (`SSH_ASKPASS`) is unset. On a copy of an environment the base policy removes
+`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`,
+`GIT_CEILING_DIRECTORIES`, `GIT_EXEC_PATH`, `GIT_TRACE`, `GIT_TRACE_CURL` and `GIT_CURL_VERBOSE`, sets
+`GIT_TERMINAL_PROMPT` to `0` and leaves `GIT_ASKPASS`, `GCM_INTERACTIVE`, `PATH` and `LC_ALL` as they were (the
+process's own environment is never changed by a test). This scenario is tested by
+`GitClient_Clone_SetsPromptOffAndAllowedProtocols`, `GitClient_SwitchAndList_SetPromptOff_NoProtocolRestriction`,
+`GitClient_UserAskpassGcmAndSshSettings_AreLeftAlone` and
+`GitClient_ApplyBaseEnvironment_RemovesRepositoryRedirectingVariables`, covering
+`AgentControl-GitClient-EnvironmentPolicy` and `AgentControl-GitClient-CloneNeverPrompts`.
+
+**GitClient_Clone_RunsInFreshSiblingFolderWithDataArgumentsAndRefusesBadInput**: The stub's argument log shows
+`clone -- <trimmed url> <target>`, where the target is a hidden `.agentcontrol-clone-<guid>` folder in the destination's
+parent folder - never the destination - and after the clone the destination holds the stub's clone, is not hidden, and
+is the only entry left in the parent folder. An address that starts with a dash, is blank, spans two lines or uses
+`ext::`, `EXT::` or `fd::` is refused with `ArgumentException` and the stub is never started - as is any address with
+`::` before its first `/`, whatever the text before it (`foo_bar::x`, `a b::x`, `ext::sh -c x`, `fd::0`, `[::1]::x`,
+`::x`) - while ordinary https, ssh, scp-like and path addresses are accepted by `CheckCloneUrl`, among them the ones
+whose colons are not a helper (`https://[::1]/r.git`, `ssh://git@[::1]:22/r.git`, `[::1]:repo`,
+`git@[fe80::1]:org/r.git`, `C:\repos\r`, `git@host:org/r.git`, and `::` after the first `/`), and an `ssh://` address
+whose host (after any user name) starts with a dash is refused while a dash elsewhere in the address is accepted. A
+destination that is a folder with a file in it (the file stays intact), an empty folder or a file is refused with a
+reason that says it already exists, with git never started and the parent unchanged; so is a destination that is a
+link - a junction on Windows, a symbolic link elsewhere - whose target is untouched, and one whose target is gone; a
+destination with a missing parent or a relative one is refused; `CheckCloneDestination` gives the same reasons without
+cloning and accepts a name that does not exist yet, with or without a trailing separator. A stub whose `clone` takes two
+seconds completes under a one-second local limit (the clone limit applies); on a guarded thread the branch list, the
+switch, the clone and the destination check are each refused with `BlockingCallOnGuardedThreadException`. A real clone
+of a local bare repository works into a new folder (a repository root on `main` with the committed file, a clean working
+tree for git, no hidden attribute, nothing else left in the parent folder), and a clone of a path that is not a
+repository is a failed result that leaves the parent folder empty. This scenario is tested by
+`GitClient_Clone_Succeeds_RunsCloneWithDoubleDashAndArgumentList`,
+`GitClient_Clone_RefusedUrl_ThrowsArgumentExceptionAndRunsNoGit`, `GitClient_CheckCloneUrl_UsualAddress_ReturnsNull`,
+`GitClient_CheckCloneUrl_SshHostStartingWithDash_IsRefused`,
+`GitClient_Clone_DestinationExists_ThrowsArgumentExceptionAndTouchesNothing`,
+`GitClient_Clone_DestinationIsLink_IsRefusedAndTargetUntouched`,
+`GitClient_Clone_ParentMissingRelativeOrFile_ThrowsArgumentException`,
+`GitClient_CheckCloneDestination_NewFolder_ReturnsNull`,
+`GitClient_CheckCloneDestination_ExistingEmptyFolderOrFile_ReturnsReason`,
+`GitClient_CheckCloneDestination_DestinationIsLink_ReturnsReason`, `GitClient_Clone_UsesCloneTimeoutNotLocalTimeout`,
+`GitClient_Constructor_NonPositiveSwitchOrCloneLimit_ThrowsArgumentOutOfRangeException`,
+`GitClient_BranchAndCloneCommands_OnGuardedThread_ThrowBlockingCallOnGuardedThread`,
+`GitClient_Clone_RealLocalBareRepository_ClonesIntoNewFolderAndLeavesNoTempBehind` and
+`GitClient_Clone_RealGit_NotARepository_ReturnsFailedResultAndLeavesParentEmpty`, covering
+`AgentControl-GitClient-Clone`, `-CloneTimeLimit`, `-CloneFailureReported`, `-CommandsRefuseGuardedThread`,
+`-CloneUrlRefused`, `-CloneUrlSeparatedFromOptions`, `-CloneDestinationRules` and `-CloneIntoFreshFolder` (all prefixed
+`AgentControl-GitClient`).
+
+**GitClient_Clone_StopsAndCleansUpOnlyItsOwnFolder**: A stub whose `clone` creates its working folder (with a read-only
+pack file) and then hangs is canceled after the file exists: the call throws `OperationCanceledException`, the stub
+never finishes, the working folder is gone, the destination never existed, and a file, a folder and a look-alike folder
+named `.agentcontrol-clone-theirs` (with a file in it) that the user had in the parent folder are all still there with
+their content. With a one-second clone limit the same stub is stopped and reported as `GitCommandTimeoutException`
+naming `git clone` and the limit, and the parent folder is empty; a stub whose `clone` leaves its folder and exits with
+an error is returned as a failed result with git's text, the working folder is removed and the user's file stays. A stub
+whose `clone` takes two seconds, during which the test creates the destination folder - once with a file in it, once
+empty (which a plain Unix rename would silently replace; the rename of each platform must not) - ends as a failed result
+(no exception) whose text names the destination and says it was created while the repository was being cloned; the file
+is intact (the empty folder is still empty), the working folder is gone and the destination is the only entry in the
+parent folder. The rename that refuses to replace is also run directly (`MoveFileExW` with no flags on Windows,
+`renameat2` with `RENAME_NOREPLACE` on Linux, `renamex_np` with `RENAME_EXCL` on macOS): onto an existing empty folder
+it reports a conflict and changes nothing, onto a free name it moves the folder with its content. With a rename replaced
+by one that reports the platform as unsupported, the clone ends as a failed result that says the computer cannot rename
+without the risk of replacing, there is no destination and the working folder is gone. When the first two working-folder
+names the client would use are already taken - a folder with a file in it and a plain file - the clone uses the third
+name and both are intact afterwards; when every name tried is taken, the clone is a failed result saying the working
+folder could not be created, git is never started and the folder and its file are intact. A canceled clone whose working
+folder holds a junction (also one nested below it) to a folder of the user's with a read-only file ends with the working
+folder gone and the target folder, its files, the read-only flag included, and its sub folder unchanged; the same holds
+for a file symbolic link and a directory symbolic link (skipped where the platform refuses to create them). This
+scenario is tested by `GitClient_Clone_Canceled_RemovesOnlyItsTempFolder`,
+`GitClient_Clone_Canceled_LinkInWorkFolder_RemovesTheLinkAndLeavesItsTargetUntouched`,
+`GitClient_Clone_Canceled_SymbolicLinksInWorkFolder_AreRemovedAndTargetsUntouched`,
+`GitClient_Clone_TimesOut_StopsGitAndRemovesItsTempFolder`,
+`GitClient_Clone_Fails_RemovesItsTempFolderAndReturnsGitsReason` and
+`GitClient_Clone_DestinationAppearsWhileCloning_FailsClearlyAndTouchesNothingOfTheUsers`,
+`GitClient_Clone_NativeNoReplaceMove_MovesToFreeNameAndNeverReplacesAnEmptyFolder`,
+`GitClient_Clone_NoReplaceRenameUnsupported_RefusesAndRemovesOnlyTheWorkFolder`,
+`GitClient_Clone_WorkFolderNameTaken_IsNeverUsedOrDeleted` and
+`GitClient_Clone_EveryWorkFolderNameTaken_FailsWithoutStartingGitOrTouchingTheFolder`, covering
+`AgentControl-GitClient-CloneCleansUpOnlyItsOwnFolder`, `-CloneIntoFreshFolder`, `-CloneDestinationAppearedMeanwhile`
+and `-CloneCancelStopsGit` (all prefixed `AgentControl-GitClient`). The Linux and macOS native calls run only on those
+operating systems, which the continuous-integration jobs cover. Not tested: a working folder that cannot be created (a
+read-only parent); that path logs and reports the folder by name. A working folder that cannot be removed is tested
+through the `DeleteCloneFolder` seam, which makes every deletion fail, because a process holding a file open is not
+reproducible portably (see `GitClient_Clone_CloneReportsLeftoverFolder` below).
+
+**GitClient_Clone_CloneReportsLeftoverFolder**: With the deletion replaced by one that always throws, a clone canceled
+while git writes ends with a `GitCloneCanceledException` (an `OperationCanceledException` carrying the caller's token)
+whose message names the working folder and says it could not be removed and that the user should delete it; the
+working folder is still on disk and the destination does not exist. With the real deletion, a canceled clone throws a
+plain cancellation that is not a `GitCloneCanceledException`, and the parent folder is empty. With a git that cannot be
+started and the failing deletion, the clone throws an `InvalidOperationException` whose message holds both the start
+failure and the sentence naming the folder, and whose inner exception is kept. This scenario is tested by
+`GitClient_Clone_CanceledWhenTheFolderCannotBeRemoved_ThrowsCancellationNamingTheLeftover`,
+`GitClient_Clone_CanceledAndFolderRemoved_ThrowsPlainCancellation` and
+`GitClient_Clone_FailsToStartWhenTheFolderCannotBeRemoved_NamesTheLeftover`, covering
+`AgentControl-GitClient-CloneReportsLeftoverFolder`.
+
+**GitClient_Clone_NeverLogsTheAddressCredentials**: With an address `https://alice:<password>@example.com/...`, a stub
+whose `clone` fails and echoes the address in its error text, and a client whose git cannot be started, the password
+appears in no logged message (captured through `GitClientListLogger`), no result text and no exception text (its
+message and its full text), while the host `example.com` remains. A clone that times out and one that is canceled with
+such an address leave the password out of the exception text and the log. A token before the host
+(`https://<token>@example.com/...`), a token in the query string and a user name alone are removed from the result and
+the log of a failed clone, with the host kept. This scenario is tested by
+`GitClient_Clone_UrlWithPassword_IsNeverWrittenToLogOrExceptionText`,
+`GitClient_Clone_TimeoutAndCancelMessages_NeverContainTheCredentials` and
+`GitClient_Clone_TokenOnlyAndQueryStringUrls_AreRedactedEverywhere`, covering
+`AgentControl-GitClient-CloneRedactsCredentials`.
