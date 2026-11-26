@@ -24,7 +24,8 @@ tests use the shared headless Avalonia session (`HeadlessTestApp`).
 - An address that starts with a dash, uses the remote-helper syntax or has more than one line is refused with a message,
   as is a parent folder that is not an absolute path, and Clone stays disabled.
 - The folder name follows the address (last segment, without `.git`, for URLs, scp-like addresses and local paths) until
-  the user types a name, and then stays; a name that is not one valid Windows file name is refused with a message.
+  the user types a name, and then stays; a name that is not one valid Windows file name is refused with a message, on
+  every host operating system (the forbidden characters are a fixed set, not the host's).
 - The destination is checked on disk through the background work runner when Clone is pressed, so the calling thread is
   free meanwhile; an existing non-empty folder or a missing parent keeps the dialog open with the reason, and a new or
   an empty folder is accepted.

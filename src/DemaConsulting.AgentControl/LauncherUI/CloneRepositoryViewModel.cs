@@ -91,6 +91,14 @@ internal sealed class CloneRepositoryViewModel : ViewModelBase
     };
 
     /// <summary>
+    ///     The characters no Windows file name may contain: <c>\ / : * ? " &lt; &gt; |</c> and every
+    ///     control character. A fixed set, because <see cref="Path.GetInvalidFileNameChars"/> answers
+    ///     for the host operating system and is far smaller on Linux and macOS.
+    /// </summary>
+    private static readonly char[] InvalidNameCharacters =
+        [.. "\\/:*?\"<>|", .. Enumerable.Range(0, 32).Select(code => (char)code)];
+
+    /// <summary>
     ///     Runs the destination check off the UI thread.
     /// </summary>
     private readonly IBackgroundWorkRunner _backgroundWork;
@@ -353,6 +361,7 @@ internal sealed class CloneRepositoryViewModel : ViewModelBase
     ///     The folder name must be one valid Windows file name: no path separators or other characters a
     ///     file name cannot have, not <c>.</c> or <c>..</c>, no space or dot at the end, and not a
     ///     reserved device name (<c>CON</c>, <c>NUL</c>, <c>COM1</c>...), with or without an extension.
+    ///     The set of forbidden characters is fixed and does not depend on the host operating system.
     ///     Pure; no disk access.
     /// </remarks>
     /// <param name="name">The folder name as typed.</param>
@@ -370,7 +379,7 @@ internal sealed class CloneRepositoryViewModel : ViewModelBase
             return "The folder name must not be '.' or '..'.";
         }
 
-        if (text.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        if (text.IndexOfAny(InvalidNameCharacters) >= 0)
         {
             return "The folder name must not contain \\ / : * ? \" < > | or control characters.";
         }

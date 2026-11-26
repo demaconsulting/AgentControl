@@ -56,7 +56,8 @@ local paths; empty when the address names none.
 
 **CheckFolderName(name)** (static, pure): Returns the reason a text is not one valid Windows file name - blank, `.` or
 `..`, a character a file name cannot have (which includes the path separators), a trailing dot or space, a reserved
-device name (`CON`, `NUL`, `COM1`... with or without an extension) - or `null`.
+device name (`CON`, `NUL`, `COM1`... with or without an extension) - or `null`. The set of forbidden characters
+(`\ / : * ? " < > |` and the control characters) is fixed, so the answer does not depend on the host operating system.
 
 **AcceptAsync** (the body of `AcceptCommand`): Does nothing unless `CanAccept`. Sets `IsChecking`, runs
 `GitClient.CheckCloneDestination` through the background work runner - never on the calling (UI) thread, because the
