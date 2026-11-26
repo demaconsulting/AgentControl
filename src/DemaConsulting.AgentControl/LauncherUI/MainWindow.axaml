@@ -73,7 +73,9 @@
                      AutomationProperties.AutomationId="CloneRepoButton"
                      AutomationProperties.Name="Clone a repository"
                      Click="CloneRepoButton_Click"
-                     ToolTip.Tip="Clone a repository"
+                     IsEnabled="{Binding CanCloneRepository}"
+                     ToolTip.Tip="{Binding CloneRepositoryToolTip}"
+                     ToolTip.ShowOnDisabled="True"
                      Margin="0,0,8,0">
                 <materialIcons:MaterialIcon Kind="CloudDownloadOutline" />
             </Button>

@@ -192,10 +192,17 @@ operation (`GlobalProgressOperation`, begun with "Adding repositories..." and `C
 one `CancellationTokenSource` and a count of adds not yet ended; `null` when no add runs. Ending the last add of the
 session disposes its progress operation and its cancellation.
 
-**_activeCloneDestinations**, **_cloneCancellations**: `HashSet<string>` (compared ignoring letter case) and
-`List<CancellationTokenSource>` (UI thread only) — the normalized destinations of the clones that run, which refuse a
-second clone into the same folder, and the cancellations of those clones, which the strip's Cancel signals one by one
-and `Dispose` signals all. **CloneCancelDescription**: the strip's cancel naming of a clone.
+**_cloneActive**, **_cloneCancellations**, **_cloneWork**: `bool`, `List<CancellationTokenSource>` and `List<Task>` (UI
+thread only) — whether a clone, including the add of its folder, is running, which refuses a second clone; the
+cancellations of the clones that run, which the strip's Cancel signals one by one and `Dispose` signals all; and the
+background tasks of those clones, which `Dispose` waits for. **CanCloneRepository** (`bool`) and
+**CloneRepositoryToolTip** (`string`): whether a clone may start now - the view model is not disposed, no clone runs
+and `GlobalProgress.HasCancelableOperation` is `false` - and the Clone button's tooltip (*Clone a repository*, or *Wait
+for the running clone or other operation to finish, or cancel it, before cloning again*); both raise `PropertyChanged`
+when `_cloneActive` changes and when `GlobalProgress` reports a change of `HasCancelableOperation`.
+**CloneCancelDescription**: the strip's cancel naming of a clone. **CloneStopTimeout** (internal static `TimeSpan`, five
+seconds) and **_cloneStopTimeout**: how long `Dispose` waits for the clones' background work, lowered by the
+constructor's optional `cloneStopTimeout`.
 **CloneRepositoryOutcome** (`enum`: `Added`, `ClonedNotAdded`, `Failed`, `Canceled`, `Refused`) and
 **CloneRepositoryResult** (`record`: `Outcome`, `Notice`) — how a clone ended and what to tell the user.
 
@@ -372,6 +379,14 @@ nobody can be told any more (`-SettingsFlushedOnClose`). Nothing is handed to th
 (`ScheduleSettingsSave` ignores a change, and a confirmed save or a synchronous add throws `ObjectDisposedException`),
 so the close's write is the last one. The constructor's `settingsFlushTimeout` lets a test shorten the budget, so a
 write still running after it is tested without waiting.
+
+*Clones at close*: before the settings are written, `Dispose` cancels the clones that run and waits for their
+background tasks (`_cloneWork`), at most `CloneStopTimeout` (five seconds, lowered by the constructor's
+`cloneStopTimeout`), so git is stopped and the partly cloned folder removed before the process can end. The awaited task
+is the worker's own - killing git and removing the folder need no UI thread - so the wait cannot deadlock. When the
+time runs out a warning is logged and the close goes on; the cleanup finishes if the process lives long enough, which
+bounds the whole close by `CloneStopTimeout` plus `SettingsFlushTimeout`
+(`AgentControl-MainWindowViewModel-CloneStopsWhenWindowCloses`).
 
 *Test seam*: `FlushSettingsAsync()` (internal) flushes the writer and completes when the writes accepted so far have
 ended, so a test reads the settings file only once it holds every change.
@@ -730,14 +745,18 @@ of the same name can be told apart. Favorites is not offered. Reads the settings
 or `null`) and returning a `CloneRepositoryResult` (a `CloneRepositoryOutcome` and the notice to show, if any).
 
 - *Algorithm*: an invalid group name throws `ArgumentException` before anything starts; a disposed view model returns
-  `Canceled`; the destination is normalized (`NormalizeRepoPath`) and reserved in `_activeCloneDestinations` (compared
-  ignoring letter case) - a destination already reserved returns `Refused` with *A repository is already being cloned
-  into '...'.* without starting git (`AgentControl-MainWindowViewModel-CloneOneDestinationAtATime`). `RunCloneAsync`
+  `Canceled`; when `CanCloneRepository` is `false` (another clone or its add runs, or another operation that can be
+  canceled shows in the strip) it returns `Refused` with *A clone or another operation that can be canceled is still
+  running; wait for it to end or cancel it, then clone again.* without starting git
+  (`AgentControl-MainWindowViewModel-CloneOneAtATime`). Otherwise `_cloneActive` is set for the whole call - the clone
+  and the add that follows it, so there is no gap between the clone's operation ending and the add's beginning - and
+  cleared in a `finally`. The destination is normalized (`NormalizeRepoPath`). `RunCloneAsync`
   then begins a progress operation `Cloning {folder}...` (indeterminate) whose cancel action cancels the clone's
   `CancellationTokenSource` and whose cancel description is *Cancel cloning repository* / *Stop cloning; the partly
   cloned folder is removed*, and runs `new GitClient(git path, timeouts).Clone(url, destination, token)` through the
-  `IBackgroundWorkRunner` - never on the UI thread (`AgentControl-MainWindowViewModel-CloneInBackground`). Whatever the
-  outcome, the operation is disposed, the cancellation released and the destination freed. An exit code of zero is a
+  `IBackgroundWorkRunner` - never on the UI thread (`AgentControl-MainWindowViewModel-CloneInBackground`); the task is
+  kept in `_cloneWork` while it runs. Whatever the outcome, the operation is disposed, the task forgotten and the
+  cancellation released. An exit code of zero is a
   successful clone, and the folder is then added by `EnqueueAddReposAsync([destination], group)` - the path every add
   takes (`AgentControl-MainWindowViewModel-CloneAddsCardThroughAddPath`); a canceled add (the strip's second Cancel, or
   the window closed), or one whose outcome is not `Added` (already listed, not a repository root, the save could not be
@@ -745,14 +764,18 @@ or `null`) and returning a `CloneRepositoryResult` (a `CloneRepositoryOutcome` a
   cloned folder is still on disk.*
 - *Failures* (`AgentControl-MainWindowViewModel-CloneFailureReported`): a non-zero exit code returns `Failed` with
   `Cloning failed: ` and git's message - standard error, else standard output, without the progress line that begins
-  `Cloning into` - redacted with `SecretRedactor`, or `git exited with code N.` when git said nothing; an exception
-  other than a cancellation (the destination or address was refused at the last moment, git cannot be started, the
-  clone limit) is logged through the redacting logger and returned as `Failed` with its safe message. The method does
+  `Cloning into` - redacted with `SecretRedactor`, or `git exited with code N.` when git said nothing; an
+  `ArgumentException` (the client refused the address or destination at the last moment) is returned as `Failed` with
+  its message without the framework's ` (Parameter 'x')` suffix, which names a code parameter the user cannot see; any
+  other exception other than a cancellation (git cannot be started, the clone limit) is logged through the redacting
+  logger and returned as `Failed` with its safe message. The method does
   not throw for an expected failure, because the window calls it from an event handler.
-- *Cancel* (`AgentControl-MainWindowViewModel-CloneProgressAndCancel`): the strip's Cancel, and `Dispose`, which cancels
-  every clone that runs, make `GitClient.Clone` kill git and remove only what the clone created; the result is
-  `Canceled` with no notice, nothing is added and the strip is idle again.
-**RemoveRepo**: Removes a repo card unconditionally.
+- *Cancel* (`AgentControl-MainWindowViewModel-CloneProgressAndCancel`): the strip's Cancel makes `GitClient.Clone` kill
+  git and remove only what the clone created; the result is `Canceled` with no notice, nothing is added and the strip
+  is idle again. `Dispose` does the same for every clone that runs and then waits for their background tasks, at most
+  `CloneStopTimeout`; on a timeout it logs a warning and goes on
+  (`AgentControl-MainWindowViewModel-CloneStopsWhenWindowCloses`).
+
 
 - *Parameters*: `RepoCardViewModel card`.
 - *Returns*: `void`.
@@ -1159,7 +1182,7 @@ outcome with the redacted reason, and the window shows the reason in the summary
 same `SaveFailed` outcomes, and its task never faults for an expected failure (a queued add whose predecessor faulted
 still runs); `CloneRepositoryAsync` throws `ArgumentNullException` for a null request and `ArgumentException` for an
 invalid group name before anything starts, and otherwise never throws: a failed clone, a refused destination and git
-that cannot be started are `Failed` results, a clone into a destination being cloned into is `Refused` and a
+that cannot be started are `Failed` results, a clone while another clone or cancelable operation runs is `Refused` and a
 cancellation is `Canceled`; a cancellation before the commit is a canceled result, not an exception; `AddRepos` and
 `EnqueueAddReposAsync` throw `ArgumentNullException` for a null list and `ArgumentException` for an invalid group name
 before adding (or queuing) anything; `ToggleGroupCollapsed` throws `ArgumentException` for a blank name, while
@@ -1220,7 +1243,8 @@ succeeding. A background card refresh after a settings save that is canceled (th
 - **App** — constructs `MainWindowViewModel` in `OnFrameworkInitializationCompleted`, passing the
   process-wide `PackageCredentialContext`, and assigns it as `MainWindow.DataContext`.
 - **MainWindow** (code-behind) — calls `GetGroupChoices` to build the clone dialog and `CloneRepositoryAsync` with its
-  answer for the app bar's Clone button (showing the returned notice in a message box), calls `EnqueueAddReposAsync` and
+  answer for the app bar's Clone button (showing the returned notice in a message box) and binds the button's
+  `IsEnabled` and tooltip to `CanCloneRepository` and `CloneRepositoryToolTip`, calls `EnqueueAddReposAsync` and
   `DescribeAddOutcomes` for the app bar's Add button, a header's "Add repository..." (both with several folders) and
   folders dropped from the file manager (the drop's add posted to the UI thread), binds the progress strip to
   `GlobalProgress`, answers `AddSaveFailed` with the Retry/Discard `ConfirmationWindow`, and calls `RemoveRepo`,

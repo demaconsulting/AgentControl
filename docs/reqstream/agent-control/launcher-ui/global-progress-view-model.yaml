@@ -98,3 +98,16 @@ sections:
           button, the wrong thing while another operation (a clone) runs.
         tests:
           - GlobalProgressViewModel_Cancel_NamesTheOperation
+
+      - id: AgentControl-GlobalProgressViewModel-HasCancelableOperation
+        title: >-
+          The GlobalProgressViewModel class shall tell whether any running operation was begun with a
+          cancel action - from its start until it has ended, also after its cancel was requested or
+          while it accepts no cancel - and shall announce each change, so the window can offer one
+          cancelable operation at a time.
+        justification: |
+          The work behind a canceled operation (stopping git, removing a partial folder) is still
+          running until the operation ends; the window must not start another such operation before
+          then, which the shown Cancel button alone cannot tell it.
+        tests:
+          - GlobalProgressViewModel_HasCancelableOperation_FollowsOperationsWithACancelAction

@@ -370,7 +370,7 @@ name and the group `Work` are entered and Clone is pressed. The card named after
 and the dialog are gone, the destination is a working clone on `main` with the repository's files, the header
 `Work` counts two repos and the settings file stores the new repo with the group `Work`. This scenario is tested by
 `windows@CloneRepoButton_CloneFromLocalBareRepoIntoGroup_AddsTheCardAndRemovesTheProgressStrip`, covering
-`AgentControl-System-CloneRepository`; Cancel, the failure message, one clone per destination and the add path are
+`AgentControl-System-CloneRepository`; Cancel, the failure message, one clone at a time and the add path are
 verified one level down (`MainWindowViewModel`, `GitClient`).
 
 **AgentControl_CloneSafety_UrlThatLooksLikeAnOption_IsRefusedAndRunsNoGit**: In the published application, with the

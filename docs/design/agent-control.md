@@ -306,8 +306,9 @@ draws it, and - for what must persist - `Settings`. Nothing here touches a repo.
 - *Cloning a repository* (`AgentControl-System-CloneRepository`, `AgentControl-System-CloneSafety`): the app bar's
   **Clone repository** button collects an address, a parent folder, a folder name and a group in a dialog that applies
   the rules of `GitClient` (an address that git would read as an option or as a remote helper is refused before git
-  starts; the destination must not exist or be empty). `MainWindowViewModel.CloneRepositoryAsync` runs `GitClient.Clone`
-  off the UI thread under a progress-strip operation with Cancel, one clone per destination, and then adds the folder
+  starts; the destination must not exist at all). `MainWindowViewModel.CloneRepositoryAsync` runs `GitClient.Clone`
+  off the UI thread under a progress-strip operation with Cancel, one clone at a time (the Clone button is disabled with
+  a tooltip while a clone or another cancelable operation runs), and then adds the folder
   through the same add path as any repo. Credentials in an address are removed from every log message and failure
   text, and a canceled or timed-out clone removes only what it created.
 - *Responsive repo-list work* (`AgentControl-System-ResponsiveRepoListWork`): reading the cards at start-up, adding

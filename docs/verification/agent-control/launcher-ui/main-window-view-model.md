@@ -1037,12 +1037,21 @@ the gate opens the clone is made and the card added. This scenario is tested by
 active, reads `Cloning repo...`, is indeterminate, can be canceled and names its Cancel `Cancel cloning repository`; it
 is idle after the clone. With a git whose clone creates its working folder and then hangs, executing the strip's Cancel
 makes the result `Canceled` with no notice, removes the working folder, leaves the parent folder empty (no destination),
-adds no card and leaves the strip idle; disposing
-the view model does the same for a running clone, and a clone requested after the close does nothing. This scenario is
-tested by `MainWindowViewModel_CloneRepositoryAsync_ShowsProgressWithCancelAndRemovesItAtTheEnd`,
-`MainWindowViewModel_CloneRepositoryAsync_Cancel_RemovesPartialFolderAndAddsNothing` and
-`MainWindowViewModel_CloneRepositoryAsync_Dispose_CancelsRunningClone`, covering
+adds no card and leaves the strip idle. This scenario is tested by
+`MainWindowViewModel_CloneRepositoryAsync_ShowsProgressWithCancelAndRemovesItAtTheEnd` and
+`MainWindowViewModel_CloneRepositoryAsync_Cancel_RemovesPartialFolderAndAddsNothing`, covering
 `AgentControl-MainWindowViewModel-CloneProgressAndCancel`.
+
+**MainWindowViewModel_CloneStopsWhenWindowCloses_WaitsBoundedForTheCleanup**: With a git whose clone creates its working
+folder and then hangs, disposing the view model returns only after git was stopped and the working folder removed (the
+parent folder is empty and the stub did not run to its end the moment `Dispose` returns); the clone's result is
+`Canceled`, no card was added, and a clone requested after the close does nothing. With the background work held at a
+gate that never opens and a bound of 200 milliseconds, `Dispose` waits for about that bound (at least 150
+milliseconds, well under the default five seconds) and returns while the clone has not completed; once the gate opens
+the clone ends `Canceled`. This scenario is tested by
+`MainWindowViewModel_CloneRepositoryAsync_Dispose_CancelsRunningClone` and
+`MainWindowViewModel_CloneRepositoryAsync_DisposeWhileCloneNeverEnds_ReturnsWithinTheBound`, covering
+`AgentControl-MainWindowViewModel-CloneStopsWhenWindowCloses`.
 
 **MainWindowViewModel_CloneAddsCardThroughAddPath_CardInGroupSavedOrFolderKept**: A successful clone (the stub's, and a
 real clone of a local bare repository with one commit) runs git with `clone -- <address> <working folder>`, where the
@@ -1066,13 +1075,22 @@ with a blank group name throws `ArgumentException` before the strip shows anythi
 `MainWindowViewModel_CloneRepositoryAsync_Failure_ReturnsGitMessageAndAddsNothing`,
 `MainWindowViewModel_CloneRepositoryAsync_FailureWithoutMessage_NamesTheExitCode`,
 `MainWindowViewModel_CloneRepositoryAsync_DestinationAppeared_FailsWithReasonAndTouchesNothing`,
-`MainWindowViewModel_CloneRepositoryAsync_RealGitNotARepository_FailsWithGitsMessage` and
-`MainWindowViewModel_CloneRepositoryAsync_InvalidGroup_ThrowsBeforeStarting`, covering
-`AgentControl-MainWindowViewModel-CloneFailureReported`.
+`MainWindowViewModel_CloneRepositoryAsync_RealGitNotARepository_FailsWithGitsMessage`,
+`MainWindowViewModel_CloneRepositoryAsync_InvalidGroup_ThrowsBeforeStarting` and
+`MainWindowViewModel_CloneRepositoryAsync_CloneFailsWithArgumentException_NoticeHasNoParameterSuffix`, covering
+`AgentControl-MainWindowViewModel-CloneFailureReported`. The last one clones from an address that starts with a dash:
+the notice is exactly `Cloning failed: The repository address must not start with a dash.`, without the framework's
+parameter suffix.
 
-**MainWindowViewModel_CloneOneDestinationAtATime_SecondRequestRefused**: With the first clone held at the gate, a second
-request for the same folder spelled in upper case returns `Refused` (its notice says a repository is already being
-cloned there) and git was started once; after the first clone ends its card is listed and the destination is no longer
-reserved (a third request is refused for the destination now existing, not for the reservation). This scenario is tested
-by `MainWindowViewModel_CloneRepositoryAsync_SameDestinationTwice_SecondRefused`, covering
-`AgentControl-MainWindowViewModel-CloneOneDestinationAtATime`.
+**MainWindowViewModel_CloneOneAtATime_SecondRequestRefused**: With the first clone held at the gate, a second request
+for the same folder spelled in upper case and one for another folder both return `Refused` (the notice says a clone
+or another operation is still running) and git was started once; after the first clone ends its card is listed and
+another clone is accepted. `CanCloneRepository` is `true` when idle (tooltip `Clone a repository`), `false` with the
+tooltip that says to wait or cancel while an add that can be canceled is held and while a clone is held, and `true`
+again after each; each change raises `PropertyChanged` for `CanCloneRepository` and `CloneRepositoryToolTip`. With the
+clone finished and the add of its folder held at the gate, a further clone is refused too (the guard covers the gap
+between the clone and its add). This scenario is tested by
+`MainWindowViewModel_CloneRepositoryAsync_SecondCloneWhileOneRuns_RefusedWithoutStartingGit`,
+`MainWindowViewModel_CanCloneRepository_FalseWhileCloneOrAddRuns_TrueAfter` and
+`MainWindowViewModel_CloneRepositoryAsync_WhileTheClonedFolderIsBeingAdded_RefusedToo`, covering
+`AgentControl-MainWindowViewModel-CloneOneAtATime`.

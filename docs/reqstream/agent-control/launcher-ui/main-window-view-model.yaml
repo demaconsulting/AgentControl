@@ -1362,15 +1362,28 @@ sections:
         title: >-
           The MainWindowViewModel class shall show a clone in the global progress strip as
           "Cloning {folder}..." with a Cancel button named after the clone, remove the progress at the
-          end however the clone ended, and, when the clone is canceled (or the window is closed), stop
-          git, add nothing and say nothing.
+          end however the clone ended, and, when the clone is canceled, stop git, add nothing and say
+          nothing.
         justification: |
           A clone that takes long or was started by mistake must be stoppable, and a deliberate cancel
           is not an error; the strip is the one place the window shows its long operations.
         tests:
           - MainWindowViewModel_CloneRepositoryAsync_ShowsProgressWithCancelAndRemovesItAtTheEnd
           - MainWindowViewModel_CloneRepositoryAsync_Cancel_RemovesPartialFolderAndAddsNothing
+
+      - id: AgentControl-MainWindowViewModel-CloneStopsWhenWindowCloses
+        title: >-
+          The MainWindowViewModel class shall, when it is disposed (the window closed) while a clone
+          runs, cancel the clone and wait at most five seconds - a limit a caller can lower - for git
+          to be stopped and the partly cloned folder to be removed, and shall then return even when
+          that work has not ended, without adding anything.
+        justification: |
+          A process that ends right after the window closed would leave the partly cloned folder
+          behind unless the close waits for the cleanup; an unbounded wait would keep a closed window
+          alive when the cleanup cannot end.
+        tests:
           - MainWindowViewModel_CloneRepositoryAsync_Dispose_CancelsRunningClone
+          - MainWindowViewModel_CloneRepositoryAsync_DisposeWhileCloneNeverEnds_ReturnsWithinTheBound
 
       - id: AgentControl-MainWindowViewModel-CloneAddsCardThroughAddPath
         title: >-
@@ -1401,17 +1414,24 @@ sections:
           - MainWindowViewModel_CloneRepositoryAsync_DestinationAppeared_FailsWithReasonAndTouchesNothing
           - MainWindowViewModel_CloneRepositoryAsync_RealGitNotARepository_FailsWithGitsMessage
           - MainWindowViewModel_CloneRepositoryAsync_InvalidGroup_ThrowsBeforeStarting
+          - MainWindowViewModel_CloneRepositoryAsync_CloneFailsWithArgumentException_NoticeHasNoParameterSuffix
 
-      - id: AgentControl-MainWindowViewModel-CloneOneDestinationAtATime
+      - id: AgentControl-MainWindowViewModel-CloneOneAtATime
         title: >-
-          The MainWindowViewModel class shall refuse a clone into a destination that another clone is
-          already filling (ignoring letter case), without starting git, and shall allow the destination
-          again once that clone has ended.
+          The MainWindowViewModel class shall refuse a clone, without starting git, while another
+          clone (including the add of its folder) or any other operation that can be canceled shows
+          in the progress strip, say so in the notice, tell the window through CanCloneRepository
+          (with a tooltip that gives the reason) when a clone may start, and accept a clone again
+          once that operation has ended.
         justification: |
-          Two clones into one folder would corrupt each other, and the removal after a canceled clone
-          must never delete a folder another clone is still writing.
+          Clones into one folder would corrupt each other, the removal after a canceled clone must
+          never touch a folder another clone is filling, and a second long operation beside an add
+          would leave the strip showing only one of them; offering one cancelable operation at a time
+          keeps what Cancel stops unambiguous.
         tests:
-          - MainWindowViewModel_CloneRepositoryAsync_SameDestinationTwice_SecondRefused
+          - MainWindowViewModel_CloneRepositoryAsync_SecondCloneWhileOneRuns_RefusedWithoutStartingGit
+          - MainWindowViewModel_CloneRepositoryAsync_WhileTheClonedFolderIsBeingAdded_RefusedToo
+          - MainWindowViewModel_CanCloneRepository_FalseWhileCloneOrAddRuns_TrueAfter
 
       - id: AgentControl-MainWindowViewModel-SharedRepoReads
         title: >-

@@ -557,11 +557,17 @@ public sealed class MainWindowTests : IDisposable
             Assert.Equal("Cancel cloning repository", AutomationProperties.GetName(cancel));
             Assert.Equal("Cloning slow...", viewModel.GlobalProgress.Text);
 
+            // Assert: the Clone button is unavailable while the clone runs
+            var cloneButton = window.FindControl<Button>("CloneRepoButton")!;
+            Assert.False(cloneButton.IsEnabled);
+
             // Act: Cancel
             DialogWindowTests.Click(window, "GlobalProgressCancelButton");
-            await WaitUntilAsync(() => !viewModel.GlobalProgress.IsActive);
+            await WaitUntilAsync(() => !viewModel.GlobalProgress.IsActive && viewModel.CanCloneRepository);
+            Dispatcher.UIThread.RunJobs();
 
             // Assert: stopped, cleaned up (neither the destination nor the working folder), nothing added or said
+            Assert.True(cloneButton.IsEnabled);
             Assert.False(Directory.Exists(destination));
             Assert.Empty(Directory.GetFileSystemEntries(parent));
             Assert.Empty(viewModel.RepoCards);
@@ -997,7 +1003,51 @@ public sealed class MainWindowTests : IDisposable
     });
 
     /// <summary>
-    ///     Test that the progress strip's Cancel stops an add before anything is added, without a
+    ///     Test that the Clone button is disabled, with a tooltip that says to wait or cancel, while an
+    ///     operation that can be canceled shows in the progress strip (an add held at a gate here), and
+    ///     is enabled again with its normal tooltip once that operation ended.
+    /// </summary>
+    [Fact]
+    public void MainWindow_CloneRepoButton_WhileCancelableOperationShown_IsDisabledWithTooltip() => HeadlessTestApp.RunAsync(async () =>
+    {
+        // Arrange: an add that is held while its folder is checked
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = new MainWindowViewModel(new AppSettings(), configDirectory: CreateTempDirectory(), backgroundWork: gate);
+        var window = new MainWindow { DataContext = viewModel, Width = 900, Height = 700 };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        var button = window.FindControl<Button>("CloneRepoButton")!;
+        var idle = (button.IsEnabled, ToolTip.GetTip(button));
+
+        try
+        {
+            // Act
+            var adding = viewModel.EnqueueAddReposAsync([CreateRepoDirectory()], null);
+            await gate.FirstCall;
+            Dispatcher.UIThread.RunJobs();
+            var whileAdding = (button.IsEnabled, ToolTip.GetTip(button), AutomationProperties.GetName(button));
+            gate.Release();
+            await adding;
+            Dispatcher.UIThread.RunJobs();
+
+            // Assert: disabled with the reason while the add runs, as before afterwards
+            Assert.Equal((true, (object?)"Clone a repository"), idle);
+            Assert.False(whileAdding.IsEnabled);
+            Assert.Equal(
+                "Wait for the running clone or other operation to finish, or cancel it, before cloning again",
+                whileAdding.Item2);
+            Assert.Equal("Clone a repository", whileAdding.Item3);
+            Assert.True(button.IsEnabled);
+            Assert.Equal("Clone a repository", ToolTip.GetTip(button));
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    /// <summary>
+    ///     Test that the progress strip's Cancel button stops an add before anything is added, without a
     ///     message afterwards.
     /// </summary>
     [Fact]

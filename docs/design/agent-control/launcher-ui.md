@@ -26,8 +26,8 @@ the filter and the choice; its rows `BranchItemViewModel` and its answer `Branch
 `CloneRepositoryViewModel` (the view model of the "Clone repository" dialog: the address, the folder, the group and the
 checks on them; its group choice `CloneGroupChoice` and its answer `CloneRepositoryRequest` are in the same file),
 `DialogBehavior` (the keyboard behavior every dialog shares) and `GlobalProgressViewModel` (with
-`GlobalProgressOperation`; the progress strip under the app bar that shows bulk work - adding repositories, and
-refreshing the cards at start-up and after Settings are saved - with Cancel for an add or a clone) and
+`GlobalProgressOperation`; the progress strip under the app bar that shows bulk work - adding repositories, cloning a
+repository, and refreshing the cards at start-up and after Settings are saved - with Cancel for an add or a clone) and
 `RepoRefreshQueue` (the one queue every lazy read of a repo's state goes through - the cards' start-up reads, the folder
 checks of an add, the cards' refresh after a settings save, the working-tree checks of the cards shown, and the reads of
 Refresh, Pull and the card actions - so at most two run at once across all of them).
@@ -206,25 +206,31 @@ a NuGet source's editor and the "Forget saved sign-in" action of a server source
 - *Constraints*: The fingerprint is saved normalized, and only while signatures are required.
 
 **Global progress strip** (`MainWindowViewModel.GlobalProgress`, a `GlobalProgressViewModel`): the strip directly under
-the app bar that shows bulk work not tied to one card - adding repositories, and refreshing the cards at start-up and
-after Settings are saved.
+the app bar that shows bulk work not tied to one card - adding repositories, cloning a repository, and refreshing the
+cards at start-up and after Settings are saved.
 
 - *Type*: In-process .NET bindable properties and an `ICommand`, bound by `MainWindow.axaml` to a `Border`
   (AutomationId `GlobalProgressStrip`, exposed to UI Automation as a content element, visible only while `IsActive`),
   a 3-pixel `ProgressBar` (`GlobalProgressBar`,
   indeterminate or with `Value` of `Maximum`, its accessible name the status text), a `TextBlock`
-  (`GlobalProgressText`) and a Cancel `Button` (`GlobalProgressCancelButton`, accessible name "Cancel adding
-  repositories", visible only while `CanCancel`).
+  (`GlobalProgressText`) and a Cancel `Button` (`GlobalProgressCancelButton`, visible only while `CanCancel`; its
+  accessible name and tooltip follow the shown operation - "Cancel adding repositories" for an add, "Cancel cloning
+  repository" for a clone - through `CancelAccessibleName` and `CancelToolTip`).
 - *Role*: Provider.
 - *Contract*: Shows the most recently begun running bulk operation that can still be canceled or, when none can, the
   most recently begun running one: "Adding repositories..." while the
   folders of an add are counted, "Adding {completed} of {total} repositories..." as each folder has been checked,
-  "Saving..." while the add saves (no Cancel then), and "Refreshing repositories {completed} of {total}..." while the
+  "Saving..." while the add saves (no Cancel then), "Cloning {folder}..." while a clone runs (indeterminate, with
+  Cancel) and "Refreshing repositories {completed} of {total}..." while the
   shared refresh queue reads the cards at start-up or after a settings save (no Cancel). A single card's Refresh,
   Pull or action shows on its card, not in the strip. Cancel stops the running add and every queued
-  add before anything is saved or added, with no message afterwards; an add stays shown, with its Cancel, while the
+  add before anything is saved or added, with no message afterwards, or stops the running clone and removes the partly
+  cloned folder; an add stays shown, with its Cancel, while the
   cards refresh after a settings save, and the refresh is shown once the add has ended or was canceled
-  (`AgentControl-LauncherUI-GlobalProgress`, `AgentControl-LauncherUI-AddCancel`).
+  (`AgentControl-LauncherUI-GlobalProgress`, `AgentControl-LauncherUI-AddCancel`,
+  `AgentControl-LauncherUI-CloneProgressCancel`). `HasCancelableOperation` tells whether any running operation has a
+  cancel action, also one already canceled whose work is still ending; the Clone button is disabled while it is `true`
+  (`AgentControl-LauncherUI-CloneOneAtATime`), so one clone or add runs at a time.
 - *Constraints*: Fully collapsed when idle, so the idle window is unchanged; the strip, its text and its bar use
   the theme brushes `GlobalProgressStripBackground`, `GlobalProgressTextForeground`, `GlobalProgressForeground` and
   `GlobalProgressTrack`, defined for both themes and checked for contrast.
@@ -884,8 +890,11 @@ reason when it cannot be used. The dialog only chooses. `MainWindowViewModel.Clo
 operation of the window
 (`AgentControl-LauncherUI-CloneRepository`, `-CloneProgressCancel`): the strip shows an indeterminate `Cloning x...`
 with a Cancel button named *Cancel cloning repository*; `GitClient.Clone` runs on a worker thread and clones into a
-hidden folder next to the destination that it renames to the destination when git succeeded; a second request for
-the destination being cloned into is refused; Cancel (or closing the window) stops git and removes only that hidden
+hidden folder next to the destination that it renames to the destination when git succeeded; one clone runs at a time:
+while a clone (and the add of its folder) or another operation that can be canceled shows in the strip, the Clone button
+is disabled and its tooltip says to wait for the running clone or other operation, or cancel it, and a request made
+anyway is refused (`-CloneOneAtATime`); Cancel (or closing the window, which waits at most five seconds for the
+cleanup) stops git and removes only that hidden
 folder (see the GitIntegration design) and says nothing. When git succeeds the folder is added through
 `EnqueueAddReposAsync` - the same checks, the chosen group (created when it does not exist), the save and the
 Retry/Discard question - so the card appears like any added repo; when that add is canceled, refused or cannot be saved

@@ -30,7 +30,7 @@ namespace DemaConsulting.AgentControl.Tests.LauncherUI;
 /// <summary>
 ///     Unit tests for the clone part of <see cref="MainWindowViewModel"/>: the group choices of the
 ///     dialog and <see cref="MainWindowViewModel.CloneRepositoryAsync"/> (progress with Cancel, the clone
-///     off the UI thread, the card added through the add path, one clone per destination, failures
+///     off the UI thread, the card added through the add path, one clone at a time, failures
 ///     reported).
 /// </summary>
 /// <remarks>
@@ -263,38 +263,117 @@ public sealed class MainWindowViewModelCloneTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that a second clone into a destination that is being cloned into is refused without
-    ///     starting git, whatever its letter case, and that the first clone is unaffected.
+    ///     Test that a second clone, into the same folder or another one, is refused without starting git
+    ///     while the first clone runs, that the first clone is unaffected, and that a clone is accepted
+    ///     again once the first one ended.
     /// </summary>
     [Fact]
-    public async Task MainWindowViewModel_CloneRepositoryAsync_SameDestinationTwice_SecondRefused()
+    public async Task MainWindowViewModel_CloneRepositoryAsync_SecondCloneWhileOneRuns_RefusedWithoutStartingGit()
     {
         // Arrange: the first clone is held at a gate
         var stub = CreateStub(null, new GitStub.Command("clone", CreatesDestination: true));
         var gate = new GatedBackgroundWorkRunner();
         var viewModel = CreateViewModel(stub, new AppSettings(), gate);
-        var destination = Path.Combine(CreateTempDirectory(), "repo");
+        var parent = CreateTempDirectory();
+        var destination = Path.Combine(parent, "repo");
         var first = viewModel.CloneRepositoryAsync(new CloneRepositoryRequest(Url, destination, null));
         await gate.FirstCall;
 
-        // Act: a second request for the same folder (spelled in another case)
-        var second = await viewModel.CloneRepositoryAsync(new CloneRepositoryRequest(Url, destination.ToUpperInvariant(), null));
+        // Act: a second request for the same folder (spelled in another case) and one for another folder
+        var sameFolder = await viewModel.CloneRepositoryAsync(new CloneRepositoryRequest(Url, destination.ToUpperInvariant(), null));
+        var otherFolder = await viewModel.CloneRepositoryAsync(new CloneRepositoryRequest(Url, Path.Combine(parent, "other"), null));
         var callsBeforeRelease = gate.Calls;
         gate.Release();
         var firstResult = await first;
 
-        // Assert
-        Assert.Equal(CloneRepositoryOutcome.Refused, second.Outcome);
-        Assert.Contains("already being cloned", second.Notice, StringComparison.Ordinal);
+        // Assert: both refused, git started once, the first clone added its card
+        Assert.Equal(CloneRepositoryOutcome.Refused, sameFolder.Outcome);
+        Assert.Equal(CloneRepositoryOutcome.Refused, otherFolder.Outcome);
+        Assert.Contains("still running", otherFolder.Notice, StringComparison.Ordinal);
         Assert.Equal(1, callsBeforeRelease);
         Assert.Equal(CloneRepositoryOutcome.Added, firstResult.Outcome);
         Assert.Single(viewModel.RepoCards);
+        Assert.False(Directory.Exists(Path.Combine(parent, "other")));
 
-        // Act: once the clone ended the destination is free of the reservation (and now exists)
-        var third = await viewModel.CloneRepositoryAsync(new CloneRepositoryRequest(Url, destination, null));
+        // Act: once the clone ended, another clone is accepted
+        var third = await viewModel.CloneRepositoryAsync(new CloneRepositoryRequest(Url, Path.Combine(parent, "other"), null));
 
-        // Assert: refused by the destination rule, not the reservation
-        Assert.Equal(CloneRepositoryOutcome.Failed, third.Outcome);
+        // Assert
+        Assert.Equal(CloneRepositoryOutcome.Added, third.Outcome);
+        Assert.Equal(2, viewModel.RepoCards.Count);
+    }
+
+    /// <summary>
+    ///     Test that <see cref="MainWindowViewModel.CanCloneRepository"/> is false, with a tooltip that
+    ///     says why, from the start of a clone until its card was added, and while an add that can be
+    ///     canceled runs, and true again afterwards; and that the change is announced.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_CanCloneRepository_FalseWhileCloneOrAddRuns_TrueAfter()
+    {
+        // Arrange
+        var stub = CreateStub(null, new GitStub.Command("clone", CreatesDestination: true));
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = CreateViewModel(stub, new AppSettings(), gate);
+        var announced = new List<string?>();
+        viewModel.PropertyChanged += (_, e) => announced.Add(e.PropertyName);
+        var idle = (viewModel.CanCloneRepository, viewModel.CloneRepositoryToolTip);
+
+        // Act: an add is held
+        var adding = viewModel.EnqueueAddReposAsync([CreateTempDirectory()], null);
+        await gate.FirstCall;
+        var whileAdding = (viewModel.CanCloneRepository, viewModel.CloneRepositoryToolTip);
+        gate.Release();
+        await adding;
+        var afterAdd = viewModel.CanCloneRepository;
+
+        // Act: a clone is held
+        gate.Close();
+        announced.Clear();
+        var cloning = viewModel.CloneRepositoryAsync(new CloneRepositoryRequest(Url, Path.Combine(CreateTempDirectory(), "repo"), null));
+        await gate.FirstCall;
+        var whileCloning = viewModel.CanCloneRepository;
+        gate.Release();
+        await cloning;
+
+        // Assert
+        Assert.Equal((true, "Clone a repository"), idle);
+        Assert.False(whileAdding.CanCloneRepository);
+        Assert.Contains("cancel it", whileAdding.CloneRepositoryToolTip, StringComparison.Ordinal);
+        Assert.True(afterAdd);
+        Assert.False(whileCloning);
+        Assert.True(viewModel.CanCloneRepository);
+        Assert.Equal("Clone a repository", viewModel.CloneRepositoryToolTip);
+        Assert.Contains(nameof(MainWindowViewModel.CanCloneRepository), announced);
+        Assert.Contains(nameof(MainWindowViewModel.CloneRepositoryToolTip), announced);
+    }
+
+    /// <summary>
+    ///     Test that the add that follows a clone is covered by the same guard: while the cloned folder's
+    ///     add is held (the clone itself has ended) a clone is still refused.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_CloneRepositoryAsync_WhileTheClonedFolderIsBeingAdded_RefusedToo()
+    {
+        // Arrange: the clone runs at once; the runner then holds the add's reads
+        var stub = CreateStub(null, new GitStub.Command("clone", CreatesDestination: true));
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = CreateViewModel(stub, new AppSettings(), gate);
+        var parent = CreateTempDirectory();
+        var cloning = viewModel.CloneRepositoryAsync(new CloneRepositoryRequest(Url, Path.Combine(parent, "repo"), null));
+        await gate.FirstCall;
+        gate.Release();
+        gate.Close();
+        await gate.FirstCall;
+
+        // Act: the clone has ended and the add holds the gate
+        var duringAdd = await viewModel.CloneRepositoryAsync(new CloneRepositoryRequest(Url, Path.Combine(parent, "other"), null));
+        gate.Release();
+        var result = await cloning;
+
+        // Assert
+        Assert.Equal(CloneRepositoryOutcome.Refused, duringAdd.Outcome);
+        Assert.Equal(CloneRepositoryOutcome.Added, result.Outcome);
     }
 
     /// <summary>
@@ -356,8 +435,8 @@ public sealed class MainWindowViewModelCloneTests : IDisposable
     }
 
     /// <summary>
-    ///     Test that disposing the view model (the window closed) cancels a running clone, which removes
-    ///     the partial folder and adds nothing.
+    ///     Test that disposing the view model (the window closed) cancels a running clone and returns
+    ///     only after git was stopped and the partial folder removed, and that the clone adds nothing.
     /// </summary>
     [Fact]
     public async Task MainWindowViewModel_CloneRepositoryAsync_Dispose_CancelsRunningClone()
@@ -372,9 +451,11 @@ public sealed class MainWindowViewModelCloneTests : IDisposable
 
         // Act
         viewModel.Dispose();
-        var result = await cloning;
 
-        // Assert
+        // Assert: when Dispose returned, the cleanup was done and git had not run to its end
+        Assert.Empty(Directory.GetFileSystemEntries(parent));
+        Assert.False(File.Exists(stub.FinishedMarkerPath));
+        var result = await cloning;
         Assert.Equal(CloneRepositoryOutcome.Canceled, result.Outcome);
         Assert.False(Directory.Exists(destination));
         Assert.Empty(viewModel.RepoCards);
@@ -385,6 +466,58 @@ public sealed class MainWindowViewModelCloneTests : IDisposable
         // Assert
         Assert.Equal(CloneRepositoryOutcome.Canceled, after.Outcome);
         Assert.False(Directory.Exists(destination));
+    }
+
+    /// <summary>
+    ///     Test that disposing the view model while a clone's background work never ends returns within
+    ///     the bound the view model was given instead of waiting for it.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_CloneRepositoryAsync_DisposeWhileCloneNeverEnds_ReturnsWithinTheBound()
+    {
+        // Arrange: the clone is held at a gate that is never opened during the close
+        var stub = CreateStub(null, new GitStub.Command("clone", CreatesDestination: true));
+        var gate = new GatedBackgroundWorkRunner();
+        var viewModel = CreateViewModel(
+            stub, new AppSettings(), gate, cloneStopTimeout: TimeSpan.FromMilliseconds(200));
+        var cloning = viewModel.CloneRepositoryAsync(
+            new CloneRepositoryRequest(Url, Path.Combine(CreateTempDirectory(), "repo"), null));
+        await gate.FirstCall;
+
+        // Act
+        var started = DateTime.UtcNow;
+        viewModel.Dispose();
+        var elapsed = DateTime.UtcNow - started;
+
+        // Assert: it waited for the bound (not forever, not for the default five seconds)
+        Assert.True(elapsed >= TimeSpan.FromMilliseconds(150), $"Dispose did not wait for the clone ({elapsed}).");
+        Assert.True(elapsed < TimeSpan.FromSeconds(4), $"Dispose waited too long ({elapsed}).");
+        Assert.False(cloning.IsCompleted);
+
+        // Cleanup: let the held work end
+        gate.Release();
+        Assert.Equal(CloneRepositoryOutcome.Canceled, (await cloning).Outcome);
+    }
+
+    /// <summary>
+    ///     Test that a clone the client refuses with an argument problem (an address that starts with a
+    ///     dash) is reported with the reason alone, without the framework's parameter suffix.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_CloneRepositoryAsync_CloneFailsWithArgumentException_NoticeHasNoParameterSuffix()
+    {
+        // Arrange
+        var viewModel = CreateViewModel(CreateStub(null), new AppSettings());
+
+        // Act
+        var result = await viewModel.CloneRepositoryAsync(
+            new CloneRepositoryRequest("-oProxyCommand=x", Path.Combine(CreateTempDirectory(), "repo"), null));
+
+        // Assert
+        Assert.Equal(CloneRepositoryOutcome.Failed, result.Outcome);
+        Assert.Equal("Cloning failed: The repository address must not start with a dash.", result.Notice);
+        Assert.False(viewModel.GlobalProgress.IsActive);
+        Assert.True(viewModel.CanCloneRepository);
     }
 
     /// <summary>
@@ -499,13 +632,16 @@ public sealed class MainWindowViewModelCloneTests : IDisposable
     ///     thread pool.</param>
     /// <param name="saveSettings">What saves the settings, or <see langword="null"/> for the real
     ///     store.</param>
+    /// <param name="cloneStopTimeout">How long the close waits for a clone's cleanup at most, or
+    ///     <see langword="null"/> for the default.</param>
     /// <returns>The view model, disposed when the test ends.</returns>
     private MainWindowViewModel CreateViewModel(
         GitStub? stub,
         AppSettings settings,
         IBackgroundWorkRunner? backgroundWork = null,
-        Action<AppSettings>? saveSettings = null) =>
-        CreateViewModel(stub, settings, out _, backgroundWork, saveSettings);
+        Action<AppSettings>? saveSettings = null,
+        TimeSpan? cloneStopTimeout = null) =>
+        CreateViewModel(stub, settings, out _, backgroundWork, saveSettings, cloneStopTimeout);
 
     /// <summary>
     ///     Creates a view model over the stub git (or the real git for <see langword="null"/>) with its
@@ -518,13 +654,16 @@ public sealed class MainWindowViewModelCloneTests : IDisposable
     ///     thread pool.</param>
     /// <param name="saveSettings">What saves the settings, or <see langword="null"/> for the real
     ///     store.</param>
+    /// <param name="cloneStopTimeout">How long the close waits for a clone's cleanup at most, or
+    ///     <see langword="null"/> for the default.</param>
     /// <returns>The view model, disposed when the test ends.</returns>
     private MainWindowViewModel CreateViewModel(
         GitStub? stub,
         AppSettings settings,
         out string configDirectory,
         IBackgroundWorkRunner? backgroundWork = null,
-        Action<AppSettings>? saveSettings = null)
+        Action<AppSettings>? saveSettings = null,
+        TimeSpan? cloneStopTimeout = null)
     {
         if (stub is not null)
         {
@@ -533,7 +672,11 @@ public sealed class MainWindowViewModelCloneTests : IDisposable
 
         configDirectory = CreateTempDirectory();
         var viewModel = new MainWindowViewModel(
-            settings, configDirectory: configDirectory, backgroundWork: backgroundWork, saveSettings: saveSettings);
+            settings,
+            configDirectory: configDirectory,
+            backgroundWork: backgroundWork,
+            saveSettings: saveSettings,
+            cloneStopTimeout: cloneStopTimeout);
         _viewModels.Add(viewModel);
         return viewModel;
     }

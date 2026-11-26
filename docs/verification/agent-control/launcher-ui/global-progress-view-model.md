@@ -83,3 +83,11 @@ that name; a clone begun with its own description is shown with that description
 both properties is announced; when the clone ends the add's text is shown again. This scenario is tested by
 `GlobalProgressViewModel_Cancel_NamesTheOperation`, covering
 `AgentControl-GlobalProgressViewModel-CancelDescribesOperation`.
+
+**GlobalProgressViewModel_HasCancelableOperation**: An idle strip and a strip that runs only an operation without a
+cancel action (the refresh of the cards) report `HasCancelableOperation` as `false`; once an operation with a cancel
+action begins it is `true`, and it stays `true` while that operation accepts no cancel (`AllowCancel` off) and after its
+cancel was requested through the command, until the operation ends, when it is `false` again while the refresh still
+runs. The change was announced exactly once on the way up and once on the way down. This scenario is tested by
+`GlobalProgressViewModel_HasCancelableOperation_FollowsOperationsWithACancelAction`, covering
+`AgentControl-GlobalProgressViewModel-HasCancelableOperation`.

@@ -1685,9 +1685,9 @@ sections:
       - id: AgentControl-LauncherUI-CloneRepository
         title: >-
           The LauncherUI subsystem shall, when the user confirms the Clone repository dialog, clone the
-          repository in the background without blocking the window, one clone per destination, add the
-          cloned folder to the list in the chosen group through the same path every add takes, and, when
-          the clone fails, show git's reason (with credentials removed) in a message and add nothing.
+          repository in the background without blocking the window, add the cloned folder to the list in
+          the chosen group through the same path every add takes, and, when the clone fails, show git's
+          reason (with credentials removed) in a message and add nothing.
         justification: |
           A developer who has no copy of a repository yet should be able to get one, and the tool's
           help with it, in one step; a failure must be explained, and a half-made clone must not leave
@@ -1697,22 +1697,39 @@ sections:
           - AgentControl-MainWindowViewModel-CloneInBackground
           - AgentControl-MainWindowViewModel-CloneAddsCardThroughAddPath
           - AgentControl-MainWindowViewModel-CloneFailureReported
-          - AgentControl-MainWindowViewModel-CloneOneDestinationAtATime
         tests:
           - MainWindow_CloneRepoButton_OpensDialogAndCloneAddsCardIntoChosenGroup
           - MainWindow_CloneRepoButton_CloneFails_ShowsGitsReasonInMessageBox
+
+      - id: AgentControl-LauncherUI-CloneOneAtATime
+        title: >-
+          The LauncherUI subsystem shall disable the Clone button, with a tooltip that says why, while
+          a clone or another operation that can be canceled is shown in the progress strip, and enable
+          it again when that operation has ended.
+        justification: |
+          One long, cancelable operation at a time keeps the strip's single Cancel button unambiguous
+          and keeps two clones from working at once; a disabled button that does not say why would
+          look broken.
+        children:
+          - AgentControl-MainWindowViewModel-CloneOneAtATime
+          - AgentControl-GlobalProgressViewModel-HasCancelableOperation
+        tests:
+          - MainWindow_CloneRepoButton_WhileCancelableOperationShown_IsDisabledWithTooltip
+          - MainWindow_GlobalProgressCancel_WhileCloning_StopsTheCloneAndAddsNothing
 
       - id: AgentControl-LauncherUI-CloneProgressCancel
         title: >-
           The LauncherUI subsystem shall show a clone in the progress strip with a Cancel button named
           after the clone, that stops the clone and removes the partly cloned folder without a message
-          afterwards.
+          afterwards, and, when the window is closed while a clone runs, stop it and wait a short,
+          bounded time for the partly cloned folder to be removed.
         justification: |
           A clone of a large repository can take long, and a clone started by mistake must be
           stoppable; the strip is where the window shows its long operations, and its one Cancel
           button must say which operation it stops.
         children:
           - AgentControl-MainWindowViewModel-CloneProgressAndCancel
+          - AgentControl-MainWindowViewModel-CloneStopsWhenWindowCloses
           - AgentControl-GlobalProgressViewModel-CancelDescribesOperation
         tests:
           - MainWindow_GlobalProgressCancel_WhileCloning_StopsTheCloneAndAddsNothing

@@ -45,6 +45,13 @@ wrong thing while a clone runs. An operation that gives no description, and an i
 nothing more is added"), the text the button always had; a change of the shown operation notifies both properties
 (`AgentControl-GlobalProgressViewModel-CancelDescribesOperation`).
 
+**HasCancelableOperation** (`bool`): `true` while any running operation was begun with a cancel action
+(`GlobalProgressOperation.HasCancelAction`), from its start until it has ended - also after its cancel was requested
+(the work behind it, such as git's stop and the removal of a partial folder, is still running) and while its step
+accepts no cancel. An operation without a cancel action (the refresh of the cards) does not count. It is recomputed by
+`Publish` and announced on change; the main window uses it to offer one cancelable operation at a time
+(`MainWindowViewModel.CanCloneRepository`; `AgentControl-GlobalProgressViewModel-HasCancelableOperation`).
+
 **_operations** (`List<GlobalProgressOperation>`, private): the running operations, oldest first. **Shown**
 (`GlobalProgressOperation?`, private) is the one shown: the most recently begun running operation that can still be
 canceled (`IsCancelable`) or, when none can, the most recently begun running operation; `null` when none runs. So an
@@ -59,8 +66,9 @@ started (the add's save) and accept it again afterwards; it has no effect on an 
 **CanCancel** is `true` only when the operation has a cancel action, `AllowCancel` is set, it was not canceled already
 and it has not ended. **IsCancelable** (internal `bool`) is `true` when the operation has a cancel action that has
 not run and it has not ended, whether or not `AllowCancel` is set: such an operation is shown in preference to newer
-ones, so an add in its "Saving..." step stays shown, without Cancel, rather than flipping to the refresh. Private flags
-record whether the cancel action has run (it runs at most once) and whether the
+ones, so an add in its "Saving..." step stays shown, without Cancel, rather than flipping to the refresh.
+**HasCancelAction** (internal `bool`) is `true` when the operation has a cancel action and has not ended, even after
+the cancel ran. Private flags record whether the cancel action has run (it runs at most once) and whether the
 operation has ended.
 
 Invariants: exactly when `_operations` is empty the strip is idle; the shown state is always that of `Shown` - the most
@@ -73,15 +81,17 @@ continuations of their background work, which resume on the UI thread); it is no
 **Begin(text, cancel = null, cancelDescription = null)**: Starts showing an operation, indeterminate, with the given
 text.
 
-- *Parameters*: `string text` (not null, `ArgumentNullException`), `Action? cancel` - what the strip's Cancel button
-  does for this operation, run on the UI thread at most once, or `null` for an operation that cannot be canceled;
-  `GlobalProgressCancelDescription? cancelDescription` - how the Cancel button is named while this operation is shown
-  (`null` for the adding-repositories text).
+- *Parameters*: `string text` (not null, `ArgumentNullException`; may be empty), `Action? cancel` - what the strip's
+  Cancel button does for this operation, run on the UI thread at most once, or `null` for an operation that cannot be
+  canceled; `GlobalProgressCancelDescription? cancelDescription` - how the Cancel button is named while this operation
+  is shown (`null` for the adding-repositories text; used only with a cancel action).
 - *Returns*: the `GlobalProgressOperation`; its owner reports through it and disposes it when the work has ended.
-- *Postconditions*: the operation is appended to `_operations` and becomes the shown one, unless an older operation
-  that can still be canceled is running (`AgentControl-GlobalProgressViewModel-OverlappingOperations`): `IsActive` is
-  `true`, `Text` its text, the bar indeterminate, `CanCancel` `true` exactly when a cancel action was given
-  (`AgentControl-GlobalProgressViewModel-ShowsOperation`).
+- *Postconditions*: the operation is appended to `_operations`. One with a cancel action becomes the shown one (the most
+  recently begun cancelable operation is shown); one without is shown only while no running operation has a cancel
+  action (`AgentControl-GlobalProgressViewModel-OverlappingOperations`): `IsActive` is `true`, `Text` its text, the bar
+  indeterminate, `CanCancel` `true` exactly when a cancel action was given
+  (`AgentControl-GlobalProgressViewModel-ShowsOperation`); `HasCancelableOperation` is `true` when a cancel action was
+  given.
 
 **GlobalProgressOperation.Report(completed, total, text)**: Reports a known amount of work: the operation becomes
 determinate. `total` below 0 counts as 0, `completed` is clamped to 0 up to `total`; `text` must not be null. When the

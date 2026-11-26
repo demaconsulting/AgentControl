@@ -263,25 +263,29 @@ anything is there the dialog stays open and says so, so nothing of yours can be 
 The boxes stay editable while the folder is checked; if you change one of them meanwhile, the answer of that check is
 ignored and you can press **Clone** again for what the dialog shows now.
 
-The dialog then closes and the clone runs in the background, shown in the progress strip under the app bar as
-"Cloning repo...". The window stays usable meanwhile, and you can start another clone into a different folder (a second
-clone into the folder that is being cloned into is refused). Git does not write into your new folder while it works:
-the clone is made in a hidden folder named `.agentcontrol-clone-` followed by a long random text, next to the new
-folder, and renamed to the name you chose when Git has finished. If something with your chosen name appears in the
-meantime, the clone is not moved there; the message says so and what appeared is left as it was.
+The dialog then closes and the clone runs in the background, shown in the progress strip under the app bar as "Cloning
+repo...". The window stays usable meanwhile, but one clone runs at a time: the **Clone repository** button is
+unavailable (its tooltip says so) while a clone, the adding of its folder or any other operation with a **Cancel**
+button in the strip is running, so wait for it to finish or cancel it, then clone again. Git does not write into your
+new folder while it works: the clone is made in a hidden folder named `.agentcontrol-clone-` followed by a long random
+text, next to the new folder, and renamed to the name you chose when Git has finished. If something with your chosen
+name appears in the meantime, the clone is not moved there; the message says so and what appeared is left as it was.
 
 - **Cancel.** **Cancel** in the strip (named "Cancel cloning repository" for screen readers) stops Git and removes the
   hidden folder with what the clone had written so far. Nothing else is removed, and the folder you chose never
   existed in the meantime. No message is shown after a Cancel. A clone that Git itself ends with an error removes the
-  same hidden folder and shows Git's reason. If the application is closed or crashes in the middle of a clone, the
-  hidden `.agentcontrol-clone-...` folder can stay behind; you can delete it yourself.
+  same hidden folder and shows Git's reason. If you close the window in the middle of a clone, AgentControl stops Git
+  and waits up to five seconds for the hidden folder to be removed; if the application crashes or is ended in the
+  middle of a clone, the hidden `.agentcontrol-clone-...` folder can stay behind and you can delete it yourself.
 - **Added like any repo.** When Git has finished, the folder is added to the list exactly as **Add repository** adds
   it - into the group you chose, which is created again if you removed it meanwhile - and the card appears. If that add
   cannot be saved, the same **Retry** or **Discard** question is asked, and the message that follows says that the
   cloned folder is still on disk.
 - **When it fails.** A message starting "Cloning failed:" gives Git's own reason, for example that the repository was
-  not found or that access was denied, and nothing is added. A password written into an address
-  (`https://user:password@host/...`) is removed from every message and log, but it is better not to put one there.
+  not found or that access was denied, and nothing is added. **Do not put a password in the address.** One written
+  into an address (`https://user:password@host/...`) is removed from every message and log of AgentControl, but Git
+  itself keeps the address, password included, in the `.git/config` file of the new folder; use a credential helper
+  instead (see *Signing in* below).
 - **Signing in.** Git runs without a terminal, so it cannot ask for a password in the window. A credential helper such
   as Git Credential Manager can still show its own sign-in window; if Git needs a sign-in that no helper provides, the
   clone fails with Git's message - sign in with your Git credential helper first (see *Git on Your Computer*) and

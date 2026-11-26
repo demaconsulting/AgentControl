@@ -1239,13 +1239,21 @@ name. The requirements are split by behavior; each is covered by the tests that 
   folder becomes a working clone with its files, its card is listed in the chosen group and saved, the strip is idle and
   nothing is left open) and `MainWindow_CloneRepoButton_CloneFails_ShowsGitsReasonInMessageBox` (an address that is no
   repository: a message box starting `Cloning failed: fatal:` without git's `Cloning into` line, no card). The behavior
-  behind them - off the UI thread, one clone per destination, the card added through the add path, the save failure
+  behind them - off the UI thread, the card added through the add path, the save failure
   question, failures reported - is verified by the `MainWindowViewModel` unit tests
   (`MainWindowViewModelCloneTests.cs`), whose requirements are its children.
+- `AgentControl-LauncherUI-CloneOneAtATime` (the Clone button while something cancelable runs):
+  `MainWindow_CloneRepoButton_WhileCancelableOperationShown_IsDisabledWithTooltip` (an add held at a gate: the button is
+  disabled with the tooltip that says to wait for the running clone or other operation, or cancel it, keeps its
+  accessible name, and is enabled again with `Clone a repository` once the add ended) and
+  `MainWindow_GlobalProgressCancel_WhileCloning_StopsTheCloneAndAddsNothing` (the button is disabled while the clone
+  runs and enabled again after Cancel). The refusal itself and the guard that covers the add after the clone are
+  verified by the `MainWindowViewModel` and `GlobalProgressViewModel` unit tests, whose requirements are its children.
 - `AgentControl-LauncherUI-CloneProgressCancel` (the strip while a clone runs):
   `MainWindow_GlobalProgressCancel_WhileCloning_StopsTheCloneAndAddsNothing` (a git whose clone creates the destination
   and then hangs: the strip shows `Cloning slow...` with a Cancel button named `Cancel cloning repository`; pressing it
-  stops the clone, removes the partly cloned folder, adds no card and shows no message).
+  stops the clone, removes the partly cloned folder, adds no card and shows no message); that closing the window while
+  a clone runs stops it and waits a bounded time for the cleanup is verified by the `MainWindowViewModel` unit tests.
 - `AgentControl-LauncherUI-RepoGroupManagement` (rename from the header):
   `MainWindow_HeaderMenu_RenameGroup_AsksForTheNameAndRenames` (the prompt starts with the group's name, canceling it
   changes nothing, accepting renames the group and its repos).
