@@ -218,15 +218,14 @@ cards at start-up and after Settings are saved.
   repository" for a clone - through `CancelAccessibleName` and `CancelToolTip`).
 - *Role*: Provider.
 - *Contract*: Shows the most recently begun running bulk operation that can still be canceled or, when none can, the
-  most recently begun running one: "Adding repositories..." while the
-  folders of an add are counted, "Adding {completed} of {total} repositories..." as each folder has been checked,
-  "Saving..." while the add saves (no Cancel then), "Cloning {folder}..." while a clone runs (indeterminate, with
-  Cancel) and "Refreshing repositories {completed} of {total}..." while the
-  shared refresh queue reads the cards at start-up or after a settings save (no Cancel). A single card's Refresh,
-  Pull or action shows on its card, not in the strip. Cancel stops the running add and every queued
-  add before anything is saved or added, with no message afterwards, or stops the running clone and removes the partly
-  cloned folder; an add stays shown, with its Cancel, while the
-  cards refresh after a settings save, and the refresh is shown once the add has ended or was canceled
+  most recently begun running one: "Adding repositories..." while the folders of an add are counted, "Adding {completed}
+  of {total} repositories..." as each folder has been checked, "Saving..." while the add saves (no Cancel then),
+  "Cloning {folder}..." while a clone runs (indeterminate, with Cancel) and "Refreshing repositories {completed} of
+  {total}..." while the shared refresh queue reads the cards at start-up or after a settings save (no Cancel). A single
+  card's Refresh, Pull or action shows on its card, not in the strip. Cancel stops the running add and every queued add
+  before anything is saved or added, with no message afterwards, or stops the running clone and removes the partly
+  cloned folder (a message names the folder only when it could not be removed); an add stays shown, with its Cancel,
+  while the cards refresh after a settings save, and the refresh is shown once the add has ended or was canceled
   (`AgentControl-LauncherUI-GlobalProgress`, `AgentControl-LauncherUI-AddCancel`,
   `AgentControl-LauncherUI-CloneProgressCancel`). `HasCancelableOperation` tells whether any running operation has a
   cancel action, also one already canceled whose work is still ending; the Clone button is disabled while it is `true`

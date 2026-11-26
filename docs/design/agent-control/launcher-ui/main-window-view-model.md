@@ -771,10 +771,14 @@ or `null`) and returning a `CloneRepositoryResult` (a `CloneRepositoryOutcome` a
   logger and returned as `Failed` with its safe message. The method does
   not throw for an expected failure, because the window calls it from an event handler.
 - *Cancel* (`AgentControl-MainWindowViewModel-CloneProgressAndCancel`): the strip's Cancel makes `GitClient.Clone` kill
-  git and remove only what the clone created; the result is `Canceled` with no notice, nothing is added and the strip
-  is idle again. `Dispose` does the same for every clone that runs and then waits for their background tasks, at most
-  `CloneStopTimeout`; on a timeout it logs a warning and goes on
-  (`AgentControl-MainWindowViewModel-CloneStopsWhenWindowCloses`).
+  git and remove only what the clone created; the result is `Canceled` with no notice, nothing is added and the strip is
+  idle again. When the client reports that the folder could not be removed (`GitCloneCanceledException`, caught before
+  the plain cancellation) the result is still `Canceled` and nothing is added, but the notice is *Cloning was canceled.*
+  followed by the client's sentence naming the folder, redacted with `SecretRedactor`, and the warning is logged
+  (`AgentControl-MainWindowViewModel-CloneLeftoverFolderReported`); the window shows a notice like any other. A view
+  model that was disposed meanwhile returns no notice, because nobody is left to read it. `Dispose` does the same for
+  every clone that runs and then waits for their background tasks, at most `CloneStopTimeout`; on a timeout it logs a
+  warning and goes on (`AgentControl-MainWindowViewModel-CloneStopsWhenWindowCloses`).
 
 
 - *Parameters*: `RepoCardViewModel card`.

@@ -189,6 +189,41 @@ public sealed class MainWindowViewModelCloneTests : IDisposable
     }
 
     /// <summary>
+    ///     Test that a clone that is canceled but leaves its partly cloned folder behind is still a cancel
+    ///     that adds nothing, and that the notice names the folder (with credentials removed), while a
+    ///     cancel that left nothing behind has no notice.
+    /// </summary>
+    [Fact]
+    public async Task MainWindowViewModel_CloneRepositoryAsync_CancelLeavesFolder_ReturnsCanceledWithNotice()
+    {
+        // Arrange: the client reports a cancel whose folder could not be removed; the text carries a password
+        var leftover = "The partly cloned folder 'C:\\Work\\.agentcontrol-clone-x https://user:hunter2@example.com/r.git' could not be removed; delete it yourself.";
+        var failing = new FailingBackgroundWorkRunner(
+            new GitCloneCanceledException(leftover, new OperationCanceledException(), CancellationToken.None));
+        var viewModel = CreateViewModel(CreateStub(null), new AppSettings(), failing);
+
+        // Act
+        var result = await viewModel.CloneRepositoryAsync(new CloneRepositoryRequest(Url, Path.Combine(CreateTempDirectory(), "repo"), null));
+
+        // Assert: canceled, the notice says what remains and never shows the password, nothing is added
+        Assert.Equal(CloneRepositoryOutcome.Canceled, result.Outcome);
+        Assert.NotNull(result.Notice);
+        Assert.StartsWith("Cloning was canceled. ", result.Notice, StringComparison.Ordinal);
+        Assert.Contains("could not be removed; delete it yourself", result.Notice, StringComparison.Ordinal);
+        Assert.Contains(".agentcontrol-clone-x", result.Notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("hunter2", result.Notice, StringComparison.Ordinal);
+        Assert.Empty(viewModel.RepoCards);
+        Assert.False(viewModel.GlobalProgress.IsActive);
+        Assert.True(viewModel.CanCloneRepository);
+
+        // And a plain cancel (the folder was removed) says nothing
+        var clean = CreateViewModel(CreateStub(null), new AppSettings(), new FailingBackgroundWorkRunner(new OperationCanceledException()));
+        var cleanResult = await clean.CloneRepositoryAsync(new CloneRepositoryRequest(Url, Path.Combine(CreateTempDirectory(), "repo"), null));
+        Assert.Equal(CloneRepositoryOutcome.Canceled, cleanResult.Outcome);
+        Assert.Null(cleanResult.Notice);
+    }
+
+    /// <summary>
     ///     Test that a clone git cannot make is reported with git's message with credentials removed,
     ///     nothing is added, and the strip is idle again.
     /// </summary>
@@ -747,5 +782,17 @@ public sealed class MainWindowViewModelCloneTests : IDisposable
         {
             // Best-effort cleanup; a leftover temporary folder does not fail the test
         }
+    }
+
+    /// <summary>
+    ///     A runner whose every piece of work ends with the given exception, as a clone does when the
+    ///     client reports a cancel.
+    /// </summary>
+    /// <param name="failure">The exception the work ends with.</param>
+    private sealed class FailingBackgroundWorkRunner(Exception failure) : IBackgroundWorkRunner
+    {
+        /// <inheritdoc />
+        public Task<T> RunAsync<T>(Func<T> work, CancellationToken cancellationToken) =>
+            Task.FromException<T>(failure);
     }
 }

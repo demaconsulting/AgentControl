@@ -274,11 +274,13 @@ text, next to the new folder, and renamed to the name you chose when Git has fin
 name appears in the meantime, the clone is not moved there; the message says so and what appeared is left as it was.
 
 - **Cancel.** **Cancel** in the strip (named "Cancel cloning repository" for screen readers) stops Git and removes the
-  hidden folder with what the clone had written so far. Nothing else is removed, and the folder you chose never
-  existed in the meantime. No message is shown after a Cancel. A clone that Git itself ends with an error removes the
-  same hidden folder and shows Git's reason. If you close the window in the middle of a clone, AgentControl stops Git
-  and waits up to five seconds for the hidden folder to be removed; if the application crashes or is ended in the
-  middle of a clone, the hidden `.agentcontrol-clone-...` folder can stay behind and you can delete it yourself.
+  hidden folder with what the clone had written so far. Nothing else is removed, and the folder you chose never existed
+  in the meantime. No message is shown after a Cancel, unless the hidden folder could not be removed (a file in it is
+  still in use, for example by a virus scanner): the message then names the folder so that you can delete it yourself. A
+  clone that Git itself ends with an error removes the same hidden folder and shows Git's reason. If you close the
+  window in the middle of a clone, AgentControl stops Git and waits up to five seconds for the hidden folder to be
+  removed; if the application crashes or is ended in the middle of a clone, the hidden `.agentcontrol-clone-...` folder
+  can stay behind and you can delete it yourself.
 - **Added like any repo.** When Git has finished, the folder is added to the list exactly as **Add repository** adds
   it - into the group you chose, which is created again if you removed it meanwhile - and the card appears. If that add
   cannot be saved, the same **Retry** or **Discard** question is asked, and the message that follows says that the

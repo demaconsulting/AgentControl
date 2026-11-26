@@ -295,8 +295,21 @@ scenario is tested by `GitClient_Clone_Canceled_RemovesOnlyItsTempFolder`,
 `AgentControl-GitClient-CloneCleansUpOnlyItsOwnFolder`, `-CloneIntoFreshFolder`, `-CloneDestinationAppearedMeanwhile`
 and `-CloneCancelStopsGit` (all prefixed `AgentControl-GitClient`). The Linux and macOS native calls run only on those
 operating systems, which the continuous-integration jobs cover. Not tested: a working folder that cannot be created (a
-read-only parent) and one that cannot be removed because a process holds a file; both paths log and report the folder by
-name, and the second needs a process that holds a file open, which is not reproducible portably.
+read-only parent); that path logs and reports the folder by name. A working folder that cannot be removed is tested
+through the `DeleteCloneFolder` seam, which makes every deletion fail, because a process holding a file open is not
+reproducible portably (see `GitClient_Clone_CloneReportsLeftoverFolder` below).
+
+**GitClient_Clone_CloneReportsLeftoverFolder**: With the deletion replaced by one that always throws, a clone canceled
+while git writes ends with a `GitCloneCanceledException` (an `OperationCanceledException` carrying the caller's token)
+whose message names the working folder and says it could not be removed and that the user should delete it; the
+working folder is still on disk and the destination does not exist. With the real deletion, a canceled clone throws a
+plain cancellation that is not a `GitCloneCanceledException`, and the parent folder is empty. With a git that cannot be
+started and the failing deletion, the clone throws an `InvalidOperationException` whose message holds both the start
+failure and the sentence naming the folder, and whose inner exception is kept. This scenario is tested by
+`GitClient_Clone_CanceledWhenTheFolderCannotBeRemoved_ThrowsCancellationNamingTheLeftover`,
+`GitClient_Clone_CanceledAndFolderRemoved_ThrowsPlainCancellation` and
+`GitClient_Clone_FailsToStartWhenTheFolderCannotBeRemoved_NamesTheLeftover`, covering
+`AgentControl-GitClient-CloneReportsLeftoverFolder`.
 
 **GitClient_Clone_NeverLogsTheAddressCredentials**: With an address `https://alice:<password>@example.com/...`, a stub
 whose `clone` fails and echoes the address in its error text, and a client whose git cannot be started, the password

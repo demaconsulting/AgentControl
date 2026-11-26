@@ -437,6 +437,22 @@ sections:
           - GitClient_Clone_NativeNoReplaceMove_MovesToFreeNameAndNeverReplacesAnEmptyFolder
           - GitClient_Clone_NoReplaceRenameUnsupported_RefusesAndRemovesOnlyTheWorkFolder
 
+      - id: AgentControl-GitClient-CloneReportsLeftoverFolder
+        title: >-
+          The GitClient class shall, when the working folder of a canceled clone, or of a clone that
+          stopped with another exception, could not be removed, throw an exception that names the
+          folder left behind - for a cancel an OperationCanceledException subclass, so a caller that
+          treats every cancel alike keeps working - and shall throw a plain cancellation when the
+          folder was removed.
+        justification: |
+          A cancel is deliberate and needs no message, but a half-written clone that stays on disk
+          (a file still held by git's helper or a virus scanner) is something the user must be told
+          about, as the timeout and the failed clone already do; without it the leftover is silent.
+        tests:
+          - GitClient_Clone_CanceledWhenTheFolderCannotBeRemoved_ThrowsCancellationNamingTheLeftover
+          - GitClient_Clone_CanceledAndFolderRemoved_ThrowsPlainCancellation
+          - GitClient_Clone_FailsToStartWhenTheFolderCannotBeRemoved_NamesTheLeftover
+
       - id: AgentControl-GitClient-CloneCancelStopsGit
         title: >-
           The GitClient class shall stop a running clone, together with every process it started,

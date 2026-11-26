@@ -1363,12 +1363,27 @@ sections:
           The MainWindowViewModel class shall show a clone in the global progress strip as
           "Cloning {folder}..." with a Cancel button named after the clone, remove the progress at the
           end however the clone ended, and, when the clone is canceled, stop git, add nothing and say
-          nothing.
+          nothing unless the partly cloned folder could not be removed (see
+          AgentControl-MainWindowViewModel-CloneLeftoverFolderReported).
         justification: |
           A clone that takes long or was started by mistake must be stoppable, and a deliberate cancel
           is not an error; the strip is the one place the window shows its long operations.
         tests:
           - MainWindowViewModel_CloneRepositoryAsync_ShowsProgressWithCancelAndRemovesItAtTheEnd
+          - MainWindowViewModel_CloneRepositoryAsync_Cancel_RemovesPartialFolderAndAddsNothing
+
+      - id: AgentControl-MainWindowViewModel-CloneLeftoverFolderReported
+        title: >-
+          The MainWindowViewModel class shall, when a clone is canceled but its partly cloned folder
+          could not be removed, still report the clone as canceled and add nothing, but return a
+          notice that names the folder left behind, with credentials removed; a cancel that left
+          nothing behind returns no notice.
+        justification: |
+          The user pressed Cancel and expects the partial clone to be gone; when something still
+          holds a file and the folder stays, silence would leave a half-written repository the user
+          does not know about and must delete themselves.
+        tests:
+          - MainWindowViewModel_CloneRepositoryAsync_CancelLeavesFolder_ReturnsCanceledWithNotice
           - MainWindowViewModel_CloneRepositoryAsync_Cancel_RemovesPartialFolderAndAddsNothing
 
       - id: AgentControl-MainWindowViewModel-CloneStopsWhenWindowCloses

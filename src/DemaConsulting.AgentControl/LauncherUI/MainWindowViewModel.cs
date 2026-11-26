@@ -159,8 +159,8 @@ internal enum CloneRepositoryOutcome
     /// <summary>Git could not clone the repository; nothing was added.</summary>
     Failed,
 
-    /// <summary>The clone was canceled (or the window closed); nothing was added and the partial
-    ///     folder was removed.</summary>
+    /// <summary>The clone was canceled (or the window closed); nothing was added. The partial folder
+    ///     was removed, or - when it could not be - the notice names what remains.</summary>
     Canceled,
 
     /// <summary>The clone was not started because another clone, or another operation that can be
@@ -173,7 +173,7 @@ internal enum CloneRepositoryOutcome
 /// </summary>
 /// <param name="Outcome">How the clone ended.</param>
 /// <param name="Notice">The message for the user, or <see langword="null"/> when there is nothing to
-///     tell (the repository was cloned and added, or the user canceled).</param>
+///     tell (the repository was cloned and added, or the user canceled and nothing was left behind).</param>
 internal sealed record CloneRepositoryResult(CloneRepositoryOutcome Outcome, string? Notice);
 
 /// <summary>
@@ -1334,7 +1334,8 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
     ///     keeps the removal after a cancel from touching a folder another clone is filling. The
     ///     guard holds from the start of the clone until the add that follows it has ended. A failure
     ///     (git's reason, redacted of credentials; the folder was refused after all; git cannot be
-    ///     started; the time limit) is reported in the result and never thrown. Disposing the view
+    ///     started; the time limit) is reported in the result and never thrown. A cancel is silent,
+    ///     unless the partial folder could not be removed: the notice then says what remains. Disposing the view
     ///     model cancels the clones that run and waits, at most <see cref="CloneStopTimeout"/>, for
     ///     git to stop and the partial folders to be removed. Must be called on the UI thread.
     ///     </para>
@@ -1486,6 +1487,15 @@ internal sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return result.Succeeded
                 ? new CloneRepositoryResult(CloneRepositoryOutcome.Added, null)
                 : new CloneRepositoryResult(CloneRepositoryOutcome.Failed, $"Cloning failed: {DescribeCloneFailure(result)}");
+        }
+        catch (GitCloneCanceledException ex)
+        {
+            // Canceled, but the partial folder could not be removed (something still holds a file): a
+            // deliberate cancel is silent, a folder left behind is not. The window closing says nothing
+            Logger.LogWarning(ex, "The clone into {Destination} was canceled but left its working folder", destination);
+            return new CloneRepositoryResult(
+                CloneRepositoryOutcome.Canceled,
+                _disposed ? null : $"Cloning was canceled. {SecretRedactor.Redact(ex.Message)}");
         }
         catch (OperationCanceledException)
         {

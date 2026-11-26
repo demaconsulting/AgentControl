@@ -1042,6 +1042,15 @@ adds no card and leaves the strip idle. This scenario is tested by
 `MainWindowViewModel_CloneRepositoryAsync_Cancel_RemovesPartialFolderAndAddsNothing`, covering
 `AgentControl-MainWindowViewModel-CloneProgressAndCancel`.
 
+**MainWindowViewModel_CloneLeftoverFolderReported_CanceledCloneNamesWhatRemains**: With the background work ending in a
+`GitCloneCanceledException` whose message names a folder and carries an address with a password, the result is
+`Canceled`, its notice starts `Cloning was canceled.`, names the folder and says it could not be removed, and does not
+contain the password; no card is added, the strip is idle and a new clone may start. With the work ending in a plain
+`OperationCanceledException` (the clean cancel) the result is `Canceled` with no notice. This scenario is tested by
+`MainWindowViewModel_CloneRepositoryAsync_CancelLeavesFolder_ReturnsCanceledWithNotice` and, for the clean cancel with a
+real git, `MainWindowViewModel_CloneRepositoryAsync_Cancel_RemovesPartialFolderAndAddsNothing`, covering
+`AgentControl-MainWindowViewModel-CloneLeftoverFolderReported`.
+
 **MainWindowViewModel_CloneStopsWhenWindowCloses_WaitsBoundedForTheCleanup**: With a git whose clone creates its working
 folder and then hangs, disposing the view model returns only after git was stopped and the working folder removed (the
 parent folder is empty and the stub did not run to its end the moment `Dispose` returns); the clone's result is

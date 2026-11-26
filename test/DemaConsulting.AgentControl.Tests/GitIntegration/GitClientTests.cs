@@ -1771,6 +1771,119 @@ public class GitClientTests
     }
 
     /// <summary>
+    ///     Test that canceling a clone whose working folder cannot be removed (a file is still held) is
+    ///     reported as a cancellation that names the folder left behind, and that the folder is indeed
+    ///     still there, while a cancel that does remove its folder is a plain cancellation.
+    /// </summary>
+    [Fact]
+    public async Task GitClient_Clone_CanceledWhenTheFolderCannotBeRemoved_ThrowsCancellationNamingTheLeftover()
+    {
+        // Arrange: a clone that hangs after creating its folder, and a removal that always fails
+        var stub = GitStub.Create(extraCommands:
+        [
+            new GitStub.Command("clone", SleepSeconds: GitStub.HangSeconds, CreatesDestination: true)
+        ]);
+        var parent = CreateTempDirectory();
+        var destination = Path.Combine(parent, "repo");
+        try
+        {
+            var client = new GitClient(stub.Path, _logger)
+            {
+                DeleteCloneFolder = static _ => throw new IOException("The file is being used by another process.")
+            };
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            var clone = Task.Run(() => client.Clone("https://example.com/r.git", destination, cancellation.Token), TestContext.Current.CancellationToken);
+            Assert.True(WaitForReadOnlyPackFileInWorkFolder(parent, null), "The stub never created its read-only file.");
+            var work = Directory.GetDirectories(parent, ".agentcontrol-clone-*").Single();
+
+            // Act
+            await cancellation.CancelAsync();
+
+            // Assert: still a cancellation, but one that says what is left, and the folder is left
+            var canceled = await Assert.ThrowsAsync<GitCloneCanceledException>(() => clone);
+            Assert.Contains(work, canceled.Message, StringComparison.Ordinal);
+            Assert.Contains("could not be removed; delete it yourself", canceled.Message, StringComparison.Ordinal);
+            Assert.Equal(cancellation.Token, canceled.CancellationToken);
+            Assert.IsAssignableFrom<OperationCanceledException>(canceled);
+            Assert.True(Directory.Exists(work));
+            Assert.False(Directory.Exists(destination));
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a cancel that removes its working folder stays a plain cancellation, with nothing to
+    ///     tell the user.
+    /// </summary>
+    [Fact]
+    public async Task GitClient_Clone_CanceledAndFolderRemoved_ThrowsPlainCancellation()
+    {
+        // Arrange
+        var stub = GitStub.Create(extraCommands:
+        [
+            new GitStub.Command("clone", SleepSeconds: GitStub.HangSeconds, CreatesDestination: true)
+        ]);
+        var parent = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(stub.Path, _logger);
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            var clone = Task.Run(() => client.Clone("https://example.com/r.git", Path.Combine(parent, "repo"), cancellation.Token), TestContext.Current.CancellationToken);
+            Assert.True(WaitForReadOnlyPackFileInWorkFolder(parent, null), "The stub never created its read-only file.");
+
+            // Act
+            await cancellation.CancelAsync();
+
+            // Assert: a plain cancellation, and nothing is left
+            var canceled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => clone);
+            Assert.IsNotType<GitCloneCanceledException>(canceled);
+            Assert.Empty(Directory.GetFileSystemEntries(parent));
+        }
+        finally
+        {
+            stub.Delete();
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
+    ///     Test that a clone that stops with another exception (git cannot be started) and whose working
+    ///     folder cannot be removed says so in the exception's text, keeping the cause.
+    /// </summary>
+    [Fact]
+    public void GitClient_Clone_FailsToStartWhenTheFolderCannotBeRemoved_NamesTheLeftover()
+    {
+        // Arrange: no git to start, and a removal that always fails
+        var parent = CreateTempDirectory();
+        try
+        {
+            var client = new GitClient(Path.Combine(parent, "no-such-git.exe"), _logger)
+            {
+                DeleteCloneFolder = static _ => throw new UnauthorizedAccessException("Access is denied.")
+            };
+
+            // Act
+            var failure = Assert.Throws<InvalidOperationException>(
+                () => client.Clone("https://example.com/r.git", Path.Combine(parent, "repo"), TestContext.Current.CancellationToken));
+
+            // Assert: the start failure and the leftover are both named, and the cause is kept
+            var work = Directory.GetDirectories(parent, ".agentcontrol-clone-*").Single();
+            Assert.Contains("no-such-git.exe", failure.Message, StringComparison.Ordinal);
+            Assert.Contains(work, failure.Message, StringComparison.Ordinal);
+            Assert.Contains("delete it yourself", failure.Message, StringComparison.Ordinal);
+            Assert.NotNull(failure.InnerException);
+        }
+        finally
+        {
+            GitSourceProvider.DeleteDirectory(parent);
+        }
+    }
+
+    /// <summary>
     ///     Test that canceling a clone whose working folder holds a junction (also one nested below it)
     ///     to a folder of the user's removes the junctions as links and leaves the target folder, its
     ///     files and their read-only attributes untouched.

@@ -98,6 +98,29 @@ internal sealed record GitBranchList(
     IReadOnlyList<GitRemoteBranch> Remote);
 
 /// <summary>
+///     Thrown by <see cref="GitClient.Clone"/> when the clone was canceled and the partial clone's
+///     working folder could not be removed; <see cref="Exception.Message"/> says what remains.
+/// </summary>
+/// <remarks>
+///     Derives from <see cref="OperationCanceledException"/>, so a caller that treats every cancel the
+///     same still works; a caller that tells the user what is left on disk catches this type first. A
+///     cancel that removed its folder is a plain <see cref="OperationCanceledException"/>.
+/// </remarks>
+internal sealed class GitCloneCanceledException : OperationCanceledException
+{
+    /// <summary>
+    ///     Initializes the exception.
+    /// </summary>
+    /// <param name="message">The sentence naming the folder that could not be removed.</param>
+    /// <param name="innerException">The cancellation that ended the clone.</param>
+    /// <param name="cancellationToken">The token whose signal canceled the clone.</param>
+    public GitCloneCanceledException(string message, Exception innerException, CancellationToken cancellationToken)
+        : base(message, innerException, cancellationToken)
+    {
+    }
+}
+
+/// <summary>
 ///     Thrown by <see cref="GitClient"/> when a git command did not finish within its time limit and
 ///     was stopped.
 /// </summary>
@@ -312,6 +335,13 @@ internal sealed partial class GitClient
     ///     <see cref="MoveFolderWithoutReplacing"/>).
     /// </summary>
     internal Func<string, string, NoReplaceMoveOutcome> NoReplaceMove { get; init; } = MoveFolderWithoutReplacing;
+
+    /// <summary>
+    ///     Gets the operation that deletes a clone's working folder once (see
+    ///     <see cref="RemoveCloneWorkFolder"/>, which retries it). Exists so tests can make the removal
+    ///     fail on every platform; the application uses <see cref="DeleteCloneWorkFolder"/>.
+    /// </summary>
+    internal Action<string> DeleteCloneFolder { get; init; } = DeleteCloneWorkFolder;
 
 
     /// <summary>
@@ -1033,7 +1063,8 @@ internal sealed partial class GitClient
     ///     clone limit and was stopped; the working folder was removed.</exception>
     /// <exception cref="OperationCanceledException">Thrown when
     ///     <paramref name="cancellationToken"/> was signaled; git was stopped and the working folder
-    ///     removed.</exception>
+    ///     removed. When the folder could not be removed, the exception is a
+    ///     <see cref="GitCloneCanceledException"/> that names what remains.</exception>
     /// <exception cref="BlockingCallOnGuardedThreadException">Thrown when called on a thread guarded
     ///     by <see cref="BlockingCallGuard"/>; nothing was checked or started.</exception>
     public GitCommandResult Clone(string url, string destinationPath, CancellationToken cancellationToken = default)
@@ -1084,12 +1115,21 @@ internal sealed partial class GitClient
 
             throw new GitCommandTimeoutException($"{ex.Message} {leftover}", ex.Timeout);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // Canceled (killed while writing), git could not be started, anything else: the partial
             // clone is of no use, and the folder is ours
-            RemoveCloneWorkFolder(workFolder);
-            throw;
+            var leftover = RemoveCloneWorkFolder(workFolder);
+            if (leftover is null)
+            {
+                throw;
+            }
+
+            // The folder is still there: say so, the way the timeout and the failed clone do. A clean
+            // cancel stays a plain cancel; one that left the folder carries the message
+            throw ex is OperationCanceledException canceled
+                ? new GitCloneCanceledException(leftover, canceled, cancellationToken)
+                : new InvalidOperationException($"{ex.Message} {leftover}", ex);
         }
 
         // The URL may carry credentials, and git can echo it back in its messages
@@ -1685,7 +1725,7 @@ internal sealed partial class GitClient
         {
             try
             {
-                DeleteCloneWorkFolder(folder);
+                DeleteCloneFolder(folder);
                 return null;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

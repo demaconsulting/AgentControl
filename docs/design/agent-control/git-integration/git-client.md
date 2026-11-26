@@ -63,6 +63,11 @@ type every method already throws when git cannot answer, so existing callers kee
 git as "git could not tell"; carries the exceeded **Timeout** (`TimeSpan`) so a caller can tell the
 user.
 
+**GitCloneCanceledException** (sealed, same file): derives from `OperationCanceledException`, so a caller that treats
+every cancel alike keeps working; thrown by `Clone` only when the clone was canceled and its working folder could not be
+removed, its message the sentence that names the folder left behind. A cancel that removed its folder is a plain
+`OperationCanceledException`.
+
 **KnownAgentFolders**: `static readonly string[]` — the four folders (`.github/agents`,
 `.github/standards`, `.github/templates`, `.github/skills`) whose tracking status
 `HasCommittedAgentFiles` checks, `GetTrackedAgentFolders` reports and `UntrackAgentFolders`
@@ -179,16 +184,20 @@ accepts only `KnownAgentFolders` (same argument checks as `UntrackAgentFolders`)
   under which something exists is never used, changed or deleted; `Directory.CreateDirectory` is not used because it
   succeeds on an existing folder and so proves nothing; then hidden on Windows as a best effort) - the call's own
   folder, so a deletion of it can never reach anybody else's data; (4) run `git clone -- <url> <working folder>` - the
-  address trimmed of surrounding
-  white space, the text `CheckCloneUrl` judged - with the destination's parent folder as working directory (a clone
-  needs an existing one), under the `CloneRepository` limit (`AgentControl-GitClient-CloneTimeLimit`), with the
-  environment policy and `GIT_ALLOW_PROTOCOL=file:git:http:https:ssh` (`AgentControl-GitClient-CloneNeverPrompts`); (5)
-  on **cancellation, timeout** or a git that **cannot be started** the working folder is removed
-  (`RemoveCloneWorkFolder`): a link (junction, directory or file symbolic link) anywhere in it is removed as a link
-  without being entered, so its target is never changed; read-only attributes (git writes read-only object files) are
-  cleared on everything else; a working folder that has itself become a link is deleted as a link only; the removal is
-  retried a few times because a process git started may hold a file for a moment; a leftover that cannot be removed is
-  logged and named in the text of a timeout exception; (6) a **failed** clone (non-zero exit code) also removes the
+  address trimmed of surrounding white space, the text `CheckCloneUrl` judged - with the destination's parent folder as
+  working directory (a clone needs an existing one), under the `CloneRepository` limit
+  (`AgentControl-GitClient-CloneTimeLimit`), with the environment policy and
+  `GIT_ALLOW_PROTOCOL=file:git:http:https:ssh` (`AgentControl-GitClient-CloneNeverPrompts`); (5) on **cancellation,
+  timeout** or a git that **cannot be started** the working folder is removed (`RemoveCloneWorkFolder`): a link
+  (junction, directory or file symbolic link) anywhere in it is removed as a link without being entered, so its target
+  is never changed; read-only attributes (git writes read-only object files) are cleared on everything else; a working
+  folder that has itself become a link is deleted as a link only; the removal is retried a few times because a process
+  git started may hold a file for a moment; a leftover that cannot be removed is logged and named in the text of the
+  exception that ends the clone: the timeout exception's text, a `GitCloneCanceledException` (an
+  `OperationCanceledException`) for a cancel, or - for any other exception, such as a git that cannot be started - an
+  `InvalidOperationException` that keeps the original as its inner exception
+  (`AgentControl-GitClient-CloneReportsLeftoverFolder`); when the folder was removed the original exception is rethrown
+  unchanged, so a clean cancel stays a plain cancellation; (6) a **failed** clone (non-zero exit code) also removes the
   working folder and returns git's redacted result, with the leftover sentence appended when the removal failed; (7) on
   success `MoveCloneIntoPlace` renames the working folder to the destination with a rename that fails instead of
   replacing anything (`MoveFolderWithoutReplacing`), on every platform, and clears the hidden attribute: `MoveFileExW`
@@ -205,10 +214,10 @@ accepts only `KnownAgentFolders` (same argument checks as `UntrackAgentFolders`)
   there. Nothing in that folder was changed."; any other `IOException` or `UnauthorizedAccessException` is reported as
   "The clone could not be moved to '<destination>': ..." with the same cleanup
   (`AgentControl-GitClient-CloneIntoFreshFolder`, `-CloneCleansUpOnlyItsOwnFolder`,
-  `-CloneDestinationAppearedMeanwhile`, `-CloneCancelStopsGit`). The two native calls are P/Invoked with
-  `LibraryImport` (source generated); the working-folder name source and the rename are `internal` seams
-  (`CloneWorkFolderNameSource`, `NoReplaceMove`) that tests replace to force a name collision or a platform without the
-  rename.
+  `-CloneDestinationAppearedMeanwhile`, `-CloneCancelStopsGit`). The two native calls are P/Invoked with `LibraryImport`
+  (source generated); the working-folder name source, the rename and the single deletion attempt are `internal` seams
+  (`CloneWorkFolderNameSource`, `NoReplaceMove`, `DeleteCloneFolder`) that tests replace to force a name collision, a
+  platform without the rename or a folder that cannot be removed.
 - *Postconditions*: the address is data (`--` separates it from the options, `-CloneUrlSeparatedFromOptions`) and never
   appears in a log or exception message with its credentials (`AgentControl-GitClient-CloneRedactsCredentials`). A
   process killed together with the application leaves the hidden working folder behind: nothing deletes it

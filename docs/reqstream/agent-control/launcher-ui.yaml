@@ -1726,7 +1726,8 @@ sections:
         title: >-
           The LauncherUI subsystem shall show a clone in the progress strip with a Cancel button named
           after the clone, that stops the clone and removes the partly cloned folder without a message
-          afterwards, and, when the window is closed while a clone runs, stop it and wait a short,
+          afterwards (but with one when that folder could not be removed), and, when the window is
+          closed while a clone runs, stop it and wait a short,
           bounded time for the partly cloned folder to be removed.
         justification: |
           A clone of a large repository can take long, and a clone started by mistake must be
@@ -1734,6 +1735,7 @@ sections:
           button must say which operation it stops.
         children:
           - AgentControl-MainWindowViewModel-CloneProgressAndCancel
+          - AgentControl-MainWindowViewModel-CloneLeftoverFolderReported
           - AgentControl-MainWindowViewModel-CloneStopsWhenWindowCloses
           - AgentControl-GlobalProgressViewModel-CancelDescribesOperation
         tests:

@@ -411,6 +411,7 @@ sections:
           - AgentControl-GitClient-CloneIntoFreshFolder
           - AgentControl-GitClient-CloneCleansUpOnlyItsOwnFolder
           - AgentControl-GitClient-CloneDestinationAppearedMeanwhile
+          - AgentControl-GitClient-CloneReportsLeftoverFolder
         tests:
           - GitClient_Clone_Canceled_RemovesOnlyItsTempFolder
           - GitClient_Clone_Fails_RemovesItsTempFolderAndReturnsGitsReason
