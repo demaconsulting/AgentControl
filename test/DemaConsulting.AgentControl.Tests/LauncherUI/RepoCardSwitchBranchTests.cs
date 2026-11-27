@@ -413,7 +413,6 @@ public sealed class RepoCardSwitchBranchTests : IDisposable
         Assert.False(card.IsBusy);
 
         // Assert: after the stopped switch git was asked for the branch and the working tree again
-        await WaitUntilAsync(() => ReadsBranchAndStatusAfterSwitch(argumentLog));
         var calls = ReadLog(argumentLog);
         var switchIndex = Array.FindIndex(calls, call => call.StartsWith("switch", StringComparison.Ordinal));
         Assert.True(switchIndex >= 0);
@@ -481,7 +480,6 @@ public sealed class RepoCardSwitchBranchTests : IDisposable
         Assert.Equal("Switched to branch 'other'.", card.StatusMessage);
         Assert.False(card.LastActionFailed);
         Assert.False(card.IsBusy);
-        await WaitUntilAsync(() => ReadsBranchAndStatusAfterSwitch(argumentLog));
         var calls = ReadLog(argumentLog);
         var switchIndex = Array.FindIndex(calls, call => call.StartsWith("switch", StringComparison.Ordinal));
         var after = calls.Skip(switchIndex + 1).ToArray();
@@ -656,25 +654,6 @@ public sealed class RepoCardSwitchBranchTests : IDisposable
         {
             return [];
         }
-    }
-
-    /// <summary>
-    ///     Tells whether the stub git was asked for the branch and the working-tree status after the switch.
-    /// </summary>
-    /// <remarks>
-    ///     The card reads these through its shared refresh queue, so they can still be running when the
-    ///     switch returns; tests wait for this before asserting on the calls.
-    /// </remarks>
-    /// <param name="argumentLog">The stub git's argument log.</param>
-    /// <returns>True once both reads appear after the switch call.</returns>
-    private static bool ReadsBranchAndStatusAfterSwitch(string argumentLog)
-    {
-        var after = ReadLog(argumentLog)
-            .SkipWhile(call => !call.StartsWith("switch", StringComparison.Ordinal))
-            .Skip(1)
-            .ToArray();
-        return after.Any(call => call.StartsWith("rev-parse --abbrev-ref", StringComparison.Ordinal)) &&
-               after.Any(call => call.StartsWith("status", StringComparison.Ordinal));
     }
 
     /// <summary>
