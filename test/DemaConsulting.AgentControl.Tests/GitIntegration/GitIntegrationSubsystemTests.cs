@@ -363,12 +363,17 @@ public class GitIntegrationSubsystemTests
                 hung.Path,
                 timeouts: new GitClientTimeouts(TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(10)));
 
+            // A separate client with a long limit for the abandoned query, so its cancel never races the limit
+            var patientClient = new GitClient(
+                hung.Path,
+                timeouts: new GitClientTimeouts(TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(10)));
+
             // Act: the working-tree query runs into the limit; the HEAD query is abandoned by its caller
             // half a second after it started
             var timedOut = Record.Exception(() => client.IsWorkingTreeClean(folder, TestContext.Current.CancellationToken));
             using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
             shutdown.CancelAfter(TimeSpan.FromMilliseconds(500));
-            var canceled = Record.Exception(() => client.GetHeadCommitHash(folder, shutdown.Token));
+            var canceled = Record.Exception(() => patientClient.GetHeadCommitHash(folder, shutdown.Token));
             var hungRanToTheEnd = await hung.RanToTheEndOfItsHangAsync();
 
             // Assert: a timeout naming the limit, a cancellation, and neither process finished
