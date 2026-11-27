@@ -2018,6 +2018,9 @@ internal sealed partial class GitClient
             if (!exited)
             {
                 StopTimedOutProcess(process, argumentsText.Value, timeout);
+
+                // A cancel asked for first wins, even when killing the process outlasted the limit
+                cancellationToken.ThrowIfCancellationRequested();
                 throw new GitCommandTimeoutException(
                     $"'git {arguments[0]}' did not finish within {timeout.TotalSeconds:0.###} seconds and was stopped.",
                     timeout);
