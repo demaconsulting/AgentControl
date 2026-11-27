@@ -1498,8 +1498,20 @@ public sealed class MainWindowViewModelTests : IDisposable
     ///     Test that a target group collapsed while a background add was checking its folders is
     ///     opened by the add, so the new repo is shown, and is saved as expanded.
     /// </summary>
+    /// <remarks>
+    ///     Runs on the headless UI thread, as the view model does in the application: off it, the add's
+    ///     continuations resume on several thread-pool threads at once and race on the progress strip,
+    ///     which is UI-thread only.
+    /// </remarks>
     [Fact]
-    public async Task MainWindowViewModel_AddReposAsync_TargetGroupCollapsedMeanwhile_OpensItWithTheNewRepo()
+    public void MainWindowViewModel_AddReposAsync_TargetGroupCollapsedMeanwhile_OpensItWithTheNewRepo() =>
+        HeadlessTestApp.RunAsync(AddReposAsync_TargetGroupCollapsedMeanwhile_OpensItWithTheNewRepoAsync);
+
+    /// <summary>
+    ///     The body of <see cref="MainWindowViewModel_AddReposAsync_TargetGroupCollapsedMeanwhile_OpensItWithTheNewRepo"/>.
+    /// </summary>
+    /// <returns>A task that completes when the test has run.</returns>
+    private async Task AddReposAsync_TargetGroupCollapsedMeanwhile_OpensItWithTheNewRepoAsync()
     {
         // Arrange: an expanded "Work" group, a counting save seam and an add into it held at a gate
         var gate = new GatedBackgroundWorkRunner();

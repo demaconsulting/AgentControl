@@ -394,7 +394,10 @@ internal sealed class GitStub
 
         if (argumentLogPath is not null)
         {
-            lines.Add($">>\"{argumentLogPath}\" echo %*");
+            // Two stub processes can append at the same moment (the refresh queue runs two reads at once);
+            // cmd's append then fails for one of them, so retry rather than lose the line
+            lines.Add(":agentcontrol_argument_log");
+            lines.Add($"2>nul >>\"{argumentLogPath}\" echo %* || goto agentcontrol_argument_log");
         }
 
         lines.AddRange(environmentLines);
